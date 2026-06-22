@@ -1,34 +1,30 @@
 package font
 
 import (
-	"golang.org/x/image/font/sfnt"
+	"github.com/benoitkugler/textlayout/fonts"
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
 )
 
 // simpleFont is a GlyphSource for a simple (single-byte) font: a /TrueType font
-// with an embedded FontFile2, or a /Type1 font with an embedded FontFile3 (CFF).
-// Each byte of a show-string is one glyph. Code→glyph is resolved by mapping the
-// code to a Unicode rune via the font's encoding and then through the embedded
-// program's cmap.
+// with an embedded FontFile2, or a /Type1 font with an embedded FontFile3 (CFF)
+// or classic FontFile. Each byte of a show-string is one glyph. Code→glyph is
+// resolved by mapping the code to a glyph name via the font's encoding and then
+// through the program's name→GID table, falling back to code→rune→GID.
 type simpleFont struct {
 	prog     *program
-	toGID    [256]sfnt.GlyphIndex
+	toGID    [256]fonts.GID
 	toRune   [256]rune
-	toName   [256]string  // glyph name per code, for CFF charset (name→GID) lookup
+	toName   [256]string  // glyph name per code, for name→GID lookup
 	width    [256]float64 // em units; only valid where hasWidth is set
 	hasWidth [256]bool
 	missing  float64 // /MissingWidth in em units
 }
 
-// newSimpleFont builds a simpleFont from a resolved font dictionary. data is the
-// decoded embedded program; isBareCFF marks a FontFile3 Type1C program.
-func newSimpleFont(doc *pdf.Document, fontDict pdf.Dict, data []byte, isBareCFF bool) (*simpleFont, error) {
-	prog, err := parseProgram(data, isBareCFF)
-	if err != nil {
-		return nil, err
-	}
+// newSimpleFont builds a simpleFont from a resolved font dictionary and its
+// parsed embedded program.
+func newSimpleFont(doc *pdf.Document, fontDict pdf.Dict, prog *program) (*simpleFont, error) {
 	f := &simpleFont{prog: prog}
 	f.buildEncoding(doc, fontDict)
 	f.buildWidths(doc, fontDict)
@@ -99,41 +95,37 @@ func (f *simpleFont) buildWidths(doc *pdf.Document, fontDict pdf.Dict) {
 	}
 }
 
-// resolveGIDs precomputes code→GID. For a bare-CFF program (which has a
-// name→GID charset but no usable cmap) it maps code→glyphname→GID; otherwise it
-// maps code→rune→GID through the embedded program's cmap.
+// resolveGIDs precomputes code→GID. It first tries code→glyph name→GID via the
+// program's name table (the reliable path for Type1/CFF, whose encodings are
+// name-based), then falls back to code→rune→GID through the program's own cmap
+// (the usual path for TrueType).
 func (f *simpleFont) resolveGIDs() {
-	if f.prog.nameToGID != nil {
-		for c := range 256 {
-			if gid, ok := f.prog.nameToGID[f.toName[c]]; ok {
+	names := f.prog.nameToGID()
+	for c := range 256 {
+		if name := f.toName[c]; name != "" {
+			if gid, ok := names[name]; ok {
 				f.toGID[c] = gid
+				continue
 			}
 		}
-		return
-	}
-	var b sfnt.Buffer
-	for c := range 256 {
-		r := f.toRune[c]
-		if r == 0 {
-			continue
-		}
-		gid, err := f.prog.sf.GlyphIndex(&b, r)
-		if err == nil {
-			f.toGID[c] = gid
+		if r := f.toRune[c]; r != 0 {
+			if gid, ok := f.prog.gidForRune(r); ok {
+				f.toGID[c] = gid
+			}
 		}
 	}
 }
 
 // widthOf returns the advance for code in em units: PDF /Widths if present, else
 // /MissingWidth, else the embedded program's own advance.
-func (f *simpleFont) widthOf(b *sfnt.Buffer, code byte) float64 {
+func (f *simpleFont) widthOf(code byte) float64 {
 	if f.hasWidth[code] {
 		return f.width[code]
 	}
 	if f.missing != 0 {
 		return f.missing
 	}
-	if w, ok := f.prog.advanceEm(b, f.toGID[code]); ok {
+	if w, ok := f.prog.advanceEm(f.toGID[code]); ok {
 		return w
 	}
 	return 0
@@ -142,16 +134,14 @@ func (f *simpleFont) widthOf(b *sfnt.Buffer, code byte) float64 {
 // DecodeString implements content.GlyphSource: one glyph per byte.
 func (f *simpleFont) DecodeString(s []byte) []content.Glyph {
 	glyphs := make([]content.Glyph, 0, len(s))
-	var b sfnt.Buffer
 	for _, c := range s {
 		gid := f.toGID[c]
-		outline := f.prog.outline(&b, gid)
 		glyphs = append(glyphs, content.Glyph{
 			Code:    int(c),
-			Width:   f.widthOf(&b, c),
+			Width:   f.widthOf(c),
 			Rune:    f.toRune[c],
 			IsSpace: c == 0x20,
-			Outline: outline,
+			Outline: f.prog.outline(gid),
 		})
 	}
 	return glyphs

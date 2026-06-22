@@ -3,7 +3,7 @@ package font
 import (
 	"encoding/binary"
 
-	"golang.org/x/image/font/sfnt"
+	"github.com/benoitkugler/textlayout/fonts"
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
@@ -17,7 +17,7 @@ type type0Font struct {
 	prog     *program
 	dw       float64         // default width, em units
 	w        map[int]float64 // CID → width, em units
-	cidToGID func(cid int) sfnt.GlyphIndex
+	cidToGID func(cid int) fonts.GID
 }
 
 // newType0Font builds a type0Font from a resolved Type0 font dictionary. Only
@@ -33,11 +33,7 @@ func newType0Font(doc *pdf.Document, fontDict pdf.Dict) (*type0Font, error) {
 		return nil, ErrUnsupportedFontType
 	}
 
-	data, isBareCFF, err := embeddedCIDProgram(doc, cidFont)
-	if err != nil {
-		return nil, err
-	}
-	prog, err := parseProgram(data, isBareCFF)
+	prog, err := embeddedCIDProgram(doc, cidFont)
 	if err != nil {
 		return nil, err
 	}
@@ -60,47 +56,48 @@ func firstDescendant(doc *pdf.Document, fontDict pdf.Dict) pdf.Dict {
 	return doc.GetDict(arr[0])
 }
 
-// embeddedCIDProgram returns the decoded embedded program for a CIDFont and
-// whether it is a bare CFF (CIDFontType0C). CIDFontType2 uses FontFile2;
-// CIDFontType0 uses FontFile3.
-func embeddedCIDProgram(doc *pdf.Document, cidFont pdf.Dict) (data []byte, isBareCFF bool, err error) {
+// embeddedCIDProgram parses the embedded program for a CIDFont. CIDFontType2
+// uses FontFile2 (TrueType); CIDFontType0 uses FontFile3 (bare CFF/CIDFontType0C,
+// or an OpenType wrapper).
+func embeddedCIDProgram(doc *pdf.Document, cidFont pdf.Dict) (*program, error) {
 	desc := doc.GetDict(cidFont["FontDescriptor"])
 	if desc == nil {
-		return nil, false, ErrNoEmbeddedProgram
+		return nil, ErrNoEmbeddedProgram
 	}
 	if s := doc.GetStream(desc["FontFile2"]); s != nil {
 		b, _, derr := doc.DecodedStream(s)
 		if derr != nil {
-			return nil, false, ErrUnsupportedFontProgram
+			return nil, ErrUnsupportedFontProgram
 		}
-		return b, false, nil
+		return parseProgram(b, progTrueType)
 	}
 	if s := doc.GetStream(desc["FontFile3"]); s != nil {
 		b, _, derr := doc.DecodedStream(s)
 		if derr != nil {
-			return nil, false, ErrUnsupportedFontProgram
+			return nil, ErrUnsupportedFontProgram
 		}
-		// FontFile3 /Subtype OpenType is a full SFNT; Type1C/CIDFontType0C are
-		// bare CFF needing the wrapper.
 		sub, _ := doc.GetName(s.Dict["Subtype"])
-		return b, sub != "OpenType", nil
+		if sub == "OpenType" {
+			return parseProgram(b, progTrueType)
+		}
+		return parseProgram(b, progCFF)
 	}
-	return nil, false, ErrNoEmbeddedProgram
+	return nil, ErrNoEmbeddedProgram
 }
 
 // buildCIDToGID returns the CID→GID mapping function from /CIDToGIDMap: the name
 // /Identity (or absent) is the identity map; a stream is a packed big-endian
 // uint16 array indexed by CID. Out-of-range results clamp to GID 0 (.notdef).
-func buildCIDToGID(doc *pdf.Document, cidFont pdf.Dict, numGlyphs int) func(int) sfnt.GlyphIndex {
-	clamp := func(gid int) sfnt.GlyphIndex {
+func buildCIDToGID(doc *pdf.Document, cidFont pdf.Dict, numGlyphs int) func(int) fonts.GID {
+	clamp := func(gid int) fonts.GID {
 		if gid < 0 || gid >= numGlyphs {
 			return 0
 		}
-		return sfnt.GlyphIndex(gid)
+		return fonts.GID(gid)
 	}
 	if s := doc.GetStream(cidFont["CIDToGIDMap"]); s != nil {
 		if data, _, err := doc.DecodedStream(s); err == nil {
-			return func(cid int) sfnt.GlyphIndex {
+			return func(cid int) fonts.GID {
 				off := 2 * cid
 				if off < 0 || off+2 > len(data) {
 					return 0
@@ -110,7 +107,7 @@ func buildCIDToGID(doc *pdf.Document, cidFont pdf.Dict, numGlyphs int) func(int)
 		}
 	}
 	// Identity (the name /Identity or absent).
-	return func(cid int) sfnt.GlyphIndex { return clamp(cid) }
+	return func(cid int) fonts.GID { return clamp(cid) }
 }
 
 // parseCIDWidths parses a /W array into a CID→width(em) map. /W is a sequence of
@@ -167,7 +164,6 @@ func (f *type0Font) widthOf(cid int) float64 {
 // A trailing odd byte is dropped.
 func (f *type0Font) DecodeString(s []byte) []content.Glyph {
 	glyphs := make([]content.Glyph, 0, len(s)/2)
-	var b sfnt.Buffer
 	for i := 0; i+1 < len(s); i += 2 {
 		cid := int(s[i])<<8 | int(s[i+1])
 		gid := f.cidToGID(cid)
@@ -176,7 +172,7 @@ func (f *type0Font) DecodeString(s []byte) []content.Glyph {
 			Width:   f.widthOf(cid),
 			Rune:    0, // no ToUnicode in scope
 			IsSpace: false,
-			Outline: f.prog.outline(&b, gid),
+			Outline: f.prog.outline(gid),
 		})
 	}
 	return glyphs

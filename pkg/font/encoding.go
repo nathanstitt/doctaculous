@@ -3,9 +3,10 @@ package font
 import "strconv"
 
 // This file maps single-byte character codes to Unicode runes for the simple
-// (non-composite) font encodings PDF uses. The interpreter needs a rune to look
-// a glyph up in the embedded font's cmap (sfnt exposes rune→glyph, not
-// code→glyph or name→glyph), so the simple-font path resolves code→rune here.
+// (non-composite) font encodings PDF uses. The simple-font path resolves
+// code→glyph name→GID where possible, and falls back to code→rune→GID through the
+// program's own cmap; this table provides both the code→rune mapping and the
+// code→name mapping (via runeToGlyphName).
 //
 // Coverage is the standard Latin set shared by WinAnsi, MacRoman, and Standard
 // encodings plus a glyph-name table for /Differences entries. It is deliberately

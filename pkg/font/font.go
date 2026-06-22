@@ -1,13 +1,13 @@
 // Package font turns embedded PDF font programs into glyph outlines. It parses
-// the supported font dictionaries (simple TrueType and CFF, and Type0 composite
-// fonts), reads the embedded FontFile2/FontFile3 programs with
-// golang.org/x/image/font/sfnt, and exposes them through the content.GlyphSource
-// interface so the content interpreter can draw text without knowing any
-// font-format details.
+// the supported font dictionaries (simple TrueType, CFF, and classic Type1, plus
+// Type0 composite fonts), reads the embedded FontFile/FontFile2/FontFile3
+// programs with github.com/benoitkugler/textlayout, and exposes them through the
+// content.GlyphSource interface so the content interpreter can draw text without
+// knowing any font-format details.
 //
-// Unsupported fonts (non-embedded base-14, classic Type1 /FontFile, non-Identity
-// Type0 CMaps, Type3) return a typed error; callers degrade gracefully by
-// drawing nothing while still advancing the text cursor.
+// Unsupported fonts (non-embedded base-14, non-Identity Type0 CMaps, Type3)
+// return a typed error; callers degrade gracefully by drawing nothing while still
+// advancing the text cursor.
 package font
 
 import (
@@ -24,20 +24,12 @@ import (
 func New(doc *pdf.Document, fontDict pdf.Dict, logf func(string, ...any)) (content.GlyphSource, error) {
 	subtype, _ := doc.GetName(fontDict["Subtype"])
 	switch subtype {
-	case "TrueType":
-		data, isBareCFF, err := embeddedSimpleProgram(doc, fontDict)
+	case "TrueType", "Type1", "MMType1":
+		prog, err := embeddedSimpleProgram(doc, fontDict)
 		if err != nil {
 			return nil, err
 		}
-		return newSimpleFont(doc, fontDict, data, isBareCFF)
-	case "Type1", "MMType1":
-		// Only an embedded FontFile3 (CFF) is supported; a classic FontFile
-		// (Type1/PFB) or a non-embedded base-14 font is out of scope.
-		data, isBareCFF, err := embeddedSimpleProgram(doc, fontDict)
-		if err != nil {
-			return nil, err
-		}
-		return newSimpleFont(doc, fontDict, data, isBareCFF)
+		return newSimpleFont(doc, fontDict, prog)
 	case "Type0":
 		return newType0Font(doc, fontDict)
 	default:
@@ -45,33 +37,38 @@ func New(doc *pdf.Document, fontDict pdf.Dict, logf func(string, ...any)) (conte
 	}
 }
 
-// embeddedSimpleProgram returns the decoded embedded program for a simple font
-// and whether it is a bare CFF (FontFile3 Type1C). It reads the FontDescriptor's
-// FontFile2 (TrueType) or FontFile3 (CFF/OpenType).
-func embeddedSimpleProgram(doc *pdf.Document, fontDict pdf.Dict) (data []byte, isBareCFF bool, err error) {
+// embeddedSimpleProgram parses the embedded program for a simple font from the
+// FontDescriptor: FontFile2 (TrueType), FontFile3 (bare CFF/Type1C or OpenType),
+// or the classic FontFile (Type1, eexec).
+func embeddedSimpleProgram(doc *pdf.Document, fontDict pdf.Dict) (*program, error) {
 	desc := doc.GetDict(fontDict["FontDescriptor"])
 	if desc == nil {
-		return nil, false, ErrNoEmbeddedProgram
+		return nil, ErrNoEmbeddedProgram
 	}
 	if s := doc.GetStream(desc["FontFile2"]); s != nil {
 		b, _, derr := doc.DecodedStream(s)
 		if derr != nil {
-			return nil, false, fmt.Errorf("%w: FontFile2: %v", ErrUnsupportedFontProgram, derr)
+			return nil, fmt.Errorf("%w: FontFile2: %v", ErrUnsupportedFontProgram, derr)
 		}
-		return b, false, nil
+		return parseProgram(b, progTrueType)
 	}
 	if s := doc.GetStream(desc["FontFile3"]); s != nil {
 		b, _, derr := doc.DecodedStream(s)
 		if derr != nil {
-			return nil, false, fmt.Errorf("%w: FontFile3: %v", ErrUnsupportedFontProgram, derr)
+			return nil, fmt.Errorf("%w: FontFile3: %v", ErrUnsupportedFontProgram, derr)
 		}
 		sub, _ := doc.GetName(s.Dict["Subtype"])
-		return b, sub != "OpenType", nil
+		if sub == "OpenType" {
+			return parseProgram(b, progTrueType)
+		}
+		return parseProgram(b, progCFF)
 	}
-	// A classic Type1 /FontFile is present but unsupported; otherwise there is no
-	// embedded program at all.
-	if doc.GetStream(desc["FontFile"]) != nil {
-		return nil, false, ErrUnsupportedFontProgram
+	if s := doc.GetStream(desc["FontFile"]); s != nil {
+		b, _, derr := doc.DecodedStream(s)
+		if derr != nil {
+			return nil, fmt.Errorf("%w: FontFile: %v", ErrUnsupportedFontProgram, derr)
+		}
+		return parseProgram(b, progType1)
 	}
-	return nil, false, ErrNoEmbeddedProgram
+	return nil, ErrNoEmbeddedProgram
 }

@@ -5,13 +5,33 @@ import (
 	"math"
 	"testing"
 
-	"golang.org/x/image/font/sfnt"
+	"github.com/benoitkugler/textlayout/fonts"
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 )
+
+// ttProg parses the embedded Roboto TrueType program for outline-level tests.
+func ttProg(t *testing.T) *program {
+	t.Helper()
+	prog, err := parseProgram(gen.RobotoTTF(), progTrueType)
+	if err != nil {
+		t.Fatalf("parseProgram: %v", err)
+	}
+	return prog
+}
+
+// gidFor resolves a rune to a GID through the program's own cmap.
+func gidFor(t *testing.T, prog *program, r rune) fonts.GID {
+	t.Helper()
+	gid, ok := prog.gidForRune(r)
+	if !ok {
+		t.Fatalf("no GID for %q", r)
+	}
+	return gid
+}
 
 // fontDict parses a generated PDF and returns its /F1 font dictionary, so tests
 // can drive font.New the same way the rasterizer does.
@@ -102,17 +122,10 @@ func TestType0Decodes(t *testing.T) {
 // Roboto, matching what EmbeddedType0PDF draws.
 func type0HelloCodes(t *testing.T) []byte {
 	t.Helper()
-	f, err := sfnt.Parse(gen.RobotoTTF())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var b sfnt.Buffer
+	prog := ttProg(t)
 	var out []byte
 	for _, r := range "Hello" {
-		g, err := f.GlyphIndex(&b, r)
-		if err != nil {
-			t.Fatal(err)
-		}
+		g := gidFor(t, prog, r)
 		out = append(out, byte(uint16(g)>>8), byte(uint16(g)))
 	}
 	return out
@@ -122,13 +135,8 @@ func type0HelloCodes(t *testing.T) []byte {
 // uppercase 'H' should sit above the baseline (max Y positive, around cap
 // height) and within the em box.
 func TestOutlineYUp(t *testing.T) {
-	prog, err := parseProgram(gen.RobotoTTF(), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var b sfnt.Buffer
-	gid, _ := prog.sf.GlyphIndex(&b, 'H')
-	out := prog.outline(&b, gid)
+	prog := ttProg(t)
+	out := prog.outline(gidFor(t, prog, 'H'))
 	if out == nil || out.Empty() {
 		t.Fatal("no outline for 'H'")
 	}
@@ -182,13 +190,8 @@ func TestQuadToCubicElevation(t *testing.T) {
 // TestRobotoOutlineHasCubics ensures a real glyph yields cubic segments (proving
 // TrueType quadratics were elevated, since render.Path has no QuadTo).
 func TestRobotoOutlineHasCubics(t *testing.T) {
-	prog, err := parseProgram(gen.RobotoTTF(), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var b sfnt.Buffer
-	gid, _ := prog.sf.GlyphIndex(&b, 'o') // 'o' is all curves
-	out := prog.outline(&b, gid)
+	prog := ttProg(t)
+	out := prog.outline(gidFor(t, prog, 'o')) // 'o' is all curves
 	if out == nil {
 		t.Fatal("no outline")
 	}
@@ -203,39 +206,27 @@ func TestRobotoOutlineHasCubics(t *testing.T) {
 	}
 }
 
-func TestCFFNameToGIDGroundTruth(t *testing.T) {
-	m, err := cffNameToGID(gen.SourceSansCFF())
+// TestBareCFFNameToGID verifies that a bare CFF program (FontFile3 Type1C)
+// resolves glyph names to GIDs through the parser's charset — the path simple
+// CFF fonts use to map a PDF code → glyph name → GID.
+func TestBareCFFNameToGID(t *testing.T) {
+	prog, err := parseProgram(gen.SourceSansCFF(), progCFF)
 	if err != nil {
-		t.Fatalf("cffNameToGID: %v", err)
+		t.Fatalf("parseProgram(CFF): %v", err)
 	}
-	// Verified ground truth from the Source Sans 3 CFF charset (format 1).
-	for name, want := range map[string]uint16{"space": 1, "A": 2, "a": 28} {
-		if got := m[name]; got != want {
-			t.Errorf("name %q -> GID %d, want %d", name, got, want)
+	if n := prog.numGlyphs(); n < 100 {
+		t.Errorf("bare CFF has %d glyphs, expected the full set", n)
+	}
+	names := prog.nameToGID()
+	for _, name := range []string{"space", "A", "a"} {
+		gid, ok := names[name]
+		if !ok {
+			t.Errorf("name %q not found in CFF charset", name)
+			continue
 		}
-	}
-	if len(cffStandardStrings) != 391 {
-		t.Errorf("cffStandardStrings has %d entries, want 391", len(cffStandardStrings))
-	}
-}
-
-func TestWrapBareCFFRoundTrips(t *testing.T) {
-	cff := gen.SourceSansCFF()
-	// A bare CFF must NOT parse as SFNT directly.
-	if _, err := sfnt.Parse(cff); err == nil {
-		t.Fatal("bare CFF parsed as SFNT; the wrapper would be unnecessary")
-	}
-	// Wrapped, it must parse and load glyphs.
-	wrapped, err := wrapBareCFF(cff)
-	if err != nil {
-		t.Fatalf("wrapBareCFF: %v", err)
-	}
-	f, err := sfnt.Parse(wrapped)
-	if err != nil {
-		t.Fatalf("parse wrapped: %v", err)
-	}
-	if f.NumGlyphs() < 100 {
-		t.Errorf("wrapped font has %d glyphs, expected the full set", f.NumGlyphs())
+		if prog.outline(gid) == nil && name != "space" {
+			t.Errorf("name %q (gid %d) has no outline", name, gid)
+		}
 	}
 }
 
@@ -275,17 +266,60 @@ func TestErrorPaths(t *testing.T) {
 	}
 }
 
-func TestClassicFontFileUnsupported(t *testing.T) {
+// TestType1ProgramOutlines parses the two committed classic Type1 programs
+// directly and verifies each yields a non-empty outline for 'A' — covering both
+// the serif (Termes) and sans (Heros) designs.
+func TestType1ProgramOutlines(t *testing.T) {
+	for name, pfb := range map[string][]byte{
+		"termes": gen.TeXGyreTermesPFB(),
+		"heros":  gen.TeXGyreHerosPFB(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			prog, err := parseProgram(pfb, progType1)
+			if err != nil {
+				t.Fatalf("parseProgram(Type1): %v", err)
+			}
+			gid := gidFor(t, prog, 'A')
+			if out := prog.outline(gid); out == nil || out.Empty() {
+				t.Errorf("no outline for 'A'")
+			}
+		})
+	}
+}
+
+// TestClassicType1Decodes verifies a simple /Type1 font with an embedded classic
+// FontFile (eexec PostScript) now parses and yields glyph outlines — the
+// capability that benoitkugler/textlayout adds over the old sfnt-only pipeline.
+func TestClassicType1Decodes(t *testing.T) {
+	doc, fd := fontDict(t, gen.EmbeddedType1PDF())
+	src, err := New(doc, fd, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	glyphs := src.DecodeString([]byte("Hello"))
+	if len(glyphs) != 5 {
+		t.Fatalf("got %d glyphs, want 5", len(glyphs))
+	}
+	for i, g := range glyphs {
+		if g.Outline == nil {
+			t.Errorf("glyph %d (%q): nil outline — Type1 FontFile not rendered", i, g.Rune)
+		}
+	}
+}
+
+// TestMalformedFontFileGraceful confirms a /Type1 font with a bogus FontFile
+// still degrades gracefully (typed error, no panic).
+func TestMalformedFontFileGraceful(t *testing.T) {
 	doc := &pdf.Document{}
 	dict := pdf.Dict{
 		"Subtype": pdf.Name("Type1"),
 		"FontDescriptor": pdf.Dict{
-			"FontFile": &pdf.Stream{Dict: pdf.Dict{}, Raw: []byte("dummy")},
+			"FontFile": &pdf.Stream{Dict: pdf.Dict{}, Raw: []byte("not a font")},
 		},
 	}
 	_, err := New(doc, dict, nil)
 	if !errors.Is(err, ErrUnsupportedFontProgram) {
-		t.Errorf("classic FontFile err = %v, want ErrUnsupportedFontProgram", err)
+		t.Errorf("malformed FontFile err = %v, want ErrUnsupportedFontProgram", err)
 	}
 }
 

@@ -1,113 +1,114 @@
 package font
 
 import (
+	"bytes"
 	"fmt"
 
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/sfnt"
-	"golang.org/x/image/math/fixed"
+	"github.com/benoitkugler/textlayout/fonts"
+	"github.com/benoitkugler/textlayout/fonts/truetype"
+	"github.com/benoitkugler/textlayout/fonts/type1"
+	type1c "github.com/benoitkugler/textlayout/fonts/type1C"
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
-// program wraps a parsed sfnt font program together with its units-per-em, which
-// is the constant needed to normalize glyph coordinates into em space. A parsed
-// program is read-only and safe to share, but each goroutine drawing from it
-// must use its own *sfnt.Buffer (LoadGlyph reuses the buffer's backing arrays).
-type program struct {
-	sf  *sfnt.Font
-	upm float64 // units per em; always > 0
-
-	// nameToGID maps glyph names to GIDs for bare-CFF (Type1C/CIDFontType0C)
-	// programs, whose charset sfnt does not expose. It is nil for TrueType and
-	// OpenType programs, where rune→GID via the cmap is used instead.
-	nameToGID map[string]sfnt.GlyphIndex
+// glyphProgram is the small slice of a parsed font program the renderer needs:
+// glyph outlines, advances, and the two lookups (rune→GID and name→GID) used to
+// resolve PDF codes to glyphs. github.com/benoitkugler/textlayout exposes three
+// concrete font types — TrueType/OpenType, classic Type1, and bare CFF — that we
+// adapt to this one interface so program.outline and the simple/Type0 callers
+// stay format-agnostic.
+type glyphProgram interface {
+	// upem is the font's units-per-em (>0); outlines are divided by it to reach
+	// em space.
+	upem() float64
+	// segments returns glyph gid's outline as benoitkugler segments (font units,
+	// Y up), or nil for a missing/empty glyph.
+	segments(gid fonts.GID) []fonts.Segment
+	// glyphName returns gid's PostScript glyph name, or "" if unnamed.
+	glyphName(gid fonts.GID) string
+	// advance returns gid's horizontal advance in font units.
+	advance(gid fonts.GID) float64
+	// nominalGID maps a rune to a GID via the font's own cmap/encoding, ok=false
+	// if absent.
+	nominalGID(r rune) (fonts.GID, bool)
+	// numGlyphs is the glyph count, used to bound GID lookups.
+	numGlyphs() int
 }
 
-// parseProgram parses an embedded font program. data is the decoded bytes of a
-// FontFile2 (raw SFNT/TrueType) or FontFile3 stream. When isBareCFF is set the
-// bytes are a bare CFF table (FontFile3 /Subtype Type1C or CIDFontType0C), which
-// sfnt cannot parse directly, so they are first wrapped in a minimal OpenType
-// container (see wrapBareCFF).
-func parseProgram(data []byte, isBareCFF bool) (*program, error) {
-	var nameToGID map[string]sfnt.GlyphIndex
-	if isBareCFF {
-		// Build the name→GID map from the CFF charset before wrapping, since the
-		// wrapper's synthesized cmap maps nothing; simple Type1C fonts resolve
-		// code→glyphname→GID through this map. A failure here is non-fatal:
-		// GID-indexed (Type0) access still works without it.
-		if m, err := cffNameToGID(data); err == nil {
-			nameToGID = make(map[string]sfnt.GlyphIndex, len(m))
-			for name, gid := range m {
-				nameToGID[name] = sfnt.GlyphIndex(gid)
-			}
-		}
-		wrapped, err := wrapBareCFF(data)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrUnsupportedFontProgram, err)
-		}
-		data = wrapped
-	}
-	sf, err := sfnt.Parse(data)
+// program wraps a parsed font program. It is read-only after construction and
+// safe to share across goroutines: unlike the previous sfnt-based implementation
+// it needs no per-call scratch buffer.
+type program struct {
+	gp  glyphProgram
+	upm float64 // units per em; always > 0
+}
+
+// parseProgram parses an embedded font program. kind selects the format:
+//
+//	progTrueType — FontFile2 (raw SFNT/TrueType) or FontFile3 /Subtype OpenType
+//	progCFF      — FontFile3 /Subtype Type1C or CIDFontType0C (bare CFF table)
+//	progType1    — classic FontFile (eexec-encrypted Type1, PFB or raw)
+//
+// A parse failure returns ErrUnsupportedFontProgram so callers degrade
+// gracefully.
+func parseProgram(data []byte, kind progKind) (*program, error) {
+	gp, err := newGlyphProgram(data, kind)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnsupportedFontProgram, err)
+		return nil, err
 	}
-	upm := float64(sf.UnitsPerEm())
+	upm := gp.upem()
 	if upm <= 0 {
 		upm = 1000 // defensive: a sane default rather than dividing by zero
 	}
-	return &program{sf: sf, upm: upm, nameToGID: nameToGID}, nil
+	return &program{gp: gp, upm: upm}, nil
 }
 
 // numGlyphs reports the number of glyphs in the program.
-func (p *program) numGlyphs() int { return p.sf.NumGlyphs() }
+func (p *program) numGlyphs() int { return p.gp.numGlyphs() }
 
-// outline loads glyph gid and returns its outline as a *render.Path in em units
-// with the Y axis pointing up, the orientation the content interpreter expects.
-// It returns nil for a missing, empty, or non-vector glyph; the interpreter then
-// advances the cursor but draws nothing.
-func (p *program) outline(b *sfnt.Buffer, gid sfnt.GlyphIndex) *render.Path {
-	// ppem == UnitsPerEm makes LoadGlyph return coordinates in font units (as
-	// 26.6 fixed point). sfnt has already negated Y so its output is Y-down; we
-	// negate again below to restore the Y-up em-space outline contract.
-	ppem := fixed.I(int(p.sf.UnitsPerEm()))
-	segs, err := p.sf.LoadGlyph(b, gid, ppem, nil)
-	if err != nil || len(segs) == 0 {
+// outline returns glyph gid's outline as a *render.Path in em units with the Y
+// axis pointing up, the orientation the content interpreter expects. It returns
+// nil for a missing, empty, or non-vector glyph; the interpreter then advances
+// the cursor but draws nothing.
+//
+// benoitkugler already emits coordinates Y-up in font units, so unlike the prior
+// sfnt path no Y negation is needed — only division by units-per-em.
+func (p *program) outline(gid fonts.GID) *render.Path {
+	segs := p.gp.segments(gid)
+	if len(segs) == 0 {
 		return nil
 	}
 
 	out := &render.Path{}
-	var cur render.Point // running current point (start of the next segment)
 	started := false
 	for _, s := range segs {
 		switch s.Op {
-		case sfnt.SegmentOpMoveTo:
+		case fonts.SegmentOpMoveTo:
 			if started {
 				out.Close() // close the previous subpath before starting a new one
 			}
 			pt := p.toEm(s.Args[0])
 			out.MoveTo(pt.X, pt.Y)
-			cur = pt
 			started = true
-		case sfnt.SegmentOpLineTo:
+		case fonts.SegmentOpLineTo:
 			pt := p.toEm(s.Args[0])
 			out.LineTo(pt.X, pt.Y)
-			cur = pt
-		case sfnt.SegmentOpCubeTo:
+		case fonts.SegmentOpCubeTo:
 			c1 := p.toEm(s.Args[0])
 			c2 := p.toEm(s.Args[1])
 			end := p.toEm(s.Args[2])
 			out.CubeTo(c1.X, c1.Y, c2.X, c2.Y, end.X, end.Y)
-			cur = end
-		case sfnt.SegmentOpQuadTo:
-			// Elevate the quadratic (control q, endpoint end) from the current
-			// point to an equivalent cubic: C1 = P0 + 2/3(q-P0), C2 = end + 2/3(q-end).
+		case fonts.SegmentOpQuadTo:
+			// Elevate the quadratic (control q=Args[0], endpoint end=Args[1]) to a
+			// cubic. render.Path has no quad segment, so we compute the equivalent
+			// cubic control points from the subpath's current point.
+			cur := currentPoint(out)
 			q := p.toEm(s.Args[0])
 			end := p.toEm(s.Args[1])
 			c1 := render.Point{X: cur.X + (2.0/3.0)*(q.X-cur.X), Y: cur.Y + (2.0/3.0)*(q.Y-cur.Y)}
 			c2 := render.Point{X: end.X + (2.0/3.0)*(q.X-end.X), Y: end.Y + (2.0/3.0)*(q.Y-end.Y)}
 			out.CubeTo(c1.X, c1.Y, c2.X, c2.Y, end.X, end.Y)
-			cur = end
 		}
 	}
 	if started {
@@ -119,23 +120,174 @@ func (p *program) outline(b *sfnt.Buffer, gid sfnt.GlyphIndex) *render.Path {
 	return out
 }
 
-// toEm converts a 26.6 fixed-point font-unit point from sfnt into an em-space
-// point with the Y axis pointing up.
-func (p *program) toEm(pt fixed.Point26_6) render.Point {
+// toEm converts a font-unit point (Y up) into an em-space point (Y up).
+func (p *program) toEm(pt fonts.SegmentPoint) render.Point {
 	return render.Point{
-		X: (float64(pt.X) / 64.0) / p.upm,
-		Y: -(float64(pt.Y) / 64.0) / p.upm,
+		X: float64(pt.X) / p.upm,
+		Y: float64(pt.Y) / p.upm,
 	}
 }
 
 // advanceEm returns glyph gid's advance width in em units. It is only a fallback
 // for fonts whose PDF dictionary omits widths; when the PDF supplies widths those
 // are authoritative and this is not consulted.
-func (p *program) advanceEm(b *sfnt.Buffer, gid sfnt.GlyphIndex) (float64, bool) {
-	ppem := fixed.I(int(p.sf.UnitsPerEm()))
-	adv, err := p.sf.GlyphAdvance(b, gid, ppem, font.HintingNone)
-	if err != nil {
-		return 0, false
+func (p *program) advanceEm(gid fonts.GID) (float64, bool) {
+	return p.gp.advance(gid) / p.upm, true
+}
+
+// nameToGID builds a glyph-name→GID map by walking every glyph's name. Simple
+// fonts resolve a PDF code → glyph name (via /Encoding) → GID through this map.
+// It is built once per font and cached on the program by the caller.
+func (p *program) nameToGID() map[string]fonts.GID {
+	n := p.numGlyphs()
+	m := make(map[string]fonts.GID, n)
+	for gid := 0; gid < n; gid++ {
+		if name := p.gp.glyphName(fonts.GID(gid)); name != "" {
+			// Keep the first GID for a given name (lowest index wins).
+			if _, ok := m[name]; !ok {
+				m[name] = fonts.GID(gid)
+			}
+		}
 	}
-	return (float64(adv) / 64.0) / p.upm, true
+	return m
+}
+
+// gidForRune maps a rune to a GID via the font program's own cmap/encoding.
+func (p *program) gidForRune(r rune) (fonts.GID, bool) { return p.gp.nominalGID(r) }
+
+// currentPoint returns the endpoint of the last emitted segment, used to elevate
+// quadratics. It assumes a subpath is in progress (a MoveTo has been emitted).
+func currentPoint(p *render.Path) render.Point {
+	if len(p.Segments) == 0 {
+		return render.Point{}
+	}
+	s := p.Segments[len(p.Segments)-1]
+	switch s.Kind {
+	case render.MoveTo, render.LineTo:
+		return s.P0
+	case render.CubeTo:
+		return s.P2
+	default:
+		return render.Point{}
+	}
+}
+
+// progKind selects the embedded font program format for parseProgram.
+type progKind int
+
+const (
+	progTrueType progKind = iota // SFNT/TrueType or OpenType (FontFile2/FontFile3 OpenType)
+	progCFF                      // bare CFF table (FontFile3 Type1C / CIDFontType0C)
+	progType1                    // classic Type1 (FontFile, eexec)
+)
+
+// newGlyphProgram parses data with the parser appropriate to kind and adapts it
+// to glyphProgram.
+func newGlyphProgram(data []byte, kind progKind) (glyphProgram, error) {
+	switch kind {
+	case progTrueType:
+		f, err := truetype.Parse(bytes.NewReader(data))
+		if err != nil {
+			return nil, wrapProgErr(err)
+		}
+		return ttProgram{f}, nil
+	case progCFF:
+		f, err := type1c.Parse(bytes.NewReader(data))
+		if err != nil {
+			return nil, wrapProgErr(err)
+		}
+		return cffProgram{f}, nil
+	case progType1:
+		f, err := type1.Parse(bytes.NewReader(data))
+		if err != nil {
+			return nil, wrapProgErr(err)
+		}
+		return &t1Program{f: f, n: -1}, nil
+	default:
+		return nil, ErrUnsupportedFontProgram
+	}
+}
+
+// outlineSegments extracts segments from a fonts.GlyphData (the common shape
+// returned by faces' GlyphData), or nil if it is not a vector outline.
+func outlineSegments(data fonts.GlyphData) []fonts.Segment {
+	if o, ok := data.(fonts.GlyphOutline); ok {
+		return o.Segments
+	}
+	return nil
+}
+
+// ttProgram adapts *truetype.Font (TrueType/OpenType, incl. embedded CFF tables).
+type ttProgram struct{ f *truetype.Font }
+
+func (a ttProgram) upem() float64 { return float64(a.f.Upem()) }
+func (a ttProgram) segments(gid fonts.GID) []fonts.Segment {
+	return outlineSegments(a.f.GlyphData(gid, 0, 0))
+}
+func (a ttProgram) glyphName(gid fonts.GID) string      { return a.f.GlyphName(gid) }
+func (a ttProgram) advance(gid fonts.GID) float64       { return float64(a.f.HorizontalAdvance(gid)) }
+func (a ttProgram) nominalGID(r rune) (fonts.GID, bool) { return a.f.NominalGlyph(r) }
+func (a ttProgram) numGlyphs() int                      { return a.f.NumGlyphs }
+
+// t1Program adapts a classic *type1.Font. type1.Font implements fonts.Face but
+// exposes no glyph count, so numGlyphs is derived by probing GlyphName and cached.
+type t1Program struct {
+	f *type1.Font
+	n int // cached glyph count; -1 until computed
+}
+
+func (a *t1Program) upem() float64 { return float64(a.f.Upem()) }
+func (a *t1Program) segments(gid fonts.GID) []fonts.Segment {
+	return outlineSegments(a.f.GlyphData(gid, 0, 0))
+}
+func (a *t1Program) glyphName(gid fonts.GID) string      { return a.f.GlyphName(gid) }
+func (a *t1Program) advance(gid fonts.GID) float64       { return float64(a.f.HorizontalAdvance(gid)) }
+func (a *t1Program) nominalGID(r rune) (fonts.GID, bool) { return a.f.NominalGlyph(r) }
+
+// numGlyphs probes GlyphName upward until it stops returning names. Type1 fonts
+// have at most 256 encoded glyphs but may carry more in their charstrings; we cap
+// the probe generously. The result is cached.
+func (a *t1Program) numGlyphs() int {
+	if a.n >= 0 {
+		return a.n
+	}
+	const cap = 1 << 16
+	n := 0
+	for gid := 0; gid < cap; gid++ {
+		if a.f.GlyphName(fonts.GID(gid)) == "" {
+			break
+		}
+		n = gid + 1
+	}
+	a.n = n
+	return n
+}
+
+// cffProgram adapts a bare-CFF *type1C.Font, whose API differs from fonts.Face:
+// it exposes LoadGlyph (returning segments directly) and a synthesized Cmap
+// rather than GlyphData/NominalGlyph, and has no advance/upem accessors. Glyph
+// access for CFF PDF fonts is by name or GID, so the missing pieces fall back to
+// sane defaults (upem 1000; advance from PDF /Widths, which is authoritative).
+type cffProgram struct{ f *type1c.Font }
+
+func (a cffProgram) upem() float64 { return 1000 } // CFF charstrings are in 1000-unit space
+func (a cffProgram) segments(gid fonts.GID) []fonts.Segment {
+	segs, _, err := a.f.LoadGlyph(gid)
+	if err != nil {
+		return nil
+	}
+	return segs
+}
+func (a cffProgram) glyphName(gid fonts.GID) string { return a.f.GlyphName(gid) }
+func (a cffProgram) advance(fonts.GID) float64      { return 0 } // PDF /Widths supplies advances
+func (a cffProgram) nominalGID(r rune) (fonts.GID, bool) {
+	// type1C synthesizes a cmap from the charset; it is always non-nil.
+	cmap, _ := a.f.Cmap()
+	return cmap.Lookup(r)
+}
+func (a cffProgram) numGlyphs() int { return a.f.NumGlyphs() }
+
+// wrapProgErr tags a parser error as an unsupported font program.
+func wrapProgErr(err error) error {
+	return fmt.Errorf("%w: %v", ErrUnsupportedFontProgram, err)
 }
