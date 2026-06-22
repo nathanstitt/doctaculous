@@ -7,6 +7,9 @@
 *.test
 *.out
 
+# Materialized test fixtures (see cmd/dumpfixtures); regenerate, never commit.
+/fixtures-out/
+
 # Editor / OS cruft
 .DS_Store
 .idea/

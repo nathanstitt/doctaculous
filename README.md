@@ -39,6 +39,19 @@ A layered pipeline; each layer is independently testable:
 
 The `Device` interface is the seam that will let us add other backends (e.g. SVG) later.
 
+## Test fixtures
+
+Test PDFs aren't committed — they're generated deterministically in `testdata/gen`, so each
+fixture is readable Go rather than an opaque blob. To materialize them as real `.pdf` files for
+inspection:
+
+```sh
+go run ./cmd/dumpfixtures -list           # show available fixtures
+go run ./cmd/dumpfixtures                 # write the core set to ./fixtures-out
+go run ./cmd/dumpfixtures -all -o /tmp    # include malformed fixtures too
+go run ./cmd/dumpfixtures text objstm     # write only named fixtures
+```
+
 ## Development
 
 ```sh
