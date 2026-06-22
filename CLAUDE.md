@@ -69,9 +69,11 @@ SVG/other backend later without touching parsing or interpretation.
   real changes. Regenerate after an intentional render change with
   `go test ./pkg/render/raster -run TestGolden -update`, then **eyeball every changed PNG in the
   PR** — an unexplained golden diff is a regression. Goldens are committed (not gitignored); the
-  fixtures that produce them are generated, so the whole chain stays hermetic. Text fixtures
-  currently render blank (no font backend yet) — that is the expected baseline and will change
-  when glyph rendering lands, at which point those goldens get regenerated.
+  fixtures that produce them are generated, so the whole chain stays hermetic. Glyph rendering is
+  implemented for fixtures with embedded font programs (`embedded-truetype`, `type0`, `cff` show
+  real glyphs); the standard-font fixtures (`text`, `flate`, `multipage`) still render blank
+  because non-embedded base-14 fonts aren't supported yet (`ErrNoEmbeddedProgram`, glyphs skipped)
+  — that is the expected baseline and changes only when base-14 support lands.
 - **Benchmarks**: `BenchmarkRasterizePages` proves goroutine speedup vs. `--workers 1`. Add a
   race-detector run (`go test -race ./...`) since concurrency is core.
 - Tests must be hermetic and fast: no network. Generated fixtures are preferred; committed PDFs
