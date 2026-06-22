@@ -100,8 +100,9 @@ what is done vs. pending.
 - **Fills**: nonzero and even-odd winding (the even-odd rasterizer is hand-rolled, dep-free).
 - **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard.
 - **Fonts** (via `github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
-  (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), and symbolic subset
-  TrueType (raw-code / code-as-GID glyph lookup).
+  (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), symbolic subset
+  TrueType (raw-code / code-as-GID glyph lookup), and non-embedded base-14 fonts via bundled
+  permissively-licensed substitutes (`pkg/font/standard`: TeX Gyre Heros/Termes, Inconsolata).
 - **Transparency**: ExtGState constant alpha `/ca` (fill/text) and `/CA` (stroke), applied to fills,
   strokes, glyphs, and images.
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
@@ -122,16 +123,16 @@ that skip into real output.
    (sample inversion/remap) generally. (`pkg/render/raster/image.go`, `decodeImageXObject`.)
 2. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-3. **Base-14 / non-embedded fonts** — a font with no embedded program returns
-   `ErrNoEmbeddedProgram` and its text is skipped (e.g. Helvetica in
-   `cropped-rotated-scaled.pdf`). Bundle the 14 standard fonts (or AFM metrics + substitutes).
-4. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
+3. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
    filled outline with butt caps and no joins (`pkg/render/raster/device.go`).
-5. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
+4. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
    masks** (`/SMask` in ExtGState — distinct from the per-image `/SMask` already supported),
    **transparency groups** — `gs` already logs the unsupported blend/soft-mask case.
-6. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
+5. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
    `ErrEncrypted`.
+6. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
+   Symbol and ZapfDingbats have no substitute (skipped). Bundle weighted faces + symbol look-alikes,
+   and ideally standard AFM widths for exact base-14 metrics.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.

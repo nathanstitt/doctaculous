@@ -11,8 +11,10 @@
 package font
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/nathanstitt/doctaculous/pkg/font/standard"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
 )
@@ -26,6 +28,12 @@ func New(doc *pdf.Document, fontDict pdf.Dict, logf func(string, ...any)) (conte
 	switch subtype {
 	case "TrueType", "Type1", "MMType1":
 		prog, err := embeddedSimpleProgram(doc, fontDict)
+		if errors.Is(err, ErrNoEmbeddedProgram) {
+			// No embedded program: if /BaseFont is a standard-14 font (or a known
+			// alias), substitute a bundled permissively-licensed look-alike so the
+			// text still renders. Otherwise propagate the error and the caller skips.
+			prog, err = standardSubstituteProgram(doc, fontDict, logf)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -71,4 +79,34 @@ func embeddedSimpleProgram(doc *pdf.Document, fontDict pdf.Dict) (*program, erro
 		return parseProgram(b, progType1)
 	}
 	return nil, ErrNoEmbeddedProgram
+}
+
+// standardSubstituteProgram parses a bundled substitute font for a simple font
+// whose /BaseFont names a standard-14 font (or a common alias such as Arial or
+// TimesNewRoman) but which embeds no program. It returns ErrNoEmbeddedProgram
+// when no substitute is bundled for the base font (e.g. Symbol/ZapfDingbats, or a
+// non-standard name), so the caller degrades gracefully. The resulting *program
+// flows through the normal simpleFont path; the PDF's own /Widths are preferred
+// when present, otherwise the substitute font's own advances approximate them.
+func standardSubstituteProgram(doc *pdf.Document, fontDict pdf.Dict, logf func(string, ...any)) (*program, error) {
+	baseFont, _ := doc.GetName(fontDict["BaseFont"])
+	sub, ok := standard.Lookup(string(baseFont))
+	if !ok {
+		if logf != nil && baseFont != "" {
+			logf("font: no bundled substitute for non-embedded base font %q; skipping", string(baseFont))
+		}
+		return nil, ErrNoEmbeddedProgram
+	}
+	if logf != nil {
+		logf("font: substituting bundled %s for non-embedded base font %q", sub.Name, string(baseFont))
+	}
+	return parseProgram(sub.Data, substituteKind(sub.Kind))
+}
+
+// substituteKind maps a standard.Kind to this package's progKind.
+func substituteKind(k standard.Kind) progKind {
+	if k == standard.KindTrueType {
+		return progTrueType
+	}
+	return progType1
 }

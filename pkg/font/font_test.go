@@ -307,6 +307,70 @@ func TestClassicType1Decodes(t *testing.T) {
 	}
 }
 
+// TestStandardSubstituteDecodes verifies that a simple font naming a standard-14
+// /BaseFont (here /Helvetica) but embedding NO program still produces glyph
+// outlines via a bundled substitute face. gen.TextPDF uses non-embedded
+// /Helvetica, the exact base-14 gap this feature closes.
+func TestStandardSubstituteDecodes(t *testing.T) {
+	doc, fd := fontDict(t, gen.TextPDF())
+	src, err := New(doc, fd, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	glyphs := src.DecodeString([]byte("Hello"))
+	if len(glyphs) != 5 {
+		t.Fatalf("got %d glyphs, want 5", len(glyphs))
+	}
+	for i, g := range glyphs {
+		if g.Outline == nil {
+			t.Errorf("glyph %d (%q): nil outline — base-14 substitute not rendered", i, g.Rune)
+		}
+		if g.Width <= 0 || g.Width > 1.5 {
+			t.Errorf("glyph %d: implausible width %v em", i, g.Width)
+		}
+	}
+	if glyphs[0].Rune != 'H' {
+		t.Errorf("glyph 0 rune = %q, want 'H'", glyphs[0].Rune)
+	}
+}
+
+// TestStandardSubstituteFamilies covers the name→substitute mapping for each
+// bundled family and an alias, plus the unsupported Symbol case which must skip.
+func TestStandardSubstituteFamilies(t *testing.T) {
+	doc := &pdf.Document{}
+	render := func(t *testing.T, baseFont string) content.GlyphSource {
+		t.Helper()
+		dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name(baseFont)}
+		src, err := New(doc, dict, nil)
+		if err != nil {
+			t.Fatalf("New(%s): %v", baseFont, err)
+		}
+		return src
+	}
+
+	for _, baseFont := range []string{"Helvetica", "Helvetica-Bold", "Arial", "Times-Roman", "TimesNewRoman", "Courier", "CourierNew", "ABCDEF+Helvetica"} {
+		t.Run(baseFont, func(t *testing.T) {
+			glyphs := render(t, baseFont).DecodeString([]byte("Ag"))
+			for i, g := range glyphs {
+				if g.Outline == nil {
+					t.Errorf("%s glyph %d (%q): nil outline", baseFont, i, g.Rune)
+				}
+			}
+		})
+	}
+
+	// Symbol and ZapfDingbats have no bundled substitute: New must report
+	// ErrNoEmbeddedProgram so the caller skips the text.
+	for _, baseFont := range []string{"Symbol", "ZapfDingbats", "NotAStandardFont"} {
+		t.Run("unsupported/"+baseFont, func(t *testing.T) {
+			dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name(baseFont)}
+			if _, err := New(doc, dict, nil); !errors.Is(err, ErrNoEmbeddedProgram) {
+				t.Errorf("err = %v, want ErrNoEmbeddedProgram", err)
+			}
+		})
+	}
+}
+
 // TestSymbolicTrueTypeDecodes verifies the symbolic-TrueType glyph path: a font
 // flagged Symbolic with no /Encoding, whose codes resolve to glyphs via the
 // raw-code/symbol cmap or the code-as-GID fallback rather than code→rune→GID.
