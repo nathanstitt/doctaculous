@@ -33,8 +33,7 @@ func (it *Interpreter) execute(op string, operands []pdf.Object, depth int) {
 	case "d":
 		it.setDash(operands)
 	case "gs":
-		// Extended graphics state: not interpreted in v1 (alpha, blend modes…).
-		it.logf("content: /ExtGState (gs) not applied")
+		it.applyExtGState(operands)
 
 	// --- path construction ---
 	case "m":

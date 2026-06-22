@@ -21,8 +21,9 @@ type Device interface {
 	Stroke(path *Path, paint StrokePaint)
 
 	// DrawImage draws img mapped by ctm. The image's unit square [0,1]×[0,1] is
-	// mapped through ctm into device space (PDF image space convention).
-	DrawImage(img image.Image, ctm Matrix)
+	// mapped through ctm into device space (PDF image space convention). alpha in
+	// [0,1] is the constant fill opacity (ExtGState /ca); 1 is fully opaque.
+	DrawImage(img image.Image, ctm Matrix, alpha float64)
 
 	// FillGlyph fills a single glyph outline (already in device space) with color.
 	// The outline uses the nonzero winding rule.

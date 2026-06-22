@@ -97,7 +97,7 @@ func (it *Interpreter) drawGlyph(g Glyph) {
 	}.Mul(ts.matrix).Mul(it.gs.ctm)
 
 	out := transformOutline(g.Outline, trm)
-	c := it.gs.fill
+	c := withAlpha(it.gs.fill, it.gs.fillAlpha)
 	it.dev.FillGlyph(out, render.FillColor{R: c.R, G: c.G, B: c.B, A: c.A})
 }
 

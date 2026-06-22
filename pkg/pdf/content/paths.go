@@ -67,7 +67,7 @@ func (it *Interpreter) fillPath(rule render.FillRule) {
 	if it.path.Empty() {
 		return
 	}
-	it.dev.Fill(&it.path, render.FillPaint{Color: it.gs.fill, Rule: rule})
+	it.dev.Fill(&it.path, render.FillPaint{Color: withAlpha(it.gs.fill, it.gs.fillAlpha), Rule: rule})
 }
 
 func (it *Interpreter) strokePath() {
@@ -81,7 +81,7 @@ func (it *Interpreter) strokePath() {
 	}
 	dash := it.scaledDash()
 	it.dev.Stroke(&it.path, render.StrokePaint{
-		Color:      it.gs.stroke,
+		Color:      withAlpha(it.gs.stroke, it.gs.strokeAlpha),
 		Width:      w,
 		Cap:        it.gs.lineCap,
 		Join:       it.gs.lineJoin,

@@ -7,9 +7,9 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
-// Resources supplies page resources the interpreter needs: fonts, images, and
-// nested form XObjects. The backend implements it so font-program and image
-// decoding stay out of this package.
+// Resources supplies page resources the interpreter needs: fonts, images,
+// nested form XObjects, and extended graphics states. The backend implements it
+// so font-program and image decoding stay out of this package.
 type Resources interface {
 	// Font returns a usable font for the resource name (without leading slash),
 	// or nil if it cannot be resolved.
@@ -20,6 +20,23 @@ type Resources interface {
 	// Form returns the decoded content bytes and resources of a form XObject, or
 	// ok=false if name is not a form XObject. matrix is the form's /Matrix.
 	Form(name string) (content []byte, res Resources, matrix render.Matrix, ok bool)
+	// ExtGState returns the named entry of the /ExtGState resource dict, or
+	// ok=false if it is absent. Only the parameters the interpreter applies are
+	// reported (see ExtGStateParams); unsupported entries are flagged so the
+	// caller can log graceful degradation.
+	ExtGState(name string) (params ExtGStateParams, ok bool)
+}
+
+// ExtGStateParams holds the subset of an ExtGState dictionary the interpreter
+// understands. Fill/StrokeAlpha come from /ca and /CA. HasUnsupported is true
+// when the dict carries entries we do not interpret (a non-Normal /BM blend mode
+// or a non-None /SMask), so the caller can emit a degradation log.
+type ExtGStateParams struct {
+	FillAlpha      float64
+	HasFillAlpha   bool
+	StrokeAlpha    float64
+	HasStrokeAlpha bool
+	HasUnsupported bool
 }
 
 // Interpreter executes a content stream against a Device.

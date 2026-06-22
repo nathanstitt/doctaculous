@@ -127,9 +127,15 @@ func (d *Device) FillGlyph(outline *render.Path, c render.FillColor) {
 
 // DrawImage maps img's unit square through ctm into device space using inverse
 // sampling (nearest neighbor), respecting the current clip.
-func (d *Device) DrawImage(img image.Image, ctm render.Matrix) {
+func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64) {
 	if img == nil {
 		return
+	}
+	if alpha <= 0 {
+		return // fully transparent: nothing to draw
+	}
+	if alpha > 1 {
+		alpha = 1
 	}
 	inv, ok := invert(ctm)
 	if !ok {
@@ -147,8 +153,11 @@ func (d *Device) DrawImage(img image.Image, ctm render.Matrix) {
 	clip := d.activeClip()
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
-			if clip != nil && clip.AlphaAt(x, y).A == 0 {
-				continue
+			cov := uint32(255)
+			if clip != nil {
+				if cov = uint32(clip.AlphaAt(x, y).A); cov == 0 {
+					continue
+				}
 			}
 			// Map pixel center to unit space, then to source pixels. PDF image
 			// space has y up with the image's top row at v=1, so flip v.
@@ -161,8 +170,33 @@ func (d *Device) DrawImage(img image.Image, ctm render.Matrix) {
 			// Guard against float rounding landing on the exclusive max edge.
 			sx = clampInt(sx, sb.Min.X, sb.Max.X-1)
 			sy = clampInt(sy, sb.Min.Y, sb.Max.Y-1)
-			d.img.Set(x, y, img.At(sx, sy))
+
+			// Straight-alpha source color, folding in the source pixel's own alpha,
+			// the constant /ca alpha, and the clip coverage.
+			sc := straightRGBA(img.At(sx, sy))
+			a := uint32(sc.A) * uint32(alpha*255+0.5) / 255 // source α × constant α
+			a = a * cov / 255                               // × clip coverage
+			if a == 0 {
+				continue
+			}
+			over(d.img, x, y, color.RGBA{R: sc.R, G: sc.G, B: sc.B, A: sc.A}, uint8(a))
 		}
+	}
+}
+
+// straightRGBA converts any color to straight-alpha 8-bit RGBA. Go's color
+// model returns premultiplied 16-bit values from RGBA(); we un-premultiply so
+// over() (which expects straight-alpha) blends correctly.
+func straightRGBA(c color.Color) color.RGBA {
+	r, g, b, a := c.RGBA() // premultiplied, 16-bit
+	if a == 0 {
+		return color.RGBA{}
+	}
+	return color.RGBA{
+		R: uint8(r * 0xffff / a >> 8),
+		G: uint8(g * 0xffff / a >> 8),
+		B: uint8(b * 0xffff / a >> 8),
+		A: uint8(a >> 8),
 	}
 }
 

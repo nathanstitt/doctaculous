@@ -208,6 +208,50 @@ func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Mat
 	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), true
 }
 
+// ExtGState resolves a named entry of the /ExtGState resource dict, reporting the
+// constant alpha (/ca, /CA) and whether the entry carries parameters this
+// renderer does not interpret (a non-Normal /BM or a non-None /SMask).
+func (r *pageResources) ExtGState(name string) (content.ExtGStateParams, bool) {
+	gsDicts := r.doc.GetDict(r.dict["ExtGState"])
+	if gsDicts == nil {
+		return content.ExtGStateParams{}, false
+	}
+	gs := r.doc.GetDict(gsDicts[pdf.Name(name)])
+	if gs == nil {
+		return content.ExtGStateParams{}, false
+	}
+	var p content.ExtGStateParams
+	if ca, ok := pdf.Number(r.doc.Resolve(gs["ca"])); ok {
+		p.FillAlpha, p.HasFillAlpha = clampAlpha(ca), true
+	}
+	if ca, ok := pdf.Number(r.doc.Resolve(gs["CA"])); ok {
+		p.StrokeAlpha, p.HasStrokeAlpha = clampAlpha(ca), true
+	}
+	// Flag blend modes and soft masks we don't interpret, so the interpreter can
+	// log graceful degradation.
+	if bm, ok := r.doc.GetName(gs["BM"]); ok && bm != "Normal" && bm != "Compatible" {
+		p.HasUnsupported = true
+	}
+	if sm, ok := r.doc.GetName(gs["SMask"]); ok && sm != "None" {
+		p.HasUnsupported = true
+	} else if _, isDict := r.doc.Resolve(gs["SMask"]).(pdf.Dict); isDict {
+		p.HasUnsupported = true
+	}
+	return p, true
+}
+
+// clampAlpha constrains an alpha value to [0,1].
+func clampAlpha(a float64) float64 {
+	switch {
+	case a < 0:
+		return 0
+	case a > 1:
+		return 1
+	default:
+		return a
+	}
+}
+
 // formMatrix reads a form XObject's /Matrix (six numbers) into a render.Matrix,
 // returning identity when absent or malformed (the PDF default).
 func formMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
