@@ -1,0 +1,49 @@
+# doctaculous
+
+A pure-Go, MIT-licensed document toolkit. No CGo, no native bindings — everything is Go.
+
+The long-term goal is an "everything" document tool: convert between formats, author and sign
+PDF/DOCX/EPUB/HTML, and rasterize pages to images. The current focus is **rasterizing PDF pages
+to images**.
+
+## Status
+
+Early development. v1 target: render a PDF page to a PNG.
+
+```sh
+doctaculous rasterize input.pdf --page 1 --out page1.png --dpi 150
+```
+
+## Why pure Go?
+
+Existing high-fidelity renderers (PDFium, MuPDF, Poppler) require CGo and/or carry copyleft
+licenses. doctaculous renders PDF content streams itself in pure Go, so it builds as a single
+static binary, cross-compiles freely, and stays MIT-licensed.
+
+## Architecture
+
+A layered pipeline; each layer is independently testable:
+
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| Parse | `pkg/pdf` | Tokenizer, objects, xref, page tree |
+| Filter | `pkg/pdf/filter` | Decode stream bytes (Flate, ASCII85, …) |
+| Interpret | `pkg/pdf/content` | Content-stream tokenizer + graphics state |
+| Device | `pkg/render` | Backend-agnostic paint ops (`Device` interface) |
+| Raster | `pkg/render/raster` | Bitmap backend → `image.Image` |
+| API | `pkg/doctaculous` | Public library entry point |
+| CLI | `cmd/doctaculous` | Thin command-line wrapper |
+
+The `Device` interface is the seam that will let us add other backends (e.g. SVG) later.
+
+## Development
+
+```sh
+make build   # build the CLI
+make test    # go test ./... (with race detector)
+make lint    # go vet + golangci-lint
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

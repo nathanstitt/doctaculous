@@ -1,0 +1,18 @@
+# Plans are working docs — not committed to the repo.
+/plans/
+
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+
+# Skill/tooling assets that are not part of this module.
+/agent/
+/.agents/
+/skills-lock.json
