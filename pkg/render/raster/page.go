@@ -282,7 +282,7 @@ func (r *pageResources) Image(name string) (image.Image, bool) {
 	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Image" {
 		return nil, false
 	}
-	img, err := decodeImageXObject(r.doc, s)
+	img, err := decodeImageXObject(r.doc, s, r.logf)
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: image %q: %v", name, err)
@@ -292,10 +292,12 @@ func (r *pageResources) Image(name string) (image.Image, bool) {
 	return img, true
 }
 
-// decodeImageXObject turns an image XObject stream into an image.Image, handling
-// the two paths the core corpus exercises: DCTDecode (baseline JPEG via the
-// stdlib decoder) and raw FlateDecode DeviceRGB 8-bit samples.
-func decodeImageXObject(doc *pdf.Document, s *pdf.Stream) (image.Image, error) {
+// decodeImageXObject turns an image XObject stream into an image.Image. It
+// handles raw samples in the common color spaces and bit depths (DeviceGray/RGB/
+// CMYK, Indexed, ICCBased by component count; 1/2/4/8/16 bpc) and baseline JPEG
+// (DCTDecode via the stdlib decoder), then applies a grayscale /SMask as the
+// image's alpha channel.
+func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, logf func(string, ...any)) (image.Image, error) {
 	data, imgFilter, err := doc.DecodedStream(s)
 	if err != nil {
 		return nil, err
@@ -306,32 +308,101 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream) (image.Image, error) {
 		return nil, fmt.Errorf("bad dimensions %dx%d", w, h)
 	}
 
+	var base *image.RGBA
 	switch imgFilter {
 	case "DCTDecode":
-		img, _, derr := image.Decode(bytes.NewReader(data))
+		decoded, _, derr := image.Decode(bytes.NewReader(data))
 		if derr != nil {
 			return nil, fmt.Errorf("jpeg decode: %w", derr)
 		}
-		return img, nil
+		base = toRGBA(decoded)
 	case "":
-		// Raw samples. First pass supports 8-bit DeviceRGB (3 bytes/pixel).
 		bpc, _ := doc.GetInt(s.Dict["BitsPerComponent"])
-		cs, _ := doc.GetName(s.Dict["ColorSpace"])
-		if bpc != 8 || cs != "DeviceRGB" {
-			return nil, fmt.Errorf("unsupported raw image: %d bpc, /%s", bpc, cs)
+		if bpc == 0 {
+			bpc = 8
 		}
-		if len(data) < w*h*3 {
-			return nil, fmt.Errorf("short sample data: %d < %d", len(data), w*h*3)
+		cs, err := resolveImageCS(doc, s.Dict["ColorSpace"], bpc, logf)
+		if err != nil {
+			return nil, err
 		}
-		img := image.NewRGBA(image.Rect(0, 0, w, h))
-		for y := range h {
-			for x := range w {
-				i := (y*w + x) * 3
-				img.SetRGBA(x, y, color.RGBA{R: data[i], G: data[i+1], B: data[i+2], A: 0xFF})
-			}
+		base, err = decodeRawImage(data, w, h, bpc, cs)
+		if err != nil {
+			return nil, err
 		}
-		return img, nil
 	default:
 		return nil, fmt.Errorf("unsupported image filter %s", imgFilter)
 	}
+
+	applySoftMask(doc, s, base, logf)
+	return base, nil
+}
+
+// applySoftMask reads the image's /SMask (a grayscale image whose samples are the
+// base image's per-pixel alpha) and writes it into base's alpha channel. Mask
+// dimensions may differ from the base; samples are taken by nearest-neighbor. A
+// missing or undecodable mask leaves base fully opaque.
+func applySoftMask(doc *pdf.Document, s *pdf.Stream, base *image.RGBA, logf func(string, ...any)) {
+	sm := doc.GetStream(s.Dict["SMask"])
+	if sm == nil {
+		return
+	}
+	data, filter, err := doc.DecodedStream(sm)
+	if err != nil {
+		if logf != nil {
+			logf("raster: image /SMask: %v", err)
+		}
+		return
+	}
+	mw, _ := doc.GetInt(sm.Dict["Width"])
+	mh, _ := doc.GetInt(sm.Dict["Height"])
+	if mw <= 0 || mh <= 0 {
+		return
+	}
+	var mask *image.RGBA // gray mask decoded as RGBA (R==G==B==alpha sample)
+	switch filter {
+	case "DCTDecode":
+		decoded, _, derr := image.Decode(bytes.NewReader(data))
+		if derr != nil {
+			return
+		}
+		mask = toRGBA(decoded)
+	case "":
+		bpc, _ := doc.GetInt(sm.Dict["BitsPerComponent"])
+		if bpc == 0 {
+			bpc = 8
+		}
+		mask, err = decodeRawImage(data, mw, mh, bpc, imageCS{kind: csGray, nComps: 1})
+		if err != nil {
+			return
+		}
+	default:
+		return
+	}
+
+	b := base.Bounds()
+	for y := 0; y < b.Dy(); y++ {
+		my := y * mh / b.Dy()
+		for x := 0; x < b.Dx(); x++ {
+			mx := x * mw / b.Dx()
+			a := mask.RGBAAt(mx, my).R // gray sample == alpha
+			c := base.RGBAAt(x, y)
+			c.A = a
+			base.SetRGBA(x, y, c)
+		}
+	}
+}
+
+// toRGBA returns img as an *image.RGBA, copying only if it is not already one.
+func toRGBA(img image.Image) *image.RGBA {
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba
+	}
+	b := img.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			out.Set(x, y, img.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return out
 }
