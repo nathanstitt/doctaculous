@@ -6,6 +6,9 @@ The long-term goal is an "everything" document tool: convert between formats, au
 PDF/DOCX/EPUB/HTML, and rasterize pages to images. The current focus is **rasterizing PDF pages
 to images**.
 
+Built for [tinycld](https://github.com/tinycld), where it powers document thumbnails and other
+format conversions.
+
 ## Status
 
 Early development. v1 target: render a PDF page to a PNG.
