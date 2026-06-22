@@ -22,6 +22,34 @@ func VectorPDF() []byte {
 	return buildSinglePage(content, `<< >>`)
 }
 
+// StrokeJoinsPDF returns a single-page PDF that strokes a thick open polyline
+// three times, once per line join (miter, round, bevel), each row also varying
+// the line cap (butt, round, square). It locks down the stroker's join and cap
+// fidelity through the content-stream interpreter and rasterizer. The polyline
+// is a shallow "V" so the joins form visible corners.
+func StrokeJoinsPDF() []byte {
+	var b bytes.Buffer
+	// Three rows; each uses a distinct join (j) and cap (J) operator.
+	// PDF: "J" = line cap, "j" = line join, "M" = miter limit, "w" = width.
+	rows := []struct {
+		y          int
+		join, capN int // 0,1,2 maps to miter/round/bevel and butt/round/square
+		r, g, bl   string
+	}{
+		{600, 0, 0, "1", "0", "0"}, // miter join, butt cap, red
+		{450, 1, 1, "0", "1", "0"}, // round join, round cap, green
+		{300, 2, 2, "0", "0", "1"}, // bevel join, square cap, blue
+	}
+	for _, row := range rows {
+		// A "V": left-down to a vertex, then up-right — a sharp join in the middle.
+		fmt.Fprintf(&b, "%s %s %s RG 16 w 10 M %d J %d j ",
+			row.r, row.g, row.bl, row.capN, row.join)
+		fmt.Fprintf(&b, "100 %d m 250 %d l 400 %d l S ",
+			row.y, row.y-100, row.y)
+	}
+	return buildSinglePage(b.Bytes(), `<< >>`)
+}
+
 // EvenOddPDF returns a single-page PDF that fills a square-with-a-square-hole
 // ("donut") using the even-odd rule (f*). Both subpaths wind the same direction,
 // so the nonzero rule would fill the hole solid; even-odd must leave it empty.

@@ -48,6 +48,12 @@ var Core = []CoreFixture{
 		Build: VectorPDF,
 	},
 	{
+		Name:  "stroke-joins",
+		Desc:  "thick polylines stroked with miter/round/bevel joins and butt/round/square caps",
+		Pages: 1,
+		Build: StrokeJoinsPDF,
+	},
+	{
 		Name:  "even-odd",
 		Desc:  "even-odd fill (f*): square with a square hole",
 		Pages: 1,

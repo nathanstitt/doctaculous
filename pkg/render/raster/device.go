@@ -58,60 +58,8 @@ func (d *Device) Fill(path *render.Path, paint render.FillPaint) {
 	d.composite(mask, paint.Color)
 }
 
-// Stroke approximates a stroke by filling a thin quad along each segment. This
-// is a first-pass stroker (butt caps, no joins/dashes); rasterx replaces it when
-// stroke fidelity is needed. It keeps the common "thin line" case correct.
-func (d *Device) Stroke(path *render.Path, paint render.StrokePaint) {
-	if path == nil || path.Empty() {
-		return
-	}
-	w := paint.Width
-	if w <= 0 {
-		w = 1 // PDF zero-width means "thinnest renderable line"
-	}
-	half := w / 2
-	outline := &render.Path{}
-	var cx, cy float64
-	var have bool
-	flush := func(x0, y0, x1, y1 float64) {
-		dx, dy := x1-x0, y1-y0
-		l := math.Hypot(dx, dy)
-		if l == 0 {
-			return
-		}
-		// Unit normal.
-		nx, ny := -dy/l*half, dx/l*half
-		outline.MoveTo(x0+nx, y0+ny)
-		outline.LineTo(x1+nx, y1+ny)
-		outline.LineTo(x1-nx, y1-ny)
-		outline.LineTo(x0-nx, y0-ny)
-		outline.Close()
-	}
-	for _, s := range path.Segments {
-		switch s.Kind {
-		case render.MoveTo:
-			cx, cy, have = s.P0.X, s.P0.Y, true
-		case render.LineTo:
-			if have {
-				flush(cx, cy, s.P0.X, s.P0.Y)
-			}
-			cx, cy = s.P0.X, s.P0.Y
-		case render.CubeTo:
-			// Flatten the cubic to short line segments.
-			flattenCubic(cx, cy, s.P0, s.P1, s.P2, func(x, y float64) {
-				flush(cx, cy, x, y)
-				cx, cy = x, y
-			})
-		case render.Close:
-			have = false
-		}
-	}
-	mask := d.rasterizeMask(outline, render.NonZero)
-	if mask == nil {
-		return
-	}
-	d.composite(mask, paint.Color)
-}
+// Stroke renders path's outline honoring caps, joins and dashes. Its
+// implementation lives in stroke.go (rasterx-backed).
 
 // FillGlyph fills a glyph outline (device space) with a solid color.
 func (d *Device) FillGlyph(outline *render.Path, c render.FillColor) {

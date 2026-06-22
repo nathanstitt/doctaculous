@@ -98,6 +98,8 @@ what is done vs. pending.
 - **Content interpreter**: full path construction/painting, graphics state (`q/Q/cm/w/J/j/M/d`),
   device color (`g/rg/k/cs/sc/scn`), clipping (`W/W*`), text operators, `Do` XObjects.
 - **Fills**: nonzero and even-odd winding (the even-odd rasterizer is hand-rolled, dep-free).
+- **Strokes**: line joins (miter/round/bevel + miter limit), caps (butt/round/square), and dashes,
+  via `github.com/srwiley/rasterx` (`pkg/render/raster/stroke.go`).
 - **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard.
 - **Fonts** (via `github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), symbolic subset
@@ -123,14 +125,12 @@ that skip into real output.
    (sample inversion/remap) generally. (`pkg/render/raster/image.go`, `decodeImageXObject`.)
 2. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-3. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
-   filled outline with butt caps and no joins (`pkg/render/raster/device.go`).
-4. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
+3. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
    masks** (`/SMask` in ExtGState — distinct from the per-image `/SMask` already supported),
    **transparency groups** — `gs` already logs the unsupported blend/soft-mask case.
-5. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
+4. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
    `ErrEncrypted`.
-6. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
+5. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
    Symbol and ZapfDingbats have no substitute (skipped). Bundle weighted faces + symbol look-alikes,
    and ideally standard AFM widths for exact base-14 metrics.
 
