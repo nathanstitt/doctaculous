@@ -64,13 +64,50 @@ func TestDeviceClipPoppedOnRestore(t *testing.T) {
 	}
 }
 
-func TestEvenOddLogged(t *testing.T) {
-	dev, _ := newTestDevice(50, 50)
-	logged := false
-	dev.SetLogf(func(string, ...any) { logged = true })
-	dev.Fill(rectPath(5, 5, 20, 20), render.FillPaint{Color: color.RGBA{0, 0, 0, 255}, Rule: render.EvenOdd})
-	if !logged {
-		t.Error("even-odd fill should emit a debug log (v1 approximation)")
+// donutPath returns an outer rectangle with an inner rectangle hole. Both
+// subpaths wind the same direction, so the nonzero rule fills the hole solid
+// while the even-odd rule leaves it empty — the case that distinguishes them.
+func donutPath(outer, inner float64) *render.Path {
+	p := &render.Path{}
+	// Outer ring.
+	p.MoveTo(outer, outer)
+	p.LineTo(100-outer, outer)
+	p.LineTo(100-outer, 100-outer)
+	p.LineTo(outer, 100-outer)
+	p.Close()
+	// Inner ring (same winding direction).
+	p.MoveTo(inner, inner)
+	p.LineTo(100-inner, inner)
+	p.LineTo(100-inner, 100-inner)
+	p.LineTo(inner, 100-inner)
+	p.Close()
+	return p
+}
+
+func TestEvenOddLeavesHole(t *testing.T) {
+	dev, img := newTestDevice(100, 100)
+	black := color.RGBA{0, 0, 0, 255}
+	// Outer ring at 20px inset, inner hole at 40px inset: hole spans 40..60.
+	dev.Fill(donutPath(20, 40), render.FillPaint{Color: black, Rule: render.EvenOdd})
+
+	// The ring (e.g. 30,30) is painted.
+	if c := img.RGBAAt(30, 30); c.R > 50 {
+		t.Errorf("ring pixel = %v, want black", c)
+	}
+	// The hole center (50,50) must stay white under even-odd.
+	if c := img.RGBAAt(50, 50); c.R != 255 || c.G != 255 || c.B != 255 {
+		t.Errorf("hole pixel = %v, want white (even-odd leaves it empty)", c)
+	}
+}
+
+func TestNonZeroFillsHole(t *testing.T) {
+	dev, img := newTestDevice(100, 100)
+	black := color.RGBA{0, 0, 0, 255}
+	// Same donut, but nonzero winding fills the hole solid (both rings same dir).
+	dev.Fill(donutPath(20, 40), render.FillPaint{Color: black, Rule: render.NonZero})
+
+	if c := img.RGBAAt(50, 50); c.R > 50 {
+		t.Errorf("hole pixel = %v, want black (nonzero fills the hole)", c)
 	}
 }
 

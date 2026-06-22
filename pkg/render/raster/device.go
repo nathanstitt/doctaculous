@@ -12,9 +12,10 @@ import (
 )
 
 // Device renders into an *image.RGBA, implementing render.Device. Paths arrive
-// already in device space (origin top-left, y down). Fills use
-// golang.org/x/image/vector; strokes and glyphs are flattened to filled paths.
-// Clipping is an alpha-mask intersection tracked on a small state stack.
+// already in device space (origin top-left, y down). Nonzero fills use
+// golang.org/x/image/vector; even-odd fills use a built-in scanline rasterizer
+// (evenOddCoverage); strokes and glyphs are flattened to filled paths. Clipping
+// is an alpha-mask intersection tracked on a small state stack.
 //
 // A Device is not safe for concurrent use; render one page per Device. Separate
 // pages render on separate Devices, which is how the page-parallel path stays
@@ -23,8 +24,6 @@ type Device struct {
 	img  *image.RGBA
 	clip []*image.Alpha // clip stack; top is the active mask (nil = unclipped)
 	logf func(string, ...any)
-
-	warnedEvenOdd bool // log the even-odd approximation only once
 }
 
 // New returns a Device drawing onto img. The caller owns img and reads the
@@ -214,20 +213,25 @@ func (d *Device) activeClip() *image.Alpha {
 // rather than O(glyphs × image area). The returned mask's Bounds() reflect that
 // sub-rectangle; callers (composite, intersect) iterate Bounds() and so stay
 // bounded automatically. Returns nil if the path lies entirely off-canvas.
+// evenOddSupersample is the number of subscanlines per pixel row the even-odd
+// rasterizer averages for vertical anti-aliasing. 4 matches the visual quality of
+// the vector backend's nonzero coverage closely enough for the golden tolerance.
+const evenOddSupersample = 4
+
 func (d *Device) rasterizeMask(path *render.Path, rule render.FillRule) *image.Alpha {
 	bb := pathDeviceBounds(path).Intersect(d.img.Bounds())
 	if bb.Empty() {
 		return nil
 	}
+	// golang.org/x/image/vector only implements nonzero winding, so even-odd fills
+	// go through our own scanline rasterizer (see evenOddCoverage). Nonzero stays
+	// on the fast vector path.
+	if rule == render.EvenOdd {
+		return evenOddCoverage(flattenToPolygons(path), bb, evenOddSupersample)
+	}
 	r := vector.NewRasterizer(bb.Dx(), bb.Dy())
 	replay(r, path, float32(bb.Min.X), float32(bb.Min.Y))
 	mask := image.NewAlpha(bb)
-	// vector always uses nonzero winding; even-odd is approximated as nonzero
-	// for this first pass (correct for the non-self-overlapping common case).
-	if rule == render.EvenOdd && !d.warnedEvenOdd {
-		d.logf("raster: even-odd fill approximated as nonzero (v1 limitation)")
-		d.warnedEvenOdd = true
-	}
 	// Draw into the mask. The rasterizer's coordinate space starts at (0,0); the
 	// mask's Bounds() start at bb.Min, so draw with that as the destination rect.
 	r.Draw(mask, bb, image.Opaque, image.Point{})

@@ -61,6 +61,165 @@ func flattenCubic(x0, y0 float64, p0, p1, p2 render.Point, emit func(x, y float6
 	}
 }
 
+// flattenToPolygons converts path into a set of closed polygons in device space,
+// subdividing cubic Béziers to line segments. Each subpath becomes one polygon
+// (implicitly closed). Used by the even-odd rasterizer, which needs explicit edge
+// lists rather than a streaming rasterizer.
+func flattenToPolygons(path *render.Path) [][]render.Point {
+	var polys [][]render.Point
+	var cur []render.Point
+	var startPt, lastPt render.Point
+
+	flush := func() {
+		if len(cur) >= 2 {
+			polys = append(polys, cur)
+		}
+		cur = nil
+	}
+	for _, s := range path.Segments {
+		switch s.Kind {
+		case render.MoveTo:
+			flush()
+			startPt, lastPt = s.P0, s.P0
+			cur = []render.Point{s.P0}
+		case render.LineTo:
+			if cur == nil {
+				startPt = s.P0
+				cur = []render.Point{s.P0}
+			} else {
+				cur = append(cur, s.P0)
+			}
+			lastPt = s.P0
+		case render.CubeTo:
+			if cur == nil {
+				cur = []render.Point{lastPt}
+			}
+			flattenCubic(lastPt.X, lastPt.Y, s.P0, s.P1, s.P2, func(x, y float64) {
+				cur = append(cur, render.Point{X: x, Y: y})
+			})
+			lastPt = s.P2
+		case render.Close:
+			if cur != nil {
+				cur = append(cur, startPt)
+				lastPt = startPt
+			}
+		}
+	}
+	flush()
+	return polys
+}
+
+// evenOddCoverage rasterizes the given polygons into bb-sized alpha coverage
+// using the even-odd fill rule. It supersamples ss subscanlines per pixel row and
+// computes fractional horizontal coverage at span edges, so edges are
+// anti-aliased without any external rasterizer (golang.org/x/image/vector only
+// offers nonzero winding). Returns nil for an empty bounding box.
+func evenOddCoverage(polys [][]render.Point, bb image.Rectangle, ss int) *image.Alpha {
+	if bb.Empty() {
+		return nil
+	}
+	if ss < 1 {
+		ss = 1
+	}
+	mask := image.NewAlpha(bb)
+	w := bb.Dx()
+	// cov accumulates fractional coverage (0..ss) per pixel for the current row.
+	cov := make([]float64, w)
+	xs := make([]float64, 0, 16)
+
+	for py := bb.Min.Y; py < bb.Max.Y; py++ {
+		for i := range cov {
+			cov[i] = 0
+		}
+		for s := 0; s < ss; s++ {
+			// Sample y at the center of each subscanline within this pixel row.
+			sy := float64(py) + (float64(s)+0.5)/float64(ss)
+			xs = xs[:0]
+			// Collect x-intersections of all edges with the horizontal line y=sy.
+			for _, poly := range polys {
+				for i := 0; i+1 < len(poly); i++ {
+					a, b := poly[i], poly[i+1]
+					y0, y1 := a.Y, b.Y
+					if y0 == y1 {
+						continue // horizontal edge: no crossing
+					}
+					// Half-open rule [min,max) avoids double-counting shared vertices.
+					if (sy >= y0 && sy < y1) || (sy >= y1 && sy < y0) {
+						t := (sy - y0) / (y1 - y0)
+						xs = append(xs, a.X+t*(b.X-a.X))
+					}
+				}
+			}
+			if len(xs) < 2 {
+				continue
+			}
+			sortFloats(xs)
+			// Even-odd: fill between consecutive crossing pairs.
+			for i := 0; i+1 < len(xs); i += 2 {
+				addSpan(cov, bb.Min.X, xs[i], xs[i+1])
+			}
+		}
+		for i := 0; i < w; i++ {
+			a := cov[i] / float64(ss)
+			if a <= 0 {
+				continue
+			}
+			if a > 1 {
+				a = 1
+			}
+			mask.SetAlpha(bb.Min.X+i, py, color.Alpha{A: uint8(a*255 + 0.5)})
+		}
+	}
+	return mask
+}
+
+// addSpan adds horizontal coverage for the span [x0,x1) to cov, where cov[i]
+// corresponds to the pixel at device x = originX+i. Partially covered end pixels
+// receive fractional coverage so vertical and near-vertical edges anti-alias.
+func addSpan(cov []float64, originX int, x0, x1 float64) {
+	if x1 <= x0 {
+		return
+	}
+	lo := x0 - float64(originX)
+	hi := x1 - float64(originX)
+	if hi <= 0 || lo >= float64(len(cov)) {
+		return
+	}
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > float64(len(cov)) {
+		hi = float64(len(cov))
+	}
+	iLo := int(math.Floor(lo))
+	iHi := int(math.Floor(hi))
+	if iLo == iHi {
+		cov[iLo] += hi - lo
+		return
+	}
+	cov[iLo] += float64(iLo+1) - lo // partial first pixel
+	for i := iLo + 1; i < iHi; i++ {
+		cov[i] += 1
+	}
+	if iHi < len(cov) {
+		cov[iHi] += hi - float64(iHi) // partial last pixel
+	}
+}
+
+// sortFloats sorts a small slice of float64 ascending (insertion sort; crossing
+// counts per scanline are tiny, so this beats sort.Float64s' overhead).
+func sortFloats(a []float64) {
+	for i := 1; i < len(a); i++ {
+		v := a[i]
+		j := i - 1
+		for j >= 0 && a[j] > v {
+			a[j+1] = a[j]
+			j--
+		}
+		a[j+1] = v
+	}
+}
+
 // invert returns the inverse of an affine matrix, ok=false if singular.
 func invert(m render.Matrix) (render.Matrix, bool) {
 	det := m.A*m.D - m.B*m.C

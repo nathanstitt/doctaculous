@@ -22,6 +22,20 @@ func VectorPDF() []byte {
 	return buildSinglePage(content, `<< >>`)
 }
 
+// EvenOddPDF returns a single-page PDF that fills a square-with-a-square-hole
+// ("donut") using the even-odd rule (f*). Both subpaths wind the same direction,
+// so the nonzero rule would fill the hole solid; even-odd must leave it empty.
+// This locks down even-odd winding from content stream through rasterization.
+func EvenOddPDF() []byte {
+	content := []byte(
+		"0 0.4 0.8 rg " + // blue-ish fill
+			"100 100 400 400 re " + // outer square
+			"200 200 200 200 re " + // inner square (same winding)
+			"f*", // even-odd fill: inner square is a hole
+	)
+	return buildSinglePage(content, `<< >>`)
+}
+
 // MultiPagePDF returns an n-page PDF where each page draws its 1-based number.
 func MultiPagePDF(n int) []byte {
 	if n < 1 {

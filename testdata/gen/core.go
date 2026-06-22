@@ -32,7 +32,7 @@ type CoreFixture struct {
 // Bytes returns the fixture's PDF bytes.
 func (f CoreFixture) Bytes() []byte { return f.Build() }
 
-// Core lists the ten canonical fixtures, ordered from simplest to most complex
+// Core lists the canonical fixtures, ordered from simplest to most complex
 // structurally. See CoreFixture for the contract every entry satisfies.
 var Core = []CoreFixture{
 	{
@@ -46,6 +46,12 @@ var Core = []CoreFixture{
 		Desc:  "vector paths: filled rectangle + stroked line",
 		Pages: 1,
 		Build: VectorPDF,
+	},
+	{
+		Name:  "even-odd",
+		Desc:  "even-odd fill (f*): square with a square hole",
+		Pages: 1,
+		Build: EvenOddPDF,
 	},
 	{
 		Name:  "flate",
