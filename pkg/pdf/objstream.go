@@ -35,10 +35,16 @@ func (d *Document) loadObjStream(streamObjNum int) (*parsedObjStream, error) {
 	if !ok || entry.inStream {
 		return nil, fmt.Errorf("pdf: object stream %d not found", streamObjNum)
 	}
-	obj := d.parseObjectAt(entry.offset, streamObjNum)
+	obj, gen := d.parseObjectAtGen(entry.offset, streamObjNum)
 	s, ok := obj.(*Stream)
 	if !ok {
 		return nil, fmt.Errorf("pdf: object %d is not a stream", streamObjNum)
+	}
+	// The ObjStm container is a normal encrypted stream: decrypt its raw bytes
+	// before filter-decoding. The objects parsed out of the decoded data are
+	// then plaintext and must NOT be decrypted individually (see parseXrefObject).
+	if d.enc != nil {
+		s = &Stream{Dict: s.Dict, Raw: d.enc.decryptStream(streamObjNum, gen, s.Raw)}
 	}
 
 	data, imgF, err := d.DecodedStream(s)

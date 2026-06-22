@@ -156,6 +156,12 @@ var Core = []CoreFixture{
 		Build: BadXrefOffsetPDF,
 	},
 	{
+		Name:  "encrypted-rc4",
+		Desc:  "Standard Security Handler, empty user password, RC4 (V2/R3); decrypts a filled rectangle + /Title string",
+		Pages: 1,
+		Build: EncryptedRC4PDF,
+	},
+	{
 		Name:  "embedded-truetype",
 		Desc:  "simple TrueType font with an embedded FontFile2 (Roboto)",
 		Pages: 1,

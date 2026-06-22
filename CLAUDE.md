@@ -92,7 +92,10 @@ what is done vs. pending.
 ### Done (covered by `gen.Core` fixtures + golden images unless noted)
 
 - **Parsing**: classic xref tables, xref streams (`/Type /XRef`), object streams (`/ObjStm`),
-  object-scan rebuild for broken `startxref`. Encrypted documents return `ErrEncrypted`.
+  object-scan rebuild for broken `startxref`.
+- **Encryption**: Standard Security Handler, empty user password — RC4 (V1/V2), AES-128 (V4/AESV2),
+  AES-256 (V5/R6/AESV3), verified against `/U` (`pkg/pdf/crypt.go`). Documents needing a real
+  password return `ErrEncryptedNeedsPassword`; unsupported handlers return `ErrEncrypted`.
 - **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors), CCITTFax
   (Group 4 / Group 3 1D+2D, `pkg/pdf/filter/ccitt.go`). DCTDecode (JPEG) decoded at image-draw time.
 - **Content interpreter**: full path construction/painting, graphics state (`q/Q/cm/w/J/j/M/d`),
@@ -128,8 +131,8 @@ that skip into real output.
 3. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
    masks** (`/SMask` in ExtGState — distinct from the per-image `/SMask` already supported),
    **transparency groups** — `gs` already logs the unsupported blend/soft-mask case.
-4. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
-   `ErrEncrypted`.
+4. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
+   `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.
 5. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
    Symbol and ZapfDingbats have no substitute (skipped). Bundle weighted faces + symbol look-alikes,
    and ideally standard AFM widths for exact base-14 metrics.

@@ -43,47 +43,91 @@ func (d *Document) loadObject(num int) Object {
 
 func (d *Document) parseXrefObject(num int, entry xrefEntry) Object {
 	if entry.inStream {
+		// Objects living inside an object stream are already plaintext: the
+		// container ObjStm stream is decrypted as a whole when it is loaded, so
+		// its members must NOT be decrypted again here.
 		obj, err := d.parseObjectFromStream(entry.streamObj, entry.indexInStrm)
 		if err != nil {
 			return Null{}
 		}
 		return obj
 	}
-	return d.parseObjectAt(entry.offset, num)
+	obj, gen := d.parseObjectAtGen(entry.offset, num)
+	// Decrypt strings and the stream body of a top-level (uncompressed) object.
+	// The /Encrypt dict and the xref stream never reach this path with an
+	// encrypter installed, so they are not decrypted.
+	if d.enc != nil {
+		obj = d.decryptObject(obj, num, gen)
+	}
+	return obj
+}
+
+// decryptObject walks an object tree decrypting every String in place and the
+// Raw bytes of a Stream, using the (num, gen) of the owning indirect object.
+func (d *Document) decryptObject(o Object, num, gen int) Object {
+	switch v := o.(type) {
+	case String:
+		return String(d.enc.decryptString(num, gen, []byte(v)))
+	case Array:
+		for i, e := range v {
+			v[i] = d.decryptObject(e, num, gen)
+		}
+		return v
+	case Dict:
+		for k, e := range v {
+			v[k] = d.decryptObject(e, num, gen)
+		}
+		return v
+	case *Stream:
+		for k, e := range v.Dict {
+			v.Dict[k] = d.decryptObject(e, num, gen)
+		}
+		v.Raw = d.enc.decryptStream(num, gen, v.Raw)
+		return v
+	default:
+		return o
+	}
 }
 
 // parseObjectAt parses an indirect object located at a byte offset. The form is
 // "N G obj <object> endobj".
 func (d *Document) parseObjectAt(offset int64, wantNum int) Object {
+	obj, _ := d.parseObjectAtGen(offset, wantNum)
+	return obj
+}
+
+// parseObjectAtGen is parseObjectAt that also reports the parsed object's
+// generation number (needed to derive the per-object decryption key).
+func (d *Document) parseObjectAtGen(offset int64, wantNum int) (Object, int) {
 	if offset < 0 || int(offset) >= len(d.data) {
-		return Null{}
+		return Null{}, 0
 	}
 	p := newObjParser(d.data[offset:])
 	// Expect "N G obj".
 	t1, err := p.take()
 	if err != nil || t1.kind != tokInteger {
-		return Null{}
+		return Null{}, 0
 	}
 	t2, err := p.take()
 	if err != nil || t2.kind != tokInteger {
-		return Null{}
+		return Null{}, 0
 	}
 	t3, err := p.take()
 	if err != nil || t3.kind != tokKeyword || string(t3.val) != "obj" {
-		return Null{}
+		return Null{}, 0
 	}
 	// If a specific object number was requested, verify the object at this offset
 	// actually has that number. A stale/corrupt xref offset must resolve to Null
 	// (so the caller can fall back) rather than silently returning a neighboring
 	// object. wantNum < 0 means "don't check" (e.g. xref-stream objects).
 	if wantNum >= 0 && int(t1.num) != wantNum {
-		return Null{}
+		return Null{}, 0
 	}
 	obj, err := p.parseObject()
 	if err != nil {
-		return Null{}
+		return Null{}, 0
 	}
-	return obj
+	return obj, int(t2.num)
 }
 
 // GetDict resolves o to a Dict (or a Stream's dict), returning nil if it is not

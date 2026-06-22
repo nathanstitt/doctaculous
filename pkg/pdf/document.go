@@ -7,9 +7,12 @@ import (
 	"sync"
 )
 
-// ErrEncrypted is returned when a document uses encryption, which is not yet
-// supported.
-var ErrEncrypted = errors.New("pdf: encrypted documents are not supported")
+// ErrEncrypted is returned when a document uses an encryption scheme that is not
+// supported: a non-Standard security handler, or a Standard handler with an
+// unsupported /V or /R. Standard-handler documents readable with the empty user
+// password are decrypted transparently; ones needing a real password return
+// ErrEncryptedNeedsPassword instead.
+var ErrEncrypted = errors.New("pdf: unsupported encryption")
 
 // Document is a parsed PDF. After Open returns, a Document is read-only and safe
 // for concurrent use by multiple goroutines.
@@ -25,6 +28,10 @@ type Document struct {
 	cacheMu        sync.Mutex
 	objCache       map[int]Object           // resolved top-level objects by number
 	objStreamCache map[int]*parsedObjStream // decoded object streams by number
+
+	// enc is the Standard Security Handler state, or nil for an unencrypted
+	// document. It is computed once during Parse and read-only afterwards.
+	enc *encrypter
 
 	pages []*Page // flattened page list in document order
 }
@@ -68,9 +75,11 @@ func Parse(data []byte) (*Document, error) {
 			return nil, fmt.Errorf("pdf: no trailer found: %w", err)
 		}
 	}
-	if _, ok := d.trailer["Encrypt"]; ok {
-		return nil, ErrEncrypted
+	enc, err := d.setupEncryption()
+	if err != nil {
+		return nil, err
 	}
+	d.enc = enc
 	if err := d.loadPages(); err != nil {
 		// The xref may have pointed at stale offsets (common in damaged files).
 		// Retry once after a brute-force rebuild before giving up.
