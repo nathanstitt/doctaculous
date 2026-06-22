@@ -142,9 +142,9 @@ func pageMatrix(pg *pdf.Page, scale, wpt, hpt float64) render.Matrix {
 	}
 }
 
-// pageResources resolves fonts and image XObjects from a page's /Resources.
-// Form XObjects are not yet supported; requests for them return "not found" so
-// the interpreter skips them gracefully.
+// pageResources resolves fonts, image XObjects, and form XObjects from a page's
+// /Resources. The same type backs nested form resources (see Form), so form
+// content resolves names against its own /Resources, falling back to the page's.
 type pageResources struct {
 	doc  *pdf.Document
 	dict pdf.Dict
@@ -173,8 +173,57 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 	return src
 }
 
+// Form resolves a form XObject by name to its decoded content stream, its scoped
+// resources, and its /Matrix. It returns ok=false if name is not a form XObject
+// or its content cannot be decoded, so the interpreter skips it gracefully. Per
+// the PDF spec a form without its own /Resources inherits the page's, so the
+// child pageResources falls back to this dict.
 func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, bool) {
-	return nil, nil, render.Identity, false
+	xobjs := r.doc.GetDict(r.dict["XObject"])
+	if xobjs == nil {
+		return nil, nil, render.Identity, false
+	}
+	s := r.doc.GetStream(xobjs[pdf.Name(name)])
+	if s == nil {
+		return nil, nil, render.Identity, false
+	}
+	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Form" {
+		return nil, nil, render.Identity, false
+	}
+	data, _, err := r.doc.DecodedStream(s)
+	if err != nil {
+		if r.logf != nil {
+			r.logf("raster: form %q: %v", name, err)
+		}
+		return nil, nil, render.Identity, false
+	}
+
+	// A form's /Resources is optional; fall back to the page's so names resolve.
+	childDict := r.doc.GetDict(s.Dict["Resources"])
+	if childDict == nil {
+		childDict = r.dict
+	}
+	child := &pageResources{doc: r.doc, dict: childDict, logf: r.logf}
+
+	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), true
+}
+
+// formMatrix reads a form XObject's /Matrix (six numbers) into a render.Matrix,
+// returning identity when absent or malformed (the PDF default).
+func formMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
+	arr := doc.GetArray(o)
+	if len(arr) != 6 {
+		return render.Identity
+	}
+	var v [6]float64
+	for i, e := range arr {
+		f, ok := pdf.Number(doc.Resolve(e))
+		if !ok {
+			return render.Identity
+		}
+		v[i] = f
+	}
+	return render.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
 }
 
 func (r *pageResources) Image(name string) (image.Image, bool) {

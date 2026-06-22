@@ -36,6 +36,31 @@ func TestRenderVectorProducesRedPixels(t *testing.T) {
 	}
 }
 
+func TestRenderFormXObject(t *testing.T) {
+	doc, err := pdf.Parse(gen.FormXObjectPDF())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, _ := doc.Page(0)
+	img, err := RenderPage(context.Background(), pg, Options{DPI: 72, Background: color.White})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The form draws a 100x100 green square at its origin, shifted +(50,50) by its
+	// /Matrix and +(200,200) by the page cm, landing at user (250,250)-(350,350).
+	// At 72 DPI device y = 792 - userY. Sample the center, user (300,300).
+	cx, cy := 300, int(792-300)
+	got := img.RGBAAt(cx, cy)
+	if got.G < 200 || got.R > 60 || got.B > 60 {
+		t.Errorf("form pixel at user(300,300) = %v, want ~green (form not drawn)", got)
+	}
+	// Outside the square stays white — proves the /Matrix offset is honored rather
+	// than the form being drawn at the page origin.
+	if bg := img.RGBAAt(5, 5); bg.R < 250 || bg.G < 250 || bg.B < 250 {
+		t.Errorf("background pixel = %v, want white", bg)
+	}
+}
+
 func TestRenderImageFixture(t *testing.T) {
 	for name, build := range map[string]func() []byte{
 		"flate": gen.ImagePDF,

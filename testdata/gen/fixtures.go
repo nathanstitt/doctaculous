@@ -36,6 +36,45 @@ func EvenOddPDF() []byte {
 	return buildSinglePage(content, `<< >>`)
 }
 
+// FormXObjectPDF returns a single-page PDF whose content invokes a form XObject
+// (Do) that draws a green rectangle. The form carries a /Matrix that translates
+// its drawing, so a correct renderer must concatenate that matrix; the page also
+// nests a q/cm around the Do to prove the form runs inside the caller's state.
+// This locks down form-XObject recursion, /Matrix composition, and resource
+// scoping (the form has its own /Resources) from content stream to raster.
+func FormXObjectPDF() []byte {
+	b := newBuilder()
+
+	// The form's content: fill a 100x100 green square at the form's origin.
+	formContent := []byte("0 1 0 rg 0 0 100 100 re f")
+	form := b.addStreamForm(formContent)
+
+	// Page content: translate by (200,200) via cm, then invoke the form, which
+	// additionally translates by (50,50) via its own /Matrix.
+	pageContent := []byte("q 1 0 0 1 200 200 cm /Fm0 Do Q")
+	content := b.addStream("", pageContent)
+
+	// Resources reference the form under /XObject /Fm0.
+	resources := fmt.Sprintf("<< /XObject << /Fm0 %d 0 R >> >>", form)
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources %s /Contents %d 0 R >>",
+		pagesNum, resources, content))
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
+// addStreamForm appends a form XObject stream (Subtype /Form) with a /Matrix that
+// translates by (50,50) and its own empty /Resources, returning its object number.
+func (b *builder) addStreamForm(content []byte) int {
+	dictExtra := " /Type /XObject /Subtype /Form /BBox [0 0 200 200] " +
+		"/Matrix [1 0 0 1 50 50] /Resources << >>"
+	return b.addStream(dictExtra, content)
+}
+
 // MultiPagePDF returns an n-page PDF where each page draws its 1-based number.
 func MultiPagePDF(n int) []byte {
 	if n < 1 {

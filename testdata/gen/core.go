@@ -54,6 +54,12 @@ var Core = []CoreFixture{
 		Build: EvenOddPDF,
 	},
 	{
+		Name:  "form-xobject",
+		Desc:  "form XObject (Do) with /Matrix and scoped /Resources",
+		Pages: 1,
+		Build: FormXObjectPDF,
+	},
+	{
 		Name:  "flate",
 		Desc:  "FlateDecode-compressed content stream",
 		Pages: 1,
