@@ -25,12 +25,42 @@ var externalFixtureDir = filepath.Join("..", "..", "testdata", "external", "pdf"
 var externalFixtures = []struct {
 	file  string
 	pages int
+	// forms marks fixtures whose first page draws via form XObjects (Do) in the
+	// page content stream. For these, page 0 must render non-blank — proving form
+	// recursion actually emits content, not merely that rendering returns no error.
+	//
+	// Note: the AcroForm fixtures below are deliberately NOT marked. Their
+	// /Subtype /Form objects are widget *appearance* streams reached through
+	// annotations (out of scope for v1), not Do-invoked page content, so their
+	// pages can legitimately render blank — pdflatex-forms in fact does, because
+	// its page text uses an unsupported embedded font program. They stay in the
+	// corpus as parser/structure coverage.
+	forms bool
 }{
-	{"pdflatex-4-pages.pdf", 4},       // xref stream + ObjStm, multi-page
-	{"multicolumn.pdf", 3},            // xref stream + ObjStm, dense text/vector
-	{"imagemagick-images.pdf", 6},     // classic xref, 6 image pages
-	{"google-doc-document.pdf", 1},    // Skia/Chrome, Type0/Type3 fonts + images
-	{"cropped-rotated-scaled.pdf", 4}, // all four /Rotate values, crop/scale
+	{"pdflatex-4-pages.pdf", 4, false},      // xref stream + ObjStm, multi-page
+	{"multicolumn.pdf", 3, false},           // xref stream + ObjStm, dense text/vector
+	{"imagemagick-images.pdf", 6, false},    // classic xref, 6 image pages
+	{"google-doc-document.pdf", 1, false},   // Skia/Chrome, Type0/Type3 fonts + images
+	{"cropped-rotated-scaled.pdf", 4, true}, // /Rotate + crop/scale, Form-XObject-heavy (Do in content)
+	{"pdflatex-forms.pdf", 1, false},        // AcroForm (Tx/Btn); forms are annotation appearances, not page content
+	{"libreoffice-form.pdf", 1, false},      // AcroForm (Tx/Btn/Ch), different producer; forms via annotations
+}
+
+// imageHasInk reports whether img has any pixel darker/more-colored than near
+// white — i.e. something was actually painted. Used to assert form-bearing pages
+// are not blank.
+func imageHasInk(img image.Image) bool {
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			// RGBA() returns 16-bit values; ~0xF000 ≈ 94% of full white.
+			if r < 0xF000 || g < 0xF000 || bl < 0xF000 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestExternalCorpus enforces the same uniform contract gen.Core uses, against
@@ -63,6 +93,11 @@ func TestExternalCorpus(t *testing.T) {
 			}
 			if b := img.Bounds(); b.Dx() <= 0 || b.Dy() <= 0 {
 				t.Errorf("rasterized image has empty bounds %v", b)
+			}
+			// Form-bearing pages must produce visible content: a blank page here
+			// would mean form XObjects were silently skipped (the pre-support bug).
+			if f.forms && !imageHasInk(img) {
+				t.Errorf("page 0 rendered blank; expected form XObject content")
 			}
 		})
 	}

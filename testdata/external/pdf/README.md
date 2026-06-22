@@ -28,6 +28,8 @@ Attribution: PDF samples © the py-pdf/sample-files contributors, CC-BY-SA-4.0.
 | `imagemagick-images.pdf` | ImageMagick | classic xref table | 6 pages, 6 images — multipage image-decode path |
 | `google-doc-document.pdf` | Skia/PDF (Chrome / Google Docs) | classic xref table | Type0/CIDFontType2 + Type3 composite fonts, 10 images; a non-TeX producer |
 | `cropped-rotated-scaled.pdf` | pypdf (rewritten) | classic xref table | All four `/Rotate` values (0/90/180/270), cropping/scaling; rotated-render + rewritten structure. **Also carries blend state** (`/BM /Multiply`, `/ca 0.5`) — see note below |
+| `pdflatex-forms.pdf` | pdfTeX 1.40.23 | classic xref table | **AcroForm** interactive fields (`Tx` text, `Btn` button/checkbox) + the Form XObject appearance streams that back them |
+| `libreoffice-form.pdf` | LibreOffice 6.4 | classic xref table | **AcroForm** with the widest field coverage (`Tx`, `Btn`, `Ch` choice/dropdown) + Form XObjects, from a different producer |
 
 Deliberately excluded from py-pdf/sample-files: the encrypted fixture
 (`005-…-password`, encryption is out of scope for v1) and the 117-page GeoTopo
@@ -51,6 +53,26 @@ expected output is controlled and hermetic, rather than relying on this file.
 (`google-doc-document.pdf` contains `/BM /Normal` + `/ca 1` — the no-op opaque
 defaults — and `/SMask` image alpha, but no meaningful blending. The three
 pdfTeX/ImageMagick files use no transparency at all.)
+
+## Note: "xforms" — two distinct PDF features, both covered
+
+The corpus covers the two things "xforms" can mean:
+
+- **Form XObjects** (`/Subtype /Form`, reusable content streams invoked with the
+  `Do` operator) — a core *render* path the interpreter must handle. Exercised by
+  `cropped-rotated-scaled.pdf` (Form-XObject-heavy) and the appearance streams in
+  both form files below.
+- **AcroForm interactive fields** (text/checkbox/dropdown widgets) — *structure*
+  the parser must traverse; the widgets themselves are annotations, out of scope
+  to render in v1. `pdflatex-forms.pdf` covers `Tx`/`Btn`; `libreoffice-form.pdf`
+  adds `Ch` (choice). Both still rasterize their page content without error — the
+  interactive widgets degrade gracefully (page draws; field UI is not painted).
+  `pdflatex-forms.pdf` in fact renders an essentially blank page because its page
+  text uses an embedded font program format that is out of scope for v1
+  (`ErrUnsupportedFontProgram`); that is expected, not a regression.
+
+When AcroForm widget rendering moves in scope, prefer a *generated* fixture in
+`testdata/gen` with known field geometry so expected output stays hermetic.
 
 ## Verifying
 
