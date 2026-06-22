@@ -96,6 +96,12 @@ var Core = []CoreFixture{
 		Build: ImagePDF,
 	},
 	{
+		Name:  "image-mask",
+		Desc:  "1-bit /ImageMask stencil painted in the fill color",
+		Pages: 1,
+		Build: ImageMaskPDF,
+	},
+	{
 		Name:  "image-jpeg",
 		Desc:  "image XObject with DCTDecode (baseline JPEG) data",
 		Pages: 1,

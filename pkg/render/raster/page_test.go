@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 )
 
@@ -76,7 +77,7 @@ func decodeFixtureImage(t *testing.T, pdfBytes []byte) image.Image {
 	if s == nil {
 		t.Fatal("no /Im0 image XObject")
 	}
-	img, err := decodeImageXObject(doc, s, nil)
+	img, err := decodeImageXObject(doc, s, render.FillColor{A: 0xFF}, nil)
 	if err != nil {
 		t.Fatalf("decodeImageXObject: %v", err)
 	}
@@ -129,6 +130,29 @@ func TestDecodeImageColorSpaces(t *testing.T) {
 			t.Errorf("right alpha = %d, want 0 (transparent)", aR>>8)
 		}
 	})
+}
+
+func TestDecodeImageMask(t *testing.T) {
+	doc, err := pdf.Parse(gen.ImageMaskPDF())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, _ := doc.Page(0)
+	s := doc.GetStream(doc.GetDict(pg.Resources["XObject"])["Im0"])
+	// Decode with a green fill, mirroring the content stream's "0 1 0 rg".
+	green := render.FillColor{R: 0, G: 255, B: 0, A: 255}
+	img, err := decodeImageXObject(doc, s, green, nil)
+	if err != nil {
+		t.Fatalf("decodeImageXObject: %v", err)
+	}
+	// Left half: painted green, opaque. Right half: transparent.
+	rL, gL, bL, aL := img.At(1, 1).RGBA()
+	if aL>>8 != 255 || rL>>8 != 0 || gL>>8 != 255 || bL>>8 != 0 {
+		t.Errorf("left mask pixel = (%d,%d,%d,%d), want opaque green", rL>>8, gL>>8, bL>>8, aL>>8)
+	}
+	if _, _, _, aR := img.At(6, 1).RGBA(); aR>>8 != 0 {
+		t.Errorf("right mask pixel alpha = %d, want 0 (transparent)", aR>>8)
+	}
 }
 
 func TestRenderImageFixture(t *testing.T) {

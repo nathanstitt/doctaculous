@@ -270,7 +270,7 @@ func formMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
 	return render.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
 }
 
-func (r *pageResources) Image(name string) (image.Image, bool) {
+func (r *pageResources) Image(name string, fill render.FillColor) (image.Image, bool) {
 	xobjs := r.doc.GetDict(r.dict["XObject"])
 	if xobjs == nil {
 		return nil, false
@@ -282,7 +282,7 @@ func (r *pageResources) Image(name string) (image.Image, bool) {
 	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Image" {
 		return nil, false
 	}
-	img, err := decodeImageXObject(r.doc, s, r.logf)
+	img, err := decodeImageXObject(r.doc, s, fill, r.logf)
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: image %q: %v", name, err)
@@ -319,7 +319,7 @@ var inlineCSAliases = map[string]string{
 // InlineImage decodes a BI...ID...EI inline image into a drawable image. It
 // normalizes the abbreviated keys into a synthetic stream dict and reuses the
 // XObject image-decode path, so the two share color-space and bit-depth handling.
-func (r *pageResources) InlineImage(dict pdf.Dict, data []byte) (image.Image, bool) {
+func (r *pageResources) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (image.Image, bool) {
 	// Normalize abbreviated keys to their full forms.
 	norm := pdf.Dict{}
 	for k, v := range dict {
@@ -335,7 +335,7 @@ func (r *pageResources) InlineImage(dict pdf.Dict, data []byte) (image.Image, bo
 		}
 	}
 
-	img, err := decodeInlineImage(r.doc, norm, data, r.logf)
+	img, err := decodeInlineImage(r.doc, norm, data, fill, r.logf)
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: inline image: %v", err)
@@ -347,10 +347,10 @@ func (r *pageResources) InlineImage(dict pdf.Dict, data []byte) (image.Image, bo
 
 // decodeImageXObject turns an image XObject stream into an image.Image. It
 // handles raw samples in the common color spaces and bit depths (DeviceGray/RGB/
-// CMYK, Indexed, ICCBased by component count; 1/2/4/8/16 bpc) and baseline JPEG
-// (DCTDecode via the stdlib decoder), then applies a grayscale /SMask as the
-// image's alpha channel.
-func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, logf func(string, ...any)) (image.Image, error) {
+// CMYK, Indexed, ICCBased by component count; 1/2/4/8/16 bpc), baseline JPEG
+// (DCTDecode), and 1-bit /ImageMask stencils painted in the fill color. It honors
+// the /Decode array and applies a grayscale /SMask as the image's alpha channel.
+func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, fill render.FillColor, logf func(string, ...any)) (image.Image, error) {
 	data, imgFilter, err := doc.DecodedStream(s)
 	if err != nil {
 		return nil, err
@@ -359,6 +359,12 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, logf func(string, ...a
 	h, _ := doc.GetInt(s.Dict["Height"])
 	if w <= 0 || h <= 0 {
 		return nil, fmt.Errorf("bad dimensions %dx%d", w, h)
+	}
+
+	// /ImageMask: a 1-bit stencil. Sample 0 paints the fill color, 1 is
+	// transparent (default /Decode [0 1]); /Decode [1 0] inverts that.
+	if isImageMask(doc, s.Dict) {
+		return decodeImageMask(data, w, h, imageMaskInverted(doc, s.Dict), fill)
 	}
 
 	var base *image.RGBA
@@ -378,6 +384,7 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, logf func(string, ...a
 		if err != nil {
 			return nil, err
 		}
+		cs.decode = imageDecodeArray(doc, s.Dict["Decode"], bpc, cs)
 		base, err = decodeRawImage(data, w, h, bpc, cs)
 		if err != nil {
 			return nil, err
@@ -394,8 +401,79 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, logf func(string, ...a
 // sample bytes) by wrapping it as a synthetic stream and reusing
 // decodeImageXObject, so inline and XObject images share one decode path. The
 // dict's keys must already be normalized to full names by the caller.
-func decodeInlineImage(doc *pdf.Document, dict pdf.Dict, data []byte, logf func(string, ...any)) (image.Image, error) {
-	return decodeImageXObject(doc, &pdf.Stream{Dict: dict, Raw: data}, logf)
+func decodeInlineImage(doc *pdf.Document, dict pdf.Dict, data []byte, fill render.FillColor, logf func(string, ...any)) (image.Image, error) {
+	return decodeImageXObject(doc, &pdf.Stream{Dict: dict, Raw: data}, fill, logf)
+}
+
+// isImageMask reports whether the image dict declares /ImageMask true.
+func isImageMask(doc *pdf.Document, dict pdf.Dict) bool {
+	switch v := doc.Resolve(dict["ImageMask"]).(type) {
+	case pdf.Boolean:
+		return bool(v)
+	default:
+		return false
+	}
+}
+
+// imageMaskInverted reports whether a stencil mask's /Decode is [1 0] (paint on
+// sample 1 instead of the default sample 0).
+func imageMaskInverted(doc *pdf.Document, dict pdf.Dict) bool {
+	arr := doc.GetArray(dict["Decode"])
+	if len(arr) >= 2 {
+		d0, _ := pdf.Number(doc.Resolve(arr[0]))
+		return d0 == 1
+	}
+	return false
+}
+
+// decodeImageMask builds an RGBA image from a 1-bpc stencil: painted samples take
+// the fill color (opaque), unpainted samples are transparent. Rows are padded to
+// a byte boundary. inverted selects sample==1 as the painted value.
+func decodeImageMask(data []byte, w, h int, inverted bool, fill render.FillColor) (image.Image, error) {
+	rowBytes := (w + 7) / 8
+	if len(data) < rowBytes*h {
+		return nil, fmt.Errorf("short image-mask data: %d < %d", len(data), rowBytes*h)
+	}
+	paintBit := byte(0) // default /Decode [0 1]: a 0 sample paints
+	if inverted {
+		paintBit = 1
+	}
+	fc := color.RGBA{R: fill.R, G: fill.G, B: fill.B, A: fill.A}
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		row := data[y*rowBytes:]
+		for x := 0; x < w; x++ {
+			bit := (row[x>>3] >> uint(7-(x&7))) & 1
+			if bit == paintBit {
+				img.SetRGBA(x, y, fc)
+			} // else leave transparent (zero value)
+		}
+	}
+	return img, nil
+}
+
+// imageDecodeArray reads a /Decode array into per-component [min,max] pairs in
+// [0,1], or nil when absent or the default identity. For Indexed images /Decode
+// is over index range, which we leave to the palette (returns nil).
+func imageDecodeArray(doc *pdf.Document, o pdf.Object, bpc int, cs imageCS) []float64 {
+	arr := doc.GetArray(o)
+	if len(arr) == 0 || cs.kind == csIndexed {
+		return nil
+	}
+	out := make([]float64, len(arr))
+	identity := true
+	for i, e := range arr {
+		v, _ := pdf.Number(doc.Resolve(e))
+		out[i] = v
+		// Identity is [0 1 0 1 ...]: even indices 0, odd indices 1.
+		if (i%2 == 0 && v != 0) || (i%2 == 1 && v != 1) {
+			identity = false
+		}
+	}
+	if identity {
+		return nil
+	}
+	return out
 }
 
 // applySoftMask reads the image's /SMask (a grayscale image whose samples are the

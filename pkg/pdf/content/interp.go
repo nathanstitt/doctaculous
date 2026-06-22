@@ -15,13 +15,15 @@ type Resources interface {
 	// or nil if it cannot be resolved.
 	Font(name string) GlyphSource
 	// Image returns a decoded image XObject for the resource name, or ok=false if
-	// it is not an image or could not be decoded.
-	Image(name string) (img image.Image, ok bool)
+	// it is not an image or could not be decoded. fill is the current fill color,
+	// used to paint /ImageMask stencils (ignored by ordinary images).
+	Image(name string, fill render.FillColor) (img image.Image, ok bool)
 	// InlineImage decodes a BI...ID...EI inline image into a drawable image. dict
 	// holds the inline image parameters with their keys as written (abbreviated,
 	// e.g. W/H/CS/BPC/F/IM); data is the verbatim sample bytes between ID and EI.
-	// ok=false if the image cannot be decoded.
-	InlineImage(dict pdf.Dict, data []byte) (img image.Image, ok bool)
+	// fill is the current fill color (for /ImageMask). ok=false if the image
+	// cannot be decoded.
+	InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (img image.Image, ok bool)
 	// Form returns the decoded content bytes and resources of a form XObject, or
 	// ok=false if name is not a form XObject. matrix is the form's /Matrix.
 	Form(name string) (content []byte, res Resources, matrix render.Matrix, ok bool)

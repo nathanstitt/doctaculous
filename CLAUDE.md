@@ -111,8 +111,9 @@ what is done vs. pending.
 - **Transparency**: ExtGState constant alpha `/ca` (fill/text) and `/CA` (stroke), applied to fills,
   strokes, glyphs, and images.
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
-  1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha
-  (`pkg/render/raster/image.go`), and inline images (`BI`/`ID`/`EI`).
+  1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
+  stencils painted in the fill color, `/Decode` arrays, and inline images (`BI`/`ID`/`EI`)
+  (`pkg/render/raster/image.go`, `page.go`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
   kill a batch.
@@ -123,17 +124,14 @@ Each item should land with a new fixture/test in the same PR (see Testing). Unsu
 already degrade gracefully (skip + debug log / typed error); a TODO becoming supported just turns
 that skip into real output.
 
-1. **ImageMask & `/Decode`** — 1-bit stencil masks (`/ImageMask true`) paint the current fill color
-   through the mask; needs the fill color threaded into image drawing. Also honor `/Decode` arrays
-   (sample inversion/remap) generally. (`pkg/render/raster/image.go`, `decodeImageXObject`.)
-2. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
+1. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-3. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
+2. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
    masks** (`/SMask` in ExtGState — distinct from the per-image `/SMask` already supported),
    **transparency groups** — `gs` already logs the unsupported blend/soft-mask case.
-4. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
+3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.
-5. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
+4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
    Symbol and ZapfDingbats have no substitute (skipped). Bundle weighted faces + symbol look-alikes,
    and ideally standard AFM widths for exact base-14 metrics.
 

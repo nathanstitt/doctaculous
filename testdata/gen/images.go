@@ -192,6 +192,43 @@ func CCITTImagePDF() []byte {
 	return buildImagePage(w, h, enc, dict)
 }
 
+// ImageMaskPDF returns a single-page PDF drawing a 1-bit /ImageMask stencil under
+// a green fill color. The mask's left half is "paint" (sample 0) and right half
+// is "don't paint" (sample 1), so the result is a green left half with the white
+// page showing through the right. Exercises the ImageMask stencil path.
+func ImageMaskPDF() []byte {
+	const w, h = 8, 8
+	// 1 bpp, rows byte-aligned (w=8 → 1 byte/row). Left 4 px = 0 (paint), right
+	// 4 px = 1 (transparent): bit pattern 0000_1111 = 0x0F.
+	samples := make([]byte, 0, h)
+	for range h {
+		samples = append(samples, 0x0F)
+	}
+
+	b := newBuilder()
+	imgNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/ImageMask true /BitsPerComponent 1 /Filter /FlateDecode", w, h),
+		zlibCompress(samples))
+
+	// Set a green fill, then draw the stencil scaled to 400x400.
+	content := []byte("0 1 0 rg q 400 0 0 400 100 200 cm /Im0 Do Q")
+	contentNum := b.addStream("", content)
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << /XObject << /Im0 %d 0 R >> >> /Contents %d 0 R >>",
+		pagesNum, imgNum, contentNum))
+	if page != pageNum {
+		panic("gen: page object number mismatch in ImageMaskPDF")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
 // buildImagePage assembles a one-page PDF that paints a single image XObject
 // (with the given width/height, stream data, and image-dict extras) scaled to
 // 400x400 user units near the page origin.

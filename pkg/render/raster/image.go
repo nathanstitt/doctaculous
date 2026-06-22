@@ -27,6 +27,10 @@ type imageCS struct {
 	nComps   int          // samples per pixel in the source stream
 	palette  []color.RGBA // Indexed only: entry per index, already converted to RGB
 	maxIndex int          // Indexed only: hival
+	// decode, when non-nil, is the /Decode array as per-component [min,max] pairs
+	// in [0,1]; each sample s in [0,1] is remapped to min + s*(max-min). nil means
+	// the identity mapping.
+	decode []float64
 }
 
 // resolveImageCS interprets an image's /ColorSpace, which may be a name
@@ -203,6 +207,11 @@ func decodeRawImage(data []byte, w, h, bpc int, cs imageCS) (*image.RGBA, error)
 			}
 			for c := 0; c < cs.nComps; c++ {
 				comps[c] = float64(br.next()) / maxVal
+				// Apply /Decode remap if present: s → min + s*(max-min).
+				if cs.decode != nil && 2*c+1 < len(cs.decode) {
+					lo, hi := cs.decode[2*c], cs.decode[2*c+1]
+					comps[c] = lo + comps[c]*(hi-lo)
+				}
 			}
 			rc := componentsToRGBA(cs.kind, comps)
 			rc.A = 0xFF

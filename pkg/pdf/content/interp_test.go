@@ -148,10 +148,10 @@ type fakeRes struct {
 }
 
 func (r fakeRes) Font(name string) GlyphSource { return r.font }
-func (r fakeRes) Image(name string) (image.Image, bool) {
+func (r fakeRes) Image(name string, fill render.FillColor) (image.Image, bool) {
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
 }
-func (r fakeRes) InlineImage(dict pdf.Dict, data []byte) (image.Image, bool) {
+func (r fakeRes) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (image.Image, bool) {
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
 }
 func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, bool) {
