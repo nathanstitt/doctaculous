@@ -1,8 +1,10 @@
 # Doctaculous
 
 Pure-Go, MIT-licensed document toolkit. Long-term goal: convert any document to any other format,
-author/sign PDF/DOCX/EPUB/HTML, and rasterize pages to images. **Current focus: rasterize a PDF
-page to an image.**
+author/sign PDF/DOCX/EPUB/HTML, and rasterize pages to images. **Current focus: high-fidelity PDF
+page rasterization.** The core pipeline (parse → interpret → raster) is working end-to-end and
+renders real-world PDFs faithfully; see "Status & roadmap" at the bottom for what's done and what's
+next.
 
 ## Non-negotiable constraints
 
@@ -81,7 +83,54 @@ SVG/other backend later without touching parsing or interpretation.
 - New feature ⇒ new fixture + test in the same PR. Unsupported PDF features must degrade
   gracefully (skip + debug log), and that behavior must be covered by a test.
 
-## Out of scope for v1 (don't gold-plate)
+## Status & roadmap
 
-Encryption, shadings/gradients, blend modes, transparency groups, exact base-14 fonts, full color
-management. Stub with clear typed errors and move on; these are tracked follow-ups.
+The core rasterization pipeline is implemented and validated against a real-world corpus
+(`testdata/external/`). Keep this list current as features land — it is the source of truth for
+what is done vs. pending.
+
+### Done (covered by `gen.Core` fixtures + golden images unless noted)
+
+- **Parsing**: classic xref tables, xref streams (`/Type /XRef`), object streams (`/ObjStm`),
+  object-scan rebuild for broken `startxref`. Encrypted documents return `ErrEncrypted`.
+- **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors). DCTDecode (JPEG)
+  decoded at image-draw time.
+- **Content interpreter**: full path construction/painting, graphics state (`q/Q/cm/w/J/j/M/d`),
+  device color (`g/rg/k/cs/sc/scn`), clipping (`W/W*`), text operators, `Do` XObjects.
+- **Fills**: nonzero and even-odd winding (the even-odd rasterizer is hand-rolled, dep-free).
+- **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard.
+- **Fonts** (via `github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
+  (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), and symbolic subset
+  TrueType (raw-code / code-as-GID glyph lookup).
+- **Transparency**: ExtGState constant alpha `/ca` (fill/text) and `/CA` (stroke), applied to fills,
+  strokes, glyphs, and images.
+- **Images**: 8-bit DeviceRGB raw samples and baseline JPEG (DCTDecode), alpha-composited.
+- **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
+- **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
+  kill a batch.
+
+### TODO (roughly priority order — pick these up next)
+
+Each item should land with a new fixture/test in the same PR (see Testing). Unsupported cases must
+already degrade gracefully (skip + debug log / typed error); a TODO becoming supported just turns
+that skip into real output.
+
+1. **Image color spaces & depth** — only 8-bit DeviceRGB + JPEG decode today
+   (`decodeImageXObject` in `pkg/render/raster/page.go`). Add Indexed, DeviceGray, DeviceCMYK,
+   1/2/4-bit depths, and `/SMask` soft-mask alpha. (Common in real PDFs; highest-value gap.)
+2. **Image filters for scans** — CCITTFax (fax/scanned docs), JBIG2, JPX/JPEG2000. Currently
+   `ErrUnsupported` (`pkg/pdf/filter/filter.go`). CCITT first.
+3. **Inline images** (`BI`/`ID`/`EI`) — stubbed in `pkg/pdf/content/execute.go`.
+4. **Base-14 / non-embedded fonts** — a font with no embedded program returns
+   `ErrNoEmbeddedProgram` and its text is skipped (e.g. Helvetica in
+   `cropped-rotated-scaled.pdf`). Bundle the 14 standard fonts (or AFM metrics + substitutes).
+5. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
+   filled outline with butt caps and no joins (`pkg/render/raster/device.go`).
+6. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **soft masks**
+   (`/SMask` luminosity), **transparency groups** — out of scope for now; `gs` already logs the
+   unsupported blend/soft-mask case.
+7. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
+   `ErrEncrypted`.
+
+Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
+interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
