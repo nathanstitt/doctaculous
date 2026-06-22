@@ -171,6 +171,27 @@ func SMaskImagePDF() []byte {
 	return buildImageWithSMaskPage(w, h, zlibCompress(rgb), zlibCompress(maskSamples))
 }
 
+// CCITTImagePDF returns a single-page PDF whose image XObject is a Group 4
+// (CCITTFaxDecode, K<0) bilevel image: a black frame around a white interior on
+// an 8x8 grid. Exercises the CCITT filter feeding the 1-bpc DeviceGray path.
+func CCITTImagePDF() []byte {
+	const w, h = 8, 8
+	rows := make([][]bool, h)
+	for y := range rows {
+		row := make([]bool, w)
+		for x := range row {
+			// Black border (the frame), white interior.
+			row[x] = x == 0 || y == 0 || x == w-1 || y == h-1
+		}
+		rows[y] = row
+	}
+	enc := encodeG4Frame(rows, w)
+	dict := fmt.Sprintf(
+		"/Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns %d /Rows %d >> "+
+			"/ColorSpace /DeviceGray /BitsPerComponent 1", w, h)
+	return buildImagePage(w, h, enc, dict)
+}
+
 // buildImagePage assembles a one-page PDF that paints a single image XObject
 // (with the given width/height, stream data, and image-dict extras) scaled to
 // 400x400 user units near the page origin.

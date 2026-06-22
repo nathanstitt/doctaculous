@@ -93,8 +93,8 @@ what is done vs. pending.
 
 - **Parsing**: classic xref tables, xref streams (`/Type /XRef`), object streams (`/ObjStm`),
   object-scan rebuild for broken `startxref`. Encrypted documents return `ErrEncrypted`.
-- **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors). DCTDecode (JPEG)
-  decoded at image-draw time.
+- **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors), CCITTFax
+  (Group 4 / Group 3 1D+2D, `pkg/pdf/filter/ccitt.go`). DCTDecode (JPEG) decoded at image-draw time.
 - **Content interpreter**: full path construction/painting, graphics state (`q/Q/cm/w/J/j/M/d`),
   device color (`g/rg/k/cs/sc/scn`), clipping (`W/W*`), text operators, `Do` XObjects.
 - **Fills**: nonzero and even-odd winding (the even-odd rasterizer is hand-rolled, dep-free).
@@ -105,8 +105,8 @@ what is done vs. pending.
 - **Transparency**: ExtGState constant alpha `/ca` (fill/text) and `/CA` (stroke), applied to fills,
   strokes, glyphs, and images.
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
-  1/2/4/8/16 bpc, baseline JPEG (DCTDecode), and grayscale `/SMask` soft-mask alpha
-  (`pkg/render/raster/image.go`).
+  1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha
+  (`pkg/render/raster/image.go`), and inline images (`BI`/`ID`/`EI`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
   kill a batch.
@@ -120,18 +120,17 @@ that skip into real output.
 1. **ImageMask & `/Decode`** — 1-bit stencil masks (`/ImageMask true`) paint the current fill color
    through the mask; needs the fill color threaded into image drawing. Also honor `/Decode` arrays
    (sample inversion/remap) generally. (`pkg/render/raster/image.go`, `decodeImageXObject`.)
-2. **Image filters for scans** — CCITTFax (fax/scanned docs), JBIG2, JPX/JPEG2000. Currently
-   `ErrUnsupported` (`pkg/pdf/filter/filter.go`). CCITT first.
-3. **Inline images** (`BI`/`ID`/`EI`) — stubbed in `pkg/pdf/content/execute.go`.
-4. **Base-14 / non-embedded fonts** — a font with no embedded program returns
+2. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
+   `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
+3. **Base-14 / non-embedded fonts** — a font with no embedded program returns
    `ErrNoEmbeddedProgram` and its text is skipped (e.g. Helvetica in
    `cropped-rotated-scaled.pdf`). Bundle the 14 standard fonts (or AFM metrics + substitutes).
-5. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
+4. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
    filled outline with butt caps and no joins (`pkg/render/raster/device.go`).
-6. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
+5. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
    masks** (`/SMask` in ExtGState — distinct from the per-image `/SMask` already supported),
    **transparency groups** — `gs` already logs the unsupported blend/soft-mask case.
-7. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
+6. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
    `ErrEncrypted`.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,

@@ -20,6 +20,31 @@ type Params struct {
 	// EarlyChange applies to LZWDecode. nil means unspecified (PDF default 1);
 	// a non-nil pointer carries an explicit 0 or 1.
 	EarlyChange *int
+
+	// CCITT fields apply to CCITTFaxDecode (the /DecodeParms of a fax stream).
+	// Zero values mean "not specified" and the decoder uses PDF defaults
+	// (K=0, Columns=1728, Rows=0/unbounded, BlackIs1=false, EncodedByteAlign=false,
+	// EndOfBlock=true). They are only consulted for the CCITTFaxDecode stage.
+	CCITT *CCITTParams
+}
+
+// CCITTParams holds the CCITTFaxDecode decode parameters (PDF 32000-1 Table 11).
+type CCITTParams struct {
+	// K selects the coding scheme: K<0 = pure two-dimensional (Group 4 / T.6),
+	// K=0 = one-dimensional (Group 3 1D / T.4), K>0 = mixed 1D/2D (Group 3 2D).
+	K int
+	// Columns is the image width in pixels (default 1728).
+	Columns int
+	// Rows is the image height in pixels; 0 means "decode until EOD/end of data".
+	Rows int
+	// BlackIs1 inverts the default sense: when false (default) a 0 bit in the
+	// output is black and a 1 bit is white; when true, 1 is black.
+	BlackIs1 bool
+	// EncodedByteAlign pads each encoded row to the next byte boundary.
+	EncodedByteAlign bool
+	// EndOfBlock indicates an end-of-block pattern terminates the stream; when
+	// true (default) the decoder may stop on EOFB even before Rows are produced.
+	EndOfBlock bool
 }
 
 // earlyChange returns the effective LZW EarlyChange value, applying the PDF
@@ -73,7 +98,11 @@ func decodeStage(data []byte, st Stage) ([]byte, error) {
 		return ascii85Decode(data)
 	case "RunLengthDecode", "RL":
 		return runLengthDecode(data)
-	case "DCTDecode", "DCT", "JPXDecode", "JBIG2Decode", "CCITTFaxDecode", "CCF":
+	case "CCITTFaxDecode", "CCF":
+		// CCITT fax decodes to packed 1-bpp sample rows, which the generic image
+		// decoder then unpacks as a 1-bpc DeviceGray/bilevel image.
+		return ccittDecode(data, st.Params)
+	case "DCTDecode", "DCT", "JPXDecode", "JBIG2Decode":
 		// Image-only filters: not decoded here.
 		return nil, fmt.Errorf("%w: %s is an image filter; decode at draw time", ErrUnsupported, st.Name)
 	default:
@@ -85,7 +114,7 @@ func decodeStage(data []byte, st Stage) ([]byte, error) {
 // deliberately leaves encoded (handled at image-draw time).
 func IsImageFilter(name string) bool {
 	switch name {
-	case "DCTDecode", "DCT", "JPXDecode", "JBIG2Decode", "CCITTFaxDecode", "CCF":
+	case "DCTDecode", "DCT", "JPXDecode", "JBIG2Decode":
 		return true
 	}
 	return false

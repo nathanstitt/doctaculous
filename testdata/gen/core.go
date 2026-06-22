@@ -114,6 +114,12 @@ var Core = []CoreFixture{
 		Build: IndexedImagePDF,
 	},
 	{
+		Name:  "image-ccitt",
+		Desc:  "1-bpp bilevel image via CCITTFaxDecode Group 4 (K<0)",
+		Pages: 1,
+		Build: CCITTImagePDF,
+	},
+	{
 		Name:  "image-smask",
 		Desc:  "DeviceRGB image with a DeviceGray /SMask (left opaque, right transparent)",
 		Pages: 1,

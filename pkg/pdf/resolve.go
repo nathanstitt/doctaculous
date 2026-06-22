@@ -218,5 +218,53 @@ func (d *Document) paramsFromDict(pd Dict) filter.Params {
 	if ec, ok := d.GetInt(pd["EarlyChange"]); ok {
 		params.EarlyChange = &ec
 	}
+	params.CCITT = d.ccittParams(pd)
 	return params
+}
+
+// boolValue returns the bool value of a resolved Boolean object, reporting
+// false/false when o is not a Boolean (i.e. the key was absent).
+func boolValue(o Object) (val, ok bool) {
+	if b, isBool := o.(Boolean); isBool {
+		return bool(b), true
+	}
+	return false, false
+}
+
+// ccittParams reads the CCITTFaxDecode /DecodeParms keys, applying PDF defaults.
+// It returns nil when the dict carries no CCITT-specific keys, so non-CCITT
+// stages keep their zero-value params.
+func (d *Document) ccittParams(pd Dict) *filter.CCITTParams {
+	_, hasK := d.GetInt(pd["K"])
+	_, hasCols := d.GetInt(pd["Columns"])
+	_, hasRows := d.GetInt(pd["Rows"])
+	_, hasBI1 := boolValue(d.Resolve(pd["BlackIs1"]))
+	_, hasEBA := boolValue(d.Resolve(pd["EncodedByteAlign"]))
+	_, hasEOB := boolValue(d.Resolve(pd["EndOfBlock"]))
+	if !hasK && !hasCols && !hasRows && !hasBI1 && !hasEBA && !hasEOB {
+		return nil
+	}
+	p := &filter.CCITTParams{
+		Columns:    1728,
+		EndOfBlock: true,
+	}
+	if k, ok := d.GetInt(pd["K"]); ok {
+		p.K = k
+	}
+	if c, ok := d.GetInt(pd["Columns"]); ok {
+		p.Columns = c
+	}
+	if r, ok := d.GetInt(pd["Rows"]); ok {
+		p.Rows = r
+	}
+	if v, ok := boolValue(d.Resolve(pd["BlackIs1"])); ok {
+		p.BlackIs1 = v
+	}
+	if v, ok := boolValue(d.Resolve(pd["EncodedByteAlign"])); ok {
+		p.EncodedByteAlign = v
+	}
+	if v, ok := boolValue(d.Resolve(pd["EndOfBlock"])); ok {
+		p.EndOfBlock = v
+	}
+	return p
 }
