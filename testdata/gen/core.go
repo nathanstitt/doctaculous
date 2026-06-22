@@ -66,6 +66,18 @@ var Core = []CoreFixture{
 		Build: AlphaPDF,
 	},
 	{
+		Name:  "blend-multiply",
+		Desc:  "ExtGState /BM /Multiply: overlapping red+blue rects (overlap → black)",
+		Pages: 1,
+		Build: func() []byte { return BlendModePDF("Multiply") },
+	},
+	{
+		Name:  "blend-screen",
+		Desc:  "ExtGState /BM /Screen: overlapping red+blue rects (overlap → magenta)",
+		Pages: 1,
+		Build: func() []byte { return BlendModePDF("Screen") },
+	},
+	{
 		Name:  "form-xobject",
 		Desc:  "form XObject (Do) with /Matrix and scoped /Resources",
 		Pages: 1,

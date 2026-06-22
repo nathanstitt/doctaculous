@@ -36,14 +36,16 @@ const (
 	BevelJoin
 )
 
-// FillPaint describes how to fill a region.
+// FillPaint describes how to fill a region. BlendMode is the ExtGState /BM blend
+// mode name ("" or "Normal" = source-over).
 type FillPaint struct {
-	Color color.RGBA
-	Rule  FillRule
+	Color     color.RGBA
+	Rule      FillRule
+	BlendMode string
 }
 
 // StrokePaint describes how to stroke a path. Width and DashArray/DashPhase are
-// already expressed in device space.
+// already expressed in device space. BlendMode is the /BM blend mode name.
 type StrokePaint struct {
 	Color      color.RGBA
 	Width      float64
@@ -52,4 +54,5 @@ type StrokePaint struct {
 	MiterLimit float64
 	DashArray  []float64
 	DashPhase  float64
+	BlendMode  string
 }

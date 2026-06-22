@@ -23,11 +23,12 @@ type Device interface {
 	// DrawImage draws img mapped by ctm. The image's unit square [0,1]×[0,1] is
 	// mapped through ctm into device space (PDF image space convention). alpha in
 	// [0,1] is the constant fill opacity (ExtGState /ca); 1 is fully opaque.
-	DrawImage(img image.Image, ctm Matrix, alpha float64)
+	// blendMode is the /BM blend mode name ("" or "Normal" = source-over).
+	DrawImage(img image.Image, ctm Matrix, alpha float64, blendMode string)
 
 	// FillGlyph fills a single glyph outline (already in device space) with color.
-	// The outline uses the nonzero winding rule.
-	FillGlyph(outline *Path, color FillColor)
+	// The outline uses the nonzero winding rule. blendMode is the /BM blend mode.
+	FillGlyph(outline *Path, color FillColor, blendMode string)
 
 	// PushClip intersects the current clip with path using rule.
 	PushClip(path *Path, rule FillRule)

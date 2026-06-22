@@ -44,7 +44,7 @@ func (it *Interpreter) doXObject(operands []pdf.Object, depth int) {
 		// Image space maps the unit square to device space via the CTM. PDF image
 		// space has (0,0) at the top-left of the image with y down within the unit
 		// square, which our DrawImage contract already expects.
-		it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha)
+		it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha, it.gs.blendMode)
 		return
 	}
 	if content, res, matrix, ok := it.res.Form(name); ok {
@@ -81,5 +81,5 @@ func (it *Interpreter) inlineImage(tok *contentTokenizer) {
 		it.logf("content: inline image not decoded")
 		return
 	}
-	it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha)
+	it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha, it.gs.blendMode)
 }

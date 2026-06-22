@@ -98,7 +98,7 @@ func (it *Interpreter) drawGlyph(g Glyph) {
 
 	out := transformOutline(g.Outline, trm)
 	c := withAlpha(it.gs.fill, it.gs.fillAlpha)
-	it.dev.FillGlyph(out, render.FillColor{R: c.R, G: c.G, B: c.B, A: c.A})
+	it.dev.FillGlyph(out, render.FillColor{R: c.R, G: c.G, B: c.B, A: c.A}, it.gs.blendMode)
 }
 
 // advanceText translates the text matrix by tx text-space units along the

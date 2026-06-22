@@ -132,6 +132,33 @@ func AlphaPDF() []byte {
 	return b.finish(catalog)
 }
 
+// BlendModePDF returns a single-page PDF exercising an ExtGState /BM blend mode.
+// It fills an opaque red rectangle, sets the named blend mode via /GS0 gs, then
+// fills an overlapping opaque blue rectangle. In the overlap the blue blends with
+// the red backdrop per the mode (e.g. Multiply red×blue → black; Screen →
+// magenta), locking down /BM from the gs operator through compositing.
+func BlendModePDF(mode string) []byte {
+	b := newBuilder()
+
+	content := []byte(
+		"1 0 0 rg 100 400 250 250 re f " + // opaque red rectangle
+			"/GS0 gs " + // activate the blend mode
+			"0 0 1 rg 225 300 250 250 re f", // blue rectangle overlapping the red
+	)
+	contentNum := b.addStream("", content)
+
+	resources := fmt.Sprintf("<< /ExtGState << /GS0 << /BM /%s >> >> >>", mode)
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources %s /Contents %d 0 R >>",
+		pagesNum, resources, contentNum))
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
 // MultiPagePDF returns an n-page PDF where each page draws its 1-based number.
 func MultiPagePDF(n int) []byte {
 	if n < 1 {

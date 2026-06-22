@@ -22,6 +22,10 @@ type gstate struct {
 	fillAlpha   float64
 	strokeAlpha float64
 
+	// blendMode is the current ExtGState /BM blend mode ("Normal" = source-over).
+	// Applied to fills, strokes, glyphs, and images at composite time.
+	blendMode string
+
 	lineWidth  float64
 	lineCap    render.LineCap
 	lineJoin   render.LineJoin
@@ -47,6 +51,7 @@ func newGState(base render.Matrix) gstate {
 		stroke:      color.RGBA{0, 0, 0, 255},
 		fillAlpha:   1,
 		strokeAlpha: 1,
+		blendMode:   "Normal",
 		lineWidth:   1,
 		miterLimit:  10,
 		fillCS:      deviceGray,
@@ -85,8 +90,11 @@ func (it *Interpreter) applyExtGState(operands []pdf.Object) {
 	if params.HasStrokeAlpha {
 		it.gs.strokeAlpha = params.StrokeAlpha
 	}
+	if params.HasBlendMode {
+		it.gs.blendMode = params.BlendMode
+	}
 	if params.HasUnsupported {
-		it.logf("content: /ExtGState (gs) not applied: blend mode / soft mask unsupported")
+		it.logf("content: /ExtGState (gs) not applied: soft mask unsupported")
 	}
 }
 

@@ -55,14 +55,14 @@ func (d *Device) Fill(path *render.Path, paint render.FillPaint) {
 	if mask == nil {
 		return
 	}
-	d.composite(mask, paint.Color)
+	d.compositeBlend(mask, paint.Color, paint.BlendMode)
 }
 
 // Stroke renders path's outline honoring caps, joins and dashes. Its
 // implementation lives in stroke.go (rasterx-backed).
 
 // FillGlyph fills a glyph outline (device space) with a solid color.
-func (d *Device) FillGlyph(outline *render.Path, c render.FillColor) {
+func (d *Device) FillGlyph(outline *render.Path, c render.FillColor, blendMode string) {
 	if outline == nil || outline.Empty() {
 		return
 	}
@@ -70,12 +70,12 @@ func (d *Device) FillGlyph(outline *render.Path, c render.FillColor) {
 	if mask == nil {
 		return
 	}
-	d.composite(mask, color.RGBA(c))
+	d.compositeBlend(mask, color.RGBA(c), blendMode)
 }
 
 // DrawImage maps img's unit square through ctm into device space using inverse
-// sampling (nearest neighbor), respecting the current clip.
-func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64) {
+// sampling (nearest neighbor), respecting the current clip and blend mode.
+func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64, blendMode string) {
 	if img == nil {
 		return
 	}
@@ -85,6 +85,8 @@ func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64) {
 	if alpha > 1 {
 		alpha = 1
 	}
+	sep, isSep := separableBlends[blendMode]
+	nonsep, isNonsep := nonSeparableBlends[blendMode]
 	inv, ok := invert(ctm)
 	if !ok {
 		return
@@ -127,7 +129,12 @@ func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64) {
 			if a == 0 {
 				continue
 			}
-			over(d.img, x, y, color.RGBA{R: sc.R, G: sc.G, B: sc.B, A: sc.A}, uint8(a))
+			src := color.RGBA{R: sc.R, G: sc.G, B: sc.B, A: sc.A}
+			if isSep || isNonsep {
+				dst := d.img.RGBAAt(x, y)
+				src = blendSource(dst, src, sep, nonsep, isSep)
+			}
+			over(d.img, x, y, src, uint8(a))
 		}
 	}
 }

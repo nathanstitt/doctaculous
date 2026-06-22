@@ -129,7 +129,7 @@ func TestDrawImageAlphaBlends(t *testing.T) {
 	fillBackground(src, color.RGBA{0, 0, 255, 255})
 	// Map the unit square to a 40x40 device region at (20,20).
 	ctm := render.Matrix{A: 40, B: 0, C: 0, D: 40, E: 20, F: 20}
-	dev.DrawImage(src, ctm, 0.5)
+	dev.DrawImage(src, ctm, 0.5, "")
 	c := img.RGBAAt(40, 40)
 	// 50% blue over white ≈ (128,128,255).
 	if c.B < 200 || c.R < 100 || c.R > 160 {

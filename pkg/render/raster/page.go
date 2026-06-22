@@ -227,17 +227,35 @@ func (r *pageResources) ExtGState(name string) (content.ExtGStateParams, bool) {
 	if ca, ok := pdf.Number(r.doc.Resolve(gs["CA"])); ok {
 		p.StrokeAlpha, p.HasStrokeAlpha = clampAlpha(ca), true
 	}
-	// Flag blend modes and soft masks we don't interpret, so the interpreter can
-	// log graceful degradation.
-	if bm, ok := r.doc.GetName(gs["BM"]); ok && bm != "Normal" && bm != "Compatible" {
-		p.HasUnsupported = true
+	// /BM is a blend-mode name, or an array of names (use the first one). Pass it
+	// through; the device applies recognized modes and falls back to Normal.
+	if bm := blendModeName(r.doc, gs["BM"]); bm != "" {
+		p.BlendMode, p.HasBlendMode = bm, true
 	}
+	// Soft masks (other than /None) are still unsupported.
 	if sm, ok := r.doc.GetName(gs["SMask"]); ok && sm != "None" {
 		p.HasUnsupported = true
 	} else if _, isDict := r.doc.Resolve(gs["SMask"]).(pdf.Dict); isDict {
 		p.HasUnsupported = true
 	}
 	return p, true
+}
+
+// blendModeName resolves a /BM entry (a name or an array of names) to a single
+// blend-mode name, returning "" when absent.
+func blendModeName(doc *pdf.Document, o pdf.Object) string {
+	switch v := doc.Resolve(o).(type) {
+	case pdf.Name:
+		return string(v)
+	case pdf.Array:
+		// First name in the array (PDF: the first supported mode).
+		for _, e := range v {
+			if n, ok := doc.GetName(e); ok {
+				return string(n)
+			}
+		}
+	}
+	return ""
 }
 
 // clampAlpha constrains an alpha value to [0,1].

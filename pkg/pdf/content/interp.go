@@ -43,6 +43,10 @@ type ExtGStateParams struct {
 	HasFillAlpha   bool
 	StrokeAlpha    float64
 	HasStrokeAlpha bool
+	// BlendMode is the /BM entry (a separable or non-separable PDF blend-mode
+	// name), set only when present. "Normal"/"Compatible" mean source-over.
+	BlendMode      string
+	HasBlendMode   bool
 	HasUnsupported bool
 }
 

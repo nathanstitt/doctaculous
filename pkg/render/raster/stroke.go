@@ -103,7 +103,7 @@ func (d *Device) Stroke(path *render.Path, paint render.StrokePaint) {
 	}
 	dasher.Draw()
 
-	d.compositeOffset(cov, bb.Min, paint.Color)
+	d.compositeOffset(cov, bb.Min, paint.Color, paint.BlendMode)
 }
 
 // replayStroke feeds path into a rasterx Adder (the Dasher), offsetting by
@@ -161,9 +161,14 @@ func replayStroke(a rasterx.Adder, path *render.Path, ox, oy float64) bool {
 }
 
 // compositeOffset blends src color through a coverage mask whose local (0,0)
-// origin maps to device point dst, honoring the active clip and src alpha. It
-// mirrors composite() but translates local mask coordinates to device space.
-func (d *Device) compositeOffset(mask *image.Alpha, dst image.Point, c color.RGBA) {
+// origin maps to device point dst, honoring the active clip, src alpha, and the
+// named blend mode. It mirrors compositeBlend() but translates local mask
+// coordinates to device space.
+func (d *Device) compositeOffset(mask *image.Alpha, dst image.Point, c color.RGBA, blendMode string) {
+	sep, isSep := separableBlends[blendMode]
+	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	blend := isSep || isNonsep
+
 	b := mask.Bounds()
 	clip := d.activeClip()
 	imgB := d.img.Bounds()
@@ -191,7 +196,11 @@ func (d *Device) compositeOffset(mask *image.Alpha, dst image.Point, c color.RGB
 			if a == 0 {
 				continue
 			}
-			over(d.img, dx, dy, c, a)
+			src := c
+			if blend {
+				src = blendSource(d.img.RGBAAt(dx, dy), c, sep, nonsep, isSep)
+			}
+			over(d.img, dx, dy, src, a)
 		}
 	}
 }

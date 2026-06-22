@@ -30,14 +30,14 @@ func (d *recDevice) Fill(p *render.Path, paint render.FillPaint) {
 func (d *recDevice) Stroke(p *render.Path, paint render.StrokePaint) {
 	d.strokes = append(d.strokes, paint)
 }
-func (d *recDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64) {
+func (d *recDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64, blendMode string) {
 	d.images++
 	d.lastImageAlpha = alpha
 }
-func (d *recDevice) FillGlyph(o *render.Path, c render.FillColor) { d.glyphs++ }
-func (d *recDevice) PushClip(p *render.Path, r render.FillRule)   { d.clips++ }
-func (d *recDevice) Save()                                        { d.saves++ }
-func (d *recDevice) Restore()                                     { d.restores++ }
+func (d *recDevice) FillGlyph(o *render.Path, c render.FillColor, blendMode string) { d.glyphs++ }
+func (d *recDevice) PushClip(p *render.Path, r render.FillRule)                     { d.clips++ }
+func (d *recDevice) Save()                                                          { d.saves++ }
+func (d *recDevice) Restore()                                                       { d.restores++ }
 
 func runContent(t *testing.T, src string, res Resources) *recDevice {
 	t.Helper()
