@@ -39,7 +39,7 @@ var externalFixtures = []struct {
 	{"google-doc-document.pdf", 1, false},   // Skia/Chrome, Type0/Type3 fonts + images
 	{"cropped-rotated-scaled.pdf", 4, true}, // /Rotate + crop/scale, Form-XObject-heavy (Do in content)
 	{"pdflatex-forms.pdf", 1, true},         // page text in an embedded classic Type1 font (now renders)
-	{"libreoffice-form.pdf", 1, false},      // AcroForm (Tx/Btn/Ch), different producer; forms via annotations
+	{"libreoffice-form.pdf", 1, true},       // labels in symbolic subset TrueType fonts (now render)
 }
 
 // imageHasInk reports whether img has any pixel darker/more-colored than near

@@ -307,6 +307,49 @@ func TestClassicType1Decodes(t *testing.T) {
 	}
 }
 
+// TestSymbolicTrueTypeDecodes verifies the symbolic-TrueType glyph path: a font
+// flagged Symbolic with no /Encoding, whose codes resolve to glyphs via the
+// raw-code/symbol cmap or the code-as-GID fallback rather than code→rune→GID.
+func TestSymbolicTrueTypeDecodes(t *testing.T) {
+	doc, fd := fontDict(t, gen.EmbeddedSymbolicTrueTypePDF())
+	src, err := New(doc, fd, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Codes 5..10 are drawn; each must resolve to a real outline.
+	glyphs := src.DecodeString([]byte{5, 6, 7, 8, 9, 10})
+	if len(glyphs) != 6 {
+		t.Fatalf("got %d glyphs, want 6", len(glyphs))
+	}
+	for _, g := range glyphs {
+		if g.Outline == nil {
+			t.Errorf("code %d: nil outline — symbolic fallback did not resolve a glyph", g.Code)
+		}
+	}
+}
+
+// TestNonSymbolicUnmappedStaysNotdef guards the gating: a NORMAL (non-symbolic)
+// font must not invent glyphs for codes its encoding/cmap doesn't map. The
+// code-as-GID fallback must NOT fire, so an unmapped control code resolves to
+// GID 0 (.notdef) rather than to the arbitrary glyph at that index.
+func TestNonSymbolicUnmappedStaysNotdef(t *testing.T) {
+	doc, fd := fontDict(t, gen.EmbeddedTrueTypePDF()) // WinAnsi, non-symbolic
+	src, err := New(doc, fd, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	sf, ok := src.(*simpleFont)
+	if !ok {
+		t.Fatalf("expected *simpleFont, got %T", src)
+	}
+	// Code 7 (BEL) has no WinAnsi glyph. Under the symbolic code-as-GID fallback
+	// it would resolve to GID 7 (a real Roboto glyph); gated off for this
+	// non-symbolic font, it must stay GID 0 (.notdef).
+	if gid := sf.toGID[7]; gid != 0 {
+		t.Errorf("non-symbolic unmapped code 7 resolved to GID %d, want 0 (.notdef)", gid)
+	}
+}
+
 // TestMalformedFontFileGraceful confirms a /Type1 font with a bogus FontFile
 // still degrades gracefully (typed error, no panic).
 func TestMalformedFontFileGraceful(t *testing.T) {

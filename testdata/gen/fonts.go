@@ -40,6 +40,43 @@ var texGyreHerosPFB []byte
 func TeXGyreTermesPFB() []byte { return texGyreTermesPFB }
 func TeXGyreHerosPFB() []byte  { return texGyreHerosPFB }
 
+// EmbeddedSymbolicTrueTypePDF returns a single-page PDF using a symbolic embedded
+// /TrueType font (Roboto, /Flags Symbolic) with NO /Encoding, drawing a string of
+// low byte codes that map to glyphs by index. This reproduces the real-world
+// subsetted-symbolic case (e.g. LibreOffice exports) where code→rune→GID fails
+// and the renderer must fall back to the raw-code/symbol cmap or code-as-GID.
+func EmbeddedSymbolicTrueTypePDF() []byte {
+	b := newBuilder()
+
+	fontFile := b.addStream(fmt.Sprintf(" /Length1 %d", len(robotoTTF)), robotoTTF)
+	descNum := b.addObject(fmt.Sprintf(
+		// /Flags 4 = Symbolic (no /Encoding implied).
+		"<< /Type /FontDescriptor /FontName /Roboto-Regular /Flags 4 "+
+			"/FontBBox [-681 -271 1535 1061] /ItalicAngle 0 /Ascent 1061 /Descent -271 "+
+			"/CapHeight 711 /StemV 80 /MissingWidth 500 /FontFile2 %d 0 R >>", fontFile))
+
+	// Draw codes 5..10 (which equal GIDs under the code-as-GID fallback and point
+	// at glyphs with real outlines in Roboto); give each a nominal width. No
+	// /Encoding is present, marking this symbolic.
+	first := 5
+	last := 10
+	widths := make([]int, last-first+1)
+	for i := range widths {
+		widths[i] = 600
+	}
+	fontNum := b.addObject(fmt.Sprintf(
+		"<< /Type /Font /Subtype /TrueType /BaseFont /Roboto-Regular "+
+			"/FirstChar %d /LastChar %d /Widths %s /FontDescriptor %d 0 R >>",
+		first, last, widthsArray(widths), descNum))
+
+	var codes []byte
+	for c := first; c <= last; c++ {
+		codes = append(codes, byte(c))
+	}
+	content := []byte(fmt.Sprintf("BT /F1 48 Tf 72 680 Td (%s) Tj ET", codes))
+	return finishFontPage(b, fontNum, content)
+}
+
 // EmbeddedTrueTypePDF returns a single-page PDF using a simple /TrueType font
 // with an embedded FontFile2 (Roboto) and WinAnsi encoding, drawing a short
 // string. It exercises the embedded-TrueType glyph path end to end.

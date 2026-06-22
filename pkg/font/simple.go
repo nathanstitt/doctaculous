@@ -13,19 +13,27 @@ import (
 // resolved by mapping the code to a glyph name via the font's encoding and then
 // through the program's name→GID table, falling back to code→rune→GID.
 type simpleFont struct {
-	prog     *program
-	toGID    [256]fonts.GID
-	toRune   [256]rune
-	toName   [256]string  // glyph name per code, for name→GID lookup
-	width    [256]float64 // em units; only valid where hasWidth is set
-	hasWidth [256]bool
-	missing  float64 // /MissingWidth in em units
+	prog      *program
+	toGID     [256]fonts.GID
+	toRune    [256]rune
+	toName    [256]string  // glyph name per code, for name→GID lookup
+	width     [256]float64 // em units; only valid where hasWidth is set
+	hasWidth  [256]bool
+	missing   float64 // /MissingWidth in em units
+	symbolic  bool    // FontDescriptor /Flags bit 3: a symbolic (non-standard) font
+	noEncDict bool    // the font dict has no explicit /Encoding
 }
 
 // newSimpleFont builds a simpleFont from a resolved font dictionary and its
 // parsed embedded program.
 func newSimpleFont(doc *pdf.Document, fontDict pdf.Dict, prog *program) (*simpleFont, error) {
 	f := &simpleFont{prog: prog}
+	f.noEncDict = doc.Resolve(fontDict["Encoding"]) == nil
+	if desc := doc.GetDict(fontDict["FontDescriptor"]); desc != nil {
+		if flags, ok := doc.GetInt(desc["Flags"]); ok {
+			f.symbolic = flags&0x4 != 0 // bit 3 (value 4) = Symbolic
+		}
+	}
 	f.buildEncoding(doc, fontDict)
 	f.buildWidths(doc, fontDict)
 	f.resolveGIDs()
@@ -95,23 +103,53 @@ func (f *simpleFont) buildWidths(doc *pdf.Document, fontDict pdf.Dict) {
 	}
 }
 
-// resolveGIDs precomputes code→GID. It first tries code→glyph name→GID via the
-// program's name table (the reliable path for Type1/CFF, whose encodings are
-// name-based), then falls back to code→rune→GID through the program's own cmap
-// (the usual path for TrueType).
+// resolveGIDs precomputes code→GID, trying in order:
+//
+//  1. code → glyph name → GID via the program's name table (reliable for
+//     Type1/CFF and any font with a /Differences or named encoding);
+//  2. code → rune → GID through the program's cmap (the usual TrueType path with
+//     a /Encoding mapping codes to Unicode);
+//  3. symbolic fallbacks for embedded TrueType subsets that carry no useful
+//     /Encoding and a (1,0)/(3,0) cmap keyed by the raw code: look the cmap up by
+//     the raw code, then by 0xF000+code (the Microsoft symbol convention), then
+//     treat the code itself as the GID.
+//
+// A cmap hit of GID 0 (.notdef) is treated as a miss so later fallbacks run.
 func (f *simpleFont) resolveGIDs() {
 	names := f.prog.nameToGID()
+	numGlyphs := f.prog.numGlyphs()
 	for c := range 256 {
 		if name := f.toName[c]; name != "" {
-			if gid, ok := names[name]; ok {
+			if gid, ok := names[name]; ok && gid != 0 {
 				f.toGID[c] = gid
 				continue
 			}
 		}
 		if r := f.toRune[c]; r != 0 {
-			if gid, ok := f.prog.gidForRune(r); ok {
+			if gid, ok := f.prog.gidForRune(r); ok && gid != 0 {
 				f.toGID[c] = gid
+				continue
 			}
+		}
+		// The symbolic fallbacks below only apply to symbolic fonts (or those with
+		// no explicit /Encoding), whose cmap is keyed by the raw byte code rather
+		// than a Unicode rune. Restricting them keeps non-symbolic fonts — where an
+		// unmapped code should stay .notdef — unaffected.
+		if !f.symbolic && !f.noEncDict {
+			continue
+		}
+		if gid, ok := f.prog.gidForRune(rune(c)); ok && gid != 0 {
+			f.toGID[c] = gid
+			continue
+		}
+		if gid, ok := f.prog.gidForRune(rune(0xF000 + c)); ok && gid != 0 {
+			f.toGID[c] = gid
+			continue
+		}
+		// Last resort: the code is the glyph index directly (common in subsetted
+		// symbolic fonts whose cmap is absent or degenerate).
+		if c < numGlyphs {
+			f.toGID[c] = fonts.GID(c)
 		}
 	}
 }

@@ -131,4 +131,10 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: EmbeddedType1PDF,
 	},
+	{
+		Name:  "symbolic-truetype",
+		Desc:  "symbolic embedded TrueType, no /Encoding; glyphs via raw-code/code-as-GID",
+		Pages: 1,
+		Build: EmbeddedSymbolicTrueTypePDF,
+	},
 }

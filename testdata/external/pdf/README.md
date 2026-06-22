@@ -65,11 +65,14 @@ The corpus covers the two things "xforms" can mean:
 - **AcroForm interactive fields** (text/checkbox/dropdown widgets) — *structure*
   the parser must traverse; the widgets themselves are annotations, out of scope
   to render in v1. `pdflatex-forms.pdf` covers `Tx`/`Btn`; `libreoffice-form.pdf`
-  adds `Ch` (choice). Both still rasterize their page content without error — the
-  interactive widgets degrade gracefully (page draws; field UI is not painted).
-  `pdflatex-forms.pdf`'s page-content labels ("Name", "Check", "Submit") use an
-  embedded **classic Type 1** font and now render (see the `embedded-type1`
-  generated fixture); its corpus test asserts the page is non-blank.
+  adds `Ch` (choice). Both rasterize their page content; the interactive widgets
+  themselves degrade gracefully (the field-box geometry and labels draw; the
+  editable widget UI is not painted). The page-content text now renders fully:
+  `pdflatex-forms.pdf`'s labels ("Name", "Check", "Submit") use an embedded
+  **classic Type 1** font (see the `embedded-type1` fixture), and
+  `libreoffice-form.pdf`'s labels ("First Name", "Gender", …) use **symbolic
+  subset TrueType** fonts whose cmap is keyed by raw code (see the
+  `symbolic-truetype` fixture). Both corpus tests assert the page is non-blank.
 
 When AcroForm widget rendering moves in scope, prefer a *generated* fixture in
 `testdata/gen` with known field geometry so expected output stays hermetic.
