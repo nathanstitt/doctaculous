@@ -40,16 +40,22 @@ SVG/other backend later without touching parsing or interpretation.
 
 - **Every layer has unit tests**: parser (objects, xref tables AND xref streams, object streams),
   filters (round-trip + predictors), interpreter (per-operator behavior), rasterizer (shapes).
-- **Generate test PDFs deterministically in `testdata/`** with a small hermetic Go generator
-  (`testdata/gen`), one fixture per feature so failures localize:
+- **Prefer generating test PDFs deterministically in `testdata/`** with a small hermetic Go
+  generator (`testdata/gen`), one fixture per feature so failures localize:
   text-only, vector-paths-only, image-only (Flate + DCT/JPEG), rotated page (`/Rotate`),
   xref-stream PDF, object-stream PDF, multi-page (for the parallel path), and a couple of
-  intentionally-malformed PDFs (to prove graceful degradation, no panics).
+  intentionally-malformed PDFs (to prove graceful degradation, no panics). Generation is the
+  default because the fixture stays readable Go and failures localize to one feature. But it is
+  not a hard rule: **committing real PDFs is fine** when a fixture is impractical to generate —
+  e.g. complex real-world files, output from specific producers, or fidelity/integration cases.
+  Commit such PDFs under `testdata/`, keep them as small as the case allows, and note their
+  provenance and license in the PR. Use `cmd/dumpfixtures` to materialize generated fixtures when
+  you need to inspect them.
 - **Core corpus (`gen.Core` in `testdata/gen/core.go`)**: a canonical set of ~10 fixtures —
   `text`, `vector`, `flate`, `multipage`, `rotated`, `image-flate`, `image-jpeg`, `xref-stream`,
   `objstm`, `bad-xref` — each locking down one distinct must-always-work path from parsing
-  through rasterization. The generators (not committed binaries) live in the repo, so the corpus
-  is reproducible and hermetic. Every entry satisfies a uniform contract: parses to a valid
+  through rasterization. These are generated (not committed binaries), so the core corpus is
+  reproducible and hermetic. Every entry satisfies a uniform contract: parses to a valid
   `Document`, reports its declared `Pages` count, and rasterizes without error (`bad-xref`
   recovers via the object-scan rebuild path). Not every test must iterate the whole set — use it
   where a uniform sweep makes sense (e.g. parser round-trip, golden-image rendering, the
@@ -68,7 +74,8 @@ SVG/other backend later without touching parsing or interpretation.
   when glyph rendering lands, at which point those goldens get regenerated.
 - **Benchmarks**: `BenchmarkRasterizePages` proves goroutine speedup vs. `--workers 1`. Add a
   race-detector run (`go test -race ./...`) since concurrency is core.
-- Tests must be hermetic and fast: no network, no large binary blobs beyond generated fixtures.
+- Tests must be hermetic and fast: no network. Generated fixtures are preferred; committed PDFs
+  are allowed where generation is impractical (see above) — keep them small and provenance-noted.
 - New feature ⇒ new fixture + test in the same PR. Unsupported PDF features must degrade
   gracefully (skip + debug log), and that behavior must be covered by a test.
 
