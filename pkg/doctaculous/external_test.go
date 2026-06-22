@@ -25,24 +25,20 @@ var externalFixtureDir = filepath.Join("..", "..", "testdata", "external", "pdf"
 var externalFixtures = []struct {
 	file  string
 	pages int
-	// forms marks fixtures whose first page draws via form XObjects (Do) in the
-	// page content stream. For these, page 0 must render non-blank — proving form
-	// recursion actually emits content, not merely that rendering returns no error.
-	//
-	// Note: the AcroForm fixtures below are deliberately NOT marked. Their
-	// /Subtype /Form objects are widget *appearance* streams reached through
-	// annotations (out of scope for v1), not Do-invoked page content, so their
-	// pages can legitimately render blank — pdflatex-forms in fact does, because
-	// its page text uses an unsupported embedded font program. They stay in the
-	// corpus as parser/structure coverage.
-	forms bool
+	// nonBlank marks fixtures whose first page must render visible content (not a
+	// blank page) — proving the relevant glyph/painting path actually emits ink.
+	// cropped-rotated-scaled draws via form XObjects (Do); pdflatex-forms draws
+	// text in an embedded classic Type1 font, which now renders. (The AcroForm
+	// widget *appearance* streams are reached through annotations, out of scope
+	// for v1, but these pages also carry real page-content text/forms.)
+	nonBlank bool
 }{
 	{"pdflatex-4-pages.pdf", 4, false},      // xref stream + ObjStm, multi-page
 	{"multicolumn.pdf", 3, false},           // xref stream + ObjStm, dense text/vector
 	{"imagemagick-images.pdf", 6, false},    // classic xref, 6 image pages
 	{"google-doc-document.pdf", 1, false},   // Skia/Chrome, Type0/Type3 fonts + images
 	{"cropped-rotated-scaled.pdf", 4, true}, // /Rotate + crop/scale, Form-XObject-heavy (Do in content)
-	{"pdflatex-forms.pdf", 1, false},        // AcroForm (Tx/Btn); forms are annotation appearances, not page content
+	{"pdflatex-forms.pdf", 1, true},         // page text in an embedded classic Type1 font (now renders)
 	{"libreoffice-form.pdf", 1, false},      // AcroForm (Tx/Btn/Ch), different producer; forms via annotations
 }
 
@@ -94,10 +90,11 @@ func TestExternalCorpus(t *testing.T) {
 			if b := img.Bounds(); b.Dx() <= 0 || b.Dy() <= 0 {
 				t.Errorf("rasterized image has empty bounds %v", b)
 			}
-			// Form-bearing pages must produce visible content: a blank page here
-			// would mean form XObjects were silently skipped (the pre-support bug).
-			if f.forms && !imageHasInk(img) {
-				t.Errorf("page 0 rendered blank; expected form XObject content")
+			// Pages flagged nonBlank must produce visible content: a blank page here
+			// would mean a glyph/painting path was silently skipped (e.g. the
+			// pre-support form-XObject or classic-Type1 bugs).
+			if f.nonBlank && !imageHasInk(img) {
+				t.Errorf("page 0 rendered blank; expected visible content")
 			}
 		})
 	}

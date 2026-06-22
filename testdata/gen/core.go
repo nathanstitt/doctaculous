@@ -125,4 +125,10 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: EmbeddedCFFPDF,
 	},
+	{
+		Name:  "type1",
+		Desc:  "simple Type1 font with an embedded classic FontFile (TeX Gyre Termes, eexec)",
+		Pages: 1,
+		Build: EmbeddedType1PDF,
+	},
 }

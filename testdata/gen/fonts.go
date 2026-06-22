@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/benoitkugler/textlayout/fonts/type1"
+
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 )
@@ -20,6 +22,23 @@ var robotoTTF []byte
 
 //go:embed fonts/SourceSans3-Regular.otf
 var sourceSansOTF []byte
+
+// TeX Gyre Termes and Heros (GUST Font License, LPPL-equivalent) are classic
+// Type 1 (PostScript) programs in PFB form, embedded via /FontFile to exercise
+// the Type1 glyph path. Termes is a serif (Times-like), Heros a sans
+// (Helvetica-like) — two distinct designs from one foundry so the Type1
+// charstring parser sees varied outlines. See fonts/README-type1.md.
+//
+//go:embed fonts/TeXGyreTermes-Regular.pfb
+var texGyreTermesPFB []byte
+
+//go:embed fonts/TeXGyreHeros-Regular.pfb
+var texGyreHerosPFB []byte
+
+// TeXGyreTermesPFB and TeXGyreHerosPFB expose the embedded classic Type 1
+// programs to tests in other packages (notably pkg/font).
+func TeXGyreTermesPFB() []byte { return texGyreTermesPFB }
+func TeXGyreHerosPFB() []byte  { return texGyreHerosPFB }
 
 // EmbeddedTrueTypePDF returns a single-page PDF using a simple /TrueType font
 // with an embedded FontFile2 (Roboto) and WinAnsi encoding, drawing a short
@@ -43,6 +62,99 @@ func EmbeddedTrueTypePDF() []byte {
 
 	content := []byte(fmt.Sprintf("BT /F1 48 Tf 72 680 Td (%s) Tj ET", text))
 	return finishFontPage(b, fontNum, content)
+}
+
+// EmbeddedType1PDF returns a single-page PDF using a simple /Type1 font with an
+// embedded classic FontFile (PostScript Type 1, eexec) — TeX Gyre Termes — and
+// WinAnsi encoding. It exercises the classic-Type1 glyph path end to end.
+func EmbeddedType1PDF() []byte {
+	const text = "Hello"
+	raw, l1, l2, l3 := pfbToRaw(texGyreTermesPFB)
+	b := newBuilder()
+
+	fontFile := b.addStream(
+		fmt.Sprintf(" /Length1 %d /Length2 %d /Length3 %d", l1, l2, l3), raw)
+	descNum := b.addObject(fmt.Sprintf(
+		"<< /Type /FontDescriptor /FontName /NimbusRoman-Regular /Flags 34 "+
+			"/FontBBox [-168 -281 1000 924] /ItalicAngle 0 /Ascent 683 /Descent -217 "+
+			"/CapHeight 662 /StemV 84 /MissingWidth 500 /FontFile %d 0 R >>", fontFile))
+
+	// Real per-glyph advances from the Type 1 program, so the rendered string is
+	// correctly spaced (covers the WinAnsi codes from 'H' to 'o').
+	first := int('H')
+	widths := type1Widths(texGyreTermesPFB, first, int('o'))
+	fontNum := b.addObject(fmt.Sprintf(
+		"<< /Type /Font /Subtype /Type1 /BaseFont /NimbusRoman-Regular "+
+			"/FirstChar %d /LastChar %d /Widths %s /Encoding /WinAnsiEncoding "+
+			"/FontDescriptor %d 0 R >>",
+		first, first+len(widths)-1, widthsArray(widths), descNum))
+
+	content := []byte(fmt.Sprintf("BT /F1 48 Tf 72 680 Td (%s) Tj ET", text))
+	return finishFontPage(b, fontNum, content)
+}
+
+// type1Widths returns the /Widths array (1000-unit glyph space) for codes
+// first..last of a classic Type 1 program, read via the textlayout parser.
+// Unresolvable codes default to 500.
+func type1Widths(pfb []byte, first, last int) []int {
+	f, err := type1.Parse(bytes.NewReader(pfb))
+	if err != nil {
+		panic("gen: parsing Type1 font: " + err.Error())
+	}
+	widths := make([]int, last-first+1)
+	for c := first; c <= last; c++ {
+		gid, ok := f.NominalGlyph(rune(c))
+		if !ok {
+			widths[c-first] = 500
+			continue
+		}
+		widths[c-first] = int(f.HorizontalAdvance(gid))
+	}
+	return widths
+}
+
+// pfbToRaw converts a PFB (segmented) Type 1 font into the raw concatenated
+// program bytes a PDF /FontFile stream expects, plus the segment lengths
+// Length1 (clear-text ASCII), Length2 (binary eexec), Length3 (trailing ASCII).
+// PFB segments each start with 0x80, a type byte (1=ASCII, 2=binary, 3=EOF), and
+// a 4-byte little-endian length.
+func pfbToRaw(pfb []byte) (raw []byte, l1, l2, l3 int) {
+	var out bytes.Buffer
+	lens := []int{} // length of each ASCII/binary segment in order
+	types := []byte{}
+	pos := 0
+	for pos+6 <= len(pfb) {
+		if pfb[pos] != 0x80 {
+			break
+		}
+		segType := pfb[pos+1]
+		if segType == 3 { // EOF marker
+			break
+		}
+		n := int(binary.LittleEndian.Uint32(pfb[pos+2 : pos+6]))
+		pos += 6
+		if pos+n > len(pfb) {
+			n = len(pfb) - pos
+		}
+		out.Write(pfb[pos : pos+n])
+		lens = append(lens, n)
+		types = append(types, segType)
+		pos += n
+	}
+	// Type 1 fonts are ASCII (clear) + binary (eexec) + ASCII (trailer). Sum the
+	// segments by type in order: first ASCII run -> Length1, binary -> Length2,
+	// trailing ASCII -> Length3.
+	for i, t := range types {
+		switch {
+		case t == 1 && l2 == 0:
+			l1 += lens[i] // leading clear-text
+		case t == 2:
+			l2 += lens[i] // eexec binary
+		default:
+			l3 += lens[i] // trailing clear-text
+		}
+	}
+	return out.Bytes(), l1, l2, l3
 }
 
 // EmbeddedType0PDF returns a single-page PDF using a Type0 composite font with
