@@ -76,6 +76,101 @@ func JPEGImagePDF() []byte {
 		"/Filter /DCTDecode /ColorSpace /DeviceRGB /BitsPerComponent 8")
 }
 
+// GrayImagePDF returns a single-page PDF drawing an 8-bit DeviceGray image: a
+// horizontal gradient from black to white. Exercises the DeviceGray decode path.
+func GrayImagePDF() []byte {
+	const w, h = 8, 8
+	samples := make([]byte, 0, w*h)
+	for y := range h {
+		_ = y
+		for x := range w {
+			samples = append(samples, byte(x*255/(w-1)))
+		}
+	}
+	return buildImagePage(w, h, zlibCompress(samples),
+		"/Filter /FlateDecode /ColorSpace /DeviceGray /BitsPerComponent 8")
+}
+
+// CMYKImagePDF returns a single-page PDF drawing an 8-bit DeviceCMYK image whose
+// four quadrants are cyan, magenta, yellow, and black. Exercises CMYK→RGB.
+func CMYKImagePDF() []byte {
+	const w, h = 8, 8
+	samples := make([]byte, 0, w*h*4)
+	for y := range h {
+		for x := range w {
+			var c, m, yc, k byte
+			switch {
+			case x < w/2 && y < h/2:
+				c = 0xFF // cyan
+			case x >= w/2 && y < h/2:
+				m = 0xFF // magenta
+			case x < w/2 && y >= h/2:
+				yc = 0xFF // yellow
+			default:
+				k = 0xFF // black
+			}
+			samples = append(samples, c, m, yc, k)
+		}
+	}
+	return buildImagePage(w, h, zlibCompress(samples),
+		"/Filter /FlateDecode /ColorSpace /DeviceCMYK /BitsPerComponent 8")
+}
+
+// IndexedImagePDF returns a single-page PDF drawing a 4-bit Indexed image over a
+// DeviceRGB base with a small palette. Exercises Indexed lookup + sub-byte
+// (4-bit) sample unpacking.
+func IndexedImagePDF() []byte {
+	const w, h = 8, 8
+	// Palette: 0=red, 1=green, 2=blue, 3=white (DeviceRGB, 3 bytes/entry).
+	palette := []byte{
+		0xFF, 0x00, 0x00,
+		0x00, 0xFF, 0x00,
+		0x00, 0x00, 0xFF,
+		0xFF, 0xFF, 0xFF,
+	}
+	// 4-bit indices, two per byte (MSB first), rows byte-aligned (w=8 → 4 bytes).
+	samples := make([]byte, 0, w*h/2)
+	for y := range h {
+		for x := 0; x < w; x += 2 {
+			hi := byte((x + y) % 4)
+			lo := byte((x + 1 + y) % 4)
+			samples = append(samples, hi<<4|lo)
+		}
+	}
+	dict := fmt.Sprintf(
+		"/Filter /FlateDecode /ColorSpace [ /Indexed /DeviceRGB 3 < %X > ] /BitsPerComponent 4",
+		palette)
+	return buildImagePage(w, h, zlibCompress(samples), dict)
+}
+
+// SMaskImagePDF returns a single-page PDF drawing an opaque blue DeviceRGB image
+// with a DeviceGray /SMask whose left half is opaque (255) and right half is
+// transparent (0). Exercises soft-mask alpha: the right half must let the white
+// page show through.
+func SMaskImagePDF() []byte {
+	const w, h = 8, 8
+	rgb := make([]byte, 0, w*h*3)
+	for y := range h {
+		_ = y
+		for x := range w {
+			_ = x
+			rgb = append(rgb, 0x00, 0x00, 0xFF) // solid blue
+		}
+	}
+	maskSamples := make([]byte, 0, w*h)
+	for y := range h {
+		_ = y
+		for x := range w {
+			if x < w/2 {
+				maskSamples = append(maskSamples, 0xFF) // opaque
+			} else {
+				maskSamples = append(maskSamples, 0x00) // transparent
+			}
+		}
+	}
+	return buildImageWithSMaskPage(w, h, zlibCompress(rgb), zlibCompress(maskSamples))
+}
+
 // buildImagePage assembles a one-page PDF that paints a single image XObject
 // (with the given width/height, stream data, and image-dict extras) scaled to
 // 400x400 user units near the page origin.
@@ -103,6 +198,37 @@ func buildImagePage(w, h int, data []byte, imgDictExtra string) []byte {
 	page := b.addObject(pageBody)
 	if page != pageNum {
 		panic("gen: page object number mismatch in buildImagePage")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
+// buildImageWithSMaskPage assembles a one-page PDF painting a DeviceRGB image
+// whose /SMask is a separate DeviceGray image, both w×h, scaled to 400x400.
+func buildImageWithSMaskPage(w, h int, rgbData, maskData []byte) []byte {
+	b := newBuilder()
+
+	maskNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/Filter /FlateDecode /ColorSpace /DeviceGray /BitsPerComponent 8", w, h), maskData)
+
+	imgNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/Filter /FlateDecode /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask %d 0 R",
+		w, h, maskNum), rgbData)
+
+	content := []byte("q 400 0 0 400 100 200 cm /Im0 Do Q")
+	contentNum := b.addStream("", content)
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << /XObject << /Im0 %d 0 R >> >> /Contents %d 0 R >>",
+		pagesNum, imgNum, contentNum))
+	if page != pageNum {
+		panic("gen: page object number mismatch in buildImageWithSMaskPage")
 	}
 	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
 	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))

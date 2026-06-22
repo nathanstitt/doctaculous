@@ -104,7 +104,9 @@ what is done vs. pending.
   TrueType (raw-code / code-as-GID glyph lookup).
 - **Transparency**: ExtGState constant alpha `/ca` (fill/text) and `/CA` (stroke), applied to fills,
   strokes, glyphs, and images.
-- **Images**: 8-bit DeviceRGB raw samples and baseline JPEG (DCTDecode), alpha-composited.
+- **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
+  1/2/4/8/16 bpc, baseline JPEG (DCTDecode), and grayscale `/SMask` soft-mask alpha
+  (`pkg/render/raster/image.go`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
   kill a batch.
@@ -115,9 +117,9 @@ Each item should land with a new fixture/test in the same PR (see Testing). Unsu
 already degrade gracefully (skip + debug log / typed error); a TODO becoming supported just turns
 that skip into real output.
 
-1. **Image color spaces & depth** — only 8-bit DeviceRGB + JPEG decode today
-   (`decodeImageXObject` in `pkg/render/raster/page.go`). Add Indexed, DeviceGray, DeviceCMYK,
-   1/2/4-bit depths, and `/SMask` soft-mask alpha. (Common in real PDFs; highest-value gap.)
+1. **ImageMask & `/Decode`** — 1-bit stencil masks (`/ImageMask true`) paint the current fill color
+   through the mask; needs the fill color threaded into image drawing. Also honor `/Decode` arrays
+   (sample inversion/remap) generally. (`pkg/render/raster/image.go`, `decodeImageXObject`.)
 2. **Image filters for scans** — CCITTFax (fax/scanned docs), JBIG2, JPX/JPEG2000. Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`). CCITT first.
 3. **Inline images** (`BI`/`ID`/`EI`) — stubbed in `pkg/pdf/content/execute.go`.
@@ -126,9 +128,9 @@ that skip into real output.
    `cropped-rotated-scaled.pdf`). Bundle the 14 standard fonts (or AFM metrics + substitutes).
 5. **Stroke fidelity** — line joins (miter/round/bevel) and caps; the current stroker flattens to a
    filled outline with butt caps and no joins (`pkg/render/raster/device.go`).
-6. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **soft masks**
-   (`/SMask` luminosity), **transparency groups** — out of scope for now; `gs` already logs the
-   unsupported blend/soft-mask case.
+6. **Shadings / gradients** (`sh`, pattern color space), **blend modes** (`/BM`), **luminosity soft
+   masks** (`/SMask` in ExtGState — distinct from the per-image `/SMask` already supported),
+   **transparency groups** — `gs` already logs the unsupported blend/soft-mask case.
 7. **Encryption** — standard security handler (RC4/AES) to open protected PDFs; today a clean
    `ErrEncrypted`.
 

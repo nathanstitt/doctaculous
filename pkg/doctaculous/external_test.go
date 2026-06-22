@@ -33,7 +33,7 @@ var externalFixtures = []struct {
 }{
 	{"pdflatex-4-pages.pdf", 4, false},      // xref stream + ObjStm, multi-page
 	{"multicolumn.pdf", 3, false},           // xref stream + ObjStm, dense text/vector
-	{"imagemagick-images.pdf", 6, false},    // classic xref, 6 image pages
+	{"imagemagick-images.pdf", 6, true},     // 6 ICCBased-gray images (now decode)
 	{"google-doc-document.pdf", 1, false},   // Skia/Chrome, Type0/Type3 fonts + images
 	{"cropped-rotated-scaled.pdf", 4, true}, // /Rotate + crop/scale, Form-XObject-heavy (Do in content)
 	{"pdflatex-forms.pdf", 1, true},         // page text in an embedded classic Type1 font (now renders)

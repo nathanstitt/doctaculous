@@ -20,14 +20,14 @@ doctaculous rasterize input.pdf --page 1 --out page1.png --dpi 150
 
 **Working:** xref tables / xref streams / object streams, Flate/LZW/ASCII/RunLength filters, vector
 fills (nonzero + even-odd), clipping, form XObjects, page rotation, ExtGState constant alpha
-(`/ca`/`/CA`), embedded fonts (TrueType, CFF, classic Type 1, Type0/CID, symbolic subsets), DeviceRGB
-+ JPEG images, and a concurrent multi-page render path.
+(`/ca`/`/CA`), embedded fonts (TrueType, CFF, classic Type 1, Type0/CID, symbolic subsets), images
+(Gray/RGB/CMYK/Indexed/ICCBased at 1–16 bpc, JPEG, and `/SMask` soft masks), and a concurrent
+multi-page render path.
 
 **Not yet** (see the roadmap in [CLAUDE.md](CLAUDE.md#status--roadmap) for the prioritized list):
-non-RGB / sub-8-bit image color spaces and `/SMask`, CCITT/JBIG2/JPX image filters, inline images,
-non-embedded base-14 fonts, full stroke joins/caps, shadings/gradients, blend modes, and encryption.
-Unsupported features degrade gracefully (skipped with a debug log, or a typed error) rather than
-failing the render.
+ImageMask stencils, CCITT/JBIG2/JPX image filters, inline images, non-embedded base-14 fonts, full
+stroke joins/caps, shadings/gradients, blend modes, and encryption. Unsupported features degrade
+gracefully (skipped with a debug log, or a typed error) rather than failing the render.
 
 ## Why pure Go?
 

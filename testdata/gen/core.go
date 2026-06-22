@@ -96,6 +96,30 @@ var Core = []CoreFixture{
 		Build: JPEGImagePDF,
 	},
 	{
+		Name:  "image-gray",
+		Desc:  "8-bit DeviceGray image (black→white gradient)",
+		Pages: 1,
+		Build: GrayImagePDF,
+	},
+	{
+		Name:  "image-cmyk",
+		Desc:  "8-bit DeviceCMYK image (cyan/magenta/yellow/black quadrants)",
+		Pages: 1,
+		Build: CMYKImagePDF,
+	},
+	{
+		Name:  "image-indexed",
+		Desc:  "4-bit Indexed image over a DeviceRGB palette",
+		Pages: 1,
+		Build: IndexedImagePDF,
+	},
+	{
+		Name:  "image-smask",
+		Desc:  "DeviceRGB image with a DeviceGray /SMask (left opaque, right transparent)",
+		Pages: 1,
+		Build: SMaskImagePDF,
+	},
+	{
 		Name:  "xref-stream",
 		Desc:  "cross-reference stream (/Type /XRef), no classic table",
 		Pages: 1,

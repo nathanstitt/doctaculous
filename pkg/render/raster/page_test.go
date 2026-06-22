@@ -2,6 +2,7 @@ package raster
 
 import (
 	"context"
+	"image"
 	"image/color"
 	"testing"
 
@@ -59,6 +60,75 @@ func TestRenderFormXObject(t *testing.T) {
 	if bg := img.RGBAAt(5, 5); bg.R < 250 || bg.G < 250 || bg.B < 250 {
 		t.Errorf("background pixel = %v, want white", bg)
 	}
+}
+
+// decodeFixtureImage parses an image-fixture PDF and decodes its /Im0 image
+// XObject through decodeImageXObject, returning the decoded image.
+func decodeFixtureImage(t *testing.T, pdfBytes []byte) image.Image {
+	t.Helper()
+	doc, err := pdf.Parse(pdfBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, _ := doc.Page(0)
+	xo := doc.GetDict(pg.Resources["XObject"])
+	s := doc.GetStream(xo["Im0"])
+	if s == nil {
+		t.Fatal("no /Im0 image XObject")
+	}
+	img, err := decodeImageXObject(doc, s, nil)
+	if err != nil {
+		t.Fatalf("decodeImageXObject: %v", err)
+	}
+	return img
+}
+
+func TestDecodeImageColorSpaces(t *testing.T) {
+	near := func(got, want uint32, tol int) bool {
+		d := int(got>>8) - int(want)
+		return d >= -tol && d <= tol
+	}
+
+	t.Run("gray", func(t *testing.T) {
+		img := decodeFixtureImage(t, gen.GrayImagePDF())
+		// 8-wide gradient: x=0 black, x=7 white.
+		r0, _, _, _ := img.At(0, 0).RGBA()
+		r7, _, _, _ := img.At(7, 0).RGBA()
+		if !near(r0, 0, 8) || !near(r7, 255, 8) {
+			t.Errorf("gray gradient ends = %d..%d, want ~0..255", r0>>8, r7>>8)
+		}
+	})
+
+	t.Run("cmyk", func(t *testing.T) {
+		img := decodeFixtureImage(t, gen.CMYKImagePDF())
+		// Top-left quadrant is cyan (C=1) → RGB ~ (0,255,255).
+		r, g, b, _ := img.At(1, 1).RGBA()
+		if !near(r, 0, 8) || !near(g, 255, 8) || !near(b, 255, 8) {
+			t.Errorf("cyan pixel = (%d,%d,%d), want ~(0,255,255)", r>>8, g>>8, b>>8)
+		}
+	})
+
+	t.Run("indexed", func(t *testing.T) {
+		img := decodeFixtureImage(t, gen.IndexedImagePDF())
+		// Index at (0,0) is (0+0)%4 = 0 = red.
+		r, g, b, _ := img.At(0, 0).RGBA()
+		if !near(r, 255, 8) || !near(g, 0, 8) || !near(b, 0, 8) {
+			t.Errorf("indexed (0,0) = (%d,%d,%d), want red", r>>8, g>>8, b>>8)
+		}
+	})
+
+	t.Run("smask", func(t *testing.T) {
+		img := decodeFixtureImage(t, gen.SMaskImagePDF())
+		// Left half opaque (A=255), right half transparent (A=0).
+		_, _, _, aL := img.At(1, 1).RGBA()
+		_, _, _, aR := img.At(6, 1).RGBA()
+		if aL>>8 != 255 {
+			t.Errorf("left alpha = %d, want 255 (opaque)", aL>>8)
+		}
+		if aR>>8 != 0 {
+			t.Errorf("right alpha = %d, want 0 (transparent)", aR>>8)
+		}
+	})
 }
 
 func TestRenderImageFixture(t *testing.T) {
