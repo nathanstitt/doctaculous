@@ -10,14 +10,15 @@ import (
 
 // recDevice records draw calls for assertions.
 type recDevice struct {
-	fills        []render.FillPaint
-	strokes      []render.StrokePaint
-	glyphs       int
-	images       int
-	clips        int
-	saves        int
-	restores     int
-	lastFillPath *render.Path
+	fills          []render.FillPaint
+	strokes        []render.StrokePaint
+	glyphs         int
+	images         int
+	clips          int
+	saves          int
+	restores       int
+	lastFillPath   *render.Path
+	lastImageAlpha float64
 }
 
 func (d *recDevice) Size() (int, int) { return 612, 792 }
@@ -28,7 +29,10 @@ func (d *recDevice) Fill(p *render.Path, paint render.FillPaint) {
 func (d *recDevice) Stroke(p *render.Path, paint render.StrokePaint) {
 	d.strokes = append(d.strokes, paint)
 }
-func (d *recDevice) DrawImage(img image.Image, ctm render.Matrix) { d.images++ }
+func (d *recDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64) {
+	d.images++
+	d.lastImageAlpha = alpha
+}
 func (d *recDevice) FillGlyph(o *render.Path, c render.FillColor) { d.glyphs++ }
 func (d *recDevice) PushClip(p *render.Path, r render.FillRule)   { d.clips++ }
 func (d *recDevice) Save()                                        { d.saves++ }
@@ -137,7 +141,10 @@ func (fakeFont) DecodeString(s []byte) []Glyph {
 	return glyphs
 }
 
-type fakeRes struct{ font GlyphSource }
+type fakeRes struct {
+	font  GlyphSource
+	extGS map[string]ExtGStateParams
+}
 
 func (r fakeRes) Font(name string) GlyphSource { return r.font }
 func (r fakeRes) Image(name string) (image.Image, bool) {
@@ -146,12 +153,43 @@ func (r fakeRes) Image(name string) (image.Image, bool) {
 func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, bool) {
 	return nil, nil, render.Identity, false
 }
+func (r fakeRes) ExtGState(name string) (ExtGStateParams, bool) {
+	p, ok := r.extGS[name]
+	return p, ok
+}
 
 func TestShowText(t *testing.T) {
 	res := fakeRes{font: fakeFont{}}
 	dev := runContent(t, "BT /F1 12 Tf 72 700 Td (Hi) Tj ET", res)
 	if dev.glyphs != 2 {
 		t.Errorf("glyphs filled = %d, want 2", dev.glyphs)
+	}
+}
+
+func TestExtGStateFillAlpha(t *testing.T) {
+	res := fakeRes{extGS: map[string]ExtGStateParams{
+		"GS0": {FillAlpha: 0.5, HasFillAlpha: true},
+	}}
+	// Opaque black fill (g 0 sets A=255), then gs sets /ca 0.5, then fill a rect.
+	dev := runContent(t, "0 g /GS0 gs 0 0 100 100 re f", res)
+	if len(dev.fills) != 1 {
+		t.Fatalf("got %d fills, want 1", len(dev.fills))
+	}
+	if a := dev.fills[0].Color.A; a < 120 || a > 135 {
+		t.Errorf("fill alpha = %d, want ~128 (0.5 × 255)", a)
+	}
+}
+
+func TestExtGStateImageAlpha(t *testing.T) {
+	res := fakeRes{extGS: map[string]ExtGStateParams{
+		"GS0": {FillAlpha: 0.5, HasFillAlpha: true},
+	}}
+	dev := runContent(t, "/GS0 gs q 1 0 0 1 0 0 cm /Im0 Do Q", res)
+	if dev.images != 1 {
+		t.Fatalf("images drawn = %d, want 1", dev.images)
+	}
+	if dev.lastImageAlpha != 0.5 {
+		t.Errorf("image alpha = %v, want 0.5", dev.lastImageAlpha)
 	}
 }
 

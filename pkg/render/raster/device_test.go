@@ -111,6 +111,32 @@ func TestNonZeroFillsHole(t *testing.T) {
 	}
 }
 
+func TestFillAlphaBlends(t *testing.T) {
+	dev, img := newTestDevice(100, 100)
+	// Black at 50% alpha over white should yield ~mid-gray (128).
+	half := color.RGBA{0, 0, 0, 128}
+	dev.Fill(rectPath(10, 10, 40, 40), render.FillPaint{Color: half})
+	c := img.RGBAAt(25, 25)
+	if c.R < 110 || c.R > 145 {
+		t.Errorf("50%% black over white = %v, want ~mid-gray (R≈128)", c)
+	}
+}
+
+func TestDrawImageAlphaBlends(t *testing.T) {
+	dev, img := newTestDevice(100, 100)
+	// A solid blue source image drawn at 50% alpha over white → light blue.
+	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	fillBackground(src, color.RGBA{0, 0, 255, 255})
+	// Map the unit square to a 40x40 device region at (20,20).
+	ctm := render.Matrix{A: 40, B: 0, C: 0, D: 40, E: 20, F: 20}
+	dev.DrawImage(src, ctm, 0.5)
+	c := img.RGBAAt(40, 40)
+	// 50% blue over white ≈ (128,128,255).
+	if c.B < 200 || c.R < 100 || c.R > 160 {
+		t.Errorf("50%% blue image over white = %v, want ~light blue (R≈128, B≈255)", c)
+	}
+}
+
 func TestFillOffCanvasNoOp(t *testing.T) {
 	dev, img := newTestDevice(50, 50)
 	// Entirely off-canvas; must not panic and must leave the canvas white.

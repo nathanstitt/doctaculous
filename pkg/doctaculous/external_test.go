@@ -6,8 +6,6 @@ import (
 	"image"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 )
 
@@ -136,12 +134,12 @@ func TestExternalRasterizeAllPages(t *testing.T) {
 	}
 }
 
-// TestExternalBlendingDegradesGracefully covers the v1 contract that unsupported
-// transparency degrades gracefully: it must skip + debug-log, not panic or error.
-// cropped-rotated-scaled.pdf carries real blend state (/BM /Multiply and /ca 0.5)
-// applied via the ExtGState "gs" operator, which v1 does not interpret. The page
-// must still rasterize, and the interpreter must report the skip through Logf.
-func TestExternalBlendingDegradesGracefully(t *testing.T) {
+// TestExternalConstantAlphaApplied verifies that ExtGState constant alpha is
+// honored on a real document. cropped-rotated-scaled.pdf draws its content under
+// an ExtGState with /ca 0.5 (50% fill opacity). Every page must rasterize without
+// error, and the drawn green form boxes must come out semi-transparent (blended
+// toward the white background) rather than fully saturated.
+func TestExternalConstantAlphaApplied(t *testing.T) {
 	path := filepath.Join(externalFixtureDir, "cropped-rotated-scaled.pdf")
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		t.Skipf("fixture missing: %s", path)
@@ -152,36 +150,34 @@ func TestExternalBlendingDegradesGracefully(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 
-	// Logf is called from multiple goroutines by RasterizePages, so guard it.
-	var (
-		mu   sync.Mutex
-		msgs []string
-	)
-	logf := func(format string, args ...any) {
-		mu.Lock()
-		msgs = append(msgs, format)
-		mu.Unlock()
-	}
-
-	results := doc.RasterizePages(context.Background(), doc.AllPages(), RasterOptions{DPI: 72, Logf: logf})
+	results := doc.RasterizePages(context.Background(), doc.AllPages(), RasterOptions{DPI: 72})
 	for _, r := range results {
 		if r.Err != nil {
-			t.Errorf("page %d errored instead of degrading gracefully: %v", r.Index, r.Err)
+			t.Errorf("page %d errored: %v", r.Index, r.Err)
 		}
 	}
 
-	// The "gs" operator carrying the blend mode / alpha must be reported skipped.
-	const wantSubstr = "/ExtGState (gs) not applied"
-	found := false
-	mu.Lock()
-	for _, m := range msgs {
-		if strings.Contains(m, wantSubstr) {
-			found = true
-			break
+	// On page 0, find the most-saturated green pixel. With /ca 0.5 over white it
+	// should be a tint (G high, but R and B lifted well above 0 by the 50% blend),
+	// not pure green (which would mean alpha was ignored).
+	img := results[0].Image
+	b := img.Bounds()
+	var best struct{ r, g, bl uint32 }
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			rr, gg, bb, _ := img.At(x, y).RGBA()
+			if gg > rr && gg > bb && gg > best.g {
+				best.r, best.g, best.bl = rr, gg, bb
+			}
 		}
 	}
-	mu.Unlock()
-	if !found {
-		t.Errorf("expected a debug log containing %q for unsupported blend state; got %v", wantSubstr, msgs)
+	if best.g == 0 {
+		t.Fatal("no green pixels found; expected the form boxes")
+	}
+	// 8-bit channels. Pure green would be ~(0,255,0); a 50% tint over white is
+	// ~(128,191,128). Require the red channel to be clearly lifted off zero.
+	r8 := best.r >> 8
+	if r8 < 64 {
+		t.Errorf("green pixel R=%d too saturated; /ca 0.5 alpha not applied (want a tint)", r8)
 	}
 }

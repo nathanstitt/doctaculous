@@ -54,6 +54,12 @@ var Core = []CoreFixture{
 		Build: EvenOddPDF,
 	},
 	{
+		Name:  "alpha",
+		Desc:  "ExtGState constant alpha (/ca, /CA): semi-transparent fill + stroke",
+		Pages: 1,
+		Build: AlphaPDF,
+	},
+	{
 		Name:  "form-xobject",
 		Desc:  "form XObject (Do) with /Matrix and scoped /Resources",
 		Pages: 1,

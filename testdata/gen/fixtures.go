@@ -75,6 +75,35 @@ func (b *builder) addStreamForm(content []byte) int {
 	return b.addStream(dictExtra, content)
 }
 
+// AlphaPDF returns a single-page PDF exercising ExtGState constant alpha. It
+// draws an opaque red rectangle, then overlaps it with a blue rectangle painted
+// under /ca 0.5 (50% fill opacity) and strokes a line at /CA 0.5. The overlap
+// must show a blended (semi-transparent) blue over red rather than solid blue,
+// locking down /ca and /CA from the gs operator through compositing.
+func AlphaPDF() []byte {
+	b := newBuilder()
+
+	content := []byte(
+		"1 0 0 rg 100 500 250 200 re f " + // opaque red rectangle
+			"/GS0 gs " + // set fill+stroke alpha to 0.5
+			"0 0 1 rg 200 450 250 200 re f " + // 50%-alpha blue rectangle (overlaps red)
+			"0 0 1 RG 8 w 100 450 m 450 450 l S", // 50%-alpha blue stroke
+	)
+	contentNum := b.addStream("", content)
+
+	// Resources: an ExtGState dict named GS0 with 50% fill and stroke alpha.
+	resources := "<< /ExtGState << /GS0 << /ca 0.5 /CA 0.5 >> >> >>"
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources %s /Contents %d 0 R >>",
+		pagesNum, resources, contentNum))
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
 // MultiPagePDF returns an n-page PDF where each page draws its 1-based number.
 func MultiPagePDF(n int) []byte {
 	if n < 1 {
