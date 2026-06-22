@@ -204,6 +204,41 @@ func buildImagePage(w, h int, data []byte, imgDictExtra string) []byte {
 	return b.finish(catalog)
 }
 
+// InlineImagePDF returns a one-page PDF that paints a 2×2 DeviceRGB image using
+// an inline image (BI...ID...EI) in the content stream, scaled to 400×400. The
+// four pixels are red, green, blue, white — distinct, saturated colors so the
+// rasterized output is unambiguously non-blank. The raw sample bytes deliberately
+// have no filter, exercising the abbreviated-key inline path end to end.
+func InlineImagePDF() []byte {
+	b := newBuilder()
+
+	// 2x2 RGB, 8 bpc: 12 bytes, row-major, rows padded to byte boundary (already
+	// byte-aligned here). Colors: (R,G / B,W).
+	samples := []byte{
+		0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, // row 0: red, green
+		0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, // row 1: blue, white
+	}
+	var content []byte
+	content = append(content, []byte("q 400 0 0 400 100 200 cm\nBI /W 2 /H 2 /CS /RGB /BPC 8 ID ")...)
+	content = append(content, samples...)
+	content = append(content, []byte(" EI\nQ")...)
+
+	contentNum := b.addStream("", content)
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	pageBody := fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << >> /Contents %d 0 R >>",
+		pagesNum, contentNum)
+	page := b.addObject(pageBody)
+	if page != pageNum {
+		panic("gen: page object number mismatch in InlineImagePDF")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
 // buildImageWithSMaskPage assembles a one-page PDF painting a DeviceRGB image
 // whose /SMask is a separate DeviceGray image, both w×h, scaled to 400x400.
 func buildImageWithSMaskPage(w, h int, rgbData, maskData []byte) []byte {

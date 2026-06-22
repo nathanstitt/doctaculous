@@ -34,3 +34,10 @@ func (t *contentTokenizer) next() (obj pdf.Object, isOp bool, err error) {
 	}
 	return o, false, nil
 }
+
+// readInlineImage consumes an inline image body following a BI operator,
+// returning its (abbreviated-key) dict and raw sample bytes. See
+// pdf.ContentScanner.ReadInlineImage.
+func (t *contentTokenizer) readInlineImage() (pdf.Dict, []byte, error) {
+	return t.p.ReadInlineImage()
+}

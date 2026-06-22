@@ -54,3 +54,24 @@ func (it *Interpreter) doXObject(operands []pdf.Object, depth int) {
 	}
 	it.logf("content: XObject %q not found", name)
 }
+
+// inlineImage consumes a BI...ID...EI inline image from the scanner and draws it
+// like an image XObject. Decoding is delegated to the backend's Resources so this
+// package stays free of pixel/color-space logic. A decode failure degrades
+// gracefully: the image is skipped with a debug log, never a fatal error.
+func (it *Interpreter) inlineImage(tok *contentTokenizer) {
+	dict, data, err := tok.readInlineImage()
+	if err != nil {
+		it.logf("content: inline image: %v", err)
+		return
+	}
+	if it.res == nil {
+		return
+	}
+	img, ok := it.res.InlineImage(dict, data)
+	if !ok {
+		it.logf("content: inline image not decoded")
+		return
+	}
+	it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha)
+}

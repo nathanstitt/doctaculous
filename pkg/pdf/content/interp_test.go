@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -148,6 +149,9 @@ type fakeRes struct {
 
 func (r fakeRes) Font(name string) GlyphSource { return r.font }
 func (r fakeRes) Image(name string) (image.Image, bool) {
+	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
+}
+func (r fakeRes) InlineImage(dict pdf.Dict, data []byte) (image.Image, bool) {
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
 }
 func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, bool) {

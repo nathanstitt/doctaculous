@@ -120,6 +120,12 @@ var Core = []CoreFixture{
 		Build: SMaskImagePDF,
 	},
 	{
+		Name:  "inline-image",
+		Desc:  "inline image (BI...ID...EI) with abbreviated keys, raw DeviceRGB samples",
+		Pages: 1,
+		Build: InlineImagePDF,
+	},
+	{
 		Name:  "xref-stream",
 		Desc:  "cross-reference stream (/Type /XRef), no classic table",
 		Pages: 1,

@@ -160,11 +160,8 @@ func (it *Interpreter) execute(op string, operands []pdf.Object, depth int) {
 	case "Do":
 		it.doXObject(operands, depth)
 
-	// --- inline images ---
-	case "BI":
-		// Inline images are consumed by the tokenizer-level skip; if we reach
-		// here, log and ignore.
-		it.logf("content: inline image (BI) not supported")
+	// Inline images (BI...ID...EI) are handled in the run loop, which consumes
+	// the image body directly from the scanner; they never reach execute.
 
 	default:
 		it.logf("content: unsupported operator %q", op)

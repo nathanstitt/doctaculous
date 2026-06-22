@@ -292,6 +292,59 @@ func (r *pageResources) Image(name string) (image.Image, bool) {
 	return img, true
 }
 
+// inlineKeyAliases maps inline-image abbreviated keys to their full equivalents
+// (PDF 32000-1 Table 93). Full names are also accepted, so the map only lists
+// the abbreviations.
+var inlineKeyAliases = map[pdf.Name]pdf.Name{
+	"W":   "Width",
+	"H":   "Height",
+	"BPC": "BitsPerComponent",
+	"CS":  "ColorSpace",
+	"F":   "Filter",
+	"D":   "Decode",
+	"DP":  "DecodeParms",
+	"IM":  "ImageMask",
+	"I":   "Interpolate",
+}
+
+// inlineCSAliases maps abbreviated inline color-space names to full names; the
+// decode path (resolveImageCS) understands the full names.
+var inlineCSAliases = map[string]string{
+	"G":    "DeviceGray",
+	"RGB":  "DeviceRGB",
+	"CMYK": "DeviceCMYK",
+	"I":    "Indexed",
+}
+
+// InlineImage decodes a BI...ID...EI inline image into a drawable image. It
+// normalizes the abbreviated keys into a synthetic stream dict and reuses the
+// XObject image-decode path, so the two share color-space and bit-depth handling.
+func (r *pageResources) InlineImage(dict pdf.Dict, data []byte) (image.Image, bool) {
+	// Normalize abbreviated keys to their full forms.
+	norm := pdf.Dict{}
+	for k, v := range dict {
+		if full, ok := inlineKeyAliases[k]; ok {
+			k = full
+		}
+		norm[k] = v
+	}
+	// Expand an abbreviated named color space.
+	if name, ok := norm["ColorSpace"].(pdf.Name); ok {
+		if full, ok := inlineCSAliases[string(name)]; ok {
+			norm["ColorSpace"] = pdf.Name(full)
+		}
+	}
+
+	img, err := decodeInlineImage(r.doc, norm, data, r.logf)
+	if err != nil {
+		if r.logf != nil {
+			r.logf("raster: inline image: %v", err)
+		}
+		return nil, false
+	}
+	return img, true
+}
+
 // decodeImageXObject turns an image XObject stream into an image.Image. It
 // handles raw samples in the common color spaces and bit depths (DeviceGray/RGB/
 // CMYK, Indexed, ICCBased by component count; 1/2/4/8/16 bpc) and baseline JPEG
@@ -335,6 +388,14 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, logf func(string, ...a
 
 	applySoftMask(doc, s, base, logf)
 	return base, nil
+}
+
+// decodeInlineImage decodes a normalized inline image (full-key dict + verbatim
+// sample bytes) by wrapping it as a synthetic stream and reusing
+// decodeImageXObject, so inline and XObject images share one decode path. The
+// dict's keys must already be normalized to full names by the caller.
+func decodeInlineImage(doc *pdf.Document, dict pdf.Dict, data []byte, logf func(string, ...any)) (image.Image, error) {
+	return decodeImageXObject(doc, &pdf.Stream{Dict: dict, Raw: data}, logf)
 }
 
 // applySoftMask reads the image's /SMask (a grayscale image whose samples are the
