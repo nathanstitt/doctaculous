@@ -63,3 +63,11 @@ make lint    # go vet + golangci-lint
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The library and all its source code are MIT-licensed. One exception: the
+real-world PDF samples under [`testdata/external/`](testdata/external/) are
+third-party test inputs licensed **CC-BY-SA-4.0** (from
+[py-pdf/sample-files](https://github.com/py-pdf/sample-files)), kept isolated
+there with their own license text. They are test fixtures only — never compiled
+into or shipped with the module — so they don't affect the MIT licensing of the
+library. See that directory's README for details and attribution.
