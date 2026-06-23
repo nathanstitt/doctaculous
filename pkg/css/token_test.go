@@ -84,6 +84,28 @@ func TestTokenizeCommentsAndPunctuation(t *testing.T) {
 	}
 }
 
+func TestTokenizeCommentEdgeCases(t *testing.T) {
+	// Unterminated comment consumes to EOF: no panic, no token, just EOF.
+	if got := tokenKinds("/* no end"); len(got) != 0 {
+		t.Errorf("unterminated comment kinds = %v, want none (consumed to EOF)", got)
+	}
+	// Bare "/*" at EOF: same.
+	if got := tokenKinds("/*"); len(got) != 0 {
+		t.Errorf(`bare "/*" kinds = %v, want none`, got)
+	}
+	// A lone "/" (not followed by "*") is a delimiter, not a comment.
+	tz := newTokenizer("/")
+	tok := tz.next()
+	if tok.Kind != TokenDelim || tok.Text != "/" {
+		t.Errorf(`lone "/" = {%v %q}, want {Delim "/"}`, tok.Kind, tok.Text)
+	}
+	// Consecutive comments are all skipped; the token after them is returned.
+	got := tokenKinds("/*a*//*b*/x")
+	if len(got) != 1 || got[0] != TokenIdent {
+		t.Errorf(`"/*a*//*b*/x" kinds = %v, want [Ident]`, got)
+	}
+}
+
 func TestTokenKindString(t *testing.T) {
 	cases := map[TokenKind]string{
 		TokenEOF:    "EOF",

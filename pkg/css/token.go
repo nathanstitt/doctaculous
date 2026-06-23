@@ -18,7 +18,7 @@ const (
 	TokenNumber    // 12, 1.5, -3
 	TokenDimension // 12px, 1.5em
 	TokenPercent   // 50%
-	TokenDelim     // a single significant char: . > : * etc.
+	TokenDelim     // a single significant char not matched above: . > * etc.
 	TokenColon     // :
 	TokenSemicolon // ;
 	TokenComma     // ,
@@ -60,58 +60,63 @@ type tokenizer struct {
 func newTokenizer(src string) *tokenizer { return &tokenizer{src: src} }
 
 func (t *tokenizer) next() Token {
-	if t.pos >= len(t.src) {
-		return Token{Kind: TokenEOF}
-	}
-	c := t.src[t.pos]
-	switch {
-	case isWhitespace(c):
-		start := t.pos
-		for t.pos < len(t.src) && isWhitespace(t.src[t.pos]) {
-			t.pos++
+	for {
+		if t.pos >= len(t.src) {
+			return Token{Kind: TokenEOF}
 		}
-		return Token{Kind: TokenWhitespace, Text: t.src[start:t.pos]}
-	case c == ',':
-		t.pos++
-		return Token{Kind: TokenComma, Text: ","}
-	case c == '#':
-		t.pos++
-		id := t.readName()
-		return Token{Kind: TokenHash, Text: id}
-	case c == '"' || c == '\'':
-		return t.readString(c)
-	case c == '-' && t.pos+1 < len(t.src) && (isDigit(t.src[t.pos+1]) || t.src[t.pos+1] == '.'):
-		return t.readNumeric()
-	case isDigit(c):
-		return t.readNumeric()
-	case c == '.' && t.pos+1 < len(t.src) && isDigit(t.src[t.pos+1]):
-		return t.readNumeric()
-	case isNameStart(c):
-		return t.readIdent()
-	case c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*':
-		t.skipComment()
-		return t.next()
-	case c == ':':
-		t.pos++
-		return Token{Kind: TokenColon, Text: ":"}
-	case c == ';':
-		t.pos++
-		return Token{Kind: TokenSemicolon, Text: ";"}
-	case c == '{':
-		t.pos++
-		return Token{Kind: TokenLBrace, Text: "{"}
-	case c == '}':
-		t.pos++
-		return Token{Kind: TokenRBrace, Text: "}"}
-	case c == '(':
-		t.pos++
-		return Token{Kind: TokenLParen, Text: "("}
-	case c == ')':
-		t.pos++
-		return Token{Kind: TokenRParen, Text: ")"}
-	default:
-		t.pos++
-		return Token{Kind: TokenDelim, Text: string(c)}
+		c := t.src[t.pos]
+		// Skip comments iteratively so runs of consecutive comments can't blow
+		// the goroutine stack via recursion.
+		if c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*' {
+			t.skipComment()
+			continue
+		}
+		switch {
+		case isWhitespace(c):
+			start := t.pos
+			for t.pos < len(t.src) && isWhitespace(t.src[t.pos]) {
+				t.pos++
+			}
+			return Token{Kind: TokenWhitespace, Text: t.src[start:t.pos]}
+		case c == ',':
+			t.pos++
+			return Token{Kind: TokenComma, Text: ","}
+		case c == '#':
+			t.pos++
+			id := t.readName()
+			return Token{Kind: TokenHash, Text: id}
+		case c == '"' || c == '\'':
+			return t.readString(c)
+		case c == '-' && t.pos+1 < len(t.src) && (isDigit(t.src[t.pos+1]) || t.src[t.pos+1] == '.'):
+			return t.readNumeric()
+		case isDigit(c):
+			return t.readNumeric()
+		case c == '.' && t.pos+1 < len(t.src) && isDigit(t.src[t.pos+1]):
+			return t.readNumeric()
+		case isNameStart(c):
+			return t.readIdent()
+		case c == ':':
+			t.pos++
+			return Token{Kind: TokenColon, Text: ":"}
+		case c == ';':
+			t.pos++
+			return Token{Kind: TokenSemicolon, Text: ";"}
+		case c == '{':
+			t.pos++
+			return Token{Kind: TokenLBrace, Text: "{"}
+		case c == '}':
+			t.pos++
+			return Token{Kind: TokenRBrace, Text: "}"}
+		case c == '(':
+			t.pos++
+			return Token{Kind: TokenLParen, Text: "("}
+		case c == ')':
+			t.pos++
+			return Token{Kind: TokenRParen, Text: ")"}
+		default:
+			t.pos++
+			return Token{Kind: TokenDelim, Text: string(c)}
+		}
 	}
 }
 
