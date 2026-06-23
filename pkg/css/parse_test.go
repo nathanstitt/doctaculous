@@ -2,6 +2,26 @@ package css
 
 import "testing"
 
+func TestParseStylesheet(t *testing.T) {
+	src := `
+		/* comment */
+		h1, .title { color: red; font-size: 24px; }
+		p { margin-top: 10px }
+		@media print { p { color: black } }   /* whole at-rule skipped */
+	`
+	sheet := Parse(src)
+	if len(sheet.Rules) != 2 {
+		t.Fatalf("got %d rules, want 2 (the @media block is skipped): %+v", len(sheet.Rules), sheet.Rules)
+	}
+	// First rule has 2 selectors and 2 declarations.
+	if len(sheet.Rules[0].Selectors) != 2 {
+		t.Fatalf("rule[0] selectors = %d, want 2", len(sheet.Rules[0].Selectors))
+	}
+	if len(sheet.Rules[0].Declarations) != 2 {
+		t.Fatalf("rule[0] declarations = %d, want 2", len(sheet.Rules[0].Declarations))
+	}
+}
+
 func TestParseDeclarations(t *testing.T) {
 	decls := parseDeclarations("color: red; margin-top: 10px; ; bogus")
 	// The empty declaration and the value-less "bogus" are dropped.
