@@ -118,8 +118,12 @@ what is done vs. pending.
   `/Matrix`, the active clip, and `/BM` blend modes. Also **shading patterns** (`/Pattern` color
   space + `scn`, PatternType 2): a shading pattern set via `scn` fills a subsequent path with the
   shading clipped to it, with the pattern `/Matrix` resolved against the page default coordinate
-  system (`pkg/pdf/content/shading.go`). Tiling patterns (PatternType 1) and mesh shadings
-  (Types 4–7) are still pending (see TODO).
+  system (`pkg/pdf/content/shading.go`). Also **mesh shadings** (Types 4–7,
+  `pkg/render/raster/shading_mesh.go`): free-form Gouraud triangles (Type 4) and lattice-form
+  (Type 5) are decoded from the packed bit stream and Gouraud-filled exactly; Coons (Type 6) and
+  tensor (Type 7) patches are tessellated to a fixed grid (a bilinear-corner approximation of the
+  patch surface). Malformed mesh streams degrade gracefully (no panic, skip + log). Tiling patterns
+  (PatternType 1) remain pending (see TODO).
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
   1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
   stencils painted in the fill color, `/Decode` arrays, and inline images (`BI`/`ID`/`EI`)
@@ -136,11 +140,12 @@ that skip into real output.
 
 1. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-2. **Shadings / gradients (remaining)** — **mesh shadings** (Types 4–7: free-form/lattice Gouraud
-   triangles and Coons/tensor patches) and **tiling patterns** (PatternType 1). The `sh` operator
-   with axial/radial/function-based shadings, the PDF Function evaluator (Types 0/2/3/4), and
-   shading patterns (PatternType 2) via `scn` are done. Also **luminosity soft masks** (`/SMask` in
-   ExtGState) and **transparency groups**.
+2. **Shadings / gradients (remaining)** — **tiling patterns** (PatternType 1; currently skipped +
+   logged) and higher-fidelity **Coons/tensor patches** (Types 6/7 are tessellated with a bilinear
+   corner approximation — evaluating the actual bicubic boundary would improve curved patches). The
+   `sh` operator with axial/radial/function-based shadings, the PDF Function evaluator
+   (Types 0/2/3/4), shading patterns (PatternType 2) via `scn`, and mesh shadings (Types 4–7) are
+   done. Also **luminosity soft masks** (`/SMask` in ExtGState) and **transparency groups**.
 3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.
 4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;

@@ -68,6 +68,52 @@ func ShadingFunctionPDF() []byte {
 	return b.finish(catalog)
 }
 
+// ShadingMeshPDF returns a single-page PDF that paints a Type 4 (free-form
+// Gouraud-shaded triangle) mesh via the `sh` operator. The mesh is a square made
+// of two triangles spanning (100,100)–(300,300) with a distinct primary color at
+// each corner, so the golden shows a smooth four-corner color interpolation. The
+// stream is byte-aligned (8 bits each for flag/coordinate/component), which keeps
+// the packed data trivially inspectable.
+//
+// /Decode maps coordinate bytes 0..255 onto user-space 0..400 (so a byte value
+// scales by ~1.57) and color bytes 0..255 onto 0..1. We pick byte coordinates
+// that land the corners at 100,100 / 300,100 / 300,300 / 100,300.
+func ShadingMeshPDF() []byte {
+	b := newBuilder()
+
+	// Coordinate Decode is [0 400 0 400]; to land a user coord c, byte = c/400*255.
+	bc := func(user float64) byte { return byte(user / 400 * 255) }
+	// One vertex record: flag, x, y, r, g, b (all single bytes).
+	vtx := func(flag byte, x, y float64, r, g, bl byte) []byte {
+		return []byte{flag, bc(x), bc(y), r, g, bl}
+	}
+	var data []byte
+	// First triangle (three flag-0 vertices): bottom-left (red), bottom-right
+	// (green), top-right (blue).
+	data = append(data, vtx(0, 100, 100, 255, 0, 0)...)
+	data = append(data, vtx(0, 300, 100, 0, 255, 0)...)
+	data = append(data, vtx(0, 300, 300, 0, 0, 255)...)
+	// Second triangle (flag 2: reuse va & vc = BL & TR) → top-left (yellow).
+	data = append(data, vtx(2, 100, 300, 255, 255, 0)...)
+
+	meshDictExtra := " /ShadingType 4 /ColorSpace /DeviceRGB " +
+		"/BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 " +
+		"/Decode [0 400 0 400 0 1 0 1 0 1]"
+	meshNum := b.addStream(meshDictExtra, data)
+
+	resources := fmt.Sprintf("<< /Shading << /Sh1 %d 0 R >> >>", meshNum)
+	contentNum := b.addStream("", []byte("q 100 100 200 200 re W n /Sh1 sh Q"))
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources %s /Contents %d 0 R >>",
+		pagesNum, resources, contentNum))
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
 // ShadingPatternPDF returns a single-page PDF that fills a path with a shading
 // pattern (PatternType 2): a /Pattern resource wrapping an axial red→blue shading
 // is selected as the fill "color" via `/Pattern cs /P1 scn`, then a diamond path

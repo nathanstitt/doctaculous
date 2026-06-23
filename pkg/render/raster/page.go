@@ -218,11 +218,7 @@ func (r *pageResources) Shading(name string) (render.Shader, bool) {
 	if shadings == nil {
 		return nil, false
 	}
-	dict, ok := shadingDict(r.doc, shadings[pdf.Name(name)])
-	if !ok {
-		return nil, false
-	}
-	sh, err := newShader(r.doc, dict)
+	sh, err := newShader(r.doc, shadings[pdf.Name(name)])
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: shading %q: %v", name, err)
@@ -254,14 +250,7 @@ func (r *pageResources) Pattern(name string) (render.Shader, render.Matrix, bool
 		}
 		return nil, render.Identity, false
 	}
-	shDict, ok := shadingDict(r.doc, dict["Shading"])
-	if !ok {
-		if r.logf != nil {
-			r.logf("raster: pattern %q: missing /Shading", name)
-		}
-		return nil, render.Identity, false
-	}
-	sh, err := newShader(r.doc, shDict)
+	sh, err := newShader(r.doc, dict["Shading"])
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: pattern %q: %v", name, err)

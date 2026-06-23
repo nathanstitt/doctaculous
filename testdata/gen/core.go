@@ -108,6 +108,12 @@ var Core = []CoreFixture{
 		Build: ShadingPatternPDF,
 	},
 	{
+		Name:  "shading-mesh",
+		Desc:  "free-form Gouraud mesh (Type 4) via sh: a two-triangle square, color per corner",
+		Pages: 1,
+		Build: ShadingMeshPDF,
+	},
+	{
 		Name:  "flate",
 		Desc:  "FlateDecode-compressed content stream",
 		Pages: 1,

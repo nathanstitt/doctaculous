@@ -98,18 +98,27 @@ type shading struct {
 	hasBackground bool
 }
 
-// newShader parses a shading dictionary into a render.Shader. Axial (Type 2),
-// radial (Type 3), and function-based (Type 1) shadings build a *shading; mesh
-// shadings (Types 4–7) route through newMeshShader (shading_mesh.go). It returns
-// an error for unsupported types or malformed geometry, so the caller degrades
-// gracefully with a log rather than rendering garbage.
-func newShader(doc *pdf.Document, dict pdf.Dict) (render.Shader, error) {
+// newShader parses a /Shading object into a render.Shader. The object may be a
+// shading dictionary (axial/radial/function shadings, Types 1–3) or a stream
+// (mesh shadings, Types 4–7, whose packed vertex/patch data is the stream body).
+// Axial/radial/function shadings build a *shading; mesh shadings route through
+// newMeshShader. It returns an error for unsupported types or malformed geometry,
+// so the caller degrades gracefully with a log rather than rendering garbage.
+func newShader(doc *pdf.Document, obj pdf.Object) (render.Shader, error) {
+	stream := doc.GetStream(obj)
+	dict, ok := shadingDict(doc, obj)
+	if !ok {
+		return nil, fmt.Errorf("shading: object is not a dict or stream")
+	}
 	st, ok := doc.GetInt(dict["ShadingType"])
 	if !ok {
 		return nil, fmt.Errorf("shading: missing /ShadingType")
 	}
 	if st >= 4 && st <= 7 {
-		return newMeshShader(doc, dict)
+		if stream == nil {
+			return nil, fmt.Errorf("shading: mesh /ShadingType %d requires a stream", st)
+		}
+		return newMeshShader(doc, dict, stream)
 	}
 	s := &shading{shadingType: st}
 
