@@ -11,6 +11,9 @@ import (
 // their CSS unit here (px/pt/em/%); the layout engine resolves em/% to absolute
 // points against a containing context. Raw, unrecognized declarations are not on
 // this struct — they are retained on the Rule for later sub-projects.
+//
+// Inherited properties (CSS) are Color, FontFamily, FontSizePt, Bold, Italic,
+// LineHeight, and TextAlign; inheritFrom must be kept in sync with this set.
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
@@ -131,7 +134,9 @@ func bestMatch(sels []Selector, n Node) (Specificity, bool) {
 // from the parent's computed style; everything else resets to initial.
 func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs := initialStyle()
-	// Inherited properties (CSS): color, font-*, line-height, text-align.
+	// Inherited properties (CSS): keep this set in sync with the ComputedStyle
+	// doc comment. A property added to ComputedStyle but omitted here would
+	// silently reset to initial instead of inheriting.
 	cs.Color = parent.Color
 	cs.FontFamily = parent.FontFamily
 	cs.FontSizePt = parent.FontSizePt

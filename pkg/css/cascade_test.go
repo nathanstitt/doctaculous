@@ -177,3 +177,29 @@ func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
 		t.Errorf("font-size after auto = %v, want %v preserved", cs.FontSizePt, before)
 	}
 }
+
+func TestCascadeSourceOrderTiebreak(t *testing.T) {
+	// Two rules of EQUAL specificity (both type selectors) — the later one wins.
+	src := `p { color: red; } p { color: blue; }`
+	r := NewResolver(Parse(src), nil)
+	cs := r.Compute(&fakeNode{tag: "p"}, initialStyle())
+	if cs.Color != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("color = %v, want blue (later equal-specificity rule wins)", cs.Color)
+	}
+}
+
+func TestCascadeBestMatchUsesMaxSpecificity(t *testing.T) {
+	// A rule whose selector GROUP contains a high-specificity selector matching
+	// the node contributes that higher specificity, beating a separate type rule.
+	src := `
+		p { color: red; }
+		em, #lead { color: blue; }
+	`
+	r := NewResolver(Parse(src), nil)
+	// <p id="lead"> matches "#lead" in the second rule (spec {1,0,0}), which beats
+	// the "p" rule (spec {0,0,1}); the "em" selector in the group doesn't match.
+	cs := r.Compute(&fakeNode{tag: "p", id: "lead"}, initialStyle())
+	if cs.Color != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("color = %v, want blue (#lead in the group beats p)", cs.Color)
+	}
+}
