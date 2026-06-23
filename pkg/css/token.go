@@ -88,10 +88,43 @@ func (t *tokenizer) next() Token {
 		return t.readNumeric()
 	case isNameStart(c):
 		return t.readIdent()
+	case c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*':
+		t.skipComment()
+		return t.next()
+	case c == ':':
+		t.pos++
+		return Token{Kind: TokenColon, Text: ":"}
+	case c == ';':
+		t.pos++
+		return Token{Kind: TokenSemicolon, Text: ";"}
+	case c == '{':
+		t.pos++
+		return Token{Kind: TokenLBrace, Text: "{"}
+	case c == '}':
+		t.pos++
+		return Token{Kind: TokenRBrace, Text: "}"}
+	case c == '(':
+		t.pos++
+		return Token{Kind: TokenLParen, Text: "("}
+	case c == ')':
+		t.pos++
+		return Token{Kind: TokenRParen, Text: ")"}
 	default:
 		t.pos++
 		return Token{Kind: TokenDelim, Text: string(c)}
 	}
+}
+
+func (t *tokenizer) skipComment() {
+	t.pos += 2 // consume /*
+	for t.pos+1 < len(t.src) {
+		if t.src[t.pos] == '*' && t.src[t.pos+1] == '/' {
+			t.pos += 2
+			return
+		}
+		t.pos++
+	}
+	t.pos = len(t.src) // unterminated comment: consume to EOF
 }
 
 func (t *tokenizer) readIdent() Token {

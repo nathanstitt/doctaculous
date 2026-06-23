@@ -66,6 +66,24 @@ func TestTokenizeHashStringNumberDim(t *testing.T) {
 	}
 }
 
+func TestTokenizeCommentsAndPunctuation(t *testing.T) {
+	// A comment is skipped entirely; punctuation gets its own kinds.
+	got := tokenKinds("a /* note */ : ; { } ( )")
+	want := []TokenKind{
+		TokenIdent, TokenWhitespace, TokenWhitespace, TokenColon, TokenWhitespace,
+		TokenSemicolon, TokenWhitespace, TokenLBrace, TokenWhitespace, TokenRBrace,
+		TokenWhitespace, TokenLParen, TokenWhitespace, TokenRParen,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("kinds = %v (len %d), want len %d", got, len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("kind[%d] = %v, want %v (all %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestTokenKindString(t *testing.T) {
 	cases := map[TokenKind]string{
 		TokenEOF:    "EOF",
