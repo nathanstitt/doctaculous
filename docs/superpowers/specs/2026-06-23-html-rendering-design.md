@@ -125,7 +125,7 @@ pkg/html                ── HTML frontend (thin; x/net/html does the heavy li
    html.go       wrap x/net/html → DOM; collect <style>, <link>, inline style=""
    dom.go        the DOM node view the cascade matches selectors against
 
-pkg/layout/inline       ── shared inline-layout core (EXTRACTED from pkg/layout, sub-project 0)
+pkg/layout/inline       ── shared inline-layout core (EXTRACTED from pkg/layout, in sub-project 3)
    shape.go      styled runs → shaped glyphs (face resolution + measurement)
    break.go      shaped glyphs + available widths → lines (the salvaged greedy breaker)
    line.go       line metrics, justification, alignment math
@@ -193,10 +193,9 @@ parallelizable track.
 
 | #  | Sub-project | What lands | Gated on |
 |----|-------------|-----------|----------|
-| 0  | **Inline-core extraction** (pure refactor) | `pkg/layout/inline`; flat engine refactored to call it. **No new feature.** DOCX goldens + `pkg/layout` tests unchanged = proof. De-risks everything after and pre-neutralizes the inline path for convergence. | — |
-| 1  | **CSS parse + cascade** (no rendering) | `pkg/css`: tokenizer, parser, selectors, specificity, cascade, inheritance, computed values. Unit-tested in isolation. Output: `ComputedStyle` per node. Pure machinery, no layout. | 0 |
+| 1  | **CSS parse + cascade** (no rendering) | `pkg/css`: tokenizer, parser, selectors, specificity, cascade, inheritance, computed values. Unit-tested in isolation. Output: `ComputedStyle` per node. Pure machinery, no layout. | — |
 | 2  | **HTML frontend + box generation** | `pkg/html` (wrap `x/net/html`), `pkg/layout/cssbox` tree, box generation incl. anonymous boxes. `pkg/resource` seam + hermetic test loader (no HTTP yet). | 1 |
-| 3  | **Block + inline normal flow** ★ | `pkg/layout/css`: BFC + IFC. Block boxes, margins (+ collapsing), padding, borders, backgrounds, text via the inline core. `OpenHTML` returns a real rendered page. First WPT slice (CSS2.1 normal flow) + goldens. | 2 |
+| 3  | **Block + inline normal flow** ★ | **Inline-core extraction** (`pkg/layout/inline`; flat engine refactored to call it, DOCX goldens unchanged = proof) folded in as the first task, then `pkg/layout/css`: BFC + IFC. Block boxes, margins (+ collapsing), padding, borders, backgrounds, text via the extracted inline core. `OpenHTML` returns a real rendered page. First WPT slice (CSS2.1 normal flow) + goldens. | 2 |
 | 4  | **Replaced content + images** | `<img>`, replaced-element sizing, basic object-fit, PNG/JPEG/GIF decode → `dev.DrawImage`. Intrinsic sizing feeds layout. | 3 |
 | 5  | **Floats + positioning** | float/clear + BFC interaction; relative/absolute/fixed positioning; z-order; overflow clipping. (The "classic CSS2 web" milestone.) | 3 |
 | 6  | **Tables** ◆ | `display:table`, auto/fixed table layout, column-width solve, row/col spans, borders. Built in the CSS engine; DOCX tables inherit it at convergence. | 5 |
