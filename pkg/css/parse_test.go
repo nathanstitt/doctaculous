@@ -20,6 +20,39 @@ func TestParseStylesheet(t *testing.T) {
 	if len(sheet.Rules[0].Declarations) != 2 {
 		t.Fatalf("rule[0] declarations = %d, want 2", len(sheet.Rules[0].Declarations))
 	}
+	// Guard against comment text leaking into the prelude: the selectors must
+	// actually match the intended elements (a count check alone would not catch
+	// "/* comment */ h1" parsing as a 4-part garbage selector).
+	h1 := &fakeNode{tag: "h1"}
+	title := &fakeNode{tag: "div", classes: []string{"title"}}
+	matchesAny := func(sels []Selector, n *fakeNode) bool {
+		for _, s := range sels {
+			if s.Matches(n) {
+				return true
+			}
+		}
+		return false
+	}
+	if !matchesAny(sheet.Rules[0].Selectors, h1) {
+		t.Errorf("rule[0] selectors do not match <h1>; comment likely leaked into the prelude")
+	}
+	if !matchesAny(sheet.Rules[0].Selectors, title) {
+		t.Errorf("rule[0] selectors do not match .title")
+	}
+}
+
+func TestParseStylesheetCommentBeforeSelector(t *testing.T) {
+	sheet := Parse("/* lead */ h1 { color: red }")
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	sel := sheet.Rules[0].Selectors[0]
+	if sel.Specificity() != (Specificity{0, 0, 1}) { // exactly one type selector (h1), not 4 parts
+		t.Fatalf("h1 selector specificity = %v, want {0 0 1} (comment must not leak into prelude)", sel.Specificity())
+	}
+	if !sel.Matches(&fakeNode{tag: "h1"}) {
+		t.Errorf("h1 selector does not match <h1>")
+	}
 }
 
 func TestParseDeclarations(t *testing.T) {

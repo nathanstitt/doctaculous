@@ -63,16 +63,19 @@ type ruleScanner struct {
 }
 
 func (s *ruleScanner) nextRule() (prelude, body string, ok bool) {
-	start := s.pos
+	var b strings.Builder
+	spanStart := s.pos
 	for s.pos < len(s.src) {
 		switch {
 		case s.atComment():
+			b.WriteString(s.src[spanStart:s.pos]) // flush the text before the comment
 			s.skipComment()
+			spanStart = s.pos // resume after the comment
 		case s.src[s.pos] == '{':
-			prelude = s.src[start:s.pos]
-			s.pos++ // consume {
+			b.WriteString(s.src[spanStart:s.pos]) // flush the final span (prelude minus comments)
+			s.pos++                               // consume {
 			body = s.readBody()
-			return prelude, body, true
+			return b.String(), body, true
 		default:
 			s.pos++
 		}
