@@ -47,6 +47,12 @@ func TestParseColor(t *testing.T) {
 		{"transparent", color.RGBA{0, 0, 0, 0}, true},
 		{"rgb(0,128,255)", color.RGBA{0, 128, 255, 255}, true},
 		{"notacolor", color.RGBA{}, false},
+		{"RED", color.RGBA{255, 0, 0, 255}, true},              // named colors are case-insensitive
+		{"RGB(0,128,255)", color.RGBA{0, 128, 255, 255}, true}, // rgb() is case-insensitive
+		{"#f00", color.RGBA{255, 0, 0, 255}, true},             // 3-digit hex, red channel
+		{"rgb(a,b,c)", color.RGBA{}, false},                    // malformed rgb rejects
+		{"rgb(-1,300,0)", color.RGBA{0, 255, 0, 255}, true},    // components clamp to [0,255]
+		{"rgb(0,128", color.RGBA{}, false},                     // truncated rgb rejects, no panic
 	}
 	for _, c := range cases {
 		got, ok := parseColor(newTokenizer(c.in))

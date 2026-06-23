@@ -79,7 +79,7 @@ func parseColor(tz *tokenizer) (color.RGBA, bool) {
 	case TokenHash:
 		return parseHex(tok.Text)
 	case TokenIdent:
-		if tok.Text == "rgb" {
+		if strings.ToLower(tok.Text) == "rgb" {
 			return parseRGBFunc(tz)
 		}
 		c, ok := namedColors[strings.ToLower(tok.Text)]
@@ -129,6 +129,9 @@ func parseRGBFunc(tz *tokenizer) (color.RGBA, bool) {
 		return color.RGBA{}, false
 	}
 	var comps [3]uint8
+	// Each component is a single TokenNumber. A negative value must be written
+	// with the sign adjacent to the digit (e.g. -10); the tokenizer emits a bare
+	// "-" as a delimiter otherwise, which correctly fails the kind check below.
 	for i := 0; i < 3; i++ {
 		// skip whitespace, read a number
 		tok := nextNonWhitespace(tz)
