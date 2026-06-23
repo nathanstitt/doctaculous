@@ -37,3 +37,51 @@ func TestInitialComputedStyle(t *testing.T) {
 		t.Errorf("initial margin-bottom/padding-left = %v/%v, want zero 0px", cs.MarginBottom, cs.PaddingLeft)
 	}
 }
+
+func TestApplyDeclaration(t *testing.T) {
+	cs := initialStyle()
+	apply := func(prop, val string) { applyDeclaration(&cs, Declaration{Property: prop, Value: val}) }
+
+	apply("display", "block")
+	apply("color", "red")
+	apply("background-color", "#ffffff")
+	apply("font-weight", "bold")
+	apply("font-style", "italic")
+	apply("text-align", "center")
+	apply("margin-top", "10px")
+	apply("width", "50%")
+
+	if cs.Display != "block" {
+		t.Errorf("display = %q", cs.Display)
+	}
+	if cs.Color != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("color = %v", cs.Color)
+	}
+	if cs.BackgroundColor != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("background = %v", cs.BackgroundColor)
+	}
+	if !cs.Bold {
+		t.Errorf("bold not set")
+	}
+	if !cs.Italic {
+		t.Errorf("italic not set")
+	}
+	if cs.TextAlign != "center" {
+		t.Errorf("text-align = %q", cs.TextAlign)
+	}
+	if cs.MarginTop != (Length{10, UnitPx}) {
+		t.Errorf("margin-top = %v", cs.MarginTop)
+	}
+	if cs.Width != (Length{50, UnitPercent}) {
+		t.Errorf("width = %v", cs.Width)
+	}
+}
+
+func TestApplyUnknownPropertyIgnored(t *testing.T) {
+	cs := initialStyle()
+	before := cs
+	applyDeclaration(&cs, Declaration{Property: "transform", Value: "rotate(5deg)"})
+	if cs != before {
+		t.Fatalf("unknown property changed the computed style")
+	}
+}
