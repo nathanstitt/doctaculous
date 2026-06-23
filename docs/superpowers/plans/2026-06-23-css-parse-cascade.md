@@ -484,20 +484,63 @@ func TestTokenizeCommentsAndPunctuation(t *testing.T) {
 		}
 	}
 }
+
+// TestTokenizeCommentEdgeCases locks in graceful degradation for malformed
+// comments (project rule: degradation paths must be covered by a test).
+func TestTokenizeCommentEdgeCases(t *testing.T) {
+	if got := tokenKinds("/* no end"); len(got) != 0 {
+		t.Errorf("unterminated comment kinds = %v, want none (consumed to EOF)", got)
+	}
+	if got := tokenKinds("/*"); len(got) != 0 {
+		t.Errorf(`bare "/*" kinds = %v, want none`, got)
+	}
+	tz := newTokenizer("/")
+	tok := tz.next()
+	if tok.Kind != TokenDelim || tok.Text != "/" {
+		t.Errorf(`lone "/" = {%v %q}, want {Delim "/"}`, tok.Kind, tok.Text)
+	}
+	got := tokenKinds("/*a*//*b*/x") // consecutive comments all skipped
+	if len(got) != 1 || got[0] != TokenIdent {
+		t.Errorf(`"/*a*//*b*/x" kinds = %v, want [Ident]`, got)
+	}
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./pkg/css/ -run TestTokenizeCommentsAndPunctuation`
+Run: `go test ./pkg/css/ -run TestTokenize`
 Expected: FAIL — `:` `;` `{` `}` `(` `)` come back as Delim, and `/* */` is not skipped.
 
 - [ ] **Step 3: Write minimal implementation**
 
+Comment skipping must be ITERATIVE, not recursive. Restructure `next()` so its body sits inside a
+`for` loop and a comment is skipped with `continue` (NOT `t.skipComment(); return t.next()` — that
+recurses one stack frame per comment, so a pathological run of millions of `/**/` could exhaust the
+goroutine stack, a fatal error). Re-read `c := t.src[t.pos]` inside the loop after `skipComment`
+advances `pos`:
+
 ```go
-// in pkg/css/token.go next(), add these cases before the default:
-//	case c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*':
-//		t.skipComment()
-//		return t.next()
+func (t *tokenizer) next() Token {
+	for {
+		if t.pos >= len(t.src) {
+			return Token{Kind: TokenEOF}
+		}
+		c := t.src[t.pos]
+		if c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*' {
+			t.skipComment()
+			continue
+		}
+		switch {
+		// ... all the existing cases (whitespace, comma, #, string, numerics,
+		//     isNameStart, default) — each returns, so the loop only re-iterates
+		//     after a comment is skipped — PLUS the six punctuation cases below.
+		}
+	}
+}
+```
+
+Add the six punctuation cases into that switch, before the `default`:
+```go
 //	case c == ':':
 //		t.pos++
 //		return Token{Kind: TokenColon, Text: ":"}
