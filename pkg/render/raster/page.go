@@ -208,6 +208,87 @@ func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Mat
 	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), true
 }
 
+// Shading resolves a named /Shading resource and builds a shader for it. A
+// shading entry may be a bare dictionary (axial/radial/function shadings) or a
+// stream (mesh shadings, Types 4–7); newShader handles both. Unsupported types or
+// malformed geometry return ok=false (with a debug log) so the `sh` operator
+// degrades gracefully.
+func (r *pageResources) Shading(name string) (render.Shader, bool) {
+	shadings := r.doc.GetDict(r.dict["Shading"])
+	if shadings == nil {
+		return nil, false
+	}
+	dict, ok := shadingDict(r.doc, shadings[pdf.Name(name)])
+	if !ok {
+		return nil, false
+	}
+	sh, err := newShader(r.doc, dict)
+	if err != nil {
+		if r.logf != nil {
+			r.logf("raster: shading %q: %v", name, err)
+		}
+		return nil, false
+	}
+	return sh, true
+}
+
+// Pattern resolves a named /Pattern resource to a shader plus its /Matrix.
+// Shading patterns (/PatternType 2) carry a /Shading and an optional /Matrix
+// mapping pattern space to the default coordinate system; we build a shader from
+// the /Shading and return that matrix. Tiling patterns (/PatternType 1, a stream)
+// are unsupported: they return ok=false with a debug log so the caller falls back
+// gracefully.
+func (r *pageResources) Pattern(name string) (render.Shader, render.Matrix, bool) {
+	patterns := r.doc.GetDict(r.dict["Pattern"])
+	if patterns == nil {
+		return nil, render.Identity, false
+	}
+	dict, ok := shadingDict(r.doc, patterns[pdf.Name(name)])
+	if !ok {
+		return nil, render.Identity, false
+	}
+	pt, _ := r.doc.GetInt(dict["PatternType"])
+	if pt != 2 {
+		if r.logf != nil {
+			r.logf("raster: pattern %q: unsupported /PatternType %d (only shading patterns)", name, pt)
+		}
+		return nil, render.Identity, false
+	}
+	shDict, ok := shadingDict(r.doc, dict["Shading"])
+	if !ok {
+		if r.logf != nil {
+			r.logf("raster: pattern %q: missing /Shading", name)
+		}
+		return nil, render.Identity, false
+	}
+	sh, err := newShader(r.doc, shDict)
+	if err != nil {
+		if r.logf != nil {
+			r.logf("raster: pattern %q: %v", name, err)
+		}
+		return nil, render.Identity, false
+	}
+	return sh, patternMatrix(r.doc, dict["Matrix"]), true
+}
+
+// shadingDict resolves o to a dictionary, accepting either a bare dict or a
+// stream (returning its stream dict). It returns ok=false otherwise.
+func shadingDict(doc *pdf.Document, o pdf.Object) (pdf.Dict, bool) {
+	if s := doc.GetStream(o); s != nil {
+		return s.Dict, true
+	}
+	if d := doc.GetDict(o); d != nil {
+		return d, true
+	}
+	return nil, false
+}
+
+// patternMatrix reads a pattern's /Matrix (six numbers), returning identity when
+// absent or malformed (the PDF default). Shares the parsing of formMatrix.
+func patternMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
+	return formMatrix(doc, o)
+}
+
 // ExtGState resolves a named entry of the /ExtGState resource dict, reporting the
 // constant alpha (/ca, /CA) and whether the entry carries parameters this
 // renderer does not interpret (a non-Normal /BM or a non-None /SMask).

@@ -112,6 +112,11 @@ what is done vs. pending.
   blend modes — separable (Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn,
   HardLight, SoftLight, Difference, Exclusion) and non-separable (Hue, Saturation, Color,
   Luminosity) via `/BM` (`pkg/render/raster/blend.go`) — applied to fills, strokes, glyphs, images.
+- **Shadings**: the `sh` operator with axial (Type 2), radial (Type 3), and function-based (Type 1)
+  shadings, mapping device pixels → parametric value → color via the PDF Function evaluator
+  (`pkg/render/raster/shading.go`, `render.Shader` seam). Honors `/Domain`, `/Extend`, the shading
+  `/Matrix`, the active clip, and `/BM` blend modes. Shading patterns (`scn`) and mesh shadings
+  (Types 4–7) are still pending (see TODO).
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
   1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
   stencils painted in the fill color, `/Decode` arrays, and inline images (`BI`/`ID`/`EI`)
@@ -128,10 +133,11 @@ that skip into real output.
 
 1. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-2. **Shadings / gradients** — the `sh` operator and `/Pattern` color space: a PDF Function
-   evaluator (Types 0/2/3/4), axial (Type 2) + radial (Type 3) + function-based (Type 1) + mesh
-   (Types 4–7) shadings, and shading patterns via `scn`. (Blend modes are done; `sh` still logs
-   unsupported.) Also **luminosity soft masks** (`/SMask` in ExtGState) and **transparency groups**.
+2. **Shadings / gradients (remaining)** — shading **patterns** via the `/Pattern` color space + `scn`
+   (PatternType 2), and **mesh shadings** (Types 4–7: free-form/lattice Gouraud triangles and
+   Coons/tensor patches). The `sh` operator with axial/radial/function-based shadings and the PDF
+   Function evaluator (Types 0/2/3/4) are done. Also **luminosity soft masks** (`/SMask` in
+   ExtGState) and **transparency groups**.
 3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.
 4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;

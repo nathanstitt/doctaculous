@@ -18,6 +18,7 @@ type recDevice struct {
 	clips          int
 	saves          int
 	restores       int
+	shadings       int // FillShading call count
 	lastFillPath   *render.Path
 	lastImageAlpha float64
 }
@@ -35,9 +36,12 @@ func (d *recDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64,
 	d.lastImageAlpha = alpha
 }
 func (d *recDevice) FillGlyph(o *render.Path, c render.FillColor, blendMode string) { d.glyphs++ }
-func (d *recDevice) PushClip(p *render.Path, r render.FillRule)                     { d.clips++ }
-func (d *recDevice) Save()                                                          { d.saves++ }
-func (d *recDevice) Restore()                                                       { d.restores++ }
+func (d *recDevice) FillShading(shader render.Shader, ctm render.Matrix, blendMode string) {
+	d.shadings++
+}
+func (d *recDevice) PushClip(p *render.Path, r render.FillRule) { d.clips++ }
+func (d *recDevice) Save()                                      { d.saves++ }
+func (d *recDevice) Restore()                                   { d.restores++ }
 
 func runContent(t *testing.T, src string, res Resources) *recDevice {
 	t.Helper()
@@ -142,9 +146,17 @@ func (fakeFont) DecodeString(s []byte) []Glyph {
 	return glyphs
 }
 
+// constShader is a trivial render.Shader that paints one solid color
+// everywhere, used to assert that the sh/scn paths reach the device.
+type constShader struct{ c color.RGBA }
+
+func (s constShader) ColorAt(float64, float64) (color.RGBA, bool) { return s.c, true }
+
 type fakeRes struct {
-	font  GlyphSource
-	extGS map[string]ExtGStateParams
+	font     GlyphSource
+	extGS    map[string]ExtGStateParams
+	shadings map[string]render.Shader
+	patterns map[string]render.Shader
 }
 
 func (r fakeRes) Font(name string) GlyphSource { return r.font }
@@ -156,6 +168,14 @@ func (r fakeRes) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) 
 }
 func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, bool) {
 	return nil, nil, render.Identity, false
+}
+func (r fakeRes) Shading(name string) (render.Shader, bool) {
+	s, ok := r.shadings[name]
+	return s, ok
+}
+func (r fakeRes) Pattern(name string) (render.Shader, render.Matrix, bool) {
+	s, ok := r.patterns[name]
+	return s, render.Identity, ok
 }
 func (r fakeRes) ExtGState(name string) (ExtGStateParams, bool) {
 	p, ok := r.extGS[name]
@@ -238,6 +258,26 @@ func TestMalformedOperandsNoPanic(t *testing.T) {
 			}()
 			runContent(t, s, fakeRes{font: fakeFont{}})
 		})
+	}
+}
+
+func TestShOperatorPaintsShading(t *testing.T) {
+	res := fakeRes{shadings: map[string]render.Shader{
+		"Sh1": constShader{c: color.RGBA{0, 0, 255, 255}},
+	}}
+	// Clip to a rect, then paint the shading. The device should see one
+	// FillShading call.
+	dev := runContent(t, "q 0 0 100 100 re W n /Sh1 sh Q", res)
+	if dev.shadings != 1 {
+		t.Fatalf("sh: FillShading called %d times, want 1", dev.shadings)
+	}
+}
+
+func TestShOperatorMissingShadingSkips(t *testing.T) {
+	// An unknown shading name must skip gracefully (no panic, no FillShading).
+	dev := runContent(t, "/Nope sh", fakeRes{shadings: map[string]render.Shader{}})
+	if dev.shadings != 0 {
+		t.Fatalf("sh with missing shading: FillShading called %d times, want 0", dev.shadings)
 	}
 }
 

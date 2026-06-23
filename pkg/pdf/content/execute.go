@@ -156,6 +156,10 @@ func (it *Interpreter) execute(op string, operands []pdf.Object, depth int) {
 	case "TJ":
 		it.showTextArray(operands)
 
+	// --- shadings ---
+	case "sh":
+		it.paintShading(operands)
+
 	// --- XObjects ---
 	case "Do":
 		it.doXObject(operands, depth)
