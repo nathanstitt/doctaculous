@@ -73,20 +73,30 @@ var (
 	mono   = Substitute{Name: "Inconsolata-Regular", Data: inconsolataTTF, Kind: KindTrueType}
 )
 
-// Lookup returns the bundled substitute face for a PDF /BaseFont name, resolving
-// the 14 standard names and common aliases (Arial->Helvetica, CourierNew->
-// Courier, TimesNewRoman->Times). It strips a subset prefix ("ABCDEF+Name") and
-// is case-insensitive. ok is false for fonts with no bundled substitute —
-// notably Symbol and ZapfDingbats, and any non-standard base font.
+// Lookup returns the bundled substitute face for a font family name, resolving
+// the 14 PDF standard names and common aliases (Arial->Helvetica, CourierNew->
+// Courier, TimesNewRoman->Times) as well as the default Office families used by
+// DOCX and other reflowable documents (Calibri/Segoe UI->Heros sans,
+// Cambria/Georgia->Termes serif, Consolas->Inconsolata monospace). It strips a
+// subset prefix ("ABCDEF+Name") and is case-insensitive. ok is false for families
+// with no bundled substitute — notably Symbol, ZapfDingbats, and Wingdings, and
+// any unrecognized name.
 func Lookup(baseFont string) (Substitute, bool) {
 	name := canonical(baseFont)
 	switch {
-	case strings.HasPrefix(name, "courier"):
+	case strings.HasPrefix(name, "courier"),
+		strings.HasPrefix(name, "consolas"),
+		strings.HasPrefix(name, "inconsolata"):
 		return mono, true
-	case strings.HasPrefix(name, "times"):
+	case strings.HasPrefix(name, "times"),
+		strings.HasPrefix(name, "cambria"),
+		strings.HasPrefix(name, "georgia"):
 		return termes, true
 	case strings.HasPrefix(name, "helvetica"),
-		strings.HasPrefix(name, "arial"):
+		strings.HasPrefix(name, "arial"),
+		strings.HasPrefix(name, "calibri"),
+		strings.HasPrefix(name, "segoeui"),
+		strings.HasPrefix(name, "verdana"):
 		return heros, true
 	default:
 		return Substitute{}, false

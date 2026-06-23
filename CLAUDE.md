@@ -22,8 +22,18 @@ next.
 `pkg/render` device-independent paint ops (`Device` interface) · `pkg/render/raster` bitmap
 backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 
-The `Device` interface is the seam: the interpreter must stay backend-agnostic so we can add an
-SVG/other backend later without touching parsing or interpretation.
+**Reflowable documents** (DOCX today; HTML/EPUB next) share a second pipeline that meets the PDF
+pipeline at `render.Device`: `pkg/docx` parse → `pkg/docx/style` cascade → `pkg/docx/lower` lower to
+a **format-neutral box model** (`pkg/layout/box`) → `pkg/layout` reflow engine (line-break + flow +
+paginate) → `pkg/layout/paint` → the same `render.Device`/`pkg/render/raster`. The box model is the
+contract between frontends and engine: a new reflow format (HTML, EPUB) is just a parse+lower
+frontend producing `box.Document`; it never touches line-breaking or pagination. Font outlines for
+both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces for reflow);
+`pkg/layout/font` caches them.
+
+The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML/EPUB)
+must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
+interpretation, or layout.
 
 ## Go practices
 
@@ -131,6 +141,19 @@ what is done vs. pending.
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
   kill a batch.
+- **Reflowable documents — DOCX** (covered by `testdata/gen/docx` fixtures + `pkg/doctaculous`
+  `docx-*` golden images): open a `.docx` via `OpenDOCX`/`OpenDOCXBytes` and rasterize its pages
+  through the shared reflow engine. Parsing (`pkg/docx`): ZIP/OPC container, relationship + main-part
+  resolution, `document.xml` (paragraphs, runs, `w:t` with `xml:space`, `w:br`, `w:tab`), run
+  properties (bold/italic/underline, `w:sz`, `w:color`, `w:rFonts`), paragraph properties
+  (`w:jc`, `w:spacing`, `w:ind`, `w:pStyle`, `w:pageBreakBefore`), and section geometry
+  (`w:sectPr` pgSz/pgMar). Styles (`pkg/docx/style`): the full `docDefaults → basedOn chain →
+  direct` cascade with a cycle guard. Layout (`pkg/layout`): greedy line-breaking, vertical flow,
+  and pagination on overflow with real font metrics; line height = font metrics × 1.15 for
+  `lineRule=auto`; left/right/center/justify alignment; first-line/left/right indents. Fonts:
+  named families resolve to the bundled base-14 substitutes (`pkg/font/family.go`, Office defaults
+  like Calibri/Cambria aliased), glyphs resolved by name then cmap. Single section; one engine
+  drives the same `render.Device`/raster as PDF.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -148,9 +171,22 @@ that skip into real output.
    done. Also **luminosity soft masks** (`/SMask` in ExtGState) and **transparency groups**.
 3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.
-4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
-   Symbol and ZapfDingbats have no substitute (skipped). Bundle weighted faces + symbol look-alikes,
-   and ideally standard AFM widths for exact base-14 metrics.
+4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face (now
+   affecting DOCX rendering too, not just PDF); Symbol and ZapfDingbats have no substitute (skipped).
+   Bundle weighted faces + symbol look-alikes, and ideally standard AFM widths for exact base-14
+   metrics.
+5. **DOCX features (reflow frontend)** — each a new `testdata/gen/docx` fixture + golden in the same
+   PR; add new box-model vocabulary to `pkg/layout/box` (engine track) before the DOCX frontend
+   emits it, so HTML/EPUB get it for free. In rough order: **lists/numbering** (`numbering.xml`,
+   per-level counters, marker glyphs), **tables** (`w:tbl`, grid + column-width solve, spans, cell
+   content recursion — the biggest engine addition), **images** (`w:drawing`→`a:blip`→media,
+   PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
+   content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
+   fixes bold/italic fidelity).
+6. **New reflow frontends** — **HTML** (`golang.org/x/net/html` + a small CSS subset → `box.Document`,
+   `OpenHTML`) and **EPUB** (ZIP + OPF spine reusing the HTML frontend per chapter, `OpenEPUB`). These
+   validate the neutral-engine design: each is only a parse+lower step; the engine, paint, and raster
+   are reused unchanged.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
