@@ -15,7 +15,9 @@ func TestParseLength(t *testing.T) {
 		{"0", 0, UnitPx, true}, // unitless zero is a length of 0
 		{"10pt", 10, UnitPt, true},
 		{"auto", 0, UnitAuto, true},
-		{"red", 0, UnitPx, false}, // not a length
+		{"red", 0, UnitPx, false},  // not a length
+		{"5", 0, UnitPx, false},    // non-zero unitless number is not a length
+		{"10vw", 0, UnitPx, false}, // unrecognized unit is not a length
 	}
 	for _, c := range cases {
 		got, ok := parseLength(newTokenizer(c.in).next())
