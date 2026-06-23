@@ -86,6 +86,66 @@ func TestApplyUnknownPropertyIgnored(t *testing.T) {
 	}
 }
 
+func TestCascadeSpecificityAndInheritance(t *testing.T) {
+	src := `
+		p { color: green; font-size: 12px; }
+		.intro { color: blue; }
+		#lead { color: red; }
+	`
+	sheet := Parse(src)
+	r := NewResolver(sheet, nil)
+
+	body := &fakeNode{tag: "body"}
+	// <p id="lead" class="intro"> inside <body>
+	p := &fakeNode{tag: "p", id: "lead", classes: []string{"intro"}, parent: body}
+
+	cs := r.Compute(p, initialStyle())
+	// #lead (id) beats .intro (class) beats p (type): red wins.
+	if cs.Color != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("color = %v, want red (id wins)", cs.Color)
+	}
+	// font-size only set by the p rule: 12.
+	if cs.FontSizePt != 12 {
+		t.Errorf("font-size = %v, want 12", cs.FontSizePt)
+	}
+}
+
+func TestCascadeInheritsColorButNotMargin(t *testing.T) {
+	src := `div { color: blue; margin-top: 20px; }`
+	sheet := Parse(src)
+	r := NewResolver(sheet, nil)
+
+	div := &fakeNode{tag: "div"}
+	child := &fakeNode{tag: "span", parent: div}
+
+	divStyle := r.Compute(div, initialStyle())
+	childStyle := r.Compute(child, divStyle) // parent's computed style is the inheritance base
+
+	// color inherits:
+	if childStyle.Color != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("child color = %v, want inherited blue", childStyle.Color)
+	}
+	// margin does NOT inherit: child keeps the initial 0.
+	if childStyle.MarginTop != (Length{0, UnitPx}) {
+		t.Errorf("child margin-top = %v, want 0 (not inherited)", childStyle.MarginTop)
+	}
+}
+
+func TestCascadeImportantWins(t *testing.T) {
+	src := `
+		#lead { color: red; }
+		p { color: green !important; }
+	`
+	sheet := Parse(src)
+	r := NewResolver(sheet, nil)
+	p := &fakeNode{tag: "p", id: "lead"}
+	cs := r.Compute(p, initialStyle())
+	// !important beats higher specificity.
+	if cs.Color != (color.RGBA{0, 128, 0, 255}) {
+		t.Errorf("color = %v, want green (!important wins over id)", cs.Color)
+	}
+}
+
 func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
 	// A malformed value leaves the prior value intact (the documented contract).
 	cs := initialStyle()

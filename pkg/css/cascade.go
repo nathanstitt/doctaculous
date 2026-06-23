@@ -2,6 +2,7 @@ package css
 
 import (
 	"image/color"
+	"sort"
 	"strings"
 )
 
@@ -32,6 +33,113 @@ type ComputedStyle struct {
 	BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle string
 
 	Width, Height Length // UnitAuto = "auto"
+}
+
+// Resolver computes the ComputedStyle of any node against a parsed stylesheet.
+// Build one per stylesheet with NewResolver; it is read-only after construction
+// and safe for concurrent use. logf may be nil.
+type Resolver struct {
+	sheet Stylesheet
+	logf  func(string, ...any)
+}
+
+// NewResolver builds a Resolver over a parsed stylesheet.
+func NewResolver(sheet Stylesheet, logf func(string, ...any)) *Resolver {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	return &Resolver{sheet: sheet, logf: logf}
+}
+
+// Compute returns node n's ComputedStyle. parentStyle is the already-computed
+// style of n's parent (use initialStyle() for the root). The cascade is: start
+// from the inheritance base, then apply every matching declaration in increasing
+// (specificity, source-order) order, with !important declarations applied last.
+func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
+	cs := inheritFrom(parentStyle)
+
+	type matched struct {
+		decl  Declaration
+		spec  Specificity
+		order int
+	}
+	var normal, important []matched
+
+	order := 0
+	for ri := range r.sheet.Rules {
+		rule := &r.sheet.Rules[ri]
+		spec, ok := bestMatch(rule.Selectors, n)
+		if !ok {
+			continue
+		}
+		for _, d := range rule.Declarations {
+			m := matched{decl: d, spec: spec, order: order}
+			if d.Important {
+				important = append(important, m)
+			} else {
+				normal = append(normal, m)
+			}
+			order++
+		}
+	}
+
+	less := func(a, b matched) bool {
+		if a.spec.Less(b.spec) {
+			return true
+		}
+		if b.spec.Less(a.spec) {
+			return false
+		}
+		return a.order < b.order // later source order wins, so sort ascending and apply in order
+	}
+	sort.SliceStable(normal, func(i, j int) bool { return less(normal[i], normal[j]) })
+
+	// 1. normal author rules, lowest to highest (specificity, then source order).
+	for _, m := range normal {
+		applyDeclaration(&cs, m.decl)
+	}
+
+	// 2. inline style="" attribute is inserted here in Task 14 (it outranks all
+	//    normal rules; its !important declarations are appended to `important`).
+
+	// 3. !important declarations overlay last so they always win. Sorting happens
+	//    here — after the inline block so inline-important is included.
+	sort.SliceStable(important, func(i, j int) bool { return less(important[i], important[j]) })
+	for _, m := range important {
+		applyDeclaration(&cs, m.decl)
+	}
+	return cs
+}
+
+// bestMatch returns the highest specificity among a rule's selectors that match
+// n, and whether any matched.
+func bestMatch(sels []Selector, n Node) (Specificity, bool) {
+	var best Specificity
+	found := false
+	for _, s := range sels {
+		if s.Matches(n) {
+			if !found || best.Less(s.Specificity()) {
+				best = s.Specificity()
+				found = true
+			}
+		}
+	}
+	return best, found
+}
+
+// inheritFrom builds an element's base style: inherited properties carry over
+// from the parent's computed style; everything else resets to initial.
+func inheritFrom(parent ComputedStyle) ComputedStyle {
+	cs := initialStyle()
+	// Inherited properties (CSS): color, font-*, line-height, text-align.
+	cs.Color = parent.Color
+	cs.FontFamily = parent.FontFamily
+	cs.FontSizePt = parent.FontSizePt
+	cs.Bold = parent.Bold
+	cs.Italic = parent.Italic
+	cs.LineHeight = parent.LineHeight
+	cs.TextAlign = parent.TextAlign
+	return cs
 }
 
 // initialStyle returns a ComputedStyle holding the CSS initial values, used as
