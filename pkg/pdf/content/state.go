@@ -39,7 +39,22 @@ type gstate struct {
 	fillCS   colorSpace
 	strokeCS colorSpace
 
+	// fillShading, when non-nil, is a shading pattern set as the fill "color" via
+	// scn under the /Pattern color space. A subsequent fill paints the shading
+	// clipped to the path instead of a solid color (see fillPath). It is cloned by
+	// value with the rest of the gstate on q/Q.
+	fillShading *shadingSource
+
 	text textState
+}
+
+// shadingSource is a shading-pattern fill source: the backend-built shader plus
+// the device-space transform to evaluate it under. The matrix is captured when
+// the pattern is selected (patternMatrix × page base), per the spec that pattern
+// space is relative to the default coordinate system, not the current CTM.
+type shadingSource struct {
+	shader render.Shader
+	ctm    render.Matrix
 }
 
 // newGState returns the initial graphics state for a page, with the given base

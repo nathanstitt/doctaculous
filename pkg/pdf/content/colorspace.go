@@ -14,6 +14,10 @@ const (
 	// CalRGB, Lab, Separation, etc.). The interpreter maps components to RGB as
 	// best it can.
 	csOther
+	// csPattern is the /Pattern color space. Under it, sc/scn carry a pattern
+	// name rather than color components; the fill becomes a pattern (a shading
+	// pattern sets a shading fill source, see gstate.fillShading).
+	csPattern
 )
 
 // grayToRGBA converts a single gray component (0..1) to RGBA.

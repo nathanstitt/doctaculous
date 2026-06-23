@@ -7,42 +7,31 @@ import (
 	"image/color"
 	"runtime"
 	"sync"
-
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/render/raster"
 )
 
 // Document is an opened document ready for rendering. It is read-only after Open
-// and safe for concurrent use across goroutines.
+// and safe for concurrent use across goroutines. It wraps a format-specific
+// renderer (PDF today; DOCX and other reflowable formats via OpenDOCX) behind a
+// common API, so callers rasterize any supported format the same way.
 type Document struct {
-	pdf *pdf.Document
+	r renderer
 }
 
-// Open reads and parses a document from a file path.
-func Open(path string) (*Document, error) {
-	d, err := pdf.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	return &Document{pdf: d}, nil
-}
-
-// OpenBytes parses a document from an in-memory byte slice. The slice is retained
-// and must not be modified by the caller.
-func OpenBytes(data []byte) (*Document, error) {
-	d, err := pdf.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return &Document{pdf: d}, nil
+// renderer is the format-agnostic backend a Document delegates to. Each supported
+// format provides one; the public Document and its worker pool are format-neutral.
+type renderer interface {
+	// pageCount reports the number of pages.
+	pageCount() int
+	// renderPage rasterizes one zero-based page to an image.
+	renderPage(ctx context.Context, index int, opts RasterOptions) (image.Image, error)
 }
 
 // PageCount returns the number of pages.
-func (d *Document) PageCount() int { return d.pdf.PageCount() }
+func (d *Document) PageCount() int { return d.r.pageCount() }
 
 // RasterOptions controls rasterization.
 type RasterOptions struct {
-	// DPI is the output resolution (PDF user space is 72 units/inch). Defaults to
+	// DPI is the output resolution (document space is 72 units/inch). Defaults to
 	// 150 when zero or negative.
 	DPI float64
 	// Background fills the page before drawing. Defaults to opaque white. Set to a
@@ -62,17 +51,9 @@ func (o RasterOptions) dpi() float64 {
 	return o.DPI
 }
 
-func (o RasterOptions) rasterOpts() raster.Options {
-	return raster.Options{DPI: o.dpi(), Background: o.Background, Logf: o.Logf}
-}
-
 // RasterizePage renders a single page (zero-based index) to an image.
 func (d *Document) RasterizePage(ctx context.Context, index int, opts RasterOptions) (image.Image, error) {
-	pg, err := d.pdf.Page(index)
-	if err != nil {
-		return nil, fmt.Errorf("doctaculous: page %d: %w", index, err)
-	}
-	img, err := raster.RenderPage(ctx, pg, opts.rasterOpts())
+	img, err := d.r.renderPage(ctx, index, opts)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: rasterize page %d: %w", index, err)
 	}
@@ -107,7 +88,6 @@ func (d *Document) RasterizePages(ctx context.Context, indices []int, opts Raste
 		return results
 	}
 
-	ropts := opts.rasterOpts()
 	jobs := make(chan int) // sends positions into the indices/results slices
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -119,12 +99,7 @@ func (d *Document) RasterizePages(ctx context.Context, indices []int, opts Raste
 					results[pos].Err = err
 					continue
 				}
-				pg, err := d.pdf.Page(indices[pos])
-				if err != nil {
-					results[pos].Err = fmt.Errorf("doctaculous: page %d: %w", indices[pos], err)
-					continue
-				}
-				img, err := raster.RenderPage(ctx, pg, ropts)
+				img, err := d.r.renderPage(ctx, indices[pos], opts)
 				if err != nil {
 					results[pos].Err = fmt.Errorf("doctaculous: rasterize page %d: %w", indices[pos], err)
 					continue
@@ -168,7 +143,7 @@ func (d *Document) RasterizePages(ctx context.Context, indices []int, opts Raste
 
 // AllPages is a convenience that returns every page index in order.
 func (d *Document) AllPages() []int {
-	idx := make([]int, d.pdf.PageCount())
+	idx := make([]int, d.PageCount())
 	for i := range idx {
 		idx[i] = i
 	}

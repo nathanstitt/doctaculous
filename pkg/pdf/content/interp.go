@@ -27,6 +27,18 @@ type Resources interface {
 	// Form returns the decoded content bytes and resources of a form XObject, or
 	// ok=false if name is not a form XObject. matrix is the form's /Matrix.
 	Form(name string) (content []byte, res Resources, matrix render.Matrix, ok bool)
+	// Shading returns a backend-built shader for a named /Shading resource, or
+	// ok=false if the name is absent or the shading cannot be built (unsupported
+	// type, malformed geometry). The backend keeps shading geometry and color math
+	// out of the interpreter; the interpreter just hands the shader and CTM to the
+	// device's FillShading.
+	Shading(name string) (sh render.Shader, ok bool)
+	// Pattern returns a named /Pattern resource as a shader plus the pattern's
+	// /Matrix, or ok=false if absent or unsupported. PatternType 2 (shading
+	// patterns) yield a shader whose /Matrix maps pattern space to the default
+	// (page) coordinate system; PatternType 1 (tiling) is unsupported and returns
+	// ok=false so the caller degrades gracefully.
+	Pattern(name string) (sh render.Shader, matrix render.Matrix, ok bool)
 	// ExtGState returns the named entry of the /ExtGState resource dict, or
 	// ok=false if it is absent. Only the parameters the interpreter applies are
 	// reported (see ExtGStateParams); unsupported entries are flagged so the
@@ -57,6 +69,11 @@ type Interpreter struct {
 	res    Resources
 	logf   func(string, ...any)
 	maxOps int
+
+	// base maps PDF default (page) user space to device pixels. Pattern matrices
+	// are defined relative to this default space (not the current CTM), so a
+	// shading pattern's effective transform is patternMatrix × base.
+	base render.Matrix
 
 	stack []gstate
 	gs    gstate
@@ -99,6 +116,7 @@ func New(doc *pdf.Document, dev render.Device, res Resources, base render.Matrix
 		res:    res,
 		logf:   logf,
 		maxOps: opts.MaxOps,
+		base:   base,
 		gs:     newGState(base),
 	}
 }

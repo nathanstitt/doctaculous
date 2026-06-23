@@ -34,6 +34,10 @@ type glyphProgram interface {
 	nominalGID(r rune) (fonts.GID, bool)
 	// numGlyphs is the glyph count, used to bound GID lookups.
 	numGlyphs() int
+	// hExtents returns the font's horizontal ascender, descender, and line gap in
+	// font units (ascender positive, descender negative, Y-up convention), ok=false
+	// if the program exposes no such metrics (e.g. bare CFF).
+	hExtents() (ascender, descender, lineGap float64, ok bool)
 }
 
 // program wraps a parsed font program. It is read-only after construction and
@@ -135,6 +139,26 @@ func (p *program) advanceEm(gid fonts.GID) (float64, bool) {
 	return p.gp.advance(gid) / p.upm, true
 }
 
+// metrics returns the font's vertical line metrics in em units (Y up): a positive
+// ascent, a positive descent (the magnitude below the baseline), and the suggested
+// line gap. When the program exposes no extents (bare CFF) it falls back to the
+// common 0.8/0.2/0 approximation so line height is still sane.
+func (p *program) metrics() (ascent, descent, lineGap float64) {
+	asc, desc, gap, ok := p.gp.hExtents()
+	if !ok {
+		return 0.8, 0.2, 0
+	}
+	// Extents are font units with descender negative (Y up); normalize to em and to
+	// a positive descent magnitude.
+	ascent = asc / p.upm
+	descent = -desc / p.upm
+	lineGap = gap / p.upm
+	if ascent <= 0 && descent <= 0 {
+		return 0.8, 0.2, 0
+	}
+	return ascent, descent, lineGap
+}
+
 // nameToGID builds a glyph-name→GID map by walking every glyph's name. Simple
 // fonts resolve a PDF code → glyph name (via /Encoding) → GID through this map.
 // It is built once per font and cached on the program by the caller.
@@ -228,6 +252,9 @@ func (a ttProgram) glyphName(gid fonts.GID) string      { return a.f.GlyphName(g
 func (a ttProgram) advance(gid fonts.GID) float64       { return float64(a.f.HorizontalAdvance(gid)) }
 func (a ttProgram) nominalGID(r rune) (fonts.GID, bool) { return a.f.NominalGlyph(r) }
 func (a ttProgram) numGlyphs() int                      { return a.f.NumGlyphs }
+func (a ttProgram) hExtents() (asc, desc, gap float64, ok bool) {
+	return fontHExtents(a.f.FontHExtents())
+}
 
 // t1Program adapts a classic *type1.Font. type1.Font implements fonts.Face but
 // exposes no glyph count, so numGlyphs is derived by probing GlyphName and cached.
@@ -243,6 +270,9 @@ func (a *t1Program) segments(gid fonts.GID) []fonts.Segment {
 func (a *t1Program) glyphName(gid fonts.GID) string      { return a.f.GlyphName(gid) }
 func (a *t1Program) advance(gid fonts.GID) float64       { return float64(a.f.HorizontalAdvance(gid)) }
 func (a *t1Program) nominalGID(r rune) (fonts.GID, bool) { return a.f.NominalGlyph(r) }
+func (a *t1Program) hExtents() (asc, desc, gap float64, ok bool) {
+	return fontHExtents(a.f.FontHExtents())
+}
 
 // numGlyphs probes GlyphName upward until it stops returning names. Type1 fonts
 // have at most 256 encoded glyphs but may carry more in their charstrings; we cap
@@ -286,6 +316,19 @@ func (a cffProgram) nominalGID(r rune) (fonts.GID, bool) {
 	return cmap.Lookup(r)
 }
 func (a cffProgram) numGlyphs() int { return a.f.NumGlyphs() }
+
+// hExtents reports no metrics for bare CFF (type1C exposes none); callers fall
+// back to upem-derived defaults.
+func (a cffProgram) hExtents() (asc, desc, gap float64, ok bool) { return 0, 0, 0, false }
+
+// fontHExtents adapts a benoitkugler fonts.FontExtents result to this package's
+// (ascender, descender, lineGap, ok) tuple in font units.
+func fontHExtents(ext fonts.FontExtents, ok bool) (asc, desc, gap float64, _ bool) {
+	if !ok {
+		return 0, 0, 0, false
+	}
+	return float64(ext.Ascender), float64(ext.Descender), float64(ext.LineGap), true
+}
 
 // wrapProgErr tags a parser error as an unsupported font program.
 func wrapProgErr(err error) error {

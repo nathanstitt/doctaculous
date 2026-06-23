@@ -84,6 +84,36 @@ var Core = []CoreFixture{
 		Build: FormXObjectPDF,
 	},
 	{
+		Name:  "shading-axial",
+		Desc:  "axial (Type 2) shading via sh: red→blue diagonal ramp, /Extend both",
+		Pages: 1,
+		Build: ShadingAxialPDF,
+	},
+	{
+		Name:  "shading-radial",
+		Desc:  "radial (Type 3) shading via sh: concentric green→yellow circles",
+		Pages: 1,
+		Build: ShadingRadialPDF,
+	},
+	{
+		Name:  "shading-function",
+		Desc:  "function-based (Type 1) shading via sh: 2-D color field from a Type 4 function",
+		Pages: 1,
+		Build: ShadingFunctionPDF,
+	},
+	{
+		Name:  "shading-pattern",
+		Desc:  "shading pattern (PatternType 2) via scn: a diamond filled with an axial gradient",
+		Pages: 1,
+		Build: ShadingPatternPDF,
+	},
+	{
+		Name:  "shading-mesh",
+		Desc:  "free-form Gouraud mesh (Type 4) via sh: a two-triangle square, color per corner",
+		Pages: 1,
+		Build: ShadingMeshPDF,
+	},
+	{
 		Name:  "flate",
 		Desc:  "FlateDecode-compressed content stream",
 		Pages: 1,

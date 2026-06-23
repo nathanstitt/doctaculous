@@ -1,0 +1,621 @@
+package docx
+
+import (
+	"bytes"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"image/color"
+	"io"
+	"path"
+	"strconv"
+	"strings"
+)
+
+// wNS is the WordprocessingML main namespace. encoding/xml resolves prefixes to
+// namespaces, so we match on Space rather than the "w:" prefix (a producer may
+// use a different prefix for the same namespace).
+const wNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+// parsePackage parses the main document and (if present) the styles part into a
+// Document. Styles are resolved relative to the main document's relationships,
+// falling back to the conventional word/styles.xml.
+func parsePackage(pkg *pkgReader) (*Document, error) {
+	mainName, err := pkg.mainDocumentPart()
+	if err != nil {
+		return nil, err
+	}
+	mainData, ok := pkg.part(mainName)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrMissingPart, mainName)
+	}
+
+	doc := &Document{Section: defaultSection()}
+	if err := parseDocument(mainData, doc); err != nil {
+		return nil, err
+	}
+
+	// Styles part: prefer the relationship target, fall back to the convention.
+	stylesName := resolveStylesPart(pkg, mainName)
+	if data, ok := pkg.part(stylesName); ok {
+		styles, err := parseStyles(data)
+		if err != nil {
+			return nil, err
+		}
+		doc.Styles = styles
+	}
+	return doc, nil
+}
+
+// resolveStylesPart finds the styles part name via the main document's
+// relationships, falling back to word/styles.xml.
+func resolveStylesPart(pkg *pkgReader, mainName string) string {
+	const stylesType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
+	rels := pkg.relsForByType(mainName, stylesType)
+	if rels != "" {
+		return rels
+	}
+	return "word/styles.xml"
+}
+
+// relsForByType returns the first relationship target of the given type for a
+// source part, or "" if none.
+func (p *pkgReader) relsForByType(partName, relType string) string {
+	partName = cleanPart(partName)
+	dir, base := splitPart(partName)
+	relsName := joinPart(dir, "_rels", base+".rels")
+	data, ok := p.part(relsName)
+	if !ok {
+		return ""
+	}
+	var doc struct {
+		Rels []struct {
+			Type   string `xml:"Type,attr"`
+			Target string `xml:"Target,attr"`
+		} `xml:"Relationship"`
+	}
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	for _, r := range doc.Rels {
+		if r.Type == relType {
+			return joinPart(dir, r.Target)
+		}
+	}
+	return ""
+}
+
+// parseDocument walks word/document.xml, filling the body blocks and the
+// body-level section properties.
+func parseDocument(data []byte, doc *Document) error {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return fmt.Errorf("%w: document: %v", ErrMalformedXML, err)
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if se.Name.Space == wNS && se.Name.Local == "body" {
+			if err := parseBody(dec, doc); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// parseBody consumes the children of w:body until its end element.
+func parseBody(dec *xml.Decoder, doc *Document) error {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("%w: body: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return fmt.Errorf("%w: body: %v", ErrMalformedXML, err)
+				}
+				continue
+			}
+			switch t.Name.Local {
+			case "p":
+				p, sect, err := parseParagraph(dec)
+				if err != nil {
+					return err
+				}
+				doc.Body = append(doc.Body, Block{Paragraph: p})
+				// A sectPr inside the last paragraph's pPr is the section for that
+				// run of content; for a single-section document it is the whole doc.
+				if sect != nil {
+					doc.Section = *sect
+				}
+			case "sectPr":
+				sect, err := parseSectPr(dec)
+				if err != nil {
+					return err
+				}
+				doc.Section = sect
+			default:
+				if err := dec.Skip(); err != nil {
+					return fmt.Errorf("%w: body: %v", ErrMalformedXML, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Space == wNS && t.Name.Local == "body" {
+				return nil
+			}
+		}
+	}
+}
+
+// parseParagraph consumes a w:p, returning the paragraph and any sectPr found in
+// its pPr (which marks a section boundary).
+func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
+	p := &Paragraph{}
+	var sect *SectionProps
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return nil, nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
+				}
+				continue
+			}
+			switch t.Name.Local {
+			case "pPr":
+				props, s, err := parsePPr(dec)
+				if err != nil {
+					return nil, nil, err
+				}
+				p.Props = props
+				sect = s
+			case "r":
+				runs, err := parseRun(dec)
+				if err != nil {
+					return nil, nil, err
+				}
+				p.Runs = append(p.Runs, runs...)
+			default:
+				if err := dec.Skip(); err != nil {
+					return nil, nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "p" {
+				return p, sect, nil
+			}
+		}
+	}
+}
+
+// parsePPr consumes a w:pPr, returning paragraph properties and any nested
+// sectPr.
+func parsePPr(dec *xml.Decoder) (ParagraphProps, *SectionProps, error) {
+	var props ParagraphProps
+	var sect *SectionProps
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return props, nil, fmt.Errorf("%w: pPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				applyPPrChild(&props, t)
+				if t.Name.Local == "sectPr" {
+					s, err := parseSectPr(dec)
+					if err != nil {
+						return props, nil, err
+					}
+					sect = &s
+					continue
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return props, nil, fmt.Errorf("%w: pPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "pPr" {
+				return props, sect, nil
+			}
+		}
+	}
+}
+
+// applyPPrchild applies a single direct paragraph-property element. Elements with
+// further children (sectPr) are handled by the caller; the rest are self-closing
+// and fully described by their attributes.
+func applyPPrChild(props *ParagraphProps, e xml.StartElement) {
+	switch e.Name.Local {
+	case "pStyle":
+		props.StyleID = wVal(e)
+	case "jc":
+		props.Justify = parseJustify(wVal(e))
+		props.HasJustify = true
+	case "pageBreakBefore":
+		props.PageBreakBefore = parseOnOff(wVal(e))
+	case "spacing":
+		applySpacing(props, e)
+	case "ind":
+		applyIndent(props, e)
+	}
+}
+
+// applySpacing reads w:spacing before/after/line/lineRule.
+func applySpacing(props *ParagraphProps, e xml.StartElement) {
+	if v, ok := wAttrInt(e, "before"); ok {
+		props.SpacingBefore = Twips(v)
+		props.HasSpacingBefore = true
+	}
+	if v, ok := wAttrInt(e, "after"); ok {
+		props.SpacingAfter = Twips(v)
+		props.HasSpacingAfter = true
+	}
+	if v, ok := wAttrInt(e, "line"); ok {
+		props.Line = Twips(v)
+		props.HasLine = true
+		props.LineRule = LineRuleAuto
+	}
+	if rule, ok := wAttr(e, "lineRule"); ok {
+		switch rule {
+		case "exact":
+			props.LineRule = LineRuleExact
+		case "atLeast":
+			props.LineRule = LineRuleAtLeast
+		default:
+			props.LineRule = LineRuleAuto
+		}
+	}
+}
+
+// applyIndent reads w:ind left/right/firstLine/hanging.
+func applyIndent(props *ParagraphProps, e xml.StartElement) {
+	if v, ok := wAttrInt(e, "left"); ok {
+		props.IndentLeft = Twips(v)
+		props.HasIndentLeft = true
+	}
+	if v, ok := wAttrInt(e, "right"); ok {
+		props.IndentRight = Twips(v)
+		props.HasIndentRight = true
+	}
+	if v, ok := wAttrInt(e, "firstLine"); ok {
+		props.FirstLine = Twips(v)
+		props.HasFirstLine = true
+	}
+	if v, ok := wAttrInt(e, "hanging"); ok {
+		// A hanging indent pulls the first line left of the block indent.
+		props.FirstLine = Twips(-v)
+		props.HasFirstLine = true
+	}
+}
+
+// parseRun consumes a w:r. A run may yield more than one logical run when it
+// contains a break: the text before/around the break and the break itself are
+// modeled as runs sharing the same properties so the layout engine sees them in
+// order.
+func parseRun(dec *xml.Decoder) ([]Run, error) {
+	var props RunProps
+	var sb strings.Builder
+	var out []Run
+	flushText := func() {
+		if sb.Len() > 0 {
+			out = append(out, Run{Props: props, Text: sb.String()})
+			sb.Reset()
+		}
+	}
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
+				continue
+			}
+			switch t.Name.Local {
+			case "rPr":
+				props, err = parseRPr(dec)
+				if err != nil {
+					return nil, err
+				}
+			case "t":
+				text, err := parseText(dec, t)
+				if err != nil {
+					return nil, err
+				}
+				sb.WriteString(text)
+			case "tab":
+				sb.WriteByte('\t')
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
+			case "br":
+				flushText()
+				out = append(out, Run{Props: props, Break: parseBreak(t)})
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
+			default:
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "r" {
+				flushText()
+				return out, nil
+			}
+		}
+	}
+}
+
+// parseText reads the character data of a w:t verbatim. We deliberately do not
+// trim regardless of xml:space: that attribute is Word's signal that whitespace
+// is significant, but even without it a <w:t>'s character data is the run's
+// content (producers do not indent inside <w:t>), so trimming here would drop
+// spaces that separate adjacent runs. The attribute is therefore not consulted.
+func parseText(dec *xml.Decoder, _ xml.StartElement) (string, error) {
+	var sb strings.Builder
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", fmt.Errorf("%w: t: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.CharData:
+			sb.WriteString(string(t))
+		case xml.EndElement:
+			if t.Name.Local == "t" {
+				return sb.String(), nil
+			}
+		}
+	}
+}
+
+// parseRPr consumes a w:rPr into RunProps.
+func parseRPr(dec *xml.Decoder) (RunProps, error) {
+	var props RunProps
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return props, fmt.Errorf("%w: rPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				applyRPrChild(&props, t)
+			}
+			if err := dec.Skip(); err != nil {
+				return props, fmt.Errorf("%w: rPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "rPr" {
+				return props, nil
+			}
+		}
+	}
+}
+
+// applyRPrChild applies one direct run-property element.
+func applyRPrChild(props *RunProps, e xml.StartElement) {
+	switch e.Name.Local {
+	case "b":
+		props.Bold = parseOnOff(wVal(e))
+		props.HasBold = true
+	case "i":
+		props.Italic = parseOnOff(wVal(e))
+		props.HasItalic = true
+	case "u":
+		// Any underline val other than "none" turns underline on.
+		props.Underline = wVal(e) != "none" && wVal(e) != ""
+		if wVal(e) == "" {
+			// <w:u/> with no val still means underline on for some producers; but the
+			// schema requires w:val, so treat empty as off to avoid false positives.
+			props.Underline = false
+		}
+		props.HasUnderline = true
+	case "sz":
+		if v, ok := wAttrInt(e, "val"); ok {
+			props.SizeHalfPts = v
+			props.HasSize = true
+		}
+	case "color":
+		if c, ok := parseColor(wVal(e)); ok {
+			props.Color = c
+			props.HasColor = true
+		}
+	case "rFonts":
+		if v, ok := wAttr(e, "ascii"); ok && v != "" {
+			props.Family = v
+		} else if v, ok := wAttr(e, "hAnsi"); ok && v != "" {
+			props.Family = v
+		}
+	}
+}
+
+// parseSectPr consumes a w:sectPr into SectionProps, starting from Letter
+// defaults and overriding declared fields.
+func parseSectPr(dec *xml.Decoder) (SectionProps, error) {
+	sect := defaultSection()
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return sect, fmt.Errorf("%w: sectPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "pgSz":
+					if v, ok := wAttrInt(t, "w"); ok {
+						sect.PageW = Twips(v)
+					}
+					if v, ok := wAttrInt(t, "h"); ok {
+						sect.PageH = Twips(v)
+					}
+				case "pgMar":
+					applyPgMar(&sect, t)
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return sect, fmt.Errorf("%w: sectPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "sectPr" {
+				return sect, nil
+			}
+		}
+	}
+}
+
+// applyPgMar reads w:pgMar margins.
+func applyPgMar(sect *SectionProps, e xml.StartElement) {
+	if v, ok := wAttrInt(e, "top"); ok {
+		sect.MarginTop = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "bottom"); ok {
+		sect.MarginBottom = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "left"); ok {
+		sect.MarginLeft = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "right"); ok {
+		sect.MarginRight = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "header"); ok {
+		sect.Header = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "footer"); ok {
+		sect.Footer = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "gutter"); ok {
+		sect.Gutter = Twips(v)
+	}
+}
+
+// --- small attribute helpers -------------------------------------------------
+
+// wAttr returns the value of a w-namespaced attribute by local name. OOXML
+// attributes are usually w-namespaced (w:val), but some producers emit them
+// unqualified; match either.
+func wAttr(e xml.StartElement, local string) (string, bool) {
+	for _, a := range e.Attr {
+		if a.Name.Local == local && (a.Name.Space == wNS || a.Name.Space == "") {
+			return a.Value, true
+		}
+	}
+	return "", false
+}
+
+// wVal returns the w:val attribute, or "" if absent.
+func wVal(e xml.StartElement) string {
+	v, _ := wAttr(e, "val")
+	return v
+}
+
+// wAttrInt returns an integer-valued w attribute.
+func wAttrInt(e xml.StartElement, local string) (int, bool) {
+	s, ok := wAttr(e, local)
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// parseOnOff interprets a w toggle value. Per the schema, absent val means "on";
+// "false"/"0"/"off"/"no" mean off.
+func parseOnOff(val string) bool {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "", "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// parseJustify maps a w:jc value to a Justify.
+func parseJustify(val string) Justify {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "center":
+		return JustifyCenter
+	case "right", "end":
+		return JustifyRight
+	case "both", "distribute":
+		return JustifyBoth
+	default:
+		return JustifyLeft
+	}
+}
+
+// parseColor parses an RRGGBB hex color. "auto" (or any unparseable value) yields
+// ok=false so the cascade keeps the inherited color.
+func parseColor(val string) (color.RGBA, bool) {
+	val = strings.TrimSpace(val)
+	if len(val) != 6 {
+		return color.RGBA{}, false
+	}
+	n, err := strconv.ParseUint(val, 16, 32)
+	if err != nil {
+		return color.RGBA{}, false
+	}
+	return color.RGBA{
+		R: uint8(n >> 16),
+		G: uint8(n >> 8),
+		B: uint8(n),
+		A: 0xff,
+	}, true
+}
+
+// parseBreak maps a w:br type to a BreakKind.
+func parseBreak(e xml.StartElement) BreakKind {
+	switch wAttrType(e) {
+	case "page":
+		return BreakPage
+	case "column":
+		return BreakColumn
+	default:
+		return BreakLine
+	}
+}
+
+// wAttrType returns the w:type attribute of an element.
+func wAttrType(e xml.StartElement) string {
+	v, _ := wAttr(e, "type")
+	return v
+}
+
+// splitPart splits a part name into directory (with trailing slash) and base.
+func splitPart(name string) (dir, base string) {
+	i := strings.LastIndexByte(name, '/')
+	if i < 0 {
+		return "", name
+	}
+	return name[:i+1], name[i+1:]
+}
+
+// joinPart joins package path segments with "/" and cleans "." / ".." segments,
+// relative to the package root. Package parts always use forward slashes.
+func joinPart(elems ...string) string {
+	return cleanPart(path.Clean(path.Join(elems...)))
+}

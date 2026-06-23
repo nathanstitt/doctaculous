@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -30,7 +31,7 @@ func rasterizeCmd(args []string) error {
 		workers = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx> [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	// Go's flag package stops at the first non-flag argument, so reorder the
@@ -44,7 +45,7 @@ func rasterizeCmd(args []string) error {
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return fmt.Errorf("expected exactly one input PDF, got %d", fs.NArg())
+		return fmt.Errorf("expected exactly one input document, got %d", fs.NArg())
 	}
 	input := fs.Arg(0)
 	if *out == "" {
@@ -60,7 +61,7 @@ func rasterizeCmd(args []string) error {
 		return fmt.Errorf("--workers must be at least 1, got %d", *workers)
 	}
 
-	doc, err := doctaculous.Open(input)
+	doc, err := openDocument(input)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -105,6 +106,15 @@ func rasterizeCmd(args []string) error {
 		return fmt.Errorf("%d of %d pages failed; first error: %w", len(indices)-written, len(indices), firstErr)
 	}
 	return nil
+}
+
+// openDocument opens the input by format, dispatching on file extension: .docx
+// goes through the reflow pipeline, everything else is treated as PDF.
+func openDocument(input string) (*doctaculous.Document, error) {
+	if strings.EqualFold(filepath.Ext(input), ".docx") {
+		return doctaculous.OpenDOCX(input)
+	}
+	return doctaculous.Open(input)
 }
 
 // resolvePages converts the --pages/--page flags into zero-based, in-range page

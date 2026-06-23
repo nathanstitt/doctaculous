@@ -22,8 +22,18 @@ next.
 `pkg/render` device-independent paint ops (`Device` interface) · `pkg/render/raster` bitmap
 backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 
-The `Device` interface is the seam: the interpreter must stay backend-agnostic so we can add an
-SVG/other backend later without touching parsing or interpretation.
+**Reflowable documents** (DOCX today; HTML/EPUB next) share a second pipeline that meets the PDF
+pipeline at `render.Device`: `pkg/docx` parse → `pkg/docx/style` cascade → `pkg/docx/lower` lower to
+a **format-neutral box model** (`pkg/layout/box`) → `pkg/layout` reflow engine (line-break + flow +
+paginate) → `pkg/layout/paint` → the same `render.Device`/`pkg/render/raster`. The box model is the
+contract between frontends and engine: a new reflow format (HTML, EPUB) is just a parse+lower
+frontend producing `box.Document`; it never touches line-breaking or pagination. Font outlines for
+both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces for reflow);
+`pkg/layout/font` caches them.
+
+The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML/EPUB)
+must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
+interpretation, or layout.
 
 ## Go practices
 
@@ -112,6 +122,18 @@ what is done vs. pending.
   blend modes — separable (Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn,
   HardLight, SoftLight, Difference, Exclusion) and non-separable (Hue, Saturation, Color,
   Luminosity) via `/BM` (`pkg/render/raster/blend.go`) — applied to fills, strokes, glyphs, images.
+- **Shadings**: the `sh` operator with axial (Type 2), radial (Type 3), and function-based (Type 1)
+  shadings, mapping device pixels → parametric value → color via the PDF Function evaluator
+  (`pkg/render/raster/shading.go`, `render.Shader` seam). Honors `/Domain`, `/Extend`, the shading
+  `/Matrix`, the active clip, and `/BM` blend modes. Also **shading patterns** (`/Pattern` color
+  space + `scn`, PatternType 2): a shading pattern set via `scn` fills a subsequent path with the
+  shading clipped to it, with the pattern `/Matrix` resolved against the page default coordinate
+  system (`pkg/pdf/content/shading.go`). Also **mesh shadings** (Types 4–7,
+  `pkg/render/raster/shading_mesh.go`): free-form Gouraud triangles (Type 4) and lattice-form
+  (Type 5) are decoded from the packed bit stream and Gouraud-filled exactly; Coons (Type 6) and
+  tensor (Type 7) patches are tessellated to a fixed grid (a bilinear-corner approximation of the
+  patch surface). Malformed mesh streams degrade gracefully (no panic, skip + log). Tiling patterns
+  (PatternType 1) remain pending (see TODO).
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
   1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
   stencils painted in the fill color, `/Decode` arrays, and inline images (`BI`/`ID`/`EI`)
@@ -119,6 +141,19 @@ what is done vs. pending.
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
   kill a batch.
+- **Reflowable documents — DOCX** (covered by `testdata/gen/docx` fixtures + `pkg/doctaculous`
+  `docx-*` golden images): open a `.docx` via `OpenDOCX`/`OpenDOCXBytes` and rasterize its pages
+  through the shared reflow engine. Parsing (`pkg/docx`): ZIP/OPC container, relationship + main-part
+  resolution, `document.xml` (paragraphs, runs, `w:t` with `xml:space`, `w:br`, `w:tab`), run
+  properties (bold/italic/underline, `w:sz`, `w:color`, `w:rFonts`), paragraph properties
+  (`w:jc`, `w:spacing`, `w:ind`, `w:pStyle`, `w:pageBreakBefore`), and section geometry
+  (`w:sectPr` pgSz/pgMar). Styles (`pkg/docx/style`): the full `docDefaults → basedOn chain →
+  direct` cascade with a cycle guard. Layout (`pkg/layout`): greedy line-breaking, vertical flow,
+  and pagination on overflow with real font metrics; line height = font metrics × 1.15 for
+  `lineRule=auto`; left/right/center/justify alignment; first-line/left/right indents. Fonts:
+  named families resolve to the bundled base-14 substitutes (`pkg/font/family.go`, Office defaults
+  like Calibri/Cambria aliased), glyphs resolved by name then cmap. Single section; one engine
+  drives the same `render.Device`/raster as PDF.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -128,15 +163,30 @@ that skip into real output.
 
 1. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-2. **Shadings / gradients** — the `sh` operator and `/Pattern` color space: a PDF Function
-   evaluator (Types 0/2/3/4), axial (Type 2) + radial (Type 3) + function-based (Type 1) + mesh
-   (Types 4–7) shadings, and shading patterns via `scn`. (Blend modes are done; `sh` still logs
-   unsupported.) Also **luminosity soft masks** (`/SMask` in ExtGState) and **transparency groups**.
+2. **Shadings / gradients (remaining)** — **tiling patterns** (PatternType 1; currently skipped +
+   logged) and higher-fidelity **Coons/tensor patches** (Types 6/7 are tessellated with a bilinear
+   corner approximation — evaluating the actual bicubic boundary would improve curved patches). The
+   `sh` operator with axial/radial/function-based shadings, the PDF Function evaluator
+   (Types 0/2/3/4), shading patterns (PatternType 2) via `scn`, and mesh shadings (Types 4–7) are
+   done. Also **luminosity soft masks** (`/SMask` in ExtGState) and **transparency groups**.
 3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.
-4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face;
-   Symbol and ZapfDingbats have no substitute (skipped). Bundle weighted faces + symbol look-alikes,
-   and ideally standard AFM widths for exact base-14 metrics.
+4. **Base-14 weights & symbol fonts** — bold/italic/oblique currently map to the regular face (now
+   affecting DOCX rendering too, not just PDF); Symbol and ZapfDingbats have no substitute (skipped).
+   Bundle weighted faces + symbol look-alikes, and ideally standard AFM widths for exact base-14
+   metrics.
+5. **DOCX features (reflow frontend)** — each a new `testdata/gen/docx` fixture + golden in the same
+   PR; add new box-model vocabulary to `pkg/layout/box` (engine track) before the DOCX frontend
+   emits it, so HTML/EPUB get it for free. In rough order: **lists/numbering** (`numbering.xml`,
+   per-level counters, marker glyphs), **tables** (`w:tbl`, grid + column-width solve, spans, cell
+   content recursion — the biggest engine addition), **images** (`w:drawing`→`a:blip`→media,
+   PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
+   content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
+   fixes bold/italic fidelity).
+6. **New reflow frontends** — **HTML** (`golang.org/x/net/html` + a small CSS subset → `box.Document`,
+   `OpenHTML`) and **EPUB** (ZIP + OPF spine reusing the HTML frontend per chapter, `OpenEPUB`). These
+   validate the neutral-engine design: each is only a parse+lower step; the engine, paint, and raster
+   are reused unchanged.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
