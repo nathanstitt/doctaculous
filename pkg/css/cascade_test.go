@@ -85,3 +85,35 @@ func TestApplyUnknownPropertyIgnored(t *testing.T) {
 		t.Fatalf("unknown property changed the computed style")
 	}
 }
+
+func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
+	// A malformed value leaves the prior value intact (the documented contract).
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "color", Value: "blue"})
+	applyDeclaration(&cs, Declaration{Property: "color", Value: "notacolor"})
+	if cs.Color != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("color = %v, want blue preserved (malformed value must not overwrite)", cs.Color)
+	}
+	// Likewise for a length.
+	applyDeclaration(&cs, Declaration{Property: "margin-top", Value: "12px"})
+	applyDeclaration(&cs, Declaration{Property: "margin-top", Value: "garbage"})
+	if cs.MarginTop != (Length{12, UnitPx}) {
+		t.Errorf("margin-top = %v, want 12px preserved", cs.MarginTop)
+	}
+	// font-family: first family wins, quotes stripped, through applyDeclaration.
+	applyDeclaration(&cs, Declaration{Property: "font-family", Value: `"Helvetica Neue", Arial, sans-serif`})
+	if cs.FontFamily != "Helvetica Neue" {
+		t.Errorf("font-family = %q, want \"Helvetica Neue\"", cs.FontFamily)
+	}
+	// A bare single family resolves to itself.
+	applyDeclaration(&cs, Declaration{Property: "font-family", Value: "Georgia"})
+	if cs.FontFamily != "Georgia" {
+		t.Errorf("font-family = %q, want Georgia", cs.FontFamily)
+	}
+	// font-size: auto is dropped (not a valid font-size), prior size preserved.
+	before := cs.FontSizePt
+	applyDeclaration(&cs, Declaration{Property: "font-size", Value: "auto"})
+	if cs.FontSizePt != before {
+		t.Errorf("font-size after auto = %v, want %v preserved", cs.FontSizePt, before)
+	}
+}

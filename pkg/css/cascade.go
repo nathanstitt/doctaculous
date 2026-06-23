@@ -71,6 +71,7 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "font-family":
 		cs.FontFamily = firstFamily(d.Value)
 	case "font-size":
+		// "auto" is not a valid font-size, so the UnitAuto guard drops it.
 		if l, ok := parseLength(newTokenizer(d.Value).next()); ok && l.Unit != UnitAuto {
 			cs.FontSizePt = l.Value // px:pt 1:1 for now; em/% resolution is the engine's job
 		}
@@ -164,6 +165,7 @@ func firstFamily(val string) string {
 	return val
 }
 
+// splitComma splits a comma-separated CSS value list (e.g. a font-family list).
 func splitComma(s string) []string { return strings.Split(s, ",") }
 
 func trimQuotes(s string) string {
