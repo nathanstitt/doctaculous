@@ -375,8 +375,15 @@ hyphen-then-hyphen ident path.)
 //		return t.readString(c)
 //	case c == '-' && t.pos+1 < len(t.src) && (isDigit(t.src[t.pos+1]) || t.src[t.pos+1] == '.'):
 //		return t.readNumeric()
-//	case isDigit(c) || c == '.':
+//	case isDigit(c):
 //		return t.readNumeric()
+//	case c == '.' && t.pos+1 < len(t.src) && isDigit(t.src[t.pos+1]):
+//		return t.readNumeric()
+//
+// NOTE: digit and ".+digit" are SEPARATE cases on purpose. A combined
+// `case isDigit(c) || c == '.'` is wrong: a lone "." (a class-selector marker,
+// e.g. ".x") would then start a number instead of staying a TokenDelim that the
+// selector parser needs. A "." begins a number only when a digit follows.
 //
 // and add these helpers:
 
