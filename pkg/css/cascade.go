@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// inlineImportantIDs is the synthetic specificity IDs value given to inline
+// !important declarations. CSS places inline !important above all author
+// !important rules regardless of selector specificity; we model that with an IDs
+// count (2^20) far larger than any specificity reachable from parsed CSS (which
+// would need 2^20 id qualifiers — impossible in practice).
+const inlineImportantIDs = 1 << 20
+
 // ComputedStyle is the resolved style of one element: the normal-flow property
 // subset this sub-project supports, with every value concrete. Lengths remain in
 // their CSS unit here (px/pt/em/%); the layout engine resolves em/% to absolute
@@ -111,7 +118,7 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	if styleAttr, ok := n.Attr("style"); ok {
 		for _, d := range parseDeclarations(styleAttr) {
 			if d.Important {
-				important = append(important, matched{decl: d, spec: Specificity{IDs: 1 << 20}, order: order})
+				important = append(important, matched{decl: d, spec: Specificity{IDs: inlineImportantIDs}, order: order})
 				order++
 				continue
 			}

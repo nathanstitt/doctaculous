@@ -158,6 +158,26 @@ func TestInlineStyleAttributeWins(t *testing.T) {
 	}
 }
 
+func TestInlineImportantBeatsAuthorImportant(t *testing.T) {
+	src := `p { color: red !important; }`
+	r := NewResolver(Parse(src), nil)
+	p := &fakeNode{tag: "p", attrs: map[string]string{"style": "color: green !important"}}
+	cs := r.Compute(p, initialStyle())
+	if cs.Color != (color.RGBA{0, 128, 0, 255}) {
+		t.Errorf("color = %v, want green (inline !important > author !important)", cs.Color)
+	}
+}
+
+func TestAuthorImportantBeatsInlineNormal(t *testing.T) {
+	src := `p { color: red !important; }`
+	r := NewResolver(Parse(src), nil)
+	p := &fakeNode{tag: "p", attrs: map[string]string{"style": "color: green"}}
+	cs := r.Compute(p, initialStyle())
+	if cs.Color != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("color = %v, want red (author !important > inline normal)", cs.Color)
+	}
+}
+
 func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
 	// A malformed value leaves the prior value intact (the documented contract).
 	cs := initialStyle()
