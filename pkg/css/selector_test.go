@@ -32,3 +32,18 @@ func TestParseSelectorGroup(t *testing.T) {
 		t.Fatalf("got %d selectors, want 3", len(sels))
 	}
 }
+
+func TestParseSelectorListSkipsMalformed(t *testing.T) {
+	// Malformed groups (empty qualifier names) are skipped; valid ones survive.
+	sels := parseSelectorList("h1, ., #, p.intro")
+	if len(sels) != 2 {
+		t.Fatalf("got %d selectors, want 2 (h1 and p.intro; '.' and '#' dropped)", len(sels))
+	}
+	// Confirm the survivors are the right ones by specificity.
+	if sels[0].Specificity() != (Specificity{0, 0, 1}) { // h1
+		t.Errorf("sels[0] specificity = %v, want {0 0 1} (h1)", sels[0].Specificity())
+	}
+	if sels[1].Specificity() != (Specificity{0, 1, 1}) { // p.intro
+		t.Errorf("sels[1] specificity = %v, want {0 1 1} (p.intro)", sels[1].Specificity())
+	}
+}

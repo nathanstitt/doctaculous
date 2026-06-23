@@ -86,6 +86,9 @@ func parseSimple(f string) (simpleSelector, bool) {
 	if f == "*" {
 		return ss, true
 	}
+	if f == "" {
+		return simpleSelector{}, false
+	}
 	i := 0
 	// leading type selector
 	for i < len(f) && f[i] != '.' && f[i] != '#' {
