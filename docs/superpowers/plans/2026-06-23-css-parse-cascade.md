@@ -787,7 +787,7 @@ func parseColor(tz *tokenizer) (color.RGBA, bool) {
 	case TokenHash:
 		return parseHex(tok.Text)
 	case TokenIdent:
-		if tok.Text == "rgb" {
+		if strings.ToLower(tok.Text) == "rgb" { // function names are case-insensitive
 			return parseRGBFunc(tz)
 		}
 		c, ok := namedColors[strings.ToLower(tok.Text)]
@@ -1259,6 +1259,9 @@ type Declaration struct {
 // are skipped so one bad declaration cannot void the rest.
 func parseDeclarations(body string) []Declaration {
 	var out []Declaration
+	// NOTE: the body is split naively on ';'. A value containing a literal
+	// semicolon (e.g. a data: URI in url(...)) will be split incorrectly; that is
+	// an accepted limitation for the CSS subset this engine targets.
 	for _, chunk := range strings.Split(body, ";") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
@@ -1274,9 +1277,18 @@ func parseDeclarations(body string) []Declaration {
 			continue
 		}
 		important := false
-		if i := strings.LastIndex(strings.ToLower(val), "!important"); i >= 0 {
-			important = true
-			val = strings.TrimSpace(val[:i])
+		// Match !important only as the trailing whitespace-delimited token (suffix
+		// + preceding whitespace), case-insensitively, so "url(x!important.png)" is
+		// not falsely flagged. The suffix is ASCII, so cutting len(bang) bytes off
+		// the original value is safe even if an earlier rune case-folds to a
+		// different byte length — and the cut value keeps its original case.
+		const bang = "!important"
+		if strings.HasSuffix(strings.ToLower(val), bang) {
+			candidate := val[:len(val)-len(bang)]
+			if candidate == "" || isWhitespace(candidate[len(candidate)-1]) {
+				important = true
+				val = strings.TrimSpace(candidate)
+			}
 		}
 		if val == "" {
 			continue
