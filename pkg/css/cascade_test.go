@@ -146,6 +146,18 @@ func TestCascadeImportantWins(t *testing.T) {
 	}
 }
 
+func TestInlineStyleAttributeWins(t *testing.T) {
+	src := `#lead { color: red; }`
+	sheet := Parse(src)
+	r := NewResolver(sheet, nil)
+	// style="color: green" must beat the id rule (inline style has higher origin).
+	p := &fakeNode{tag: "p", id: "lead", attrs: map[string]string{"style": "color: green"}}
+	cs := r.Compute(p, initialStyle())
+	if cs.Color != (color.RGBA{0, 128, 0, 255}) {
+		t.Errorf("color = %v, want green (inline style wins)", cs.Color)
+	}
+}
+
 func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
 	// A malformed value leaves the prior value intact (the documented contract).
 	cs := initialStyle()

@@ -102,8 +102,22 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 		applyDeclaration(&cs, m.decl)
 	}
 
-	// 2. inline style="" attribute is inserted here in Task 14 (it outranks all
-	//    normal rules; its !important declarations are appended to `important`).
+	// 2. inline style="" attribute. Its normal declarations overlay all normal
+	//    rules regardless of their specificity; its !important declarations join
+	//    the important set with an outsized specificity so inline-important is the
+	//    strongest author origin (matching the CSS cascade origin order). Because
+	//    the `important` slice is sorted in step 3 (below, after this block), the
+	//    appended entries are included in that sort — no re-sorting needed.
+	if styleAttr, ok := n.Attr("style"); ok {
+		for _, d := range parseDeclarations(styleAttr) {
+			if d.Important {
+				important = append(important, matched{decl: d, spec: Specificity{IDs: 1 << 20}, order: order})
+				order++
+				continue
+			}
+			applyDeclaration(&cs, d)
+		}
+	}
 
 	// 3. !important declarations overlay last so they always win. Sorting happens
 	//    here — after the inline block so inline-important is included.
