@@ -18,7 +18,7 @@ func (it *Interpreter) colorSpaceByName(operands []pdf.Object) colorSpace {
 	case "DeviceCMYK", "CMYK":
 		return deviceCMYK
 	case "Pattern":
-		return csOther
+		return csPattern
 	default:
 		// Unknown named space: we cannot easily resolve component counts without
 		// the resource dict here, so approximate as RGB-like. sc/scn tolerate

@@ -70,6 +70,11 @@ type Interpreter struct {
 	logf   func(string, ...any)
 	maxOps int
 
+	// base maps PDF default (page) user space to device pixels. Pattern matrices
+	// are defined relative to this default space (not the current CTM), so a
+	// shading pattern's effective transform is patternMatrix × base.
+	base render.Matrix
+
 	stack []gstate
 	gs    gstate
 
@@ -111,6 +116,7 @@ func New(doc *pdf.Document, dev render.Device, res Resources, base render.Matrix
 		res:    res,
 		logf:   logf,
 		maxOps: opts.MaxOps,
+		base:   base,
 		gs:     newGState(base),
 	}
 }

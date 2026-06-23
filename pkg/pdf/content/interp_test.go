@@ -281,6 +281,48 @@ func TestShOperatorMissingShadingSkips(t *testing.T) {
 	}
 }
 
+func TestShadingPatternFill(t *testing.T) {
+	res := fakeRes{patterns: map[string]render.Shader{
+		"P1": constShader{c: color.RGBA{0, 0, 255, 255}},
+	}}
+	// Select the Pattern color space, set the shading pattern, fill a rect. The
+	// fill must paint via FillShading (clipped to the path), not a solid Fill.
+	dev := runContent(t, "/Pattern cs /P1 scn 0 0 100 100 re f", res)
+	if dev.shadings != 1 {
+		t.Fatalf("pattern fill: FillShading called %d times, want 1", dev.shadings)
+	}
+	if len(dev.fills) != 0 {
+		t.Fatalf("pattern fill: solid Fill called %d times, want 0", len(dev.fills))
+	}
+	if dev.clips != 1 {
+		t.Fatalf("pattern fill: PushClip called %d times, want 1 (path clip)", dev.clips)
+	}
+}
+
+func TestPatternFillClearedByDeviceColor(t *testing.T) {
+	res := fakeRes{patterns: map[string]render.Shader{
+		"P1": constShader{c: color.RGBA{0, 0, 255, 255}},
+	}}
+	// After a shading pattern, an rg device color must revert fills to solid.
+	dev := runContent(t, "/Pattern cs /P1 scn 1 0 0 rg 0 0 100 100 re f", res)
+	if dev.shadings != 0 {
+		t.Fatalf("after rg: FillShading called %d times, want 0", dev.shadings)
+	}
+	if len(dev.fills) != 1 {
+		t.Fatalf("after rg: solid Fill called %d times, want 1", len(dev.fills))
+	}
+}
+
+func TestUnsupportedPatternFallsBack(t *testing.T) {
+	// A pattern name that the backend cannot resolve (e.g. a tiling pattern) must
+	// not paint a shading and must not panic.
+	dev := runContent(t, "/Pattern cs /P1 scn 0 0 100 100 re f",
+		fakeRes{patterns: map[string]render.Shader{}})
+	if dev.shadings != 0 {
+		t.Fatalf("unsupported pattern: FillShading called %d times, want 0", dev.shadings)
+	}
+}
+
 func TestMaxOpsCap(t *testing.T) {
 	dev := &recDevice{}
 	it := New(nil, dev, nil, render.Identity, Options{MaxOps: 2})

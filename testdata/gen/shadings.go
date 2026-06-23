@@ -67,3 +67,24 @@ func ShadingFunctionPDF() []byte {
 	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
 	return b.finish(catalog)
 }
+
+// ShadingPatternPDF returns a single-page PDF that fills a path with a shading
+// pattern (PatternType 2): a /Pattern resource wrapping an axial red→blue shading
+// is selected as the fill "color" via `/Pattern cs /P1 scn`, then a diamond path
+// is filled with `f`. The gradient must fill the path (clipped to it), not the
+// whole page — locking down scn pattern resolution and the fillPath shading
+// branch. The pattern /Matrix is identity, so the shading axis is in page space.
+func ShadingPatternPDF() []byte {
+	pattern := "<< /PatternType 2 /Matrix [1 0 0 1 0 0] " +
+		"/Shading << /ShadingType 2 /ColorSpace /DeviceRGB " +
+		"/Coords [150 150 450 450] /Domain [0 1] " +
+		"/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> " +
+		"/Extend [true true] >> >>"
+	resources := fmt.Sprintf("<< /Pattern << /P1 %s >> >>", pattern)
+	// Select the Pattern color space, set the shading pattern, fill a diamond.
+	content := []byte(
+		"/Pattern cs /P1 scn " +
+			"300 150 m 450 300 l 300 450 l 150 300 l h f",
+	)
+	return buildSinglePage(content, resources)
+}

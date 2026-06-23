@@ -67,6 +67,17 @@ func (it *Interpreter) fillPath(rule render.FillRule) {
 	if it.path.Empty() {
 		return
 	}
+	// A shading-pattern fill (scn under /Pattern) paints the shading clipped to the
+	// path rather than a solid color. Scope the path clip with Save/Restore so it
+	// does not leak into later drawing, and evaluate the shading under the matrix
+	// captured when the pattern was selected.
+	if src := it.gs.fillShading; src != nil {
+		it.dev.Save()
+		it.dev.PushClip(&it.path, rule)
+		it.dev.FillShading(src.shader, src.ctm, it.gs.blendMode)
+		it.dev.Restore()
+		return
+	}
 	it.dev.Fill(&it.path, render.FillPaint{
 		Color:     withAlpha(it.gs.fill, it.gs.fillAlpha),
 		Rule:      rule,

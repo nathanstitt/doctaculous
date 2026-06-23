@@ -102,6 +102,12 @@ var Core = []CoreFixture{
 		Build: ShadingFunctionPDF,
 	},
 	{
+		Name:  "shading-pattern",
+		Desc:  "shading pattern (PatternType 2) via scn: a diamond filled with an axial gradient",
+		Pages: 1,
+		Build: ShadingPatternPDF,
+	},
+	{
 		Name:  "flate",
 		Desc:  "FlateDecode-compressed content stream",
 		Pages: 1,

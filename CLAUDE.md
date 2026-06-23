@@ -115,7 +115,10 @@ what is done vs. pending.
 - **Shadings**: the `sh` operator with axial (Type 2), radial (Type 3), and function-based (Type 1)
   shadings, mapping device pixels → parametric value → color via the PDF Function evaluator
   (`pkg/render/raster/shading.go`, `render.Shader` seam). Honors `/Domain`, `/Extend`, the shading
-  `/Matrix`, the active clip, and `/BM` blend modes. Shading patterns (`scn`) and mesh shadings
+  `/Matrix`, the active clip, and `/BM` blend modes. Also **shading patterns** (`/Pattern` color
+  space + `scn`, PatternType 2): a shading pattern set via `scn` fills a subsequent path with the
+  shading clipped to it, with the pattern `/Matrix` resolved against the page default coordinate
+  system (`pkg/pdf/content/shading.go`). Tiling patterns (PatternType 1) and mesh shadings
   (Types 4–7) are still pending (see TODO).
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
   1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
@@ -133,10 +136,10 @@ that skip into real output.
 
 1. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (CCITTFax is done). Currently
    `ErrUnsupported` (`pkg/pdf/filter/filter.go`).
-2. **Shadings / gradients (remaining)** — shading **patterns** via the `/Pattern` color space + `scn`
-   (PatternType 2), and **mesh shadings** (Types 4–7: free-form/lattice Gouraud triangles and
-   Coons/tensor patches). The `sh` operator with axial/radial/function-based shadings and the PDF
-   Function evaluator (Types 0/2/3/4) are done. Also **luminosity soft masks** (`/SMask` in
+2. **Shadings / gradients (remaining)** — **mesh shadings** (Types 4–7: free-form/lattice Gouraud
+   triangles and Coons/tensor patches) and **tiling patterns** (PatternType 1). The `sh` operator
+   with axial/radial/function-based shadings, the PDF Function evaluator (Types 0/2/3/4), and
+   shading patterns (PatternType 2) via `scn` are done. Also **luminosity soft masks** (`/SMask` in
    ExtGState) and **transparency groups**.
 3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` filter overrides, `/Perms` validation. Empty-password Standard handler is done.

@@ -82,30 +82,36 @@ func (it *Interpreter) execute(op string, operands []pdf.Object, depth int) {
 		it.pending = pendingClip{active: true, rule: render.EvenOdd}
 
 	// --- color ---
+	// A device-color or color-space operator establishes a non-pattern fill, so it
+	// clears any shading-pattern fill source set by a prior scn (gs.fillShading).
 	case "g":
 		it.gs.fillCS = deviceGray
+		it.gs.fillShading = nil
 		it.gs.fill = colorFromComponents(deviceGray, nums(operands, 1))
 	case "G":
 		it.gs.strokeCS = deviceGray
 		it.gs.stroke = colorFromComponents(deviceGray, nums(operands, 1))
 	case "rg":
 		it.gs.fillCS = deviceRGB
+		it.gs.fillShading = nil
 		it.gs.fill = colorFromComponents(deviceRGB, nums(operands, 3))
 	case "RG":
 		it.gs.strokeCS = deviceRGB
 		it.gs.stroke = colorFromComponents(deviceRGB, nums(operands, 3))
 	case "k":
 		it.gs.fillCS = deviceCMYK
+		it.gs.fillShading = nil
 		it.gs.fill = colorFromComponents(deviceCMYK, nums(operands, 4))
 	case "K":
 		it.gs.strokeCS = deviceCMYK
 		it.gs.stroke = colorFromComponents(deviceCMYK, nums(operands, 4))
 	case "cs":
 		it.gs.fillCS = it.colorSpaceByName(operands)
+		it.gs.fillShading = nil
 	case "CS":
 		it.gs.strokeCS = it.colorSpaceByName(operands)
 	case "sc", "scn":
-		it.gs.fill = colorFromComponents(it.gs.fillCS, numericOperands(operands))
+		it.setFillColorN(operands)
 	case "SC", "SCN":
 		it.gs.stroke = colorFromComponents(it.gs.strokeCS, numericOperands(operands))
 
