@@ -1378,6 +1378,19 @@ func TestParseStylesheetCommentBeforeSelector(t *testing.T) {
 		t.Errorf("h1 selector does not match <h1>")
 	}
 }
+
+// TestParseDeclarationsCommentInBody verifies a /* */ comment inside a rule body
+// does not corrupt the property name (the body analog of the prelude comment-leak).
+func TestParseDeclarationsCommentInBody(t *testing.T) {
+	sheet := Parse("p { /* section */ color: red; /* end */ }")
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	decls := sheet.Rules[0].Declarations
+	if len(decls) != 1 || decls[0].Property != "color" || decls[0].Value != "red" {
+		t.Fatalf("got %+v, want one decl {color red}", decls)
+	}
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1466,24 +1479,29 @@ func (s *ruleScanner) nextRule() (prelude, body string, ok bool) {
 	return "", "", false
 }
 
-// readBody returns the text up to the matching close brace, consuming it, and
-// handling one level of nesting (so an at-rule block like @media{ p{} } is fully
-// consumed even though we then discard it).
+// readBody returns the text up to the matching close brace, consuming it, with
+// /* */ comments stripped (so a comment before a property name does not corrupt
+// the declaration, the body analog of the prelude comment-leak). It depth-tracks
+// nested braces so an at-rule block like @media{ p{} } is fully consumed even
+// though Parse then discards it.
 func (s *ruleScanner) readBody() string {
-	start := s.pos
+	var b strings.Builder
+	spanStart := s.pos
 	depth := 0
 	for s.pos < len(s.src) {
 		switch {
 		case s.atComment():
+			b.WriteString(s.src[spanStart:s.pos]) // flush text before the comment
 			s.skipComment()
+			spanStart = s.pos // resume after the comment
 		case s.src[s.pos] == '{':
 			depth++
 			s.pos++
 		case s.src[s.pos] == '}':
 			if depth == 0 {
-				body := s.src[start:s.pos]
-				s.pos++ // consume }
-				return body
+				b.WriteString(s.src[spanStart:s.pos]) // flush the final span
+				s.pos++                               // consume }
+				return b.String()
 			}
 			depth--
 			s.pos++
@@ -1491,7 +1509,8 @@ func (s *ruleScanner) readBody() string {
 			s.pos++
 		}
 	}
-	return s.src[start:s.pos]
+	b.WriteString(s.src[spanStart:s.pos]) // unterminated body: flush what remains
+	return b.String()
 }
 
 func (s *ruleScanner) atComment() bool {
