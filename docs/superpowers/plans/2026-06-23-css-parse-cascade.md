@@ -1341,6 +1341,42 @@ func TestParseStylesheet(t *testing.T) {
 	if len(sheet.Rules[0].Declarations) != 2 {
 		t.Fatalf("rule[0] declarations = %d, want 2", len(sheet.Rules[0].Declarations))
 	}
+	// Guard against comment text leaking into the prelude: the selectors must
+	// actually match the intended elements (a count check alone would not catch
+	// "/* comment */ h1" parsing as a 4-part garbage selector).
+	h1 := &fakeNode{tag: "h1"}
+	title := &fakeNode{tag: "div", classes: []string{"title"}}
+	matchesAny := func(sels []Selector, n *fakeNode) bool {
+		for _, s := range sels {
+			if s.Matches(n) {
+				return true
+			}
+		}
+		return false
+	}
+	if !matchesAny(sheet.Rules[0].Selectors, h1) {
+		t.Errorf("rule[0] selectors do not match <h1>; comment likely leaked into the prelude")
+	}
+	if !matchesAny(sheet.Rules[0].Selectors, title) {
+		t.Errorf("rule[0] selectors do not match .title")
+	}
+}
+
+// TestParseStylesheetCommentBeforeSelector is a focused regression test for a
+// comment immediately preceding a rule's selector (it must not leak into the
+// prelude and inflate the selector into multiple whitespace-split parts).
+func TestParseStylesheetCommentBeforeSelector(t *testing.T) {
+	sheet := Parse("/* lead */ h1 { color: red }")
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	sel := sheet.Rules[0].Selectors[0]
+	if sel.Specificity() != (Specificity{0, 0, 1}) { // exactly one type selector (h1), not 4 parts
+		t.Fatalf("h1 selector specificity = %v, want {0 0 1} (comment must not leak into prelude)", sel.Specificity())
+	}
+	if !sel.Matches(&fakeNode{tag: "h1"}) {
+		t.Errorf("h1 selector does not match <h1>")
+	}
 }
 ```
 
@@ -1407,16 +1443,22 @@ type ruleScanner struct {
 }
 
 func (s *ruleScanner) nextRule() (prelude, body string, ok bool) {
-	start := s.pos
+	// Build the prelude from the spans BETWEEN comments, so a comment before a
+	// rule's "{" does not leak into the selector text (otherwise "/* c */ h1"
+	// would parse as a 4-part garbage selector that matches nothing).
+	var b strings.Builder
+	spanStart := s.pos
 	for s.pos < len(s.src) {
 		switch {
 		case s.atComment():
+			b.WriteString(s.src[spanStart:s.pos]) // flush text before the comment
 			s.skipComment()
+			spanStart = s.pos // resume after the comment
 		case s.src[s.pos] == '{':
-			prelude = s.src[start:s.pos]
-			s.pos++ // consume {
+			b.WriteString(s.src[spanStart:s.pos]) // flush the final span
+			s.pos++                               // consume {
 			body = s.readBody()
-			return prelude, body, true
+			return b.String(), body, true
 		default:
 			s.pos++
 		}
