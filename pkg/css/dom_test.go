@@ -4,12 +4,11 @@ import "testing"
 
 // fakeNode is the in-test DOM used throughout pkg/css tests.
 type fakeNode struct {
-	tag      string
-	id       string
-	classes  []string
-	parent   *fakeNode
-	children []*fakeNode
-	attrs    map[string]string
+	tag     string
+	id      string
+	classes []string
+	parent  *fakeNode
+	attrs   map[string]string
 }
 
 func (n *fakeNode) Tag() string       { return n.tag }
