@@ -154,6 +154,15 @@ what is done vs. pending.
   named families resolve to the bundled base-14 substitutes (`pkg/font/family.go`, Office defaults
   like Calibri/Cambria aliased), glyphs resolved by name then cmap. Single section; one engine
   drives the same `render.Device`/raster as PDF.
+- **CSS engine — parse + cascade** (`pkg/css`, unit-tested in isolation; no layout/rendering yet):
+  a hand-written, dependency-free CSS tokenizer + parser (rules, declarations, `!important`, at-rule
+  skipping, comment stripping), selector matching (type / universal / class / id / descendant /
+  grouping) with specificity, and the full cascade (specificity + source order + inheritance +
+  `!important` + inline `style=""`) producing a `ComputedStyle` for the normal-flow property subset
+  (display, color/background, font-*, line-height, text-align, margin/padding/border, width/height).
+  This is the first landed slice of the HTML reflow frontend (sub-project 1 of the HTML-rendering
+  roadmap); it is consumed by box generation next. Unsupported selectors/properties degrade
+  gracefully (skipped). See `docs/superpowers/specs/2026-06-23-html-rendering-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -186,7 +195,9 @@ that skip into real output.
 6. **New reflow frontends** — **HTML** (`golang.org/x/net/html` + a small CSS subset → `box.Document`,
    `OpenHTML`) and **EPUB** (ZIP + OPF spine reusing the HTML frontend per chapter, `OpenEPUB`). These
    validate the neutral-engine design: each is only a parse+lower step; the engine, paint, and raster
-   are reused unchanged.
+   are reused unchanged. The CSS parse+cascade layer (`pkg/css`) is the first landed slice of the HTML
+   frontend (tokenizer + parser + selector matching + cascade → `ComputedStyle`; see the Done section);
+   box generation that consumes it and the `golang.org/x/net/html` parse step come next.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
