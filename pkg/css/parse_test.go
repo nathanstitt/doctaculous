@@ -103,3 +103,16 @@ func TestParseDeclarationImportantEdgeCases(t *testing.T) {
 		t.Fatalf("got %+v, want {color Red important}", d)
 	}
 }
+
+// TestParseDeclarationsCommentInBody verifies a /* */ comment inside a rule body
+// does not corrupt the property name (the body analog of the prelude comment-leak).
+func TestParseDeclarationsCommentInBody(t *testing.T) {
+	sheet := Parse("p { /* section */ color: red; /* end */ }")
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	decls := sheet.Rules[0].Declarations
+	if len(decls) != 1 || decls[0].Property != "color" || decls[0].Value != "red" {
+		t.Fatalf("got %+v, want one decl {color red}", decls)
+	}
+}
