@@ -52,6 +52,10 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.12.2
+          # Build golangci-lint from source with the Go toolchain set up above
+          # (go.mod targets a newer Go than the prebuilt release binaries are
+          # built with, which the version-skew guard rejects).
+          install-mode: goinstall
