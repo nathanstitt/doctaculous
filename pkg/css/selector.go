@@ -49,6 +49,63 @@ func (s Selector) Specificity() Specificity {
 	return sp
 }
 
+// Matches reports whether the selector matches node n. The last part must match
+// n itself; earlier parts must each match some ancestor, in order (descendant
+// combinator). Matching walks ancestors greedily from the subject outward.
+func (s Selector) Matches(n Node) bool {
+	if len(s.parts) == 0 {
+		return false
+	}
+	last := len(s.parts) - 1
+	if !s.parts[last].matches(n) {
+		return false
+	}
+	// Match remaining parts (right-to-left) against ancestors.
+	cur := n.Parent()
+	i := last - 1
+	for i >= 0 {
+		matched := false
+		for cur != nil {
+			if s.parts[i].matches(cur) {
+				cur = cur.Parent()
+				matched = true
+				break
+			}
+			cur = cur.Parent()
+		}
+		if !matched {
+			return false
+		}
+		i--
+	}
+	return true
+}
+
+// matches reports whether a single simple selector matches node n.
+func (ss simpleSelector) matches(n Node) bool {
+	if ss.tag != "" && ss.tag != n.Tag() {
+		return false
+	}
+	if ss.id != "" && ss.id != n.ID() {
+		return false
+	}
+	for _, c := range ss.classes {
+		if !hasClass(n.Classes(), c) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasClass(have []string, want string) bool {
+	for _, c := range have {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
 // parseSelectorList parses a comma-separated selector group into individual
 // Selectors. Whitespace between simple selectors is a descendant combinator.
 // Parsing is total: a malformed group is skipped rather than erroring, so one bad

@@ -33,6 +33,28 @@ func TestParseSelectorGroup(t *testing.T) {
 	}
 }
 
+func TestSelectorMatch(t *testing.T) {
+	// Tree: div#main > p.intro
+	div := &fakeNode{tag: "div", id: "main"}
+	p := &fakeNode{tag: "p", classes: []string{"intro"}, parent: div}
+
+	mustMatch := func(sel string, n *fakeNode, want bool) {
+		sels := parseSelectorList(sel)
+		got := sels[0].Matches(n)
+		if got != want {
+			t.Fatalf("%q matches %s#%s.%v = %v, want %v", sel, n.tag, n.id, n.classes, got, want)
+		}
+	}
+	mustMatch("p", p, true)
+	mustMatch("p.intro", p, true)
+	mustMatch("p.missing", p, false)
+	mustMatch("div p", p, true)   // descendant
+	mustMatch("#main p", p, true) // descendant via id
+	mustMatch("p p", p, false)    // no matching ancestor
+	mustMatch("div", p, false)    // subject must be the node itself
+	mustMatch("*", p, true)
+}
+
 func TestParseSelectorListSkipsMalformed(t *testing.T) {
 	// Malformed groups (empty qualifier names) are skipped; valid ones survive.
 	sels := parseSelectorList("h1, ., #, p.intro")
