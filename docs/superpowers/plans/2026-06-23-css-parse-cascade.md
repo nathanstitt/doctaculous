@@ -2122,13 +2122,24 @@ with the inline-style handling — a pure insertion, no other code in `Compute` 
 	if styleAttr, ok := n.Attr("style"); ok {
 		for _, d := range parseDeclarations(styleAttr) {
 			if d.Important {
-				important = append(important, matched{decl: d, spec: Specificity{IDs: 1 << 20}, order: order})
+				important = append(important, matched{decl: d, spec: Specificity{IDs: inlineImportantIDs}, order: order})
 				order++
 				continue
 			}
 			applyDeclaration(&cs, d)
 		}
 	}
+```
+
+where `inlineImportantIDs` is a package constant declared in cascade.go (an outsized specificity for
+inline `!important`, far above any reachable from parsed CSS):
+
+```go
+// inlineImportantIDs is the synthetic specificity IDs value given to inline
+// !important declarations. CSS places inline !important above all author
+// !important rules regardless of selector specificity; we model that with an IDs
+// count (2^20) far larger than any specificity reachable from parsed CSS.
+const inlineImportantIDs = 1 << 20
 ```
 
 This works because Task 13 deliberately deferred the `important` sort to *after* this marker, so the
