@@ -1,5 +1,7 @@
 package css
 
+import "fmt"
+
 // TokenKind enumerates the CSS token types this engine recognizes. It is a
 // pragmatic subset of CSS Syntax §4 sufficient for selectors and declarations.
 type TokenKind int
@@ -22,6 +24,20 @@ const (
 	TokenLParen    // (
 	TokenRParen    // )
 )
+
+var tokenKindNames = []string{
+	"EOF", "Whitespace", "Ident", "Hash", "String", "Number",
+	"Dimension", "Percent", "Delim", "Colon", "Semicolon", "Comma",
+	"LBrace", "RBrace", "LParen", "RParen",
+}
+
+// String returns the token kind's short name, for readable test output and debugging.
+func (k TokenKind) String() string {
+	if int(k) >= 0 && int(k) < len(tokenKindNames) {
+		return tokenKindNames[k]
+	}
+	return fmt.Sprintf("TokenKind(%d)", int(k))
+}
 
 // Token is one lexical unit. Text holds the token's source text (for Ident/String
 // the decoded value; for Dimension the numeric+unit text); Num and Unit are set

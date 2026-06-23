@@ -35,3 +35,22 @@ func TestTokenizeIdentValue(t *testing.T) {
 		t.Fatalf("got %v %q, want Ident \"margin-top\"", tok.Kind, tok.Text)
 	}
 }
+
+func TestTokenKindString(t *testing.T) {
+	cases := map[TokenKind]string{
+		TokenEOF:    "EOF",
+		TokenIdent:  "Ident",
+		TokenComma:  "Comma",
+		TokenDelim:  "Delim",
+		TokenLBrace: "LBrace",
+	}
+	for k, want := range cases {
+		if got := k.String(); got != want {
+			t.Errorf("TokenKind(%d).String() = %q, want %q", int(k), got, want)
+		}
+	}
+	// An out-of-range kind must not panic and should be clearly marked.
+	if got := TokenKind(999).String(); got == "" {
+		t.Errorf("out-of-range String() returned empty; want a non-empty placeholder")
+	}
+}
