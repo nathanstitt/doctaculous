@@ -357,6 +357,14 @@ Expected: FAIL — hashes/strings/numbers tokenize wrong (currently `#` is a Del
 
 - [ ] **Step 3: Write minimal implementation**
 
+**Ordering matters:** these cases MUST be inserted *before* the existing `case isNameStart(c)`.
+`isNameStart('-')` is true, so a `-`-prefixed number like `-1px` would otherwise be swallowed as an
+ident; placing the `c == '-' && next-is-digit/dot` case first makes `-1px` tokenize as a number.
+(A lone `-` followed by a non-name char still falls through to `isNameStart`→ident rather than the
+spec's `TokenDelim`; that is an accepted simplification — a bare `-` delimiter is not meaningful in
+the declaration/selector subset this engine parses, and `--custom-props` still work via the
+hyphen-then-hyphen ident path.)
+
 ```go
 // in pkg/css/token.go, extend next()'s switch BEFORE the isNameStart case:
 //	case c == '#':
