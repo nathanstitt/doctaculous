@@ -36,6 +36,36 @@ func TestTokenizeIdentValue(t *testing.T) {
 	}
 }
 
+func TestTokenizeHashStringNumberDim(t *testing.T) {
+	tz := newTokenizer(`#lead "hi" 12 1.5em 50% -3px`)
+	type exp struct {
+		k    TokenKind
+		text string
+		num  float64
+		unit string
+	}
+	want := []exp{
+		{TokenHash, "lead", 0, ""},
+		{TokenWhitespace, " ", 0, ""},
+		{TokenString, "hi", 0, ""},
+		{TokenWhitespace, " ", 0, ""},
+		{TokenNumber, "12", 12, ""},
+		{TokenWhitespace, " ", 0, ""},
+		{TokenDimension, "1.5em", 1.5, "em"},
+		{TokenWhitespace, " ", 0, ""},
+		{TokenPercent, "50%", 50, "%"},
+		{TokenWhitespace, " ", 0, ""},
+		{TokenDimension, "-3px", -3, "px"},
+	}
+	for i, w := range want {
+		tok := tz.next()
+		if tok.Kind != w.k || tok.Text != w.text || tok.Num != w.num || tok.Unit != w.unit {
+			t.Fatalf("token[%d] = {%v %q %v %q}, want {%v %q %v %q}",
+				i, tok.Kind, tok.Text, tok.Num, tok.Unit, w.k, w.text, w.num, w.unit)
+		}
+	}
+}
+
 func TestTokenKindString(t *testing.T) {
 	cases := map[TokenKind]string{
 		TokenEOF:    "EOF",

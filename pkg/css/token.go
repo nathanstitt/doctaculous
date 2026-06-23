@@ -1,6 +1,9 @@
 package css
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // TokenKind enumerates the CSS token types this engine recognizes. It is a
 // pragmatic subset of CSS Syntax §4 sufficient for selectors and declarations.
@@ -71,6 +74,18 @@ func (t *tokenizer) next() Token {
 	case c == ',':
 		t.pos++
 		return Token{Kind: TokenComma, Text: ","}
+	case c == '#':
+		t.pos++
+		id := t.readName()
+		return Token{Kind: TokenHash, Text: id}
+	case c == '"' || c == '\'':
+		return t.readString(c)
+	case c == '-' && t.pos+1 < len(t.src) && (isDigit(t.src[t.pos+1]) || t.src[t.pos+1] == '.'):
+		return t.readNumeric()
+	case isDigit(c):
+		return t.readNumeric()
+	case c == '.' && t.pos+1 < len(t.src) && isDigit(t.src[t.pos+1]):
+		return t.readNumeric()
 	case isNameStart(c):
 		return t.readIdent()
 	default:
@@ -85,6 +100,59 @@ func (t *tokenizer) readIdent() Token {
 		t.pos++
 	}
 	return Token{Kind: TokenIdent, Text: t.src[start:t.pos]}
+}
+
+func (t *tokenizer) readName() string {
+	start := t.pos
+	for t.pos < len(t.src) && isNameChar(t.src[t.pos]) {
+		t.pos++
+	}
+	return t.src[start:t.pos]
+}
+
+func (t *tokenizer) readString(quote byte) Token {
+	t.pos++ // opening quote
+	start := t.pos
+	for t.pos < len(t.src) && t.src[t.pos] != quote {
+		t.pos++
+	}
+	s := t.src[start:t.pos]
+	if t.pos < len(t.src) {
+		t.pos++ // closing quote
+	}
+	return Token{Kind: TokenString, Text: s}
+}
+
+func (t *tokenizer) readNumeric() Token {
+	start := t.pos
+	if t.src[t.pos] == '-' {
+		t.pos++
+	}
+	for t.pos < len(t.src) && (isDigit(t.src[t.pos]) || t.src[t.pos] == '.') {
+		t.pos++
+	}
+	numText := t.src[start:t.pos]
+	num := parseFloat(numText)
+	if t.pos < len(t.src) && t.src[t.pos] == '%' {
+		t.pos++
+		return Token{Kind: TokenPercent, Text: numText + "%", Num: num, Unit: "%"}
+	}
+	if t.pos < len(t.src) && isNameStart(t.src[t.pos]) {
+		unit := t.readName()
+		return Token{Kind: TokenDimension, Text: numText + unit, Num: num, Unit: unit}
+	}
+	return Token{Kind: TokenNumber, Text: numText, Num: num}
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// parseFloat parses a CSS number, returning 0 on malformed input (never panics).
+func parseFloat(s string) float64 {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return f
 }
 
 func isWhitespace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' }
