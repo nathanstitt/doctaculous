@@ -1,6 +1,9 @@
 package css
 
-import "testing"
+import (
+	"image/color"
+	"testing"
+)
 
 func TestParseLength(t *testing.T) {
 	cases := []struct {
@@ -26,6 +29,32 @@ func TestParseLength(t *testing.T) {
 		}
 		if ok && (got.Value != c.val || got.Unit != c.unit) {
 			t.Fatalf("parseLength(%q) = {%v %v}, want {%v %v}", c.in, got.Value, got.Unit, c.val, c.unit)
+		}
+	}
+}
+
+func TestParseColor(t *testing.T) {
+	cases := []struct {
+		in   string
+		want color.RGBA
+		ok   bool
+	}{
+		{"#000000", color.RGBA{0, 0, 0, 255}, true},
+		{"#fff", color.RGBA{255, 255, 255, 255}, true},
+		{"#ff0000", color.RGBA{255, 0, 0, 255}, true},
+		{"red", color.RGBA{255, 0, 0, 255}, true},
+		{"white", color.RGBA{255, 255, 255, 255}, true},
+		{"transparent", color.RGBA{0, 0, 0, 0}, true},
+		{"rgb(0,128,255)", color.RGBA{0, 128, 255, 255}, true},
+		{"notacolor", color.RGBA{}, false},
+	}
+	for _, c := range cases {
+		got, ok := parseColor(newTokenizer(c.in))
+		if ok != c.ok {
+			t.Fatalf("parseColor(%q) ok = %v, want %v", c.in, ok, c.ok)
+		}
+		if ok && got != c.want {
+			t.Fatalf("parseColor(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }
