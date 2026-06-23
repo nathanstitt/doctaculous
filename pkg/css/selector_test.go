@@ -82,6 +82,42 @@ func TestSelectorMatchDescendantSkipsLevels(t *testing.T) {
 	check("div span", false)   // subject must be p, not span
 }
 
+// TestDeferredSelectorsDoNotMisMatch locks in the safe-degradation guarantee for
+// selector forms this engine does not yet support (pseudo-classes, child and
+// sibling combinators, pseudo-elements, attribute selectors). They must parse
+// without panic and, crucially, must NOT match a plain element — degrading to an
+// inert non-match rather than wrongly applying styles. If a future tokenizer
+// change made ">" or ":" matchable, this test fails instead of silently
+// mis-styling pages.
+func TestDeferredSelectorsDoNotMisMatch(t *testing.T) {
+	// A representative DOM: <ul><li class="x"></li></ul>
+	ul := &fakeNode{tag: "ul"}
+	li := &fakeNode{tag: "li", classes: []string{"x"}, parent: ul}
+
+	deferred := []struct {
+		sel  string
+		node *fakeNode
+	}{
+		{"a:hover", &fakeNode{tag: "a"}},   // pseudo-class must not match a plain <a>
+		{"li:first-child", li},             // pseudo-class
+		{"ul > li", li},                    // child combinator must not match (only descendant is supported)
+		{"li + li", li},                    // adjacent-sibling combinator
+		{"li ~ li", li},                    // general-sibling combinator
+		{"p::before", &fakeNode{tag: "p"}}, // pseudo-element
+		{"li[data-x]", li},                 // attribute selector
+	}
+	for _, d := range deferred {
+		sels := parseSelectorList(d.sel)
+		// Parsing must not panic and must yield at most the parsed (garbage) selector;
+		// the guarantee is that NONE of the produced selectors match the node.
+		for _, s := range sels {
+			if s.Matches(d.node) {
+				t.Errorf("deferred selector %q wrongly matched <%s>; unsupported selectors must degrade to a non-match, not mis-apply styles", d.sel, d.node.tag)
+			}
+		}
+	}
+}
+
 func TestParseSelectorListSkipsMalformed(t *testing.T) {
 	// Malformed groups (empty qualifier names) are skipped; valid ones survive.
 	sels := parseSelectorList("h1, ., #, p.intro")
