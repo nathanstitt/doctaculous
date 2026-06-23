@@ -40,6 +40,9 @@ func TestSelectorMatch(t *testing.T) {
 
 	mustMatch := func(sel string, n *fakeNode, want bool) {
 		sels := parseSelectorList(sel)
+		if len(sels) == 0 {
+			t.Fatalf("%q: parseSelectorList returned no selectors", sel)
+		}
 		got := sels[0].Matches(n)
 		if got != want {
 			t.Fatalf("%q matches %s#%s.%v = %v, want %v", sel, n.tag, n.id, n.classes, got, want)
@@ -53,6 +56,30 @@ func TestSelectorMatch(t *testing.T) {
 	mustMatch("p p", p, false)    // no matching ancestor
 	mustMatch("div", p, false)    // subject must be the node itself
 	mustMatch("*", p, true)
+}
+
+func TestSelectorMatchDescendantSkipsLevels(t *testing.T) {
+	// Tree: html > div#main > span > p   (p is the subject)
+	html := &fakeNode{tag: "html"}
+	div := &fakeNode{tag: "div", id: "main", parent: html}
+	span := &fakeNode{tag: "span", parent: div}
+	p := &fakeNode{tag: "p", parent: span}
+
+	check := func(sel string, want bool) {
+		sels := parseSelectorList(sel)
+		if len(sels) == 0 {
+			t.Fatalf("%q: parseSelectorList returned no selectors", sel)
+		}
+		if got := sels[0].Matches(p); got != want {
+			t.Errorf("%q matches p = %v, want %v", sel, got, want)
+		}
+	}
+	check("div p", true)       // div is a non-direct ancestor (span between) — descendant skips span
+	check("#main p", true)     // ancestor by id, two levels up
+	check("html p", true)      // top-level ancestor, three levels up
+	check("html div p", true)  // three-part chain, all ancestors present in order
+	check("span div p", false) // order wrong: div is not a descendant-ancestor of span here
+	check("div span", false)   // subject must be p, not span
 }
 
 func TestParseSelectorListSkipsMalformed(t *testing.T) {
