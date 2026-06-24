@@ -22,6 +22,15 @@ func TestUADisplayDefaults(t *testing.T) {
 	if d := uaStyle("li").Display; d != "list-item" {
 		t.Errorf("li display = %q, want list-item", d)
 	}
+	// Table parts: box generation switches on exactly these values.
+	if d := uaStyle("tr").Display; d != "table-row" {
+		t.Errorf("tr display = %q, want table-row", d)
+	}
+	for _, tag := range []string{"td", "th"} {
+		if d := uaStyle(tag).Display; d != "table-cell" {
+			t.Errorf("%s display = %q, want table-cell", tag, d)
+		}
+	}
 	for _, tag := range []string{"head", "script", "style", "title"} {
 		if d := uaStyle(tag).Display; d != "none" {
 			t.Errorf("%s display = %q, want none", tag, d)
@@ -37,6 +46,23 @@ func TestUAHeadingSizes(t *testing.T) {
 	// h1 font-size should be larger than the 16pt initial.
 	if h1.FontSizePt <= 16 {
 		t.Errorf("h1 font-size = %v, want > 16", h1.FontSizePt)
+	}
+	// Heading font-sizes and top margins both decrease monotonically h1..h6
+	// (the W3C sample UA sheet shape). This locks the margins against the
+	// inverted-order regression where smaller headings got larger margins.
+	prevSize, prevMargin := h1.FontSizePt+1, h1.MarginTop.Value+1
+	for _, tag := range []string{"h1", "h2", "h3", "h4", "h5", "h6"} {
+		cs := uaStyle(tag)
+		if !cs.Bold {
+			t.Errorf("%s should be bold", tag)
+		}
+		if cs.FontSizePt >= prevSize {
+			t.Errorf("%s font-size %v should be < previous %v (sizes must decrease h1..h6)", tag, cs.FontSizePt, prevSize)
+		}
+		if cs.MarginTop.Value > prevMargin {
+			t.Errorf("%s margin-top %v should be <= previous %v (margins must not invert)", tag, cs.MarginTop.Value, prevMargin)
+		}
+		prevSize, prevMargin = cs.FontSizePt, cs.MarginTop.Value
 	}
 }
 

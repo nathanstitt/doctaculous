@@ -17,12 +17,14 @@ tr { display: table-row; }
 td, th { display: table-cell; }
 head, title, meta, link, style, script { display: none; }
 
+/* Heading margins follow the W3C CSS2.1 sample UA sheet (~0.67em of the
+   heading's font-size), so they decrease with font-size rather than inverting. */
 h1 { font-size: 32px; font-weight: bold; margin-top: 21px; margin-bottom: 21px; }
-h2 { font-size: 24px; font-weight: bold; margin-top: 20px; margin-bottom: 20px; }
-h3 { font-size: 19px; font-weight: bold; margin-top: 18px; margin-bottom: 18px; }
-h4 { font-size: 16px; font-weight: bold; margin-top: 21px; margin-bottom: 21px; }
-h5 { font-size: 13px; font-weight: bold; margin-top: 22px; margin-bottom: 22px; }
-h6 { font-size: 11px; font-weight: bold; margin-top: 24px; margin-bottom: 24px; }
+h2 { font-size: 24px; font-weight: bold; margin-top: 16px; margin-bottom: 16px; }
+h3 { font-size: 19px; font-weight: bold; margin-top: 13px; margin-bottom: 13px; }
+h4 { font-size: 16px; font-weight: bold; margin-top: 11px; margin-bottom: 11px; }
+h5 { font-size: 13px; font-weight: bold; margin-top: 9px; margin-bottom: 9px; }
+h6 { font-size: 11px; font-weight: bold; margin-top: 7px; margin-bottom: 7px; }
 p, blockquote { margin-top: 16px; margin-bottom: 16px; }
 th { font-weight: bold; }
 `
