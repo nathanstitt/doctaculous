@@ -1296,10 +1296,19 @@ import (
 
 // blockBox builds a minimal block box with the given style and children.
 func blockBox(style gcss.ComputedStyle, kids ...*cssbox.Box) *cssbox.Box {
-	// Emulate initialStyle()'s max-* convention: a zero-value Length is {0, UnitPx},
-	// which resolveContentWidth/resolveFixedHeight read as "max:0" (clamping to 0).
-	// Real box-gen gets MaxWidth/MaxHeight=UnitAuto ("none") from the cascade, so a
-	// test style that omits them must set them too, or e.g. a 60x40 float clamps to 0x0.
+	// Emulate initialStyle()'s auto/none conventions. A zero-value Length is
+	// {0, UnitPx}, which the resolver reads as an EXPLICIT 0 ("width:0"/"max-width:0"),
+	// NOT the CSS initial "auto"/"none". Real box-gen gets Width/Height=auto and
+	// Max*=none ("none") from the cascade, so a test style that omits any of them must
+	// set them, or e.g. a width-less block resolves to content width 0 (and cascades 0
+	// down to its children), or a 60×40 float clamps to 0×0. Only fields left at the
+	// zero value are defaulted, so an explicit Width/Height/Max* in the literal wins.
+	if style.Width == (gcss.Length{}) {
+		style.Width = gcss.Length{Unit: gcss.UnitAuto}
+	}
+	if style.Height == (gcss.Length{}) {
+		style.Height = gcss.Length{Unit: gcss.UnitAuto}
+	}
 	if style.MaxWidth == (gcss.Length{}) {
 		style.MaxWidth = gcss.Length{Unit: gcss.UnitAuto}
 	}
@@ -1701,8 +1710,13 @@ func TestTextWrapsBesideFloat(t *testing.T) {
 	floated.Float = cssbox.FloatLeft
 
 	// A sibling block of text with enough words to wrap several lines at width 200.
+	// Width:auto so it fills the 200px container (a zero-value Width would resolve to
+	// "width:0" — see blockBox). It is built as a raw literal (not blockBox) because it
+	// needs Formatting: InlineFC for its text child.
 	textStyle := gcss.ComputedStyle{Display: "block", FontFamily: "serif", FontSizePt: 12,
-		LineHeight: gcss.Length{Value: 16, Unit: gcss.UnitPx}, Color: color.RGBA{0, 0, 0, 255}}
+		LineHeight: gcss.Length{Value: 16, Unit: gcss.UnitPx}, Color: color.RGBA{0, 0, 0, 255},
+		Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Unit: gcss.UnitAuto},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
 	para := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC, Style: textStyle,
 		Children: []*cssbox.Box{{Kind: cssbox.BoxText, Display: cssbox.DisplayInline, Style: textStyle,
 			Text: "Many words here that should wrap across several lines beside and below the floated box on the left side."}}}
@@ -1770,16 +1784,31 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	//    queries use the BFC-root frame (bandOriginY + the local pen offset); emitted
 	//    glyph/line Y stays in the local content-top-0 frame (the block stacker shifts
 	//    the whole interior into page space later). Glyph X is absolute page-space
-	//    already (availLeft and contentX are absolute), so X is never shifted. When no
-	//    float overlaps a line's band, leftEdge/rightEdge return [contentX,
-	//    contentX+contentW] and this reproduces a single fixed-width Break.
+	//    already (availLeft and contentX are absolute), so X is never shifted.
+	//
+	//    The float edges are CLAMPED to THIS box's own content box [contentX,
+	//    contentX+contentW]: the float context spans the whole BFC (its cbLeft/cbRight
+	//    are the BFC root's content box, which for a non-BFC box narrower than its
+	//    containing block — e.g. a width:200px <p> in a 1280px page — is WIDER than this
+	//    box). Without the clamp such a box would lay text out to the BFC width, not its
+	//    own. When no float intrudes, the clamp pins avail to exactly [contentX,
+	//    contentX+contentW] and the per-line BreakNext reproduces a single fixed-width
+	//    Break (the non-float invariant). When a float intrudes, its edge is inside the
+	//    box, so the clamp leaves the float-narrowing intact.
 	penY := contentTopY
 	rest := glyphs
 	lineHGuess := e.lineHeightGuess(b) // representative band height (see Task 7 Step 4)
+	cbLeft, cbRight := contentX, contentX+contentW // this box's own content box (clamp bounds)
 	for len(rest) > 0 {
 		bandY := bandOriginY + (penY - contentTopY) // this line's Y in the BFC-root frame
 		availLeft := fc.leftEdge(bandY, lineHGuess)
+		if availLeft < cbLeft {
+			availLeft = cbLeft
+		}
 		availRight := fc.rightEdge(bandY, lineHGuess)
+		if availRight > cbRight {
+			availRight = cbRight
+		}
 		avail := availRight - availLeft
 		if avail < 1 {
 			// Fully blocked band (opposite-side floats meet). Drop below the shallowest
