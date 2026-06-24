@@ -204,6 +204,26 @@ what is done vs. pending.
   **inline-block as inline-level outer** so it flows in the IFC. Unsupported layout modes (flex/grid/
   table) fall back to block normal flow; the engine recovers at the page boundary (never panics). See
   `docs/superpowers/specs/2026-06-23-html-block-inline-flow-design.md`.
+- **HTML rendering — replaced content + images** (`pkg/layout/css/image.go` + `replaced.go`, extended
+  `pkg/layout/css/inline.go`/`block.go`/`fragment.go`, `pkg/layout/inline`, `pkg/layout/page.go` +
+  `pkg/layout/paint`, `pkg/css` `object-fit`; covered by fragment-geometry assertions, the
+  `html-image-*` golden images, an `img-vs-div` WPT reftest, and paint/inline unit tests): an `<img>`
+  now **decodes → sizes → paints**. PNG/JPEG/GIF are decoded (stdlib, no new dep) at layout time via
+  the existing `pkg/resource.ResourceLoader`, cached per-engine (mirroring the face cache, negative
+  results included). The CSS replaced-element sizing algorithm (CSS 2.1 §10.3.2/§10.6.2) resolves the
+  used size: CSS `width`/`height` win over the presentational `width`/`height` attributes; a single
+  specified dimension derives the other from the decoded image's intrinsic aspect ratio; neither uses
+  the intrinsic size; each axis is clamped by `min/max-width`/`-height`. The image paints through
+  `render.Device.DrawImage` (the same seam the PDF side uses) via a unit-square→content-box matrix, with
+  **`object-fit`** (`fill`/`contain`/`cover`/`none`/`scale-down`; `cover`/oversized clip to the content
+  box). A replaced box flows as an inline atom (default/inline-block) or a block (`display:block`, where
+  `width:auto` uses the intrinsic width, not container fill). Two inline-fidelity additions landed with
+  it: **inline-block/replaced horizontal margins** participate in the inline advance, and an atomic
+  box's **baseline/line-box ascent** is folded into line metrics separately from text (so a tall image
+  drops the baseline below it without the line-height leading multiplier scaling the atom). An
+  undecodable/404/missing-`src`/unsupported-format image degrades to a sized placeholder (reserves its
+  box, paints nothing) + debug log, never panicking; recovery is at the page boundary. See
+  `docs/superpowers/specs/2026-06-24-html-replaced-images-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -233,19 +253,21 @@ that skip into real output.
    PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
    content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
    fixes bold/italic fidelity).
-6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, and block+inline
-   normal-flow layout/paint with `OpenHTML` are done — see the Done section). Roughly in order, each a
-   parse/layout slice with its own fixtures + golden/WPT tests: **replaced content + images**
-   (`<img>` decode + intrinsic sizing + `object-fit`; today an `<img>`/inline-block atom sizes only from
-   its `width`/`height` and otherwise renders as a zero/placeholder box); **floats + positioning**
-   (float/clear, relative/absolute/fixed, z-order, overflow clipping); **tables**; **web fonts**
-   (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today flex/grid/table fall back to block
-   normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network fetching behind the existing seam,
-   which currently has only hermetic loaders); **pagination / CSS paged media** (the default stays a
-   single tall image); and **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter).
-   Fidelity follow-ups within the existing engine: inline-block horizontal margins, full
-   `vertical-align`/line-box ascent including atoms, `margin:auto` centering, and the deferred
-   margin-collapse edge cases (empty-block collapse-through, clearance, `min-height` interaction).
+6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
+   normal-flow layout/paint with `OpenHTML`, and replaced content + images are done — see the Done
+   section). Roughly in order, each a parse/layout slice with its own fixtures + golden/WPT tests:
+   **floats + positioning** (float/clear, relative/absolute/fixed, z-order, overflow clipping);
+   **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
+   flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
+   fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
+   `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
+   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Replaced-content
+   fidelity follow-ups within the existing engine: `object-position`, the ratio-preserving min/max
+   sizing step (CSS 10.4; today min/max clamps per-axis after ratio derivation), a percentage `height`
+   basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
+   inline/flow follow-ups still open: full `vertical-align` keyword set (only the atom baseline
+   mechanics landed), `margin:auto` centering, and the deferred margin-collapse edge cases (empty-block
+   collapse-through, clearance, `min-height` interaction).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
