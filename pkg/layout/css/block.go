@@ -7,6 +7,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // Engine lays out a cssbox tree into a positioned fragment tree at a fixed
@@ -18,21 +19,24 @@ import (
 // at layoutInline, the documented hook a block box establishing an inline
 // formatting context calls.
 type Engine struct {
-	faces *layoutfont.FaceCache
-	logf  func(string, ...any)
+	faces  *layoutfont.FaceCache
+	images *imageCache
+	logf   func(string, ...any)
 }
 
-// New returns an Engine that resolves fonts through faces and logs unsupported or
-// degraded cases through logf. A nil faces builds a fresh cache; a nil logf is a
-// no-op, so callers need not supply either.
-func New(faces *layoutfont.FaceCache, logf func(string, ...any)) *Engine {
+// New returns an Engine that resolves fonts through faces, decodes replaced-element
+// images (e.g. <img>) through loader, and logs unsupported or degraded cases through
+// logf. A nil faces builds a fresh cache; a nil loader means images cannot be fetched
+// (every <img> degrades to a placeholder); a nil logf is a no-op — so callers need
+// supply only what they have.
+func New(faces *layoutfont.FaceCache, loader resource.ResourceLoader, logf func(string, ...any)) *Engine {
 	if faces == nil {
 		faces = layoutfont.NewFaceCache()
 	}
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Engine{faces: faces, logf: logf}
+	return &Engine{faces: faces, images: newImageCache(loader, logf), logf: logf}
 }
 
 // Layout lays out root at viewportW points and returns a single tall page sized
@@ -94,6 +98,16 @@ type blockResult struct {
 // Y = marginTopEdgeY + result.marginTop. Children are positioned absolutely in
 // page space within the fragment.
 func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, originX, marginTopEdgeY float64) blockResult {
+	if b.Kind == cssbox.BoxReplaced {
+		// A block-level replaced box (e.g. <img style="display:block">) is sized by
+		// the replaced-element algorithm, not the block content flow: with width:auto
+		// it uses its INTRINSIC width (not the containing-block fill a normal block
+		// gets). It has no in-flow children to collapse margins with, so its top/bottom
+		// margins are solid. Margins/border/padding/min-max are honored by
+		// replacedUsedSize + replacedFragment.
+		return e.layoutBlockReplaced(ctx, b, cbWidth, originX, marginTopEdgeY)
+	}
+
 	ed := usedEdges(b, cbWidth)
 
 	// Resolve the content width the children flow into, then the border-box width.
@@ -395,27 +409,35 @@ func resolveContentWidth(b *cssbox.Box, cbWidth float64, ed edges) float64 {
 	// min/max clamp. Both describe the same box edge as width does (border box under
 	// border-box sizing), so convert each to content-box terms by subtracting the
 	// insets before comparing — keeping the comparison consistent with contentW.
-	if maxL := b.Style.MaxWidth; maxL.Unit != gcss.UnitAuto { // UnitAuto models "none"
-		maxW, _ := resolveLen(maxL, fs, cbWidth)
-		if borderBox {
-			maxW -= insets
-		}
-		if contentW > maxW {
-			contentW = maxW
-		}
-	}
+	maxW, _ := resolveLen(b.Style.MaxWidth, fs, cbWidth)
+	hasMax := b.Style.MaxWidth.Unit != gcss.UnitAuto // UnitAuto models "none"
 	// min-width default is 0 (UnitPx zero); resolve and apply unconditionally.
 	minW, _ := resolveLen(b.Style.MinWidth, fs, cbWidth)
 	if borderBox {
+		maxW -= insets
 		minW -= insets
 	}
-	if contentW < minW {
-		contentW = minW
+	return clampMaxMin(contentW, minW, maxW, hasMax)
+}
+
+// clampMaxMin clamps v to at most maxV (only when hasMax), then to at least minV,
+// then to non-negative — the CSS 10.4 max-then-min-then-floor order. It is the
+// shared min/max-clamp primitive for both the block width algorithm
+// (resolveContentWidth) and the replaced-element sizing algorithm
+// (replacedUsedSize), so the two stay consistent. Callers resolve the min/max
+// Lengths (and adjust for box-sizing) before calling, since the comparison is in
+// the same coordinate terms as v.
+func clampMaxMin(v, minV, maxV float64, hasMax bool) float64 {
+	if hasMax && v > maxV {
+		v = maxV
 	}
-	if contentW < 0 {
-		contentW = 0
+	if v < minV {
+		v = minV
 	}
-	return contentW
+	if v < 0 {
+		v = 0
+	}
+	return v
 }
 
 // isHeightAuto reports whether b's height is auto (content-derived). An anonymous
@@ -539,6 +561,9 @@ func shiftFragment(f *Fragment, dy float64) {
 	f.Y += dy
 	for li := range f.Lines {
 		f.Lines[li].BaselineY += dy
+	}
+	if f.Image != nil {
+		f.Image.CY += dy
 	}
 	for _, c := range f.Children {
 		shiftFragment(c, dy)

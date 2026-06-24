@@ -81,3 +81,29 @@ func TestMakeLineMaxMetrics(t *testing.T) {
 		t.Errorf("LineGapPt = %v, want 3", l.LineGapPt)
 	}
 }
+
+// TestMakeLineAtomicMetrics: an atomic inline box contributes its above/below-
+// baseline extent to the SEPARATE AtomAscentPt/AtomDescentPt fields (not the text
+// AscentPt/DescentPt), so the line-height leading multiplier applied to text metrics
+// never scales the atom's box height. A bottom-aligned atom (baseline == height)
+// contributes all of its height as ascent and nothing as descent.
+func TestMakeLineAtomicMetrics(t *testing.T) {
+	glyphs := []Glyph{
+		{Advance: 6, AscentPt: 8, DescentPt: 2},                                         // text
+		{Advance: 50, Atomic: &AtomicItem{WidthPt: 50, HeightPt: 100, BaselinePt: 100}}, // bottom-aligned 100px box
+		{Advance: 40, Atomic: &AtomicItem{WidthPt: 40, HeightPt: 30, BaselinePt: 20}},   // baseline 20 down: asc 20, desc 10
+	}
+	l := MakeLine(glyphs)
+	// Text metrics are unaffected by the atoms.
+	if l.AscentPt != 8 || l.DescentPt != 2 {
+		t.Errorf("text metrics = %v/%v, want 8/2 (atoms must not bleed into text metrics)", l.AscentPt, l.DescentPt)
+	}
+	// Atom ascent is the max above-baseline extent (100 vs 20); descent the max below
+	// (0 vs 10).
+	if l.AtomAscentPt != 100 {
+		t.Errorf("AtomAscentPt = %v, want 100", l.AtomAscentPt)
+	}
+	if l.AtomDescentPt != 10 {
+		t.Errorf("AtomDescentPt = %v, want 10", l.AtomDescentPt)
+	}
+}

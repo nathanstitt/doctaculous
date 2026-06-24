@@ -12,11 +12,16 @@ package doctaculous
 // copied here. See testdata/wpt/README.md.
 
 import (
+	"bytes"
 	"context"
 	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // wptReftestDir holds the in-house WPT-style normal-flow reftest pairs.
@@ -35,13 +40,38 @@ var wptReftests = []struct {
 	viewportPx float64
 	// what documents the equivalence under test, for failure messages.
 	what string
+	// loader resolves external refs (e.g. <img src>) for both pages of the pair; nil
+	// for pairs with no external resources.
+	loader resource.ResourceLoader
 }{
-	{"margin-collapse", 200, "adjacent vertical margins collapse to their max (CSS 2.1 8.3.1)"},
-	{"shorthand", 300, "margin/border/padding shorthands expand to their longhands"},
-	{"box-sizing", 200, "box-sizing:border-box equals the content-box equivalent"},
-	{"auto-width", 200, "an auto-width block fills its containing block"},
-	{"percent-width", 400, "a percentage width resolves against the containing block width"},
-	{"padding-shorthand", 320, "the 2-value padding shorthand equals the 4-value form"},
+	{"margin-collapse", 200, "adjacent vertical margins collapse to their max (CSS 2.1 8.3.1)", nil},
+	{"shorthand", 300, "margin/border/padding shorthands expand to their longhands", nil},
+	{"box-sizing", 200, "box-sizing:border-box equals the content-box equivalent", nil},
+	{"auto-width", 200, "an auto-width block fills its containing block", nil},
+	{"percent-width", 400, "a percentage width resolves against the containing block width", nil},
+	{"padding-shorthand", 320, "the 2-value padding shorthand equals the 4-value form", nil},
+	{"img-vs-div", 200, "a solid <img> sized W×H equals a <div> of the same size and background", solidSwatchLoader()},
+}
+
+// swatchColor is the solid color shared by the img-vs-div reftest's image and the
+// reference div's background (#3366cc).
+var swatchColor = color.RGBA{0x33, 0x66, 0xcc, 0xff}
+
+// solidSwatchLoader serves a solid swatchColor PNG at "swatch.png" matching the
+// reference div's background, so an object-fit:fill <img> of it renders identical
+// pixels to the div. It panics on encode failure (never happens for a tiny RGBA).
+func solidSwatchLoader() resource.MapLoader {
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			img.SetRGBA(x, y, swatchColor)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return resource.MapLoader{"swatch.png": {Data: buf.Bytes(), ContentType: "image/png"}}
 }
 
 // TestWPTReftests renders each (test, reference) pair at a fixed viewport and DPI and
@@ -51,8 +81,8 @@ var wptReftests = []struct {
 func TestWPTReftests(t *testing.T) {
 	for _, rt := range wptReftests {
 		t.Run(rt.name, func(t *testing.T) {
-			testImg := renderReftestPage(t, rt.name+".html", rt.viewportPx)
-			refImg := renderReftestPage(t, rt.name+"-ref.html", rt.viewportPx)
+			testImg := renderReftestPage(t, rt.name+".html", rt.viewportPx, rt.loader)
+			refImg := renderReftestPage(t, rt.name+"-ref.html", rt.viewportPx, rt.loader)
 
 			if testImg.Bounds() != refImg.Bounds() {
 				t.Fatalf("%s: bounds differ: test %v vs ref %v (%s)",
@@ -69,14 +99,18 @@ func TestWPTReftests(t *testing.T) {
 
 // renderReftestPage reads an HTML file from the reftest directory and rasterizes its
 // single page at the golden DPI and the given viewport width, returning the RGBA.
-func renderReftestPage(t *testing.T, file string, viewportPx float64) *image.RGBA {
+func renderReftestPage(t *testing.T, file string, viewportPx float64, loader resource.ResourceLoader) *image.RGBA {
 	t.Helper()
 	path := filepath.Join(wptReftestDir, file)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	doc, err := OpenHTMLBytes(data, WithViewportWidth(viewportPx))
+	opts := []HTMLOption{WithViewportWidth(viewportPx)}
+	if loader != nil {
+		opts = append(opts, WithResourceLoader(loader))
+	}
+	doc, err := OpenHTMLBytes(data, opts...)
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes(%s): %v", file, err)
 	}

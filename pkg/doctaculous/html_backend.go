@@ -93,7 +93,7 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
 	}
-	engine := layoutcss.New(layoutfont.NewFaceCache(), cfg.logf)
+	engine := layoutcss.New(layoutfont.NewFaceCache(), cfg.loader, cfg.logf)
 	pages, err := engine.Layout(ctx, root, cfg.viewportPt)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)

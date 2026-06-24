@@ -74,10 +74,11 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			g := &line.Glyphs[gi]
 			switch {
 			case g.Atomic != nil:
-				// Position the kept fragment: border-box left at x, bottom-aligned so
-				// its baseline (BaselinePt from the top) rests on the line baseline.
+				// Position the kept fragment: its border-box left lands at x plus the
+				// atom's left margin (the margin is part of the advance), bottom-aligned
+				// so its baseline (BaselinePt from the top) rests on the line baseline.
 				if frag, ok := g.Atomic.Ref.(*Fragment); ok && frag != nil {
-					translateFragment(frag, x-frag.X, (baselineY-g.Atomic.BaselinePt)-frag.Y)
+					translateFragment(frag, (x+g.Atomic.MarginLeftPt)-frag.X, (baselineY-g.Atomic.BaselinePt)-frag.Y)
 				}
 			case g.Outline != nil:
 				lineGlyphs = append(lineGlyphs, GlyphFragment{
@@ -119,28 +120,23 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				SizePt: child.Style.FontSizePt,
 				Color:  child.Style.Color,
 			})
+		case child.Kind == cssbox.BoxReplaced:
+			// A replaced inline (e.g. <img>, including an inline-block <img>) sizes via
+			// the replaced-element algorithm (intrinsic size + aspect ratio, clamped),
+			// decoding its image; its fragment carries the image for paint. This case
+			// precedes the inline-block case so a replaced inline-block is sized as a
+			// replaced box (not laid out as an empty block container).
+			w, h := e.replacedUsedSize(ctx, child, contentW)
+			frag := e.replacedFragment(ctx, child, w, h, 0, 0, contentW)
+			*atomics = append(*atomics, frag)
+			*runs = append(*runs, atomicRunFor(child, frag, contentW))
 		case child.Display == cssbox.DisplayInlineBlock:
 			// An inline-block establishes a new BFC; lay it out as a block at its
 			// resolved width and carry its border box as an atomic unit.
 			res := e.layoutBlock(ctx, child, contentW, 0, 0)
 			frag := res.frag
 			*atomics = append(*atomics, frag)
-			*runs = append(*runs, inline.Run{Atomic: &inline.AtomicItem{
-				WidthPt:    frag.W,
-				HeightPt:   frag.H,
-				BaselinePt: frag.H, // bottom-aligned baseline for now
-				Ref:        frag,
-			}})
-		case child.Kind == cssbox.BoxReplaced:
-			// A replaced inline (e.g. <img>) has no decoded intrinsic size yet
-			// (sub-project 4), so it sizes from its style/attrs or degrades to zero.
-			w, h := replacedSize(child)
-			*runs = append(*runs, inline.Run{Atomic: &inline.AtomicItem{
-				WidthPt:    w,
-				HeightPt:   h,
-				BaselinePt: h, // bottom-aligned baseline for now
-				Ref:        child,
-			}})
+			*runs = append(*runs, atomicRunFor(child, frag, contentW))
 		case child.Kind == cssbox.BoxInline || child.Kind == cssbox.BoxAnonInline:
 			// Descend into the inline element box; its text leaves carry the correct
 			// cascaded font/color. Inline-box decoration is deferred (see layoutInline).
@@ -153,31 +149,22 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 	}
 }
 
-// replacedSize resolves a replaced box's inline size in points: from its style
-// width/height (px/pt 1:1, em against its own font size), falling back to the
-// width/height presentation attributes parsed as integer pixels, else zero (no
-// intrinsic size until image decoding lands). A missing dimension is zero.
-func replacedSize(b *cssbox.Box) (w, h float64) {
-	fs := b.Style.FontSizePt
-	// resolveLen returns isAuto exactly when Unit==UnitAuto, so !isAuto already
-	// excludes auto — no separate Unit check needed.
-	if v, isAuto := resolveLen(b.Style.Width, fs, 0); !isAuto {
-		w = v
-	} else if b.Replaced != nil {
-		w = attrPx(b.Replaced.Attrs["width"])
-	}
-	if v, isAuto := resolveLen(b.Style.Height, fs, 0); !isAuto {
-		h = v
-	} else if b.Replaced != nil {
-		h = attrPx(b.Replaced.Attrs["height"])
-	}
-	if w < 0 {
-		w = 0
-	}
-	if h < 0 {
-		h = 0
-	}
-	return w, h
+// atomicRunFor builds the inline.Run for an atomic inline-level box (inline-block
+// or replaced) whose border-box fragment is frag, resolving its horizontal margins
+// against basis. The atom's advance is marginL + borderWidth + marginR, with the
+// left margin recorded so the IFC offsets the fragment's border box past it; the
+// atom is bottom-aligned (baseline at its margin-box bottom) for now — full inline
+// vertical-align is deferred. Negative margins are honored (they may pull the atom
+// or following content leftward), matching the block flow's margin treatment.
+func atomicRunFor(b *cssbox.Box, frag *Fragment, basis float64) inline.Run {
+	ed := usedEdges(b, basis)
+	return inline.Run{Atomic: &inline.AtomicItem{
+		WidthPt:      ed.mL + frag.W + ed.mR,
+		HeightPt:     frag.H,
+		MarginLeftPt: ed.mL,
+		BaselinePt:   frag.H, // bottom-aligned baseline for now
+		Ref:          frag,
+	}}
 }
 
 // attrPx parses a width/height presentation attribute as a non-negative integer
@@ -289,7 +276,7 @@ func (e *Engine) effectiveLineHeight(b *cssbox.Box, line inline.Line) float64 {
 	} else {
 		h = resolveLineHeight(b.Style.LineHeight, b.Style.FontSizePt, line)
 	}
-	if atomic := maxAtomicHeight(line); atomic > h {
+	if atomic := atomicLineExtent(line); atomic > h {
 		h = atomic
 	}
 	return h
@@ -320,26 +307,26 @@ func autoLineHeight(line inline.Line) float64 {
 }
 
 // ascentOfLine returns the line's ascent used to place its baseline below the pen
-// top. It is the line's glyph ascent, falling back to the tallest atomic's height
-// for an all-atomic line (whose glyph ascent is zero) so the line still has height.
+// top: the greater of the text ascent and the tallest atom's above-baseline extent
+// (inline.MakeLine records them separately). The baseline thus sits below a tall
+// atom's top rather than the atom overflowing above the line; an all-atomic line
+// (zero text ascent) still gets its ascent from the atom.
 func ascentOfLine(line inline.Line) float64 {
-	if line.AscentPt > 0 {
-		return line.AscentPt
+	if line.AtomAscentPt > line.AscentPt {
+		return line.AtomAscentPt
 	}
-	return maxAtomicHeight(line)
+	return line.AscentPt
 }
 
-// maxAtomicHeight returns the tallest atomic box on the line, or 0 if it has none.
-// An atomic is bottom-aligned (its baseline rests on the line baseline), so its
-// height is its extent above the baseline for line-box sizing purposes.
-func maxAtomicHeight(line inline.Line) float64 {
-	var maxH float64
-	for i := range line.Glyphs {
-		if a := line.Glyphs[i].Atomic; a != nil && a.HeightPt > maxH {
-			maxH = a.HeightPt
-		}
-	}
-	return maxH
+// atomicLineExtent returns the vertical extent an atomic inline box needs about the
+// baseline (its above-baseline ascent plus below-baseline descent). It is the floor
+// effectiveLineHeight applies to the line HEIGHT (vertical advance) so a fixed
+// line-height shorter than a tall atom (e.g. line-height:10px with a 100px image)
+// still reserves room for the atom — the atom-aware ascent places the baseline
+// correctly, but a fixed line-height ignores ascent, so the height floor remains
+// necessary. A line with no atoms returns 0.
+func atomicLineExtent(line inline.Line) float64 {
+	return line.AtomAscentPt + line.AtomDescentPt
 }
 
 // translateFragment shifts fragment f and its whole subtree by (dx, dy): the
@@ -359,6 +346,10 @@ func translateFragment(f *Fragment, dx, dy float64) {
 		for gi := range f.Lines[li].Glyphs {
 			f.Lines[li].Glyphs[gi].X += dx
 		}
+	}
+	if f.Image != nil {
+		f.Image.CX += dx
+		f.Image.CY += dy
 	}
 	for _, c := range f.Children {
 		translateFragment(c, dx, dy)

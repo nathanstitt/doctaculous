@@ -1,11 +1,16 @@
 package doctaculous
 
 import (
+	"bytes"
 	"context"
 	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // htmlGoldens are small HTML fixtures rendered end to end (parse -> box generation
@@ -18,6 +23,9 @@ var htmlGoldens = []struct {
 	// viewportPx is the layout viewport width this fixture renders at.
 	viewportPx float64
 	html       string
+	// loader resolves the fixture's external refs (e.g. <img src>); nil for
+	// fixtures with no external resources.
+	loader resource.ResourceLoader
 }{
 	{
 		// Background + border + padding + centered text in one styled block.
@@ -87,6 +95,80 @@ var htmlGoldens = []struct {
   <div class="db"></div>
 </body></html>`,
 	},
+	{
+		// A decoded <img> rendered in a box: an inline image sized by width/height
+		// (object-fit:fill stretches the 4-quadrant source into the box), plus a
+		// block image below it at intrinsic-derived size. Eyeball that the image
+		// renders upright (red top-left quadrant) and right-side-up.
+		name:       "image-basic",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .frame { padding: 10px; background: #eeeeee; }
+  img.big { width: 120px; height: 60px; }
+  img.block { display: block; width: 80px; height: 80px; margin-top: 10px; }
+</style></head><body>
+  <div class="frame">
+    <img class="big" src="quad.png">
+    <img class="block" src="quad.png">
+  </div>
+</body></html>`,
+		loader: quadLoader(),
+	},
+	{
+		// object-fit variants of the same square image stretched into wide boxes:
+		// fill (stretch), contain (letterbox), cover (crop). Eyeball that contain
+		// shows the whole image centered and cover fills the box edge-to-edge.
+		name:       "image-object-fit",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  img { display: block; width: 160px; height: 40px; margin: 6px; background: #cccccc; }
+  .fill { object-fit: fill; }
+  .contain { object-fit: contain; }
+  .cover { object-fit: cover; }
+</style></head><body>
+  <img class="fill" src="quad.png">
+  <img class="contain" src="quad.png">
+  <img class="cover" src="quad.png">
+</body></html>`,
+		loader: quadLoader(),
+	},
+}
+
+// quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL
+// blue, BR yellow) so a rendered image's orientation is visually unambiguous.
+func quadLoader() resource.MapLoader {
+	return resource.MapLoader{"quad.png": {Data: quadPNG(40), ContentType: "image/png"}}
+}
+
+// quadPNG returns a size×size PNG split into four solid color quadrants. It panics
+// on encode failure (encoding a tiny in-memory RGBA never fails in practice); this
+// runs only in tests.
+func quadPNG(size int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	half := size / 2
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			var c color.RGBA
+			switch {
+			case x < half && y < half:
+				c = color.RGBA{220, 50, 50, 255} // top-left red
+			case x >= half && y < half:
+				c = color.RGBA{50, 180, 50, 255} // top-right green
+			case x < half && y >= half:
+				c = color.RGBA{50, 80, 220, 255} // bottom-left blue
+			default:
+				c = color.RGBA{230, 200, 40, 255} // bottom-right yellow
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
 
 // TestHTMLGolden renders each small HTML fixture's single page end to end and
@@ -101,7 +183,11 @@ func TestHTMLGolden(t *testing.T) {
 	}
 	for _, f := range htmlGoldens {
 		t.Run(f.name, func(t *testing.T) {
-			doc, err := OpenHTMLBytes([]byte(f.html), WithViewportWidth(f.viewportPx))
+			opts := []HTMLOption{WithViewportWidth(f.viewportPx)}
+			if f.loader != nil {
+				opts = append(opts, WithResourceLoader(f.loader))
+			}
+			doc, err := OpenHTMLBytes([]byte(f.html), opts...)
 			if err != nil {
 				t.Fatalf("OpenHTMLBytes: %v", err)
 			}

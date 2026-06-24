@@ -38,8 +38,16 @@ type Run struct {
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
 // unit of a fixed width. The IFC lays out its own fragment separately; the line
 // only needs its advance and baseline placement. Carried opaquely through shaping.
+//
+// WidthPt is the item's full inline advance INCLUDING its horizontal margins;
+// MarginLeftPt is the left margin within that advance, so the IFC offsets the
+// item's border box past it when placing the kept fragment. HeightPt and BaselinePt
+// describe the margin box's vertical extent and the baseline it rests on. The core
+// uses only WidthPt (for breaking/placement) and the vertical metrics (for line-box
+// sizing); MarginLeftPt, BaselinePt, and Ref are read by the IFC at emit time.
 type AtomicItem struct {
 	WidthPt, HeightPt float64
+	MarginLeftPt      float64 // left margin within WidthPt; the IFC shifts the box past it
 	BaselinePt        float64 // distance from the item's top down to the baseline it rests on
 	Ref               any     // opaque back-reference the IFC uses to position the item's fragment
 }

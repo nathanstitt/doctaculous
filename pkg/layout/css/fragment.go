@@ -1,6 +1,7 @@
 package css
 
 import (
+	"image"
 	"image/color"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout"
@@ -23,7 +24,20 @@ type Fragment struct {
 	Border     [4]BorderEdge  // indexed by layout.EdgeSide (EdgeTop, EdgeRight, EdgeBottom, EdgeLeft)
 	Lines      []LineFragment // inline content (set for a box establishing an inline formatting context)
 	Children   []*Fragment    // child box fragments (block children; atomic inline boxes)
+	Image      *ImageContent  // decoded replaced-element image (set for a replaced box), painted in the content box
 	DebugTag   string         // optional label for test lookup; not used in paint
+}
+
+// ImageContent is a decoded replaced-element image carried on a Fragment. CX,CY,
+// CW,CH is the fragment's content box in the same frame as the fragment's own
+// border box (so it shifts with the fragment), resolved at layout time by deflating
+// the border box by the box's border+padding. Fit is the object-fit mapping. A nil
+// Img means decode failed: the fragment still reserves its box (a sized
+// placeholder), but no image is painted.
+type ImageContent struct {
+	Img            image.Image
+	CX, CY, CW, CH float64
+	Fit            layout.ObjectFit
 }
 
 // BorderEdge is one side of a fragment's border box. A zero edge (Width == 0 or
@@ -107,7 +121,21 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 		}
 	}
 
-	// 4. Children paint after this box (parent-before-child), in slice order.
+	// 4. A replaced-element image draws into the content box, after this box's
+	// background/border and before its children. A nil decoded image (failed decode)
+	// reserves the box but paints nothing — a sized placeholder.
+	if f.Image != nil && f.Image.Img != nil {
+		dst = append(dst, layout.Item{
+			Kind: layout.ImageKind,
+			Image: layout.ImageItem{
+				Img: f.Image.Img,
+				XPt: f.Image.CX, YPt: f.Image.CY, WPt: f.Image.CW, HPt: f.Image.CH,
+				Fit: f.Image.Fit,
+			},
+		})
+	}
+
+	// 5. Children paint after this box (parent-before-child), in slice order.
 	for _, c := range f.Children {
 		dst = c.AppendItems(dst)
 	}

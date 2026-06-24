@@ -331,7 +331,7 @@ func TestLayoutPageHeightIsContentBottom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	pages, err := New(nil, nil).Layout(context.Background(), root, 1000)
+	pages, err := New(nil, nil, nil).Layout(context.Background(), root, 1000)
 	if err != nil {
 		t.Fatalf("Layout: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestLayoutPageHeightIsContentBottom(t *testing.T) {
 // TestLayoutNilRootEmptyPage verifies a nil/degenerate root yields a single empty
 // page rather than an error or panic.
 func TestLayoutNilRootEmptyPage(t *testing.T) {
-	pages, err := New(nil, nil).Layout(context.Background(), nil, 800)
+	pages, err := New(nil, nil, nil).Layout(context.Background(), nil, 800)
 	if err != nil {
 		t.Fatalf("Layout(nil): %v", err)
 	}
@@ -372,7 +372,7 @@ func TestLayoutHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// Must not panic; returns a valid (possibly empty-bodied) page.
-	if _, err := New(nil, nil).Layout(ctx, root, 1000); err != nil {
+	if _, err := New(nil, nil, nil).Layout(ctx, root, 1000); err != nil {
 		t.Fatalf("Layout under cancelled ctx: %v", err)
 	}
 }
@@ -398,7 +398,7 @@ func TestEndToEndBlockFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	frag := New(nil, nil).layoutTree(context.Background(), root, 800)
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, 800)
 	if frag == nil {
 		t.Fatal("layoutTree returned nil")
 	}
@@ -422,7 +422,7 @@ func TestEndToEndBlockFlow(t *testing.T) {
 		}
 	}
 	// The whole tree flattens without panicking and yields a page sized to content.
-	pages, err := New(nil, nil).Layout(context.Background(), root, 800)
+	pages, err := New(nil, nil, nil).Layout(context.Background(), root, 800)
 	if err != nil {
 		t.Fatalf("Layout: %v", err)
 	}
@@ -445,7 +445,7 @@ func layoutTreeFor(t *testing.T, src string, viewportW float64, logf func(string
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	frag := New(nil, logf).layoutTree(context.Background(), root, viewportW)
+	frag := New(nil, nil, logf).layoutTree(context.Background(), root, viewportW)
 	if frag == nil {
 		t.Fatalf("layoutTree returned nil for %q", src)
 	}
