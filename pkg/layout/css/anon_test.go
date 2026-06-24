@@ -149,6 +149,121 @@ func TestRootDisplayNoneDegrades(t *testing.T) {
 	}
 }
 
+// --- inline-block participates inline (outer-level) ---
+
+// TestInlineBlockFlowsInline is the core fix: a container of only inline-blocks
+// establishes an INLINE formatting context (the inline-blocks flow inline as
+// atomics), not a block one — even though each inline-block's Kind is BoxBlock.
+func TestInlineBlockFlowsInline(t *testing.T) {
+	root := build(t, `<html><body><div><span style="display:inline-block">a</span><span style="display:inline-block">b</span></div></body></html>`, nil)
+	div := root.Children[0].Children[0] // html>body>div
+	if div.Formatting != cssbox.InlineFC {
+		t.Errorf("div with only inline-blocks Formatting = %d, want InlineFC: %s", div.Formatting, dump(div))
+	}
+	// The two inline-block boxes are the direct children, unwrapped (no anon block).
+	if len(div.Children) != 2 {
+		t.Fatalf("div children = %d, want 2 inline-blocks (unwrapped): %s", len(div.Children), dump(div))
+	}
+	for i, c := range div.Children {
+		if c.Kind != cssbox.BoxBlock || c.Display != cssbox.DisplayInlineBlock {
+			t.Errorf("child %d = (kind %v, display %v), want (BoxBlock, DisplayInlineBlock): %s", i, c.Kind, c.Display, dump(div))
+		}
+		if c.Kind == cssbox.BoxAnonBlock {
+			t.Errorf("inline-block should not be wrapped in an anon block: %s", dump(div))
+		}
+	}
+}
+
+// TestInlineBlockMixedWithTextStaysInline: an inline-block among text is inline-
+// level outer, so the div stays InlineFC and nothing is wrapped (no real block
+// sibling forces an anonymous block).
+func TestInlineBlockMixedWithTextStaysInline(t *testing.T) {
+	root := build(t, `<html><body><div>text <span style="display:inline-block">x</span> more</div></body></html>`, nil)
+	div := root.Children[0].Children[0]
+	if div.Formatting != cssbox.InlineFC {
+		t.Errorf("div Formatting = %d, want InlineFC: %s", div.Formatting, dump(div))
+	}
+	for _, c := range div.Children {
+		if c.Kind == cssbox.BoxAnonBlock {
+			t.Errorf("no anon block expected (no real block sibling): %s", dump(div))
+		}
+	}
+	// The inline-block survives as an inline-level child alongside the text runs.
+	ib := firstByDisplay(div, cssbox.DisplayInlineBlock)
+	if ib == nil || ib.Kind != cssbox.BoxBlock {
+		t.Errorf("expected an inline-block child (BoxBlock/DisplayInlineBlock): %s", dump(div))
+	}
+}
+
+// TestInlineBlockAlongsideRealBlockWrapped: with a real block sibling (<p>), the
+// all-block-or-all-inline invariant forces the inline-level run — which now
+// INCLUDES the inline-block — into an anonymous block, and the div is BlockFC.
+func TestInlineBlockAlongsideRealBlockWrapped(t *testing.T) {
+	root := build(t, `<html><body><div><span style="display:inline-block">x</span><p>block</p></div></body></html>`, nil)
+	div := root.Children[0].Children[0]
+	if div.Formatting != cssbox.BlockFC {
+		t.Errorf("div with a real block sibling Formatting = %d, want BlockFC: %s", div.Formatting, dump(div))
+	}
+	// Children: [AnonBlock(inline-block), Block(p)].
+	if len(div.Children) != 2 {
+		t.Fatalf("div children = %d, want 2 (anon-block, p): %s", len(div.Children), dump(div))
+	}
+	if div.Children[0].Kind != cssbox.BoxAnonBlock {
+		t.Errorf("child 0 = %v, want BoxAnonBlock wrapping the inline-block: %s", div.Children[0].Kind, dump(div))
+	}
+	if div.Children[1].Kind != cssbox.BoxBlock || div.Children[1].Display != cssbox.DisplayBlock {
+		t.Errorf("child 1 = (%v,%v), want the block p: %s", div.Children[1].Kind, div.Children[1].Display, dump(div))
+	}
+	// The anon block holds the inline-block as its inline content.
+	anon := div.Children[0]
+	if len(anon.Children) != 1 || anon.Children[0].Display != cssbox.DisplayInlineBlock {
+		t.Errorf("anon block should wrap the inline-block: %s", dump(anon))
+	}
+}
+
+// TestInlineBlockInInlineDoesNotSplit: an inline-block nested in an inline element
+// is inline-level outer, so it does NOT cause a block-in-inline split — the outer
+// span stays a single inline box with the inline-block among its children.
+func TestInlineBlockInInlineDoesNotSplit(t *testing.T) {
+	root := build(t, `<html><body><span>before<span style="display:inline-block">x</span>after</span></body></html>`, nil)
+	body := root.Children[0]
+	// The outer span is the body's lone inline child (no split promoted a block to
+	// body level). body is then InlineFC with the single inline box as its child.
+	if body.Formatting != cssbox.InlineFC {
+		t.Errorf("body Formatting = %d, want InlineFC (no block broke out): %s", body.Formatting, dump(body))
+	}
+	if firstByKind(body, cssbox.BoxAnonInline) != nil {
+		t.Errorf("inline-block in an inline must not trigger a block-in-inline split: %s", dump(body))
+	}
+	outer := body.Children[0]
+	if outer.Kind != cssbox.BoxInline {
+		t.Fatalf("body child = %v, want a single BoxInline (the outer span): %s", outer.Kind, dump(body))
+	}
+	// The outer span keeps the inline-block nested (it was not lifted out).
+	if firstByDisplay(outer, cssbox.DisplayInlineBlock) == nil {
+		t.Errorf("inline-block should remain nested in the outer span: %s", dump(outer))
+	}
+}
+
+// TestWhitespaceAroundInlineBlockPreserved: whitespace between two inline-blocks
+// is significant (they are inline-level), so the space text node survives — it is
+// NOT stripped like inter-block whitespace.
+func TestWhitespaceAroundInlineBlockPreserved(t *testing.T) {
+	root := build(t, `<html><body><div><span style="display:inline-block">a</span> <span style="display:inline-block">b</span></div></body></html>`, nil)
+	div := root.Children[0].Children[0]
+	if div.Formatting != cssbox.InlineFC {
+		t.Errorf("div Formatting = %d, want InlineFC: %s", div.Formatting, dump(div))
+	}
+	// Children: [inline-block, text(" "), inline-block]; the space must survive.
+	if len(div.Children) != 3 {
+		t.Fatalf("div children = %d, want 3 (ib, space, ib): %s", len(div.Children), dump(div))
+	}
+	mid := div.Children[1]
+	if mid.Kind != cssbox.BoxText || mid.Text != " " {
+		t.Errorf("middle child = %s, want a text node with a single space (whitespace around inline-block preserved)", dump(mid))
+	}
+}
+
 // dump renders a box subtree compactly for failure messages.
 func dump(b *cssbox.Box) string {
 	return dumpIndent(b, 0)

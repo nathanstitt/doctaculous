@@ -236,14 +236,14 @@ func TestInlineEmptyParagraph(t *testing.T) {
 
 // --- inline-block atomics ---
 //
-// NOTE on reachability: box generation (sub-project 2) classifies an inline-block as
-// block-LEVEL (its Kind is BoxBlock), so a container holding only inline-blocks
-// currently establishes a BLOCK formatting context, not an inline one — inline-blocks
-// do not yet flow through layoutInline via the public Build path. The atomic-handling
-// code in layoutInline is exercised here by constructing the inline formatting
-// context directly (an InlineFC box whose children are inline-blocks), which is the
-// exact tree box-gen will hand the IFC once it classifies inline-block as
-// inline-level. This keeps the IFC's atomic path under test today.
+// NOTE on reachability: box generation now classifies an inline-block as inline-LEVEL
+// for its parent's formatting-context partitioning (isBlockLevelOuter in anon.go),
+// so a container holding only inline-blocks establishes an INLINE formatting context
+// and the inline-blocks flow through layoutInline via the public Build path — see
+// TestInlineBlockFlowsInlineEndToEnd below, which drives Build -> Engine.Layout. The
+// unit test here still constructs the IFC box directly so it pins the atomic path's
+// numeric behavior in isolation (independent of box-gen), which keeps the contract
+// the end-to-end test relies on under tight, localized assertions.
 
 // inlineBlockChild builds a minimal inline-block box of the given content size.
 func inlineBlockChild(w, h float64) *cssbox.Box {
@@ -309,6 +309,45 @@ func TestInlineBlockAtomics(t *testing.T) {
 	// Bottom-aligned baseline: each atomic's bottom rests on the line baseline.
 	if got := a.Y + a.H; got != frag.Lines[0].BaselineY {
 		t.Errorf("atomic bottom = %v, want on baseline %v", got, frag.Lines[0].BaselineY)
+	}
+}
+
+// TestInlineBlockFlowsInlineEndToEnd drives two inline-blocks through the PUBLIC
+// path (Build -> Engine.Layout) and asserts they flow inline: two 50×30 atomic
+// fragments side by side ~50 apart on ONE line. This proves the Task-6 atomic path
+// is now REACHABLE from box generation (the container becomes InlineFC because an
+// inline-block is inline-level outer; see the NOTE above and anon.go).
+func TestInlineBlockFlowsInlineEndToEnd(t *testing.T) {
+	const cell = "display:inline-block;width:50px;height:30px"
+	div := layoutOne(t, reset+`<div><span style="`+cell+`">a</span><span style="`+cell+`">b</span></div>`, 1000)
+
+	// The div established an inline FC, so its inline-blocks came back as atomic
+	// child fragments (not stacked block children).
+	if len(div.Children) != 2 {
+		t.Fatalf("inline-block atomic children = %d, want 2: div has %d lines", len(div.Children), len(div.Lines))
+	}
+	a, b := div.Children[0], div.Children[1]
+	for i, c := range []*Fragment{a, b} {
+		if c.W != 50 || c.H != 30 {
+			t.Errorf("atomic %d size = %vx%v, want 50x30", i, c.W, c.H)
+		}
+	}
+	// Side by side ~50 apart on one line (same Y), the first at the content-left.
+	if b.X-a.X != 50 {
+		t.Errorf("atomic X gap = %v, want 50 (laid out inline on one line)", b.X-a.X)
+	}
+	if a.Y != b.Y {
+		t.Errorf("atomics should share a line (same Y): %v vs %v", a.Y, b.Y)
+	}
+	if a.X != div.X {
+		t.Errorf("first atomic X = %v, want div content-left %v", a.X, div.X)
+	}
+	// One line, tall enough for the 30pt atomics.
+	if len(div.Lines) != 1 {
+		t.Errorf("div lines = %d, want 1 (both inline-blocks on one line)", len(div.Lines))
+	}
+	if div.H < 30 {
+		t.Errorf("div border-box H = %v, want >= 30 (atomic line height)", div.H)
 	}
 }
 

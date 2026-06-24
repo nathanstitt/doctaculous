@@ -6,6 +6,28 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
+// isBlockLevelOuter reports whether b participates in its PARENT's formatting
+// context as a block-level box (its "outer" level). This differs from
+// cssbox.BoxKind.IsBlockLevel, which describes a box's structural/interior role:
+// an inline-block (Display == DisplayInlineBlock) has Kind BoxBlock — it IS a
+// block container for its own children — yet it participates OUTWARDLY as an
+// inline-level atomic in its parent's inline formatting context. So an
+// inline-block is NOT block-level-outer despite its BoxBlock kind. Every other
+// box's outer level matches its kind.
+//
+// Box generation uses this (not Kind.IsBlockLevel) wherever it classifies a box
+// AS A CHILD for its parent's FC partitioning: which children stack as blocks vs
+// flow inline, whether an inline box must split around a block descendant,
+// whether a sibling is a block boundary for whitespace stripping. The Kind
+// predicate is reserved for a box's OWN interior role (see normalize and
+// handleWhitespace, which ask whether a box is itself a block CONTAINER).
+func isBlockLevelOuter(b *cssbox.Box) bool {
+	if b.Display == cssbox.DisplayInlineBlock {
+		return false
+	}
+	return b.Kind.IsBlockLevel()
+}
+
 // normalize rewrites the tree so every box satisfies the layout invariant: a
 // block container's children are either all block-level or all inline-level.
 // It runs three passes per box, bottom-up:
@@ -22,6 +44,11 @@ func normalize(b *cssbox.Box) {
 	}
 	b.Children = splitBlockInInline(b.Children)
 	b.Children = handleWhitespace(b.Children, b)
+	// Kind.IsBlockLevel (interior role), NOT isBlockLevelOuter: these passes operate
+	// on a box that is itself a block CONTAINER. An inline-block is a block container
+	// for its own children (Kind BoxBlock), so its interior gets the same wrap +
+	// reconcile even though it is inline-level OUTERLY (its parent's FC partitioning,
+	// handled by the per-child outer-level checks, is a separate question).
 	if b.Kind.IsBlockLevel() {
 		b.Children = wrapInlineRuns(b.Children)
 		reconcileFormatting(b)
@@ -44,8 +71,11 @@ func reconcileFormatting(b *cssbox.Box) {
 		b.Formatting = cssbox.BlockFC // empty container: a (degenerate) block context
 		return
 	}
+	// A child's OUTER level decides the context: a container whose only "block"
+	// children are inline-blocks (block-level-INTERIOR but inline-level-OUTER)
+	// establishes an inline FC, so the inline-blocks flow inline as atomics.
 	for _, c := range b.Children {
-		if c.Kind.IsBlockLevel() {
+		if isBlockLevelOuter(c) {
 			b.Formatting = cssbox.BlockFC
 			return
 		}
@@ -70,10 +100,13 @@ func splitBlockInInline(children []*cssbox.Box) []*cssbox.Box {
 	return out
 }
 
-// containsBlockLevel reports whether any direct child of b is block-level.
+// containsBlockLevel reports whether any direct child of b is block-level-OUTER,
+// i.e. a box that must break an enclosing inline. An inline-block child is NOT
+// counted: it is inline-level outer, so it stays in the inline flow and does not
+// trigger a block-in-inline split.
 func containsBlockLevel(b *cssbox.Box) bool {
 	for _, c := range b.Children {
-		if c.Kind.IsBlockLevel() {
+		if isBlockLevelOuter(c) {
 			return true
 		}
 	}
@@ -106,7 +139,9 @@ func splitOneInline(inline *cssbox.Box) []*cssbox.Box {
 		run = nil
 	}
 	for _, c := range inline.Children {
-		if c.Kind.IsBlockLevel() {
+		// Only a block-level-OUTER child breaks the inline out to this level; an
+		// inline-block stays inline-level and is kept in the surrounding run.
+		if isBlockLevelOuter(c) {
 			flush()
 			out = append(out, c) // promote the block to this level
 			continue
@@ -122,15 +157,18 @@ func splitOneInline(inline *cssbox.Box) []*cssbox.Box {
 // all children are inline-level, they are left as-is (the block establishes an
 // inline formatting context directly).
 func wrapInlineRuns(children []*cssbox.Box) []*cssbox.Box {
+	// "Block" here means block-level-OUTER: an inline-block is grouped INTO the
+	// inline runs (wrapped alongside text/inlines when a real block sibling forces
+	// the wrap), never treated as a block that separates runs.
 	hasBlock := false
 	for _, c := range children {
-		if c.Kind.IsBlockLevel() {
+		if isBlockLevelOuter(c) {
 			hasBlock = true
 			break
 		}
 	}
 	if !hasBlock {
-		return children // all inline: no anonymous blocks needed
+		return children // all inline-level: no anonymous blocks needed
 	}
 
 	var out []*cssbox.Box
@@ -148,12 +186,12 @@ func wrapInlineRuns(children []*cssbox.Box) []*cssbox.Box {
 		run = nil
 	}
 	for _, c := range children {
-		if c.Kind.IsBlockLevel() {
+		if isBlockLevelOuter(c) {
 			flush()
 			out = append(out, c)
 			continue
 		}
-		run = append(run, c)
+		run = append(run, c) // inline-level (incl. inline-block) joins the run
 	}
 	flush()
 	return out
@@ -172,7 +210,11 @@ func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box 
 		}
 	}
 	// Then drop whitespace-only text boxes adjacent to block-level siblings (or at
-	// the edges of a block container).
+	// the edges of a block container). This asks whether the PARENT is itself a block
+	// container (interior role), so it uses Kind.IsBlockLevel — an inline-block parent
+	// is a block container and strips inter-block whitespace among its own children.
+	// The block-BOUNDARY test for the siblings (adjacentToBlock) uses the outer-level
+	// predicate instead, so an inline-block sibling is not a boundary.
 	parentIsBlockContainer := parent.Kind.IsBlockLevel()
 	var out []*cssbox.Box
 	for i, c := range children {
@@ -186,15 +228,18 @@ func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box 
 	return out
 }
 
-// adjacentToBlock reports whether the child at index i has a block-level neighbor
-// or is at an edge of the slice (treating container edges as block boundaries
-// when the container is a block container).
+// adjacentToBlock reports whether the child at index i has a block-level-OUTER
+// neighbor or is at an edge of the slice (treating container edges as block
+// boundaries when the container is a block container). Outer level is what matters
+// for whitespace: an inline-block neighbor is inline-level, so whitespace beside it
+// is significant (not inter-block whitespace) and must NOT be stripped — only a
+// genuine block-level-outer neighbor forms the boundary that drops the whitespace.
 func adjacentToBlock(children []*cssbox.Box, i int) bool {
 	if i == 0 || i == len(children)-1 {
 		return true
 	}
-	prevBlock := children[i-1].Kind.IsBlockLevel()
-	nextBlock := children[i+1].Kind.IsBlockLevel()
+	prevBlock := isBlockLevelOuter(children[i-1])
+	nextBlock := isBlockLevelOuter(children[i+1])
 	return prevBlock || nextBlock
 }
 
