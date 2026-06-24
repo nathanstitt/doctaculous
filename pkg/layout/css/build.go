@@ -82,7 +82,12 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 	classifyDisplay(b, cs.Display)
 	b.Float = floatOf(cs)
 	b.Position = positionOf(cs)
-	applyFloatBlockify(b, cs) // CSS 9.7: a float blockifies an inline-level box
+	// CSS 9.7: an absolutely/fixed-positioned element computes float to none, so
+	// it is taken out of flow as positioned, not placed as a float.
+	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
+		b.Float = cssbox.FloatNone
+	}
+	applyBlockify(b, cs) // CSS 9.7: a float OR an abs/fixed box blockifies an inline-level box
 
 	if replacedTags[e.Tag()] {
 		b.Kind = cssbox.BoxReplaced
@@ -150,22 +155,30 @@ func floatOf(cs gcss.ComputedStyle) cssbox.FloatKind {
 	}
 }
 
-// applyFloatBlockify promotes a floated inline-level box to block-level, per CSS
-// 2.1 §9.7 (a float computes display to a block-level value). Only a box that is
-// still inline-level when this runs is promoted — in practice a display:inline
-// element (Kind=BoxInline) and the inline anonymous/text kinds; a display:block or
-// display:inline-block element already has Kind=BoxBlock (set by classifyDisplay)
-// and is left unchanged. The box's Formatting is deliberately preserved: a floated
-// display:inline element keeps InlineFC so its text/inline children still lay out in
-// an inline formatting context inside the now block-level box. A floated <img> stays
-// BoxReplaced — replaced sizing handles a block-level replaced box.
+// applyBlockify promotes an inline-level box to block-level when it is floated or
+// absolutely/fixed positioned, per CSS 2.1 §9.7 (both compute display to a
+// block-level value). Only a box that is still inline-level when this runs is
+// promoted — in practice a display:inline element (Kind=BoxInline) and the inline
+// anonymous/text kinds; a display:block or display:inline-block element already has
+// Kind=BoxBlock (set by classifyDisplay) and is left unchanged. The box's Formatting
+// is deliberately preserved: a floated/positioned display:inline element keeps
+// InlineFC so its text/inline children still lay out in an inline formatting context
+// inside the now block-level box. A floated/positioned <img> stays BoxReplaced —
+// replaced sizing handles a block-level replaced box.
+//
+// It re-reads cs.Float (not b.Float) so it stays a pure function of the computed
+// style: even though generate has already cleared b.Float to none for an abs/fixed
+// box (a layout concern), the box should still be block-level here, which the
+// absPos branch ensures independently of the now-cleared float.
 //
 // The BoxReplaced guard is defensive: in generate, the replacedTags override sets
-// Kind=BoxReplaced AFTER this call, so a box is never BoxReplaced when
-// applyFloatBlockify runs today; the guard protects any future caller that inverts
-// that order.
-func applyFloatBlockify(b *cssbox.Box, cs gcss.ComputedStyle) {
-	if floatOf(cs) == cssbox.FloatNone {
+// Kind=BoxReplaced AFTER this call, so a box is never BoxReplaced when applyBlockify
+// runs today; the guard protects any future caller that inverts that order.
+func applyBlockify(b *cssbox.Box, cs gcss.ComputedStyle) {
+	floated := floatOf(cs) != cssbox.FloatNone
+	posKind := positionOf(cs)
+	absPos := posKind == cssbox.PosAbsolute || posKind == cssbox.PosFixed
+	if !floated && !absPos {
 		return
 	}
 	if b.Kind == cssbox.BoxReplaced {
@@ -176,9 +189,20 @@ func applyFloatBlockify(b *cssbox.Box, cs gcss.ComputedStyle) {
 	}
 }
 
-// positionOf maps a computed style to a PositionKind. Like floatOf, position is
-// not yet on ComputedStyle's subset; returns PosStatic until it is.
-func positionOf(_ gcss.ComputedStyle) cssbox.PositionKind { return cssbox.PosStatic }
+// positionOf maps a computed style's position keyword to a PositionKind. An empty
+// or unrecognized value is PosStatic.
+func positionOf(cs gcss.ComputedStyle) cssbox.PositionKind {
+	switch cs.Position {
+	case "relative":
+		return cssbox.PosRelative
+	case "absolute":
+		return cssbox.PosAbsolute
+	case "fixed":
+		return cssbox.PosFixed
+	default:
+		return cssbox.PosStatic
+	}
+}
 
 // classifyDisplay sets the box's Kind, Display, and Formatting from a computed
 // display string. Recognized layout modes not yet implemented (flex/grid/table)
