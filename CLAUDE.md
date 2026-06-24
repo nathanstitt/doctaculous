@@ -243,6 +243,30 @@ what is done vs. pending.
   BFC boundary. Not yet modeled: a parent **enclosing** its floats' height (a float-only block has zero
   content height) — deferred with the overflow slice. See
   `docs/superpowers/specs/2026-06-24-html-floats-design.md`.
+- **HTML rendering — positioning (relative / absolute / fixed)** (`pkg/layout/css/positioning.go`,
+  extended `block.go`/`fragment.go`/`build.go`, `pkg/css` `position`/`top`/`right`/`bottom`/`left`/
+  `z-index`; covered by positioning-geometry unit tests, fragment-geometry + flag-combination + paint-
+  coordinate assertions, the `html-position-relative`/`html-position-absolute` goldens, and the
+  `abs-pos`/`relative-offset` WPT reftests): `position:relative` offsets a box from its normal-flow
+  position **at paint time** (flow and siblings unchanged; the box reserves its un-offset space, and
+  `top`/`left` win over `bottom`/`right` per CSS 9.4.3). `position:absolute`/`fixed` take a box **out of
+  flow** and position it against its containing block — the nearest positioned ancestor's content box for
+  `absolute`, the page (viewport, in the single-tall-page model) for `fixed` or when there is no
+  positioned ancestor — resolved in a **second pass** (`resolveAbsolute`) once containing-block geometry
+  is final (`absRect`/`relativeOffset` in `positioning.go` carry the geometry). Positioned boxes paint in
+  their **own layer** after in-flow content: `AppendItems` is generalized from the float phase-split into
+  a **minimal stacking pass** (decorations → floats → in-flow content → positioned layer, in document
+  order), and a relative offset is applied as a translate over the fragment's flattened item range (so an
+  abs-pos descendant of a relative box rides the same shift). A positioned box establishes a stacking
+  context; an abs/fixed box also establishes a BFC. Box generation maps `position` (`positionOf`),
+  forces `float:none` under `absolute`/`fixed` (CSS 9.7), and blockifies a positioned inline-level box
+  (`applyBlockify`). The shared inline core is **untouched** (positioning needs no inline primitive).
+  Degrades gracefully: `z-index` is parsed but **not yet sorted on** (positioned boxes paint in document
+  order — full Appendix E negative/numeric z-index ordering deferred); an all-`auto`-offset abs box uses
+  a static-position approximation (containing-block top-left); `margin:auto` and abs `width:auto`
+  shrink-to-fit stay approximate; and `position:relative` on a **text-only inline box** is a no-op (no
+  inline-box fragment to offset). Non-positioned pages stay byte-identical (the existing goldens/reftests
+  are unchanged). See `docs/superpowers/specs/2026-06-24-html-positioning-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -273,18 +297,25 @@ that skip into real output.
    content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
    fixes bold/italic fidelity).
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
-   normal-flow layout/paint with `OpenHTML`, replaced content + images, and **floats + clear** are
-   done — see the Done section). Roughly in order, each a parse/layout slice with its own fixtures +
-   golden/WPT tests: **positioning** (relative/absolute/fixed, z-order — generalizes the float paint
-   layer's phase-split `AppendItems` into a full stacking-context pass); **overflow clipping**
-   (`overflow:hidden/scroll/auto`, plus the deferred float interactions: a block **enclosing** its
-   floats' height, and floats intruding across an `overflow≠visible` BFC boundary);
-   **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
+   normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**, and
+   **positioning** (relative/absolute/fixed) are done — see the Done section). Roughly in order, each a
+   parse/layout slice with its own fixtures + golden/WPT tests: **full z-index stacking** (negative
+   `z-index` painting behind in-flow content, and numeric `z-index` ordering within a stacking context —
+   `z-index` is parsed now; the minimal stacking pass paints positioned boxes in document order, and the
+   positioned-layer loop in `AppendItems` is the seam this slice re-points at a z-sorted, sub-layered
+   order); **overflow clipping** (`overflow:hidden/scroll/auto`, plus the deferred float interactions: a
+   block **enclosing** its floats' height, and floats intruding across an `overflow≠visible` BFC
+   boundary); **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
    flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
-   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Replaced-content
-   fidelity follow-ups within the existing engine: `object-position`, the ratio-preserving min/max
+   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Positioning fidelity
+   follow-ups within the existing engine: the **precise static-position solve** for an all-`auto`-offset
+   abs box (today approximates to the containing block's top-left), abs `width:auto` **shrink-to-fit**
+   (today fills the containing block), abs `margin:auto` centering, a percentage `top`/`bottom` against
+   an auto-height containing block, a `bottom`-only auto-height abs box (positioned against a provisional
+   height today), and `position:relative` on a **text-only inline box** (a no-op today — needs inline-box
+   fragments). Replaced-content fidelity follow-ups: `object-position`, the ratio-preserving min/max
    sizing step (CSS 10.4; today min/max clamps per-axis after ratio derivation), a percentage `height`
    basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
    inline/flow follow-ups still open: full `vertical-align` keyword set (only the atom baseline
