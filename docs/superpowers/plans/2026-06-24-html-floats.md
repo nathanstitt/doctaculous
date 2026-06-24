@@ -1958,9 +1958,13 @@ func TestInFlowBlockContentNarrowsAfterPrecedingBlock(t *testing.T) {
 		Height: gcss.Length{Value: 80, Unit: gcss.UnitPx}})
 	floated.Float = cssbox.FloatLeft
 
+	// Width:auto (fills the container) + Max*=auto: a zero-value Width would resolve to
+	// "width:0" (see blockBox). Raw literal because it needs Formatting: InlineFC.
 	textStyle := gcss.ComputedStyle{Display: "block", FontFamily: "serif", FontSizePt: 12,
 		LineHeight: gcss.Length{Value: 16, Unit: gcss.UnitPx}, Color: color.RGBA{0, 0, 0, 255},
-		BackgroundColor: color.RGBA{200, 220, 240, 255}}
+		BackgroundColor: color.RGBA{200, 220, 240, 255},
+		Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Unit: gcss.UnitAuto},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
 	para := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC, Style: textStyle,
 		Children: []*cssbox.Box{{Kind: cssbox.BoxText, Display: cssbox.DisplayInline, Style: textStyle,
 			Text: "Text that wraps beside the tall float on the left edge of the column here."}}}
@@ -2062,14 +2066,19 @@ func TestNestedBFCFloatRidesShift(t *testing.T) {
 		Height: gcss.Length{Value: 20, Unit: gcss.UnitPx}})
 	innerFloat.Float = cssbox.FloatLeft
 
+	// Explicit 100x40, but Max*=auto (a zero-value MaxWidth would clamp to max:0).
 	ibStyle := gcss.ComputedStyle{Display: "inline-block",
 		Width:  gcss.Length{Value: 100, Unit: gcss.UnitPx},
-		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx}}
+		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
 	ib := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayInlineBlock, Formatting: cssbox.BlockFC,
 		Style: ibStyle, Children: []*cssbox.Box{innerFloat}}
 
-	// Put the inline-block after some leading text so it is not at x=0.
-	lead := gcss.ComputedStyle{Display: "block", FontFamily: "serif", FontSizePt: 12, Color: color.RGBA{0, 0, 0, 255}}
+	// Put the inline-block after some leading text so it is not at x=0. Width:auto so
+	// the paragraph fills its container (a zero-value Width would resolve to "width:0").
+	lead := gcss.ComputedStyle{Display: "block", FontFamily: "serif", FontSizePt: 12, Color: color.RGBA{0, 0, 0, 255},
+		Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Unit: gcss.UnitAuto},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
 	para := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC, Style: lead,
 		Children: []*cssbox.Box{
 			{Kind: cssbox.BoxText, Display: cssbox.DisplayInline, Style: lead, Text: "Hi "},
@@ -2125,11 +2134,13 @@ func TestFloatedInlineBlockifies(t *testing.T) {
 	// (kept in pkg/layout/css to use generate()/the engine without the full backend)
 	// — see build_test.go TestBlockifyFloatedInline for the box-gen half; here assert
 	// the engine places it.
-	// A minimal floated inline-level box with explicit size:
+	// A minimal floated inline-level box with explicit size (Max*=auto so it is not
+	// clamped to 0; this test only checks placement count, but keep it well-formed).
 	sp := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC,
 		Float: cssbox.FloatLeft,
 		Style: gcss.ComputedStyle{Display: "block", Float: "left",
-			Width: gcss.Length{Value: 30, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}}}
+			Width: gcss.Length{Value: 30, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 30, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
 	root := blockBox(gcss.ComputedStyle{Display: "block"}, sp)
 	frag := New(nil, nil, nil).layoutTree(context.Background(), root, 100)
 	if len(frag.Floats) != 1 {
