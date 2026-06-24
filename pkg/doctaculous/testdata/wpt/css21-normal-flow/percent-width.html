@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<!-- TEST: a percentage width resolves against the containing block's width
+     (CSS 2.1 section 10.2). A child with width:50% inside a 400px-wide parent is
+     200px wide. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #parent { width: 400px; background: #eeeeee; }
+  #child  { width: 50%; height: 60px; background: #cc3366; }
+</style>
+</head>
+<body>
+  <div id="parent">
+    <div id="child"></div>
+  </div>
+</body>
+</html>

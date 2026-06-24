@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<!-- TEST: the two-value padding shorthand (vertical horizontal) is equivalent to
+     the explicit four-value form. The padding offsets an auto-width child inside a
+     fixed-width parent, so the padding is visible as the gap (parent background)
+     around the child. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #parent { width: 260px; padding: 10px 20px; background: #ddddaa; }
+  #child  { height: 40px; background: #336699; }
+</style>
+</head>
+<body>
+  <div id="parent">
+    <div id="child"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!-- TEST: box-sizing:border-box makes width include padding+border. A 130px
+     border-box width with 10px padding and 5px border yields a 100px content box
+     and a 130px border box. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #box {
+    box-sizing: border-box;
+    width: 130px;
+    height: 80px;
+    padding: 10px;
+    border: 5px solid black;
+    background: #cc6633;
+  }
+</style>
+</head>
+<body>
+  <div id="box"></div>
+</body>
+</html>
