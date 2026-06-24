@@ -51,6 +51,17 @@ func TestParseCollectsStyleSheets(t *testing.T) {
 	}
 }
 
+func TestParseSkipsBlankStyle(t *testing.T) {
+	// A whitespace-only <style> must not produce a stylesheet (the TrimSpace guard).
+	doc, err := Parse([]byte("<html><head><style>   \n\t </style><style>p{color:red}</style></head><body></body></html>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.StyleSheets) != 1 {
+		t.Errorf("got %d stylesheets, want 1 (blank <style> skipped)", len(doc.StyleSheets))
+	}
+}
+
 func TestParseCollectsLinkRefs(t *testing.T) {
 	doc, err := Parse([]byte(`<html><head><link rel="stylesheet" href="a.css"><link rel="icon" href="favicon.ico"></head><body></body></html>`))
 	if err != nil {
@@ -58,6 +69,17 @@ func TestParseCollectsLinkRefs(t *testing.T) {
 	}
 	if len(doc.LinkRefs) != 1 || doc.LinkRefs[0] != "a.css" {
 		t.Errorf("LinkRefs = %v, want [a.css] (only rel=stylesheet)", doc.LinkRefs)
+	}
+}
+
+func TestParseLinkRelIsCaseInsensitive(t *testing.T) {
+	// rel matching is case-insensitive; an href-less stylesheet link is ignored.
+	doc, err := Parse([]byte(`<html><head><link rel="StyleSheet" href="up.css"><link rel="stylesheet"></head><body></body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.LinkRefs) != 1 || doc.LinkRefs[0] != "up.css" {
+		t.Errorf("LinkRefs = %v, want [up.css] (case-insensitive rel; href-less link skipped)", doc.LinkRefs)
 	}
 }
 
