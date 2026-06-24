@@ -61,6 +61,10 @@ type ComputedStyle struct {
 	BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle string
 
 	Width, Height Length // UnitAuto = "auto"
+
+	MinWidth, MaxWidth   Length // MinWidth: UnitPx zero = no min; MaxWidth: UnitAuto = "none" (no max)
+	MinHeight, MaxHeight Length // same convention as the width pair
+	BoxSizing            string // "content-box" (default) | "border-box"
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -236,6 +240,11 @@ func initialStyle() ComputedStyle {
 		TextAlign:   "left",
 		Width:       Length{Unit: UnitAuto},
 		Height:      Length{Unit: UnitAuto},
+		MinWidth:    Length{Unit: UnitPx},   // CSS initial min-width is 0
+		MaxWidth:    Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		MinHeight:   Length{Unit: UnitPx},   // CSS initial min-height is 0
+		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		BoxSizing:   "content-box",
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
@@ -299,6 +308,19 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		setLength(&cs.Width, d.Value)
 	case "height":
 		setLength(&cs.Height, d.Value)
+	case "min-width":
+		setLength(&cs.MinWidth, d.Value)
+	case "max-width":
+		setMaxLength(&cs.MaxWidth, d.Value)
+	case "min-height":
+		setLength(&cs.MinHeight, d.Value)
+	case "max-height":
+		setMaxLength(&cs.MaxHeight, d.Value)
+	case "box-sizing":
+		switch d.Value {
+		case "content-box", "border-box":
+			cs.BoxSizing = d.Value
+		}
 	case "border-top-width":
 		setLength(&cs.BorderTopWidth, d.Value)
 	case "border-right-width":
@@ -340,6 +362,17 @@ func setLength(dst *Length, val string) {
 	if l, ok := parseLength(newTokenizer(val).next()); ok {
 		*dst = l
 	}
+}
+
+// setMaxLength parses val as a max-* length and writes it to dst. The CSS keyword
+// "none" (no maximum) is stored as a UnitAuto length; other values parse as
+// ordinary lengths. Invalid values leave dst unchanged.
+func setMaxLength(dst *Length, val string) {
+	if val == "none" {
+		*dst = Length{Unit: UnitAuto}
+		return
+	}
+	setLength(dst, val)
 }
 
 // firstFamily returns the first family name from a font-family list, stripping
