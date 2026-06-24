@@ -15,10 +15,10 @@ func TestEndToEndCascade(t *testing.T) {
 		p { margin-top: 1em; line-height: 1.5; }
 	`
 	sheet := Parse(src)
-	r := NewResolver(sheet, nil)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
 
 	body := &fakeNode{tag: "body"}
-	bodyCS := r.Compute(body, initialStyle())
+	bodyCS := r.ComputeRoot(body)
 
 	h1 := &fakeNode{tag: "h1", parent: body}
 	h1CS := r.Compute(h1, bodyCS)
@@ -50,15 +50,15 @@ func TestEndToEndCascade(t *testing.T) {
 // UnitNumber/multiplier concept the layout engine resolves against font size).
 func TestUnitlessLineHeightDeferred(t *testing.T) {
 	sheet := Parse(`p { line-height: 1.5; }`)
-	r := NewResolver(sheet, nil)
-	cs := r.Compute(&fakeNode{tag: "p"}, initialStyle())
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+	cs := r.ComputeRoot(&fakeNode{tag: "p"})
 	if cs.LineHeight.Unit != UnitAuto {
 		t.Errorf("line-height unit = %v, want UnitAuto (unitless 1.5 not yet applied)", cs.LineHeight.Unit)
 	}
 	// But an explicit unit IS applied:
 	sheet2 := Parse(`p { line-height: 20px; }`)
-	r2 := NewResolver(sheet2, nil)
-	cs2 := r2.Compute(&fakeNode{tag: "p"}, initialStyle())
+	r2 := NewResolver([]OriginSheet{{Sheet: sheet2, Origin: OriginAuthor}}, nil)
+	cs2 := r2.ComputeRoot(&fakeNode{tag: "p"})
 	if cs2.LineHeight != (Length{20, UnitPx}) {
 		t.Errorf("line-height = %v, want 20px (explicit unit applied)", cs2.LineHeight)
 	}

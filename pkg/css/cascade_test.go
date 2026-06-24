@@ -93,7 +93,7 @@ func TestCascadeSpecificityAndInheritance(t *testing.T) {
 		#lead { color: red; }
 	`
 	sheet := Parse(src)
-	r := NewResolver(sheet, nil)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
 
 	body := &fakeNode{tag: "body"}
 	// <p id="lead" class="intro"> inside <body>
@@ -113,12 +113,12 @@ func TestCascadeSpecificityAndInheritance(t *testing.T) {
 func TestCascadeInheritsColorButNotMargin(t *testing.T) {
 	src := `div { color: blue; margin-top: 20px; }`
 	sheet := Parse(src)
-	r := NewResolver(sheet, nil)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
 
 	div := &fakeNode{tag: "div"}
 	child := &fakeNode{tag: "span", parent: div}
 
-	divStyle := r.Compute(div, initialStyle())
+	divStyle := r.ComputeRoot(div)
 	childStyle := r.Compute(child, divStyle) // parent's computed style is the inheritance base
 
 	// color inherits:
@@ -137,9 +137,9 @@ func TestCascadeImportantWins(t *testing.T) {
 		p { color: green !important; }
 	`
 	sheet := Parse(src)
-	r := NewResolver(sheet, nil)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
 	p := &fakeNode{tag: "p", id: "lead"}
-	cs := r.Compute(p, initialStyle())
+	cs := r.ComputeRoot(p)
 	// !important beats higher specificity.
 	if cs.Color != (color.RGBA{0, 128, 0, 255}) {
 		t.Errorf("color = %v, want green (!important wins over id)", cs.Color)
@@ -149,10 +149,10 @@ func TestCascadeImportantWins(t *testing.T) {
 func TestInlineStyleAttributeWins(t *testing.T) {
 	src := `#lead { color: red; }`
 	sheet := Parse(src)
-	r := NewResolver(sheet, nil)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
 	// style="color: green" must beat the id rule (inline style has higher origin).
 	p := &fakeNode{tag: "p", id: "lead", attrs: map[string]string{"style": "color: green"}}
-	cs := r.Compute(p, initialStyle())
+	cs := r.ComputeRoot(p)
 	if cs.Color != (color.RGBA{0, 128, 0, 255}) {
 		t.Errorf("color = %v, want green (inline style wins)", cs.Color)
 	}
@@ -160,9 +160,9 @@ func TestInlineStyleAttributeWins(t *testing.T) {
 
 func TestInlineImportantBeatsAuthorImportant(t *testing.T) {
 	src := `p { color: red !important; }`
-	r := NewResolver(Parse(src), nil)
+	r := NewResolver([]OriginSheet{{Sheet: Parse(src), Origin: OriginAuthor}}, nil)
 	p := &fakeNode{tag: "p", attrs: map[string]string{"style": "color: green !important"}}
-	cs := r.Compute(p, initialStyle())
+	cs := r.ComputeRoot(p)
 	if cs.Color != (color.RGBA{0, 128, 0, 255}) {
 		t.Errorf("color = %v, want green (inline !important > author !important)", cs.Color)
 	}
@@ -170,9 +170,9 @@ func TestInlineImportantBeatsAuthorImportant(t *testing.T) {
 
 func TestAuthorImportantBeatsInlineNormal(t *testing.T) {
 	src := `p { color: red !important; }`
-	r := NewResolver(Parse(src), nil)
+	r := NewResolver([]OriginSheet{{Sheet: Parse(src), Origin: OriginAuthor}}, nil)
 	p := &fakeNode{tag: "p", attrs: map[string]string{"style": "color: green"}}
-	cs := r.Compute(p, initialStyle())
+	cs := r.ComputeRoot(p)
 	if cs.Color != (color.RGBA{255, 0, 0, 255}) {
 		t.Errorf("color = %v, want red (author !important > inline normal)", cs.Color)
 	}
@@ -213,8 +213,8 @@ func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
 func TestCascadeSourceOrderTiebreak(t *testing.T) {
 	// Two rules of EQUAL specificity (both type selectors) — the later one wins.
 	src := `p { color: red; } p { color: blue; }`
-	r := NewResolver(Parse(src), nil)
-	cs := r.Compute(&fakeNode{tag: "p"}, initialStyle())
+	r := NewResolver([]OriginSheet{{Sheet: Parse(src), Origin: OriginAuthor}}, nil)
+	cs := r.ComputeRoot(&fakeNode{tag: "p"})
 	if cs.Color != (color.RGBA{0, 0, 255, 255}) {
 		t.Errorf("color = %v, want blue (later equal-specificity rule wins)", cs.Color)
 	}
@@ -227,11 +227,51 @@ func TestCascadeBestMatchUsesMaxSpecificity(t *testing.T) {
 		p { color: red; }
 		em, #lead { color: blue; }
 	`
-	r := NewResolver(Parse(src), nil)
+	r := NewResolver([]OriginSheet{{Sheet: Parse(src), Origin: OriginAuthor}}, nil)
 	// <p id="lead"> matches "#lead" in the second rule (spec {1,0,0}), which beats
 	// the "p" rule (spec {0,0,1}); the "em" selector in the group doesn't match.
-	cs := r.Compute(&fakeNode{tag: "p", id: "lead"}, initialStyle())
+	cs := r.ComputeRoot(&fakeNode{tag: "p", id: "lead"})
 	if cs.Color != (color.RGBA{0, 0, 255, 255}) {
 		t.Errorf("color = %v, want blue (#lead in the group beats p)", cs.Color)
+	}
+}
+
+func TestOriginUALosesToAuthorAcrossSpecificity(t *testing.T) {
+	// UA: a type selector sets display:inline (high-ish specificity for UA).
+	ua := Parse(`div { display: block; color: red; }`)
+	// Author: a *less* specific path still wins over UA because author origin
+	// outranks UA origin regardless of specificity.
+	author := Parse(`div { color: green; }`)
+	r := NewResolver([]OriginSheet{
+		{Sheet: ua, Origin: OriginUA},
+		{Sheet: author, Origin: OriginAuthor},
+	}, nil)
+	cs := r.ComputeRoot(&fakeNode{tag: "div"})
+	if cs.Display != "block" {
+		t.Errorf("display = %q, want block (from UA, no author override)", cs.Display)
+	}
+	if (cs.Color != color.RGBA{0, 128, 0, 255}) {
+		t.Errorf("color = %v, want green (author beats UA)", cs.Color)
+	}
+}
+
+func TestUAImportantBeatsAuthorNormal(t *testing.T) {
+	ua := Parse(`p { color: red !important; }`)
+	author := Parse(`p { color: green; }`)
+	r := NewResolver([]OriginSheet{
+		{Sheet: ua, Origin: OriginUA},
+		{Sheet: author, Origin: OriginAuthor},
+	}, nil)
+	cs := r.ComputeRoot(&fakeNode{tag: "p"})
+	if (cs.Color != color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("color = %v, want red (UA !important beats author normal)", cs.Color)
+	}
+}
+
+func TestComputeRootUsesInitialBase(t *testing.T) {
+	r := NewResolver([]OriginSheet{{Sheet: Parse(``), Origin: OriginAuthor}}, nil)
+	cs := r.ComputeRoot(&fakeNode{tag: "html"})
+	if cs.FontSizePt != 16 || cs.Color != (color.RGBA{0, 0, 0, 255}) {
+		t.Errorf("root base = {size %v color %v}, want initial {16 black}", cs.FontSizePt, cs.Color)
 	}
 }
