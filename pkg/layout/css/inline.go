@@ -32,61 +32,85 @@ const cssDefaultLineMult = 1.15
 // is deferred: this pass renders inline TEXT plus atomic inline-blocks/replaced
 // boxes; an inline element box contributes only its text leaves' glyphs.
 func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, contentTopY, contentX, bandOriginY float64, fc *floatContext) (lines []LineFragment, height float64, atomics []*Fragment) {
-	_, _ = bandOriginY, fc // float-aware narrowing is wired in Task 7
-	// 1. Gather the inline-level descendants into neutral styled runs, laying out
-	//    any atomic boxes (inline-block / replaced) eagerly so their size is known.
+	// 1. Gather inline-level descendants into styled runs (atomics laid out eagerly).
 	var runs []inline.Run
 	e.gatherInlineRuns(ctx, b, contentW, &runs, &atomics)
 	if len(runs) == 0 {
 		return nil, 0, nil
 	}
 
-	// 2. Shape the runs into glyphs, then 3. break them into lines at the content
-	//    width (no first-line indent for HTML in this pass: same width for both).
+	// 2. Shape once (width-independent).
 	glyphs := inline.Shape(e.faces, runs, e.logf)
-	breakLines := inline.Break(glyphs, contentW, contentW)
-
-	// 4. Resolve the box's alignment once (see effectiveTextAlign for the anonymous-
-	//    block subtlety).
 	align := effectiveTextAlign(b)
 
-	// 5. Position each line top-to-bottom from contentTopY, building a LineFragment
-	//    and placing any atomic fragments the line carries on its baseline.
+	// 3. Break + position one line at a time against the float-narrowed band. Float
+	//    queries use the BFC-root frame (bandOriginY + the local pen offset); emitted
+	//    glyph/line Y stays in the local content-top-0 frame (the block stacker shifts
+	//    the whole interior into page space later). Glyph X is absolute page-space
+	//    already (availLeft and contentX are absolute), so X is never shifted.
+	//
+	//    The float edges are CLAMPED to THIS box's own content box [contentX,
+	//    contentX+contentW]: the float context spans the whole BFC (its cbLeft/cbRight
+	//    are the BFC root's content box, which for a non-BFC box narrower than its
+	//    containing block — e.g. a width:200px <p> in a 1280px page — is WIDER than this
+	//    box). Without the clamp such a box would lay text out to the BFC width, not its
+	//    own. When no float intrudes, the clamp pins avail to exactly [contentX,
+	//    contentX+contentW] and the per-line BreakNext reproduces a single fixed-width
+	//    Break (the non-float invariant). When a float intrudes, its edge is inside the
+	//    box, so the clamp leaves the float-narrowing intact.
 	penY := contentTopY
-	for i := range breakLines {
-		line := breakLines[i]
+	rest := glyphs
+	lineHGuess := e.lineHeightGuess(b)             // representative band height (see Task 7 Step 4)
+	cbLeft, cbRight := contentX, contentX+contentW // this box's own content box (clamp bounds)
+	for len(rest) > 0 {
+		bandY := bandOriginY + (penY - contentTopY) // this line's Y in the BFC-root frame
+		availLeft := fc.leftEdge(bandY, lineHGuess)
+		if availLeft < cbLeft {
+			availLeft = cbLeft
+		}
+		availRight := fc.rightEdge(bandY, lineHGuess)
+		if availRight > cbRight {
+			availRight = cbRight
+		}
+		avail := availRight - availLeft
+		if avail < 1 {
+			// Fully blocked band (opposite-side floats meet). Drop below the shallowest
+			// float and retry rather than emitting a zero-width line.
+			next := fc.nextDropY(bandY, lineHGuess)
+			if next > bandY {
+				penY += next - bandY
+				continue
+			}
+			// Non-advancing band (shouldn't happen): fall back to full width to avoid a
+			// spin.
+			availLeft, avail = contentX, contentW
+		}
+
+		var lineGlyphs []inline.Glyph
+		lineGlyphs, rest = inline.BreakNext(rest, avail)
+		line := inline.MakeLine(lineGlyphs)
+
 		lh := e.effectiveLineHeight(b, line)
-		// Known simplification: the baseline is placed from the TEXT ascent
-		// (ascentOfLine), so when a line mixes text with an inline-block/replaced atom
-		// taller than that ascent, the atom (bottom-aligned below) extends above the
-		// line top. effectiveLineHeight floors the line HEIGHT to the atom height so the
-		// next line doesn't overlap, but the within-line top alignment is not raised to
-		// fit the atom. Proper inline-box vertical-align / line-box ascent including
-		// atomics is deferred (a later sub-project).
 		baselineY := penY + ascentOfLine(line)
 
 		spaceCount := inline.CountSpaces(line.Glyphs)
-		isLast := i == len(breakLines)-1
-		p := inline.Place(align, contentX, contentW, line.WidthPt, spaceCount, isLast)
+		isLast := len(rest) == 0
+		// availLeft is the absolute page-space left for this line; avail is its width.
+		p := inline.Place(align, availLeft, avail, line.WidthPt, spaceCount, isLast)
 
-		var lineGlyphs []GlyphFragment
+		var emitted []GlyphFragment
 		x := p.StartX
 		for gi := range line.Glyphs {
 			g := &line.Glyphs[gi]
 			switch {
 			case g.Atomic != nil:
-				// Position the kept fragment: its border-box left lands at x plus the
-				// atom's left margin (the margin is part of the advance), bottom-aligned
-				// so its baseline (BaselinePt from the top) rests on the line baseline.
 				if frag, ok := g.Atomic.Ref.(*Fragment); ok && frag != nil {
 					translateFragment(frag, (x+g.Atomic.MarginLeftPt)-frag.X, (baselineY-g.Atomic.BaselinePt)-frag.Y)
 				}
 			case g.Outline != nil:
-				lineGlyphs = append(lineGlyphs, GlyphFragment{
-					Outline: g.Outline,
-					X:       x,
-					SizePt:  g.SizePt,
-					Color:   color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+				emitted = append(emitted, GlyphFragment{
+					Outline: g.Outline, X: x, SizePt: g.SizePt,
+					Color: color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 				})
 			}
 			x += g.Advance
@@ -95,11 +119,39 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			}
 		}
 
-		lines = append(lines, LineFragment{BaselineY: baselineY, Glyphs: lineGlyphs})
+		lines = append(lines, LineFragment{BaselineY: baselineY, Glyphs: emitted})
 		penY += lh
 	}
 
 	return lines, penY - contentTopY, atomics
+}
+
+// lineHeightGuess estimates a line's height for the float band query, before the
+// line's glyphs are measured. It uses the box's resolved line-height when fixed
+// (px/pt/em); for "normal"/auto it falls back to the font size times the default
+// multiplier — a representative value (the float bands are coarse, so an exact
+// per-line height is unnecessary, and the actual line height is recomputed once the
+// line is built). For an anonymous block it reads the inherited line-height/font-size
+// from a text leaf, mirroring effectiveLineHeight.
+func (e *Engine) lineHeightGuess(b *cssbox.Box) float64 {
+	lh := b.Style.LineHeight
+	fs := b.Style.FontSizePt
+	if isAnonymous(b) {
+		if l, f, ok := firstInlineLineHeight(b); ok {
+			lh, fs = l, f
+		}
+	}
+	switch lh.Unit {
+	case gcss.UnitPx, gcss.UnitPt:
+		return lh.Value
+	case gcss.UnitEm:
+		return lh.Value * fs
+	default:
+		if fs <= 0 {
+			fs = 12 // defensive: a sane default if the font size is unset
+		}
+		return fs * cssDefaultLineMult
+	}
 }
 
 // gatherInlineRuns walks b's inline-level descendants depth-first, appending one

@@ -191,12 +191,22 @@ func TestAppendItemsNestedBFCAtomic(t *testing.T) {
 	}
 }
 
-// blockBox builds a minimal block box with the given style and children. It fills
-// in the two CSS-initial values whose zero Length value is NOT their initial
-// (max-width/max-height initial is "none", modeled as UnitAuto; the zero Length is
-// {0,UnitPx} = "max-width:0") so a bare literal style behaves like a real cascaded
-// block (auto/no-max), matching the styles box generation produces via initialStyle.
+// blockBox builds a minimal block box with the given style and children.
+//
+// It emulates initialStyle()'s auto/none conventions. A zero-value Length is
+// {0, UnitPx}, which the resolver reads as an EXPLICIT 0 ("width:0"/"max-width:0"),
+// NOT the CSS initial "auto"/"none". Real box-gen gets Width/Height=auto and
+// Max*=none ("none") from the cascade, so a test style that omits any of them must
+// set them, or e.g. a width-less block resolves to content width 0 (and cascades 0
+// down to its children), or a 60×40 float clamps to 0×0. Only fields left at the
+// zero value are defaulted, so an explicit Width/Height/Max* in the literal wins.
 func blockBox(style gcss.ComputedStyle, kids ...*cssbox.Box) *cssbox.Box {
+	if style.Width == (gcss.Length{}) {
+		style.Width = gcss.Length{Unit: gcss.UnitAuto}
+	}
+	if style.Height == (gcss.Length{}) {
+		style.Height = gcss.Length{Unit: gcss.UnitAuto}
+	}
 	if style.MaxWidth == (gcss.Length{}) {
 		style.MaxWidth = gcss.Length{Unit: gcss.UnitAuto}
 	}
@@ -270,5 +280,63 @@ func TestClearDropsBelowFloat(t *testing.T) {
 	}
 	if frag.Children[0].Y < 40-1e-6 {
 		t.Errorf("cleared block Y=%v, want >= 40 (below the float)", frag.Children[0].Y)
+	}
+}
+
+// TestTextWrapsBesideFloat: with a left float occupying the top-left, the first
+// line of following text starts at the float's right edge; a line below the float's
+// bottom starts back at the content-box left.
+func TestTextWrapsBesideFloat(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	// A 60pt-wide, 40pt-tall left float.
+	floated := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx}})
+	floated.Float = cssbox.FloatLeft
+
+	// A sibling block of text with enough words to wrap several lines at width 200.
+	// Width:auto so it fills the 200px container (a zero-value Width would resolve to
+	// "width:0" — see blockBox). It is built as a raw literal (not blockBox) because it
+	// needs Formatting: InlineFC for its text child.
+	textStyle := gcss.ComputedStyle{Display: "block", FontFamily: "serif", FontSizePt: 12,
+		LineHeight: gcss.Length{Value: 16, Unit: gcss.UnitPx}, Color: color.RGBA{0, 0, 0, 255},
+		Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Unit: gcss.UnitAuto},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+	para := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC, Style: textStyle,
+		Children: []*cssbox.Box{{Kind: cssbox.BoxText, Display: cssbox.DisplayInline, Style: textStyle,
+			Text: "Many words here that should wrap across several lines beside and below the floated box on the left side."}}}
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, floated, para)
+	frag := eng.layoutTree(context.Background(), root, 200)
+
+	// Find the paragraph fragment (the only in-flow child) and inspect its first line.
+	if len(frag.Children) != 1 {
+		t.Fatalf("want 1 in-flow child, got %d", len(frag.Children))
+	}
+	pf := frag.Children[0]
+	if len(pf.Lines) < 2 {
+		t.Fatalf("paragraph has %d lines, want >= 2 to test wrap", len(pf.Lines))
+	}
+	// First line's first glyph X should be at/after the float's right edge (60),
+	// since the float occupies the top-left band.
+	firstX := pf.Lines[0].Glyphs[0].X
+	if firstX < 60-1e-6 {
+		t.Errorf("first line starts at X=%v, want >= 60 (right of the float)", firstX)
+	}
+	// The last line should be below the float (baseline > 40), and start back near
+	// the content-box left (X < 60). Find a line whose baseline is clearly below 40.
+	var belowX float64 = -1
+	for i := range pf.Lines {
+		if pf.Lines[i].BaselineY > 40+8 { // a line whose top is past the float bottom
+			belowX = pf.Lines[i].Glyphs[0].X
+			break
+		}
+	}
+	if belowX < 0 {
+		t.Fatalf("no line below the float bottom; lines: %d", len(pf.Lines))
+	}
+	if belowX > 60 {
+		t.Errorf("line below the float starts at X=%v, want < 60 (back at the left)", belowX)
 	}
 }
