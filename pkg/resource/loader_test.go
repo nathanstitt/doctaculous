@@ -57,3 +57,30 @@ func TestDirLoaderMissingIsNotFound(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestDirLoaderHonorsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "s.css"), []byte("a{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := DirLoader{Base: dir}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := l.Load(ctx, "s.css"); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestDirLoaderRefusesTraversal(t *testing.T) {
+	dir := t.TempDir()
+	// A file OUTSIDE the base dir.
+	outside := filepath.Join(filepath.Dir(dir), "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(outside) })
+	l := DirLoader{Base: dir}
+	if _, _, err := l.Load(context.Background(), "../secret.txt"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound (traversal must be refused)", err)
+	}
+}

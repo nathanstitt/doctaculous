@@ -24,10 +24,15 @@ type ResourceLoader interface {
 	Load(ctx context.Context, ref string) (data []byte, contentType string, err error)
 }
 
+var (
+	_ ResourceLoader = MapLoader(nil)
+	_ ResourceLoader = DirLoader{}
+)
+
 // Resource is one entry in a MapLoader.
 type Resource struct {
-	Data        []byte
-	ContentType string
+	Data        []byte // the resource's raw bytes
+	ContentType string // MIME type, e.g. "text/css"; "" if unknown
 }
 
 // MapLoader is an in-memory ResourceLoader keyed by exact ref string. It is the
@@ -47,7 +52,9 @@ func (m MapLoader) Load(ctx context.Context, ref string) ([]byte, string, error)
 }
 
 // DirLoader is a ResourceLoader that serves files from a base directory, with
-// content type inferred from the file extension. For fixtures kept on disk.
+// content type inferred from the file extension. It is intended for test
+// fixtures on local disk; it refuses refs that escape Base (e.g. "../x") rather
+// than following them, but is not hardened for untrusted input beyond that.
 type DirLoader struct {
 	Base string
 }
@@ -57,7 +64,13 @@ func (d DirLoader) Load(ctx context.Context, ref string) ([]byte, string, error)
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
 	}
-	data, err := os.ReadFile(filepath.Join(d.Base, ref))
+	// Refuse refs that escape Base via "..". Treat an out-of-bounds ref as absent.
+	base := filepath.Clean(d.Base)
+	full := filepath.Clean(filepath.Join(base, ref))
+	if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
+		return nil, "", fmt.Errorf("%q: %w", ref, ErrNotFound)
+	}
+	data, err := os.ReadFile(full)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", fmt.Errorf("%q: %w", ref, ErrNotFound)
