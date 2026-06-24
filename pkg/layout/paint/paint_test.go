@@ -7,6 +7,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/doctaculous/pkg/render/raster"
 )
 
 // recordDevice is a render.Device that records the FillGlyph and Fill calls
@@ -101,6 +102,125 @@ func TestPaintGlyphTransform(t *testing.T) {
 		if got := segs[i].P0; got != want {
 			t.Errorf("segment %d origin = %+v, want %+v", i, got, want)
 		}
+	}
+}
+
+// newRasterPage rasterizes a page at scale 1 (page points map 1:1 to pixels, so
+// page-space coordinates are pixel coordinates) onto a w×h white canvas, returning
+// the resulting image for pixel assertions. It mirrors the reflow backend's device
+// setup (raster.New + a uniform scale matrix).
+func newRasterPage(w, h int, page *layout.Page) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := range img.Pix {
+		img.Pix[i] = 0xff // opaque white background
+	}
+	dev := raster.New(img)
+	PaintPage(dev, page, render.Scale(1, 1))
+	return img
+}
+
+// isColor reports whether got matches want within a small per-channel tolerance,
+// absorbing anti-aliasing jitter at fill edges (assertions target pixel centers
+// well inside a fill, so this stays tight).
+func isColor(got, want color.RGBA, tol uint8) bool {
+	d := func(a, b uint8) uint8 {
+		if a > b {
+			return a - b
+		}
+		return b - a
+	}
+	return d(got.R, want.R) <= tol && d(got.G, want.G) <= tol &&
+		d(got.B, want.B) <= tol && d(got.A, want.A) <= tol
+}
+
+func TestPaintBackground(t *testing.T) {
+	red := color.RGBA{R: 0xc0, G: 0x10, B: 0x20, A: 0xff}
+	// A background fill covering [10,40]×[10,30] on a 50×50 white canvas.
+	page := &layout.Page{WidthPt: 50, HeightPt: 50, Items: []layout.Item{
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{
+			XPt: 10, YPt: 10, WPt: 30, HPt: 20, Color: red,
+		}},
+	}}
+	img := newRasterPage(50, 50, page)
+
+	if got := img.RGBAAt(25, 20); !isColor(got, red, 2) {
+		t.Errorf("center pixel = %v, want red %v", got, red)
+	}
+	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
+	if got := img.RGBAAt(2, 2); !isColor(got, white, 0) {
+		t.Errorf("outside pixel = %v, want white", got)
+	}
+}
+
+func TestPaintBorderSolid(t *testing.T) {
+	blue := color.RGBA{R: 0x10, G: 0x20, B: 0xc0, A: 0xff}
+	// A top edge strip [5,45]×[5,11] (6px thick) on a 50×50 white canvas.
+	page := &layout.Page{WidthPt: 50, HeightPt: 50, Items: []layout.Item{
+		{Kind: layout.BorderKind, Border: layout.BorderItem{
+			XPt: 5, YPt: 5, WPt: 40, HPt: 6,
+			Color: blue, Style: layout.BorderSolid, Side: layout.EdgeTop,
+		}},
+	}}
+	img := newRasterPage(50, 50, page)
+
+	// A pixel inside the strip is the border color.
+	if got := img.RGBAAt(25, 8); !isColor(got, blue, 2) {
+		t.Errorf("strip pixel = %v, want blue %v", got, blue)
+	}
+	// A pixel below the strip stays white.
+	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
+	if got := img.RGBAAt(25, 20); !isColor(got, white, 0) {
+		t.Errorf("below-strip pixel = %v, want white", got)
+	}
+}
+
+func TestPaintBorderDoubleLeavesGap(t *testing.T) {
+	green := color.RGBA{R: 0x10, G: 0xa0, B: 0x20, A: 0xff}
+	// A top edge strip [5,45]×[5,14] (9px thick) → thirds are 3px each:
+	// outer [5,8), middle [8,11), inner [11,14) along Y.
+	page := &layout.Page{WidthPt: 50, HeightPt: 50, Items: []layout.Item{
+		{Kind: layout.BorderKind, Border: layout.BorderItem{
+			XPt: 5, YPt: 5, WPt: 40, HPt: 9,
+			Color: green, Style: layout.BorderDouble, Side: layout.EdgeTop,
+		}},
+	}}
+	img := newRasterPage(50, 50, page)
+
+	// Outer third (y≈6) and inner third (y≈12) are filled.
+	if got := img.RGBAAt(25, 6); !isColor(got, green, 2) {
+		t.Errorf("outer-third pixel = %v, want green %v", got, green)
+	}
+	if got := img.RGBAAt(25, 12); !isColor(got, green, 2) {
+		t.Errorf("inner-third pixel = %v, want green %v", got, green)
+	}
+	// Middle third (y≈9) is NOT the border color — the gap stays white.
+	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
+	if got := img.RGBAAt(25, 9); !isColor(got, white, 0) {
+		t.Errorf("middle-third pixel = %v, want white gap (got border color?)", got)
+	}
+}
+
+func TestPaintBorderDashedAlternates(t *testing.T) {
+	black := color.RGBA{A: 0xff}
+	// A top edge strip starting at x=5, 4px thick. Dash = gap = 3×4 = 12px, so the
+	// first dash spans x∈[5,17) and the first gap x∈[17,29). Make it long enough
+	// (W=40) to hold a dash + gap + more.
+	page := &layout.Page{WidthPt: 60, HeightPt: 30, Items: []layout.Item{
+		{Kind: layout.BorderKind, Border: layout.BorderItem{
+			XPt: 5, YPt: 5, WPt: 40, HPt: 4,
+			Color: black, Style: layout.BorderDashed, Side: layout.EdgeTop,
+		}},
+	}}
+	img := newRasterPage(60, 30, page)
+
+	// A pixel inside the first dash (x≈10) is black.
+	if got := img.RGBAAt(10, 7); !isColor(got, black, 2) {
+		t.Errorf("first-dash pixel = %v, want black", got)
+	}
+	// A pixel inside the first gap (x≈23) stays white.
+	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
+	if got := img.RGBAAt(23, 7); !isColor(got, white, 0) {
+		t.Errorf("first-gap pixel = %v, want white", got)
 	}
 }
 
