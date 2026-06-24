@@ -44,6 +44,29 @@ type Fragment struct {
 	// content). Set only on an IsBFC fragment. Kept separate from Children so in-flow
 	// tree order is untouched.
 	Floats []*Fragment
+
+	// IsPositioned marks a fragment produced by a positioned box (relative,
+	// absolute, or fixed). The stacking pass lifts such a fragment out of the
+	// in-flow decoration/content passes and paints it in the positioned layer
+	// instead (CSS 2.1 Appendix E). For a relative box (which IS in flow) this
+	// moves only its painting; its in-flow space stays reserved.
+	IsPositioned bool
+	// RelOffsetX/RelOffsetY is a relatively-positioned box's paint-time offset
+	// (CSS 9.4.3). Applied as a translate over the fragment's flattened item range
+	// when the positioned layer paints it (NOT by shiftFragment/translateFragment,
+	// which do not recurse Positioned). Zero for absolute/fixed (their position is
+	// baked into the fragment coordinates by the abs-pos pass).
+	RelOffsetX, RelOffsetY float64
+	// IsStackingContext marks a fragment that establishes a stacking context (the
+	// root and every positioned box). Such a fragment owns the Appendix E phase
+	// ordering for its subtree, ending with its positioned layer.
+	IsStackingContext bool
+	// Positioned holds the fragments of positioned descendants painted in this
+	// stacking context's positioned layer (after in-flow content). Kept separate
+	// from Children so in-flow tree order is untouched; a descendant in Positioned
+	// is skipped in the in-flow passes (IsPositioned) so it paints exactly once.
+	// In the minimal cut these paint in document order (no z-index sort).
+	Positioned []*Fragment
 }
 
 // ImageContent is a decoded replaced-element image carried on a Fragment. CX,CY,
@@ -89,37 +112,70 @@ type GlyphFragment struct {
 
 // AppendItems appends f's drawing primitives, and its descendants', to dst in CSS
 // paint order and returns the extended slice. For a fragment that establishes a
-// block formatting context (IsBFC), the order follows CSS 2.1 Appendix E within the
-// context: in-flow block backgrounds/borders, then floats (Floats), then in-flow
-// inline content / images / atomics — each phase skipping floated subtrees in the
-// in-flow passes. A non-BFC fragment paints its own background/border/inline/image
-// then recurses into its children (normal-flow tree order), which is what the BFC
-// phases call per in-flow subtree.
+// stacking context (IsStackingContext — the root and every positioned box) OR a block
+// formatting context (IsBFC — inline-blocks and floats), the order follows the
+// supported subset of CSS 2.1 Appendix E within the context (4 phases): in-flow block
+// backgrounds/borders (appendDecorations), then the float layer (Floats), then in-flow
+// inline content / images / atomics (appendContent), then the positioned layer
+// (Positioned) — each in-flow phase skipping floated AND positioned subtrees so they
+// paint exactly once in their own layer. A plain BFC that is not a stacking context has
+// an empty Positioned slice, so the positioned phase is a no-op and the order reduces to
+// the prior 3-phase sequence (preserving byte-identical output for non-positioned
+// pages). A non-BFC, non-stacking fragment paints its own background/border/inline/image
+// then recurses into its children (normal-flow tree order), skipping floated and
+// positioned children, which is what the context phases call per in-flow subtree.
 //
-// AppendItems only reads the fragment tree; it does not mutate it, so it is safe to
-// call on a tree shared across the render fan-out.
+// A relatively-positioned descendant carries a paint-time offset (RelOffsetX/Y); the
+// positioned (and float, for a positioned float) layer applies it via translateItems
+// over the descendant's freshly-flattened item range, so the whole positioned subtree
+// rides the relative shift. AppendItems itself never mutates the fragment tree (only the
+// appended dst items are translated), so it is safe to call on a tree shared across the
+// render fan-out.
 //
-// The 3-phase BFC ordering is the seam the positioning slice generalizes into a full
-// stacking-context pass (CSS 2.1 Appendix E z-index layers): positioned descendants
-// and z-ordered layers will be inserted relative to the float phase, so keep the phase
-// split intact when extending this.
+// The positioned-layer loop is the seam the deferred full-z-index slice extends: it
+// gains a z-index sort and splits into negative / zero / positive sub-layers (with the
+// negative sub-layer moving before appendDecorations and the positive after this loop).
+// The phase split is written so that slice re-points the collection, not rewrites the
+// pass — keep it intact when extending this.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
-	if f.IsBFC {
-		dst = f.appendDecorations(dst) // in-flow backgrounds + borders (skip floats)
+	if f.IsStackingContext || f.IsBFC {
+		// Stacking context (root / positioned box) OR a BFC (inline-block / float): paint
+		// in CSS 2.1 Appendix E order — own decorations are emitted by the in-flow
+		// decoration walker starting at f; floats; in-flow content; then the positioned
+		// layer. (A plain BFC that is not a stacking context has an empty Positioned
+		// slice, so the positioned phase is a no-op and the order reduces to the prior
+		// 3-phase sequence — preserving byte-identical output for non-positioned pages.)
+		dst = f.appendDecorations(dst) // in-flow backgrounds + borders (skip floats, nested BFCs, positioned)
 		for _, fl := range f.Floats {  // the float layer
+			start := len(dst)
 			dst = fl.AppendItems(dst)
+			// A positioned float (float:left; position:relative) carries a relative
+			// offset; apply it to the float's emitted range, exactly like the positioned
+			// layer below. A non-positioned float has zero offset, so this is a guarded
+			// no-op — preserving byte-identical output for non-positioned float pages.
+			if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
+				translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
+			}
 		}
-		dst = f.appendContent(dst) // in-flow inline content + images (skip floats)
+		dst = f.appendContent(dst)        // in-flow inline content + images (skip floats, positioned)
+		for _, pf := range f.Positioned { // the positioned layer (document order; minimal z-index)
+			start := len(dst)
+			dst = pf.AppendItems(dst)
+			if pf.RelOffsetX != 0 || pf.RelOffsetY != 0 {
+				translateItems(dst, start, pf.RelOffsetX, pf.RelOffsetY)
+			}
+		}
 		return dst
 	}
-	// Non-BFC fragment: paint self, then recurse (normal tree order). This is the
-	// per-subtree behavior the BFC phases invoke; it is unchanged from the original
-	// single-pass AppendItems except that a floated subtree is skipped (the BFC root
-	// paints it via Floats instead).
+	// Non-BFC, non-stacking fragment: paint self, then recurse (normal tree order),
+	// skipping floated AND positioned children (painted by the owning stacking context's
+	// float / positioned layers). This is the per-subtree behavior the context phases
+	// invoke; it is unchanged from the prior single-pass AppendItems except for those
+	// skips.
 	dst = f.appendSelfDecorations(dst)
 	dst = f.appendSelfContent(dst)
 	for _, c := range f.Children {
-		if c.IsFloat {
+		if c.IsFloat || c.IsPositioned {
 			continue
 		}
 		dst = c.AppendItems(dst)
@@ -141,9 +197,10 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
 	dst = f.appendSelfDecorations(dst)
 	for _, c := range f.Children {
-		if c.IsFloat || c.IsBFC {
+		if c.IsFloat || c.IsBFC || c.IsPositioned {
 			// A floated child paints in the BFC root's float layer; a nested BFC child
-			// paints whole in the content phase (atomic). Skip both here.
+			// paints whole in the content phase (atomic); a positioned child paints in the
+			// stacking context's positioned layer. Skip all three here.
 			continue
 		}
 		dst = c.appendDecorations(dst)
@@ -164,8 +221,13 @@ func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
 func (f *Fragment) appendContent(dst []layout.Item) []layout.Item {
 	dst = f.appendSelfContent(dst)
 	for _, c := range f.Children {
-		if c.IsFloat {
-			continue // painted in the BFC root's float layer, not as in-flow content
+		if c.IsFloat || c.IsPositioned {
+			// A floated child paints in the BFC root's float layer; a positioned child
+			// paints in the stacking context's positioned layer. Skip both here. The
+			// IsPositioned check precedes the IsBFC atomic branch so a positioned
+			// inline-block (IsBFC && IsPositioned) is lifted to the positioned layer, not
+			// also painted atomically in-flow.
+			continue
 		}
 		if c.IsBFC {
 			dst = c.AppendItems(dst) // atomic: its own full phase sequence
@@ -241,6 +303,33 @@ func (f *Fragment) edgeStrip(s layout.EdgeSide, e BorderEdge) layout.BorderItem 
 		b.XPt, b.YPt, b.WPt, b.HPt = f.X+f.W-e.Width, f.Y, e.Width, f.H
 	}
 	return b
+}
+
+// translateItems shifts every item in dst[start:] by (dx,dy), mutating their XPt/YPt
+// in place. It applies a relatively-positioned fragment's paint offset to the items
+// the fragment (and its subtree, incl. any abs-pos descendant on its Positioned
+// layer) just emitted via AppendItems — so the whole positioned subtree rides the
+// relative shift. Every coordinate-bearing item kind carries XPt/YPt
+// (Background/Border/Glyph/Image), so a uniform per-item translate is exact. This
+// keeps AppendItems a pure read of the fragment tree: only the freshly-appended dst
+// items are moved, never a Fragment.
+func translateItems(dst []layout.Item, start int, dx, dy float64) {
+	for i := start; i < len(dst); i++ {
+		switch dst[i].Kind {
+		case layout.BackgroundKind:
+			dst[i].Rule.XPt += dx
+			dst[i].Rule.YPt += dy
+		case layout.BorderKind:
+			dst[i].Border.XPt += dx
+			dst[i].Border.YPt += dy
+		case layout.GlyphKind:
+			dst[i].Glyph.XPt += dx
+			dst[i].Glyph.YPt += dy
+		case layout.ImageKind:
+			dst[i].Image.XPt += dx
+			dst[i].Image.YPt += dy
+		}
+	}
 }
 
 // Page returns a single Page sized widthPt × heightPt whose Items are the flattened

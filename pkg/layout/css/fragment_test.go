@@ -148,6 +148,65 @@ func TestAppendItemsPaintOrder(t *testing.T) {
 	}
 }
 
+// TestAppendItemsNonPositionedByteIdentical: a tree with NO positioned boxes
+// produces the exact same item slice with the stacking pass as the 5a 3-phase pass.
+// (Guards the "non-positioned pages byte-identical" invariant.) Build a BFC root
+// with a background, a normal child with a background + a glyph line, and assert the
+// item KINDS/coords are exactly decorations-then-content order.
+func TestAppendItemsNonPositionedByteIdentical(t *testing.T) {
+	// root (BFC, stacking context) bg; child bg + one glyph.
+	child := &Fragment{X: 0, Y: 20, W: 100, H: 30, Background: color.RGBA{1, 1, 1, 255}}
+	child.Lines = []LineFragment{{BaselineY: 35, Glyphs: []GlyphFragment{{Outline: tinyOutline(), X: 5, SizePt: 12, Color: color.RGBA{0, 0, 0, 255}}}}}
+	root := &Fragment{X: 0, Y: 0, W: 100, H: 60, Background: color.RGBA{2, 2, 2, 255}, IsBFC: true, IsStackingContext: true, Children: []*Fragment{child}}
+	items := root.AppendItems(nil)
+	// Expect: root bg, child bg, child glyph — backgrounds before glyph (decorations
+	// before content), 3 items.
+	if len(items) != 3 {
+		t.Fatalf("got %d items, want 3", len(items))
+	}
+	if items[0].Kind != layout.BackgroundKind || items[1].Kind != layout.BackgroundKind || items[2].Kind != layout.GlyphKind {
+		t.Errorf("item kinds = %v/%v/%v, want bg/bg/glyph", items[0].Kind, items[1].Kind, items[2].Kind)
+	}
+}
+
+// TestAppendItemsPositionedPaintsLast: a positioned child paints AFTER an in-flow
+// sibling's content (positioned layer is last). Build a root with two children: a
+// normal child (bg) and a positioned child (bg, IsPositioned, on the root's
+// Positioned slice and excluded from Children-content). Assert the positioned bg
+// comes last.
+func TestAppendItemsPositionedPaintsLast(t *testing.T) {
+	normal := &Fragment{X: 0, Y: 0, W: 50, H: 20, Background: color.RGBA{1, 1, 1, 255}}
+	posChild := &Fragment{X: 0, Y: 0, W: 50, H: 20, Background: color.RGBA{9, 9, 9, 255}, IsPositioned: true, IsStackingContext: true}
+	root := &Fragment{X: 0, Y: 0, W: 100, H: 40, IsBFC: true, IsStackingContext: true,
+		Children:   []*Fragment{normal, posChild}, // posChild in Children (skipped in-flow) ...
+		Positioned: []*Fragment{posChild},         // ... and in the positioned layer.
+	}
+	items := root.AppendItems(nil)
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2 (normal bg, positioned bg)", len(items))
+	}
+	if items[len(items)-1].Rule.Color != (color.RGBA{9, 9, 9, 255}) {
+		t.Errorf("last item is not the positioned bg; positioned layer not last")
+	}
+}
+
+// TestAppendItemsRelativeOffsetTranslatesRange: a relative fragment's RelOffsetX/Y
+// shifts ALL of its emitted items (and its subtree's) by the offset.
+func TestAppendItemsRelativeOffsetTranslatesRange(t *testing.T) {
+	rel := &Fragment{X: 10, Y: 10, W: 30, H: 30, Background: color.RGBA{5, 5, 5, 255},
+		IsPositioned: true, IsStackingContext: true, RelOffsetX: 5, RelOffsetY: 7}
+	root := &Fragment{X: 0, Y: 0, W: 100, H: 100, IsBFC: true, IsStackingContext: true,
+		Children: []*Fragment{rel}, Positioned: []*Fragment{rel}}
+	items := root.AppendItems(nil)
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1", len(items))
+	}
+	// rel's background border box is X=10,Y=10; with the +5/+7 offset it must paint at 15/17.
+	if items[0].Rule.XPt != 15 || items[0].Rule.YPt != 17 {
+		t.Errorf("relative bg at (%v,%v), want (15,17) (offset applied)", items[0].Rule.XPt, items[0].Rule.YPt)
+	}
+}
+
 // TestPage checks Page builds a layout.Page with the given dimensions and Items equal
 // to AppendItems(nil).
 func TestPage(t *testing.T) {
