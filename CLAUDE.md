@@ -224,6 +224,25 @@ what is done vs. pending.
   undecodable/404/missing-`src`/unsupported-format image degrades to a sized placeholder (reserves its
   box, paints nothing) + debug log, never panicking; recovery is at the page boundary. See
   `docs/superpowers/specs/2026-06-24-html-replaced-images-design.md`.
+- **HTML rendering — floats + clear** (`pkg/layout/css/floats.go`, extended `block.go`/`inline.go`/
+  `fragment.go`, `pkg/layout/inline` `BreakNext`, `pkg/css` `float`/`clear`; covered by float-context
+  geometry unit tests, fragment-geometry assertions, the `html-float-figure` golden, and the
+  `float-left` WPT reftest): `float:left/right` takes a box out of flow to the containing-block edge
+  (positioned by its margin box); in-flow line boxes and block content narrow around floats via a
+  per-BFC `floatContext` (`leftEdge`/`rightEdge`/`place`/`clearY`) the block stacker and inline
+  formatting context query per vertical band (clamped to each box's own content box, so a non-BFC box
+  narrower than its BFC still wraps at its own width). Multiple floats **stack and wrap to a new row**;
+  `clear:left/right/both` drops a box below matching floats. Floats establish their own BFC and **paint
+  in their own CSS layer** (CSS 2.1 Appendix E: in-flow block decorations → floats → in-flow inline
+  content) via a phase-split `AppendItems`; a nested BFC paints atomically. The shared inline core
+  stays float-agnostic (one additive `BreakNext` primitive — one greedy line at a width; DOCX
+  unchanged). The float context is queried in a BFC-root-relative band frame (`bandOriginY`); the
+  shift helpers carry a fragment's `Floats` so a repositioned nested BFC moves its floats. Degrades
+  gracefully: an overflow-wide float overflows the edge (no spin), `float:auto` width approximates the
+  resolved width, a floated inline-level box is blockified (CSS 9.7), and floats do not cross a nested
+  BFC boundary. Not yet modeled: a parent **enclosing** its floats' height (a float-only block has zero
+  content height) — deferred with the overflow slice. See
+  `docs/superpowers/specs/2026-06-24-html-floats-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -254,9 +273,12 @@ that skip into real output.
    content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
    fixes bold/italic fidelity).
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
-   normal-flow layout/paint with `OpenHTML`, and replaced content + images are done — see the Done
-   section). Roughly in order, each a parse/layout slice with its own fixtures + golden/WPT tests:
-   **floats + positioning** (float/clear, relative/absolute/fixed, z-order, overflow clipping);
+   normal-flow layout/paint with `OpenHTML`, replaced content + images, and **floats + clear** are
+   done — see the Done section). Roughly in order, each a parse/layout slice with its own fixtures +
+   golden/WPT tests: **positioning** (relative/absolute/fixed, z-order — generalizes the float paint
+   layer's phase-split `AppendItems` into a full stacking-context pass); **overflow clipping**
+   (`overflow:hidden/scroll/auto`, plus the deferred float interactions: a block **enclosing** its
+   floats' height, and floats intruding across an `overflow≠visible` BFC boundary);
    **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
    flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote

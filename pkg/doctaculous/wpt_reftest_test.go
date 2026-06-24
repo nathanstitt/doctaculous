@@ -57,8 +57,8 @@ var wptReftests = []struct {
 	// holds ONLY floats, which (per CSS 2.1) do not extend a non-BFC parent's height,
 	// so it renders a 1×1 page; the inline-block reference renders 200×30. Their
 	// bounds differ, so they cannot be a pixel-equivalent reftest pair. The
-	// multi-float row layout is covered by pkg/layout/css/floats_layout_test.go
-	// (stacking/wrap geometry) instead.
+	// multi-float row layout is covered by pkg/layout/css/floats_test.go
+	// (TestPlaceStacksThenWraps stacking/wrap geometry) instead.
 }
 
 // swatchColor is the solid color shared by the img-vs-div reftest's image and the

@@ -158,8 +158,8 @@ var htmlGoldens = []struct {
 	// a degenerate 1×1 bitmap (paints nothing). That matches the float model the
 	// geometry tests lock down (TestFloatPlacedOutOfFlow: a float consumes no
 	// vertical space). The multi-float "two-on-a-row-then-wrap" behavior is covered
-	// instead by pkg/layout/css/floats_layout_test.go (stacking/wrap geometry) and is
-	// visible in the float-figure golden's figure placement.
+	// instead by pkg/layout/css/floats_test.go (TestPlaceStacksThenWraps stacking/wrap
+	// geometry) and is visible in the float-figure golden's figure placement.
 }
 
 // quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL

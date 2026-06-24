@@ -1,6 +1,6 @@
 # HTML rendering — floats + clear (sub-project 5a)
 
-**Status:** Designed (not yet implemented). Branch `feat/html-floats` (off `feat/html-replaced-images`,
+**Status:** Implemented. Branch `feat/html-floats` (off `feat/html-replaced-images`,
 or off `main` if the stack has merged). Roadmap §6 "floats + positioning", **floats slice only** —
 positioning (relative/absolute/fixed + z-index) and `overflow` clipping are deliberately split into
 their own later slices (5b, 5c). Predecessors: sub-projects 1 (CSS parse+cascade), 2 (box generation),
@@ -301,6 +301,37 @@ asserting the graceful degradation (overflow-wide float, floated inline blockifi
 - **True shrink-to-fit** (min-content/max-content) width for `float:auto`-width.
 - **Clearance** per CSS 8.3.1 (the margin-collapse interaction of `clear`); negative-margin float
   overlap; floats narrowing a sibling that establishes its own BFC.
+- **Float-height enclosure** — a block does not yet grow to enclose its floats (CSS: a BFC, or
+  `clear`ed content, encloses floats). Consequence found during implementation: a block whose **only**
+  children are floats has zero in-flow content height (so a float-only `<body>` renders a degenerate
+  1×1 page — which is why the planned `float-row` golden/reftest was dropped in favor of geometry-test
+  coverage). Enclosure lands with the `overflow` slice (`overflow≠visible` establishes a BFC that
+  encloses floats), so it is grouped there.
 - The replaced-content and inline/flow deferrals carried from sub-project 4 (`object-position`,
   ratio-preserving min/max, percentage-height basis, `background-image`, full `vertical-align`,
   `margin:auto` centering) remain open.
+
+## Review fixes folded in
+
+The two-stage review (spec + code-quality, per task) found and fixed, beyond comment/test-accuracy
+nits:
+
+1. **A float-placement test-assertion error in the plan** — `TestPlaceStacksThenWraps` expected the
+   third (wrapping) float at `y=40`, but with two different-height floats it drops twice (past both
+   bottoms) to `y=60`. The algorithm was correct; the expected value was wrong. Fixed in the test and
+   the plan.
+2. **The IFC float-narrowing missed a containing-block clamp** — the float context spans the whole BFC,
+   so a non-BFC box narrower than its BFC (e.g. a `width:200px` `<p>` in a 1280px page) would lay text
+   to the BFC width. Fixed by clamping the per-line float edges to the box's own content box (a no-op
+   for full-width boxes — goldens unchanged — and harmless to float-narrowing, since an intruding
+   float's edge is already inside the box).
+3. **Floats painted nothing end-to-end** (caught by generating the `float-figure` golden) — a real
+   float is `IsBFC && IsFloat`, so its `AppendItems` took the BFC branch and called the phase walkers
+   on itself, which early-returned on `IsFloat`. Fixed by moving the `IsFloat`-skip from "skip `f`
+   itself" to "skip floated **children**", so a float paints its own subtree as its BFC's paint root.
+   Pinned by `TestAppendItemsFloatPaintsOwnSubtree` (the prior phase test used a non-BFC float and
+   missed the combination). Lesson for the positioning slice: test the `IsBFC && IsFloat` (and future
+   `IsBFC && positioned`) **combination**, not each flag alone.
+4. **Test-fixture zero-value-`Length` trap** — a `cssbox` style literal that omits `Width`/`MaxWidth`
+   reads as an explicit `0` (not the cascade's `auto`/`none`), squashing a box to 0×0. The `blockBox`
+   test helper now defaults `Width`/`Height`/`MaxWidth`/`MaxHeight` to `UnitAuto`, matching `initialStyle()`.
