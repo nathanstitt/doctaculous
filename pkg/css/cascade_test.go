@@ -237,21 +237,20 @@ func TestCascadeBestMatchUsesMaxSpecificity(t *testing.T) {
 }
 
 func TestOriginUALosesToAuthorAcrossSpecificity(t *testing.T) {
-	// UA: a type selector sets display:inline (high-ish specificity for UA).
-	ua := Parse(`div { display: block; color: red; }`)
-	// Author: a *less* specific path still wins over UA because author origin
-	// outranks UA origin regardless of specificity.
-	author := Parse(`div { color: green; }`)
+	// UA rule has STRICTLY HIGHER specificity (an id selector) and is listed LAST,
+	// so neither specificity nor source order favors the author — only origin
+	// precedence can make the author's lower-specificity rule win. This is what
+	// "author normal beats UA normal" actually means.
+	author := Parse(`div { color: green; }`)        // type selector: specificity (0,0,1)
+	ua := Parse(`#lead { color: red; }`)            // id selector:   specificity (1,0,0)
 	r := NewResolver([]OriginSheet{
-		{Sheet: ua, Origin: OriginUA},
 		{Sheet: author, Origin: OriginAuthor},
+		{Sheet: ua, Origin: OriginUA}, // listed last: source order would favor it, but origin must override
 	}, nil)
-	cs := r.ComputeRoot(&fakeNode{tag: "div"})
-	if cs.Display != "block" {
-		t.Errorf("display = %q, want block (from UA, no author override)", cs.Display)
-	}
+	node := &fakeNode{tag: "div", id: "lead"} // matches both selectors
+	cs := r.ComputeRoot(node)
 	if (cs.Color != color.RGBA{0, 128, 0, 255}) {
-		t.Errorf("color = %v, want green (author beats UA)", cs.Color)
+		t.Errorf("color = %v, want green (author normal beats UA normal despite UA's higher specificity)", cs.Color)
 	}
 }
 
