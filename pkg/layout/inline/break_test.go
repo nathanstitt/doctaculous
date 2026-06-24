@@ -118,3 +118,97 @@ func TestBreakAtomicWiderThanLinePlacedAlone(t *testing.T) {
 		t.Errorf("expected atomic overflow width > 10, got %v", lines[0].WidthPt)
 	}
 }
+
+// mkRun builds a glyph run from words, with a per-character advance and a space
+// advance. Spaces between words are marked so the breaker can break there.
+func mkRun(words []string, advancePerChar, spaceAdvance float64) []Glyph {
+	var gs []Glyph
+	for wi, w := range words {
+		if wi > 0 {
+			gs = append(gs, Glyph{Advance: spaceAdvance, Space: true})
+		}
+		for range w {
+			gs = append(gs, Glyph{Advance: advancePerChar})
+		}
+	}
+	return gs
+}
+
+// TestBreakNextOneLine: BreakNext returns the glyphs that fit on one line plus the
+// remainder, breaking at the last space before overflow.
+func TestBreakNextOneLine(t *testing.T) {
+	// "aa bb cc" with char advance 10, space 10: "aa"=20, " "=10, "bb"=20, ...
+	gs := mkRun([]string{"aa", "bb", "cc"}, 10, 10)
+	// Width 45: "aa"(20) fits, "aa "(30) fits, "aa b"(40) fits, "aa bb"(50) overflows
+	// -> break at the space after "aa", so the line is "aa" (visible width 20).
+	line, rest := BreakNext(gs, 45)
+	if got := VisibleWidth(line); got != 20 {
+		t.Errorf("line visible width = %v, want 20 (\"aa\")", got)
+	}
+	if len(rest) == 0 {
+		t.Fatalf("rest is empty, want \"bb cc\" remainder")
+	}
+	if rest[0].Space {
+		t.Errorf("rest[0] is a space; the breaking space should be consumed")
+	}
+}
+
+// TestBreakNextEquivalence: repeatedly calling BreakNext at a fixed width yields the
+// same lines as one Break call at that width (guards the non-float path unchanged).
+func TestBreakNextEquivalence(t *testing.T) {
+	gs := mkRun([]string{"alpha", "beta", "gamma", "delta", "epsilon"}, 8, 8)
+	const w = 80
+
+	want := Break(gs, w, w)
+
+	var got []Line
+	rest := gs
+	for len(rest) > 0 {
+		var line []Glyph
+		line, rest = BreakNext(rest, w)
+		got = append(got, MakeLine(line))
+	}
+	if len(got) != len(want) {
+		t.Fatalf("BreakNext produced %d lines, Break produced %d", len(got), len(want))
+	}
+	for i := range want {
+		if !floatEq(got[i].WidthPt, want[i].WidthPt) {
+			t.Errorf("line %d width: BreakNext %v vs Break %v", i, got[i].WidthPt, want[i].WidthPt)
+		}
+		if len(got[i].Glyphs) != len(want[i].Glyphs) {
+			t.Errorf("line %d glyph count: BreakNext %d vs Break %d", i, len(got[i].Glyphs), len(want[i].Glyphs))
+		}
+	}
+}
+
+func floatEq(a, b float64) bool { d := a - b; return d < 1e-9 && d > -1e-9 }
+
+// TestBreakNextOverlongWord: a single word wider than the width is taken alone
+// (overflows) and the remainder is empty.
+func TestBreakNextOverlongWord(t *testing.T) {
+	gs := mkRun([]string{"superlongword"}, 10, 10) // 130 wide
+	line, rest := BreakNext(gs, 50)
+	if len(line) != len(gs) {
+		t.Errorf("overlong word: line has %d glyphs, want all %d", len(line), len(gs))
+	}
+	if len(rest) != 0 {
+		t.Errorf("overlong word: rest has %d glyphs, want 0", len(rest))
+	}
+}
+
+// TestBreakNextForcedBreak: a Break glyph ends the line; the remainder continues
+// after it (the break glyph is consumed).
+func TestBreakNextForcedBreak(t *testing.T) {
+	gs := []Glyph{
+		{Advance: 10}, {Advance: 10}, // "aa"
+		{Break: true},
+		{Advance: 10}, {Advance: 10}, // "bb"
+	}
+	line, rest := BreakNext(gs, 1000) // width large; only the forced break splits
+	if len(line) != 2 {
+		t.Errorf("forced break: line has %d glyphs, want 2", len(line))
+	}
+	if len(rest) != 2 {
+		t.Errorf("forced break: rest has %d glyphs, want 2 (after the break glyph)", len(rest))
+	}
+}
