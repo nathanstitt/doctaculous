@@ -358,7 +358,10 @@ type ReplacedContent struct {
 `Float`, `Position`, `Replaced` facts, and `Formatting` (derivable from display and child
 composition: a block box whose children are all inline establishes an *inline* FC, otherwise a *block*
 FC; `display:flex` establishes a flex FC; etc.). These follow deterministically from the computed
-style plus child composition.
+style plus child composition. The flow-context determination that depends on child composition
+(block-vs-inline FC) is finalized in the normalization post-pass — after anonymous-box fixups settle
+the child list — so a real block with all-inline content and an anonymous block holding inline runs
+report the same `InlineFC`; non-flow contexts (table/flex/grid) keep their keyword-derived value.
 
 **What is deliberately NOT on the box yet** (it would be speculative dead weight, and sub-project 3+
 will design it as layout *output*, not generation *input*): computed/used sizes, margin-collapse

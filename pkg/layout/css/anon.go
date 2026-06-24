@@ -24,7 +24,33 @@ func normalize(b *cssbox.Box) {
 	b.Children = handleWhitespace(b.Children, b)
 	if b.Kind.IsBlockLevel() {
 		b.Children = wrapInlineRuns(b.Children)
+		reconcileFormatting(b)
 	}
+}
+
+// reconcileFormatting sets a block-level box's formatting context from its final
+// child composition: a block container whose children are all inline-level
+// establishes an inline formatting context; otherwise a block formatting context.
+// classifyDisplay (in build.go) seeds Formatting from the display keyword alone,
+// before children are known — this corrects it post-normalization so a real <p>
+// with inline content and an anonymous block holding inline runs agree (both
+// InlineFC). Boxes establishing a non-flow context (table/flex/grid) keep their
+// keyword-derived Formatting and are left untouched.
+func reconcileFormatting(b *cssbox.Box) {
+	if b.Formatting != cssbox.BlockFC && b.Formatting != cssbox.InlineFC {
+		return // table/flex/grid: keep the keyword-derived context
+	}
+	if len(b.Children) == 0 {
+		b.Formatting = cssbox.BlockFC // empty container: a (degenerate) block context
+		return
+	}
+	for _, c := range b.Children {
+		if c.Kind.IsBlockLevel() {
+			b.Formatting = cssbox.BlockFC
+			return
+		}
+	}
+	b.Formatting = cssbox.InlineFC
 }
 
 // splitBlockInInline lifts block-level boxes out of inline boxes. For each inline

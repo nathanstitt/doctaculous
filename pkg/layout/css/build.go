@@ -40,6 +40,13 @@ func Build(ctx context.Context, doc *html.Document, loader resource.ResourceLoad
 	resolver := gcss.NewResolver(sheets, logf)
 
 	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root))
+	if root == nil {
+		// The root itself computed to display:none (e.g. html{display:none}).
+		// Degrade to an empty block root rather than falling through to the
+		// panic-recover path via normalize(nil); the result is a renderable
+		// empty document.
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, nil
+	}
 	normalize(root) // anonymous-box fixups + whitespace handling (anon.go)
 	return root, nil
 }

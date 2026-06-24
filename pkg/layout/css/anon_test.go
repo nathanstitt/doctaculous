@@ -111,6 +111,44 @@ func TestInternalWhitespaceCollapsed(t *testing.T) {
 	}
 }
 
+func TestFormattingReconciledToChildren(t *testing.T) {
+	// A block whose children are all inline-level must report InlineFC, matching
+	// the FC an anonymous block holding inline runs reports — classifyDisplay
+	// seeds BlockFC from the keyword, and normalize must correct it.
+	root := build(t, `<html><body><p>hello <span>world</span></p><div><p>a</p><p>b</p></div></body></html>`, nil)
+	body := root.Children[0]
+	p := body.Children[0]   // all-inline content
+	div := body.Children[1] // all-block content (two p children)
+	if p.Formatting != cssbox.InlineFC {
+		t.Errorf("p (all-inline children) Formatting = %d, want InlineFC", p.Formatting)
+	}
+	if div.Formatting != cssbox.BlockFC {
+		t.Errorf("div (all-block children) Formatting = %d, want BlockFC", div.Formatting)
+	}
+	// The anon-block wrapper around inline runs in a mixed div also reports InlineFC.
+	mixed := build(t, `<html><body><div>txt<p>x</p></div></body></html>`, nil)
+	mdiv := mixed.Children[0].Children[0]
+	anon := firstByKind(mdiv, cssbox.BoxAnonBlock)
+	if anon == nil || anon.Formatting != cssbox.InlineFC {
+		t.Errorf("anon block should report InlineFC, got %+v", anon)
+	}
+}
+
+func TestRootDisplayNoneDegrades(t *testing.T) {
+	// If the root computes to display:none, Build must degrade to an empty block
+	// root rather than panicking inside normalize(nil).
+	root := build(t, `<html style="display:none"><body><p>x</p></body></html>`, nil)
+	if root == nil {
+		t.Fatal("Build returned nil root for display:none root")
+	}
+	if root.Kind != cssbox.BoxBlock {
+		t.Errorf("degraded root kind = %v, want BoxBlock", root.Kind)
+	}
+	if len(root.Children) != 0 {
+		t.Errorf("display:none root should have no children, got %d", len(root.Children))
+	}
+}
+
 // dump renders a box subtree compactly for failure messages.
 func dump(b *cssbox.Box) string {
 	return dumpIndent(b, 0)
