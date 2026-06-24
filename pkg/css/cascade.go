@@ -69,6 +69,13 @@ type ComputedStyle struct {
 	// ObjectFit is the replaced-element fitting mode (CSS object-fit):
 	// "fill" (default) | "contain" | "cover" | "none" | "scale-down".
 	ObjectFit string
+
+	// Float is the CSS float value: "none" (default) | "left" | "right". Not
+	// inherited. The box generator maps it to cssbox.FloatKind.
+	Float string
+	// Clear is the CSS clear value: "none" (default) | "left" | "right" | "both".
+	// Not inherited. The layout engine lowers a cleared box below matching floats.
+	Clear string
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -250,6 +257,8 @@ func initialStyle() ComputedStyle {
 		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
 		BoxSizing:   "content-box",
 		ObjectFit:   "fill", // CSS initial object-fit
+		Float:       "none", // CSS initial float
+		Clear:       "none", // CSS initial clear
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
@@ -339,6 +348,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "fill", "contain", "cover", "none", "scale-down":
 			cs.ObjectFit = d.Value
+		}
+	case "float":
+		switch d.Value {
+		case "left", "right", "none":
+			cs.Float = d.Value
+		}
+	case "clear":
+		switch d.Value {
+		case "left", "right", "both", "none":
+			cs.Clear = d.Value
 		}
 	case "border-top-width":
 		setLength(&cs.BorderTopWidth, d.Value)
