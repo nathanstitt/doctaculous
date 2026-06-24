@@ -463,3 +463,96 @@ func TestFloatNotInherited(t *testing.T) {
 		t.Errorf("float/clear inherited: got float=%q clear=%q, want none/none", child.Float, child.Clear)
 	}
 }
+
+// TestInitialPosition: the cascade defaults position to "static", the offsets to
+// auto, and z-index to auto.
+func TestInitialPosition(t *testing.T) {
+	cs := initialStyle()
+	if cs.Position != "static" {
+		t.Errorf("initial position = %q, want static", cs.Position)
+	}
+	for name, l := range map[string]Length{"top": cs.Top, "right": cs.Right, "bottom": cs.Bottom, "left": cs.Left} {
+		if l.Unit != UnitAuto {
+			t.Errorf("initial %s = %+v, want UnitAuto", name, l)
+		}
+	}
+	if !cs.ZIndexAuto {
+		t.Errorf("initial z-index not auto (ZIndexAuto=%v)", cs.ZIndexAuto)
+	}
+}
+
+// TestApplyPosition: each valid position keyword is accepted; an invalid one is
+// dropped (leaving the prior value).
+func TestApplyPosition(t *testing.T) {
+	for _, kw := range []string{"static", "relative", "absolute", "fixed"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "position", Value: kw})
+		if cs.Position != kw {
+			t.Errorf("position %q not applied, got %q", kw, cs.Position)
+		}
+	}
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "position", Value: "sticky"}) // unsupported here
+	if cs.Position != "static" {
+		t.Errorf("position after unsupported keyword = %q, want static preserved", cs.Position)
+	}
+}
+
+// TestApplyOffsets: top/right/bottom/left parse as lengths; auto is accepted.
+func TestApplyOffsets(t *testing.T) {
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "top", Value: "10px"})
+	applyDeclaration(&cs, Declaration{Property: "left", Value: "20px"})
+	applyDeclaration(&cs, Declaration{Property: "right", Value: "auto"})
+	if cs.Top.Unit != UnitPx || cs.Top.Value != 10 {
+		t.Errorf("top = %+v, want 10px", cs.Top)
+	}
+	if cs.Left.Unit != UnitPx || cs.Left.Value != 20 {
+		t.Errorf("left = %+v, want 20px", cs.Left)
+	}
+	if cs.Right.Unit != UnitAuto {
+		t.Errorf("right = %+v, want UnitAuto", cs.Right)
+	}
+}
+
+// TestApplyZIndex: an integer z-index is parsed (ZIndexAuto=false); "auto" stays
+// auto; a non-integer is dropped.
+func TestApplyZIndex(t *testing.T) {
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "z-index", Value: "5"})
+	if cs.ZIndexAuto || cs.ZIndex != 5 {
+		t.Errorf("z-index 5: got ZIndex=%d ZIndexAuto=%v, want 5/false", cs.ZIndex, cs.ZIndexAuto)
+	}
+	applyDeclaration(&cs, Declaration{Property: "z-index", Value: "-2"})
+	if cs.ZIndexAuto || cs.ZIndex != -2 {
+		t.Errorf("z-index -2: got ZIndex=%d ZIndexAuto=%v, want -2/false", cs.ZIndex, cs.ZIndexAuto)
+	}
+	cs.ZIndex, cs.ZIndexAuto = 7, false
+	applyDeclaration(&cs, Declaration{Property: "z-index", Value: "auto"})
+	if !cs.ZIndexAuto {
+		t.Errorf("z-index auto: ZIndexAuto=%v, want true", cs.ZIndexAuto)
+	}
+	cs2 := initialStyle()
+	applyDeclaration(&cs2, Declaration{Property: "z-index", Value: "1.5"}) // non-integer dropped
+	if !cs2.ZIndexAuto {
+		t.Errorf("z-index 1.5 should be dropped, ZIndexAuto=%v", cs2.ZIndexAuto)
+	}
+}
+
+// TestPositionNotInherited: position/offsets/z-index are not inherited.
+func TestPositionNotInherited(t *testing.T) {
+	parent := initialStyle()
+	parent.Position = "relative"
+	parent.Top = Length{Value: 10, Unit: UnitPx}
+	parent.ZIndex, parent.ZIndexAuto = 3, false
+	child := inheritFrom(parent)
+	if child.Position != "static" {
+		t.Errorf("position inherited: got %q, want static", child.Position)
+	}
+	if child.Top.Unit != UnitAuto {
+		t.Errorf("top inherited: got %+v, want UnitAuto", child.Top)
+	}
+	if !child.ZIndexAuto {
+		t.Errorf("z-index inherited: ZIndexAuto=%v, want true (auto)", child.ZIndexAuto)
+	}
+}
