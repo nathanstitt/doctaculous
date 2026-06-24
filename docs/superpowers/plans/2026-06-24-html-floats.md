@@ -635,17 +635,58 @@ func (c *floatContext) clearY(clear string, y float64) float64 {
 	}
 	return out
 }
+
+// floats2frags returns the fragments of the placed floats, in placement order, for
+// the BFC owner to attach to its fragment's Floats slice (the float paint layer).
+// nil-frag entries are skipped. This is also why floatBox carries frag: the geometry
+// records each placed float's laid-out fragment so the paint layer can collect them.
+func (c *floatContext) floats2frags() []*Fragment {
+	if len(c.floats) == 0 {
+		return nil
+	}
+	out := make([]*Fragment, 0, len(c.floats))
+	for i := range c.floats {
+		if c.floats[i].frag != nil {
+			out = append(out, c.floats[i].frag)
+		}
+	}
+	return out
+}
+```
+
+**Why `floats2frags` is in this task** (not deferred to Task 6 where it is first *called*): the `floatBox.frag` field would otherwise be unread at this commit, and `golangci-lint`'s `unused` check flags an unexported struct field with no reads — which fails CI (CLAUDE.md requires a clean lint). The codebase uses **no** `//nolint` suppressions, so rather than introduce one, this read-side helper lives with the geometry type it belongs to and keeps the commit lint-clean. Task 6 (`placeFloat`) supplies the write side and the first call.
+
+Add a test exercising it (append to `floats_test.go`):
+
+```go
+// TestFloats2Frags returns the placed floats' fragments in order, skipping nil.
+func TestFloats2Frags(t *testing.T) {
+	c := newCtx(0, 200)
+	if got := c.floats2frags(); got != nil {
+		t.Errorf("empty context floats2frags = %v, want nil", got)
+	}
+	fa, fb := &Fragment{X: 1}, &Fragment{X: 2}
+	c.floats = []floatBox{
+		{side: cssbox.FloatLeft, frag: fa},
+		{side: cssbox.FloatRight, frag: nil}, // skipped
+		{side: cssbox.FloatLeft, frag: fb},
+	}
+	got := c.floats2frags()
+	if len(got) != 2 || got[0] != fa || got[1] != fb {
+		t.Errorf("floats2frags = %v, want [fa fb] (nil skipped, order preserved)", got)
+	}
+}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `go test ./pkg/layout/css -run 'TestEdges|TestLeftFloat|TestRightFloat|TestOpposite|TestPlace|TestClearY' -v`
-Expected: PASS (all geometry cases incl. stacking, wrap, overflow-wide, clear).
+Run: `go test ./pkg/layout/css -run 'TestEdges|TestLeftFloat|TestRightFloat|TestOpposite|TestPlace|TestClearY|TestFloats2Frags' -v`
+Expected: PASS (all geometry cases incl. stacking, wrap, overflow-wide, clear, floats2frags).
 
-- [ ] **Step 5: vet + gofmt + full package**
+- [ ] **Step 5: vet + gofmt + full package + lint (the lint matters — frag must be read)**
 
-Run: `go test ./pkg/layout/css && go vet ./pkg/layout/css && gofmt -l pkg/layout/css`
-Expected: PASS; vet clean; `gofmt -l` silent.
+Run: `go test ./pkg/layout/css && go vet ./pkg/layout/css && gofmt -l pkg/layout/css && golangci-lint run ./pkg/layout/css/...`
+Expected: PASS; vet clean; `gofmt -l` silent; **golangci-lint clean** (no "field frag is unused" — `floats2frags` reads it).
 
 - [ ] **Step 6: Commit**
 
@@ -1360,24 +1401,7 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 
 Note the `if res.frag.Floats == nil` guard: `layoutBlock` already set `frag.Floats` for a box that establishes its own BFC (which the root, having no float/inline-block trigger, normally does not — so the root collects here). The guard avoids double-assigning if the root itself were ever BFC-triggering.
 
-Add a helper to `floats.go`:
-
-```go
-// floats2frags returns the fragments of the placed floats, in placement order, for
-// attaching to the BFC-root fragment's Floats slice (the float paint layer).
-func (c *floatContext) floats2frags() []*Fragment {
-	if len(c.floats) == 0 {
-		return nil
-	}
-	out := make([]*Fragment, 0, len(c.floats))
-	for i := range c.floats {
-		if c.floats[i].frag != nil {
-			out = append(out, c.floats[i].frag)
-		}
-	}
-	return out
-}
-```
+(`floats2frags` was already added to `floats.go` in Task 3 — it reads `floatBox.frag`, which Task 3 left lint-clean. This task supplies the write side: `placeFloat` sets `frag` on each placed float, so `floats2frags` now returns real fragments.)
 
 **Signature decision (final — used by Tasks 6, 7, 8):** every layout function gains a `*floatContext` parameter AND a `bandOriginY float64` parameter (the box's content-box top measured in its BFC-root-local frame — used to query the float context in a consistent frame; see Task 8). The root BFC has `bandOriginY = 0`. Introducing both now means no signature changes later. The final signatures are:
 
