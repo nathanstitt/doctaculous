@@ -206,8 +206,10 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		// Inline-level children: hand off to the inline formatting context. The hook
 		// returns line fragments already positioned in page-space X (at contentX) but
 		// in the local content-top-0 frame for Y; block layout shifts them into place.
-		lines, h := e.layoutInline(ctx, b, contentW, 0, contentX)
-		return interior{lines: lines, contentHeight: h}
+		// Any atomic inline boxes (inline-block / replaced) come back as child
+		// fragments in the same frame, to attach as fragment children so they paint.
+		lines, h, atomics := e.layoutInline(ctx, b, contentW, 0, contentX)
+		return interior{lines: lines, children: atomics, contentHeight: h}
 	case cssbox.BlockFC:
 		return e.layoutBlockChildren(ctx, b, contentW, contentX)
 	default:
@@ -279,19 +281,9 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 	return interior{children: out, contentHeight: prevBorder, leadingMargin: leading, trailingMargin: trailing}
 }
 
-// layoutInline is the inline-formatting-context hook a block box establishing an
-// inline formatting context calls. It lays out b's inline-level children into line
-// fragments within contentW points, starting at content-box top contentTopY (local
-// content-top-0 frame: pass 0) and left edge contentX, and returns the lines plus
-// the total inline content height.
-//
-// TODO(task 6): real inline layout (shape via the engine's face cache, break with
-// pkg/layout/inline, place glyphs, emit LineFragments). This placeholder returns no
-// lines and zero height so block layout compiles and runs end-to-end; the block
-// code already attaches the returned lines and uses the height as content height.
-func (e *Engine) layoutInline(_ context.Context, _ *cssbox.Box, _, _, _ float64) (lines []LineFragment, height float64) {
-	return nil, 0
-}
+// The inline formatting context (layoutInline) lives in inline.go; it is the hook
+// the InlineFC case of layoutInterior calls to lay out a block's inline-level
+// children into LineFragments and atomic child fragments.
 
 // --- box-model helpers (the inline formatting context reuses resolveLen and
 // usedEdges) ---

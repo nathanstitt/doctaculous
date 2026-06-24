@@ -77,12 +77,28 @@ var (
 // the 14 PDF standard names and common aliases (Arial->Helvetica, CourierNew->
 // Courier, TimesNewRoman->Times) as well as the default Office families used by
 // DOCX and other reflowable documents (Calibri/Segoe UI->Heros sans,
-// Cambria/Georgia->Termes serif, Consolas->Inconsolata monospace). It strips a
-// subset prefix ("ABCDEF+Name") and is case-insensitive. ok is false for families
-// with no bundled substitute — notably Symbol, ZapfDingbats, and Wingdings, and
-// any unrecognized name.
+// Cambria/Georgia->Termes serif, Consolas->Inconsolata monospace). It also resolves
+// the generic CSS family keywords (serif->Termes, sans-serif->Heros,
+// monospace->Inconsolata, cursive/fantasy->Termes), which is the family a CSS reflow
+// frontend computes when no concrete family is named. It strips a subset prefix
+// ("ABCDEF+Name") and is case-insensitive. ok is false for families with no bundled
+// substitute — notably Symbol, ZapfDingbats, and Wingdings, and any unrecognized
+// name.
 func Lookup(baseFont string) (Substitute, bool) {
 	name := canonical(baseFont)
+	// Generic CSS family keywords (the default a reflow frontend computes when no
+	// concrete family is named) map to the matching substitute style: serif->Termes,
+	// sans-serif->Heros, monospace->Inconsolata, with cursive/fantasy falling back to
+	// serif. These are matched exactly (not by prefix), before the named-family
+	// aliases, so a concrete family is never shadowed by a generic keyword.
+	switch name {
+	case "serif", "cursive", "fantasy":
+		return termes, true
+	case "sans-serif", "system-ui", "ui-sans-serif":
+		return heros, true
+	case "monospace", "ui-monospace":
+		return mono, true
+	}
 	switch {
 	case strings.HasPrefix(name, "courier"),
 		strings.HasPrefix(name, "consolas"),
