@@ -148,3 +148,37 @@ func TestClearY(t *testing.T) {
 		t.Errorf("clearY(both, 90) = %v, want 90", y)
 	}
 }
+
+// TestFloats2Frags returns the placed floats' fragments in order, skipping nil.
+func TestFloats2Frags(t *testing.T) {
+	c := newCtx(0, 200)
+	if got := c.floats2frags(); got != nil {
+		t.Errorf("empty context floats2frags = %v, want nil", got)
+	}
+	fa, fb := &Fragment{X: 1}, &Fragment{X: 2}
+	c.floats = []floatBox{
+		{side: cssbox.FloatLeft, frag: fa},
+		{side: cssbox.FloatRight, frag: nil}, // skipped
+		{side: cssbox.FloatLeft, frag: fb},
+	}
+	got := c.floats2frags()
+	if len(got) != 2 || got[0] != fa || got[1] != fb {
+		t.Errorf("floats2frags = %v, want [fa fb] (nil skipped, order preserved)", got)
+	}
+}
+
+// TestOverlapBoundaryHalfOpen: a query band starting exactly at a float's bottom
+// edge does not overlap it (the interval is half-open [y, y+h)), so the edge is
+// not narrowed there.
+func TestOverlapBoundaryHalfOpen(t *testing.T) {
+	c := newCtx(0, 200)
+	c.floats = []floatBox{{side: cssbox.FloatLeft, x: 0, y: 0, w: 60, h: 50}}
+	// Band [50, 70): float occupies [0, 50); they do not overlap at the boundary.
+	if l := c.leftEdge(50, 20); !approx(l, 0) {
+		t.Errorf("leftEdge at float bottom boundary = %v, want 0 (half-open, no overlap)", l)
+	}
+	// Just inside (band [49,69) overlaps [0,50)) the edge IS narrowed.
+	if l := c.leftEdge(49, 20); !approx(l, 60) {
+		t.Errorf("leftEdge just inside float = %v, want 60", l)
+	}
+}

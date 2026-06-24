@@ -119,8 +119,9 @@ func (c *floatContext) nextDropY(y, h float64) float64 {
 	return best
 }
 
-// clearY returns the lowest y at or below the input y that clears the named side(s):
-// "left"/"right" clear that side, "both" clears all floats, "none" returns y.
+// clearY returns max(y, the lowest edge of all matching floats): the smallest y' >= y
+// (furthest down the Y-down page) at which content clears the named side(s).
+// "left"/"right" clear that side, "both" clears all floats, "none"/"" returns y.
 func (c *floatContext) clearY(clear string, y float64) float64 {
 	if clear == "none" || clear == "" {
 		return y
@@ -135,6 +136,23 @@ func (c *floatContext) clearY(clear string, y float64) float64 {
 			if bottom := f.y + f.h; bottom > out {
 				out = bottom
 			}
+		}
+	}
+	return out
+}
+
+// floats2frags returns the fragments of the placed floats, in placement order, for
+// the BFC owner to attach to its fragment's Floats slice (the float paint layer).
+// nil-frag entries are skipped. This is also why floatBox carries frag: the geometry
+// records each placed float's laid-out fragment so the paint layer can collect them.
+func (c *floatContext) floats2frags() []*Fragment {
+	if len(c.floats) == 0 {
+		return nil
+	}
+	out := make([]*Fragment, 0, len(c.floats))
+	for i := range c.floats {
+		if c.floats[i].frag != nil {
+			out = append(out, c.floats[i].frag)
 		}
 	}
 	return out
