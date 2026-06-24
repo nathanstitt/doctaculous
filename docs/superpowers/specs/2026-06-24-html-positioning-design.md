@@ -394,13 +394,16 @@ the highest risk of a paint-pass change).
   cover "float OR abs/fixed position", e.g. renamed `applyBlockify`). A `relative` inline box is **not**
   blockified (relative positioning does not change `display`); it stays inline. A positioned `<img>`
   stays `BoxReplaced` (replaced sizing handles a block-level replaced box), like a floated `<img>`.
-- **`position:relative` on an inline box** (`<span style="position:relative">text</span>`) has no
-  fragment of its own today: inline-box decoration is deferred (the IFC contributes only the box's text
-  leaves' glyphs — `inline.go`), so there is no per-inline-box fragment to carry `RelOffsetX/Y` or to lift
-  into the positioned layer. **Scope: relative offset on a text-only inline box is a documented no-op**
-  (the text paints in normal flow; logged). Relative positioning **does** take effect on inline **atoms**
-  (an `inline-block`/replaced box gets a fragment and can be offset) and on block-level boxes. This
-  limitation is removed when inline-box fragments land (a later inline-fidelity slice).
+- **`position:relative` on an inline-level box is a no-op this slice** — relative offset takes effect
+  only on **block-level** boxes. Two reasons: (a) a `position:relative` text-only inline box
+  (`<span style="position:relative">text</span>`) has no fragment of its own (inline-box decoration is
+  deferred — the IFC contributes only the box's text leaves' glyphs, `inline.go`), so there is nothing to
+  carry `RelOffsetX/Y`; (b) an inline **atom** (`inline-block`/replaced) DOES get a fragment, but it is
+  positioned on the line by the inline formatting context via `translateFragment` (which moves the atom's
+  border box but does not consult `RelOffsetX/Y` or lift the atom into a positioned layer), so a relative
+  offset on it is also dropped. Both paint in normal flow without the offset (no panic). Block-level
+  relative positioning is exact. This limitation is removed when the IFC honors a relative atom's offset
+  (a later inline-fidelity slice); the goldens use block-level boxes to exercise relative positioning.
 
 ## Degradation
 
@@ -409,8 +412,8 @@ Every unsupported case degrades without aborting the page (recovery is at the pa
   the limitation is visible;
 - an all-`auto`-offset abs-pos box is placed at its containing block's top-left (static-position
   approximation) — logged;
-- `position:relative` on a **text-only inline box** is a no-op (no inline-box fragment exists to offset)
-  — logged;
+- `position:relative` on any **inline-level box** (text-only inline OR an inline-block/replaced atom) is
+  a no-op — relative offset takes effect only on block-level boxes (see Box generation);
 - `margin:auto` on an abs-pos box stays 0 (no centering);
 - an abs-pos `width:auto` without both `left`+`right` uses the normal resolved width (shrink-to-fit
   approximation), consistent with floats.
@@ -485,6 +488,10 @@ degradation.
   collection at a z-sorted, sub-layered order.
 - **Precise static-position solve** for an all-`auto`-offset abs-pos box (the hypothetical-in-flow-box
   position); today it approximates to the containing block's top-left.
+- **A float inside a `position:relative` (non-BFC) box does not ride the relative paint offset** — a
+  relative box does not establish a BFC, so its float escapes to the enclosing BFC's float layer and is
+  not part of the relative box's flattened-range translate (CSS would shift it with the subtree). A
+  corner case (no panic); revisit alongside relative-on-inline / the stacking-context work.
 - **`margin:auto` centering** for abs-pos boxes (CSS 10.3.7) and for in-flow blocks (the carried
   `margin:auto` deferral) — both still stub to 0.
 - **`overflow` clipping** (and the float-enclosure / float-across-BFC interactions) — slice 5c.

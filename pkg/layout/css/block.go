@@ -495,6 +495,7 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			res.frag.IsPositioned = true
 			res.frag.IsStackingContext = true
 			res.frag.RelOffsetX, res.frag.RelOffsetY = dx, dy
+			e.logZIndexUnsupported(child)
 			pendingPositioned = append(pendingPositioned, res.frag)
 		}
 		// Bubble up any relative descendants the child did not consume (it is a static
@@ -589,10 +590,22 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		d := posCtx.deferred[i]
 		cb := e.resolveCBRect(d.cb, pageRect)
 		ed := usedEdges(d.box, cb.w)
-		border, _ := absRect(d.box, ed, cb)
+		border, contentW := absRect(d.box, ed, cb)
 
-		// Lay out the box's subtree as a block at the CB CONTENT width, at a provisional
-		// origin (originX = cb.x, marginTopEdgeY = cb.y, bandOriginY 0), with a FRESH
+		// The width layoutBlock should flow the interior into. Normally the box's own
+		// width resolution (containing-block fill for auto, or the explicit width) is
+		// correct, so we lay out against the full CB width (cb.w). But when left+right
+		// both pin the width with width:auto (CSS 10.3.7 shrink-to-offsets), absRect's
+		// contentW is the used width — feed layoutBlock a containing width that makes its
+		// auto-fill reproduce that content width (cbWidth - margins - insets == contentW),
+		// so the interior flows at the constrained width, not the full CB width.
+		layoutCBWidth := cb.w
+		if absWidthIsOffsetConstrained(d.box) {
+			layoutCBWidth = contentW + ed.mL + ed.mR + ed.bL + ed.bR + ed.pL + ed.pR
+		}
+
+		// Lay out the box's subtree as a block at that width, at a provisional origin
+		// (originX = cb.x, marginTopEdgeY = cb.y, bandOriginY 0), with a FRESH
 		// floatContext (its floats are self-contained) and the SAME posCtx (so its own
 		// abs-pos descendants are collected for this loop). Its posCB owner is the box
 		// ITSELF (it is a positioned ancestor / new CB); its own layoutBlock sets
@@ -600,9 +613,9 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		// frag.Positioned (the same consume-or-bubble as pass 1). The frag is not built
 		// before layoutBlock returns, so any nested abs descendant recorded {box: d.box}
 		// is back-filled with the built frag just below.
-		childFC := &floatContext{cbLeft: cb.x, cbRight: cb.x + cb.w}
+		childFC := &floatContext{cbLeft: cb.x, cbRight: cb.x + layoutCBWidth}
 		before := len(posCtx.deferred)
-		res := e.layoutBlock(ctx, d.box, cb.w, cb.x, cb.y, 0, childFC, posCtx, posCBOwner{box: d.box})
+		res := e.layoutBlock(ctx, d.box, layoutCBWidth, cb.x, cb.y, 0, childFC, posCtx, posCBOwner{box: d.box})
 		frag := res.frag
 		if frag == nil {
 			continue
@@ -625,6 +638,11 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		if isHeightAuto(d.box) && isAuto2(d.box.Style.Top, d.box.Style.FontSizePt) && !isAuto2(d.box.Style.Bottom, d.box.Style.FontSizePt) {
 			e.logf("css layout: abs-pos bottom-only auto-height box positioned against a provisional height (approximate)")
 		}
+		fs := d.box.Style.FontSizePt
+		if isAuto2(d.box.Style.Left, fs) && isAuto2(d.box.Style.Right, fs) {
+			e.logf("css layout: abs-pos box with no horizontal offset placed at its containing block's left (static-position approximation)")
+		}
+		e.logZIndexUnsupported(d.box)
 		frag.IsPositioned = true
 		frag.IsStackingContext = true
 		frag.RelOffsetX, frag.RelOffsetY = 0, 0 // abs/fixed bake position into coords
@@ -741,6 +759,17 @@ func establishesNewBFC(b *cssbox.Box) bool {
 // includes opacity<1, transforms, etc. — none modeled yet.)
 func establishesStackingContext(b *cssbox.Box) bool {
 	return b.Position != cssbox.PosStatic
+}
+
+// logZIndexUnsupported emits a one-time-per-box debug note when a positioned box
+// carries a non-auto z-index, which the minimal stacking pass does NOT yet sort on
+// (positioned boxes paint in document order). Surfacing it keeps the degradation
+// visible per the design's degradation contract; full z-index ordering is a later
+// slice.
+func (e *Engine) logZIndexUnsupported(b *cssbox.Box) {
+	if !b.Style.ZIndexAuto {
+		e.logf("css layout: z-index:%d not yet honored (positioned boxes paint in document order)", b.Style.ZIndex)
+	}
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous

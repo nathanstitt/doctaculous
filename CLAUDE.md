@@ -264,9 +264,10 @@ what is done vs. pending.
   Degrades gracefully: `z-index` is parsed but **not yet sorted on** (positioned boxes paint in document
   order — full Appendix E negative/numeric z-index ordering deferred); an all-`auto`-offset abs box uses
   a static-position approximation (containing-block top-left); `margin:auto` and abs `width:auto`
-  shrink-to-fit stay approximate; and `position:relative` on a **text-only inline box** is a no-op (no
-  inline-box fragment to offset). Non-positioned pages stay byte-identical (the existing goldens/reftests
-  are unchanged). See `docs/superpowers/specs/2026-06-24-html-positioning-design.md`.
+  shrink-to-fit stay approximate; and `position:relative` on any **inline-level box** (text-only inline
+  or an inline-block/replaced atom) is a no-op — relative offset takes effect only on block-level boxes.
+  Non-positioned pages stay byte-identical (the existing goldens/reftests are unchanged). See
+  `docs/superpowers/specs/2026-06-24-html-positioning-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 

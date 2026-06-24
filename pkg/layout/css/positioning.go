@@ -70,16 +70,19 @@ func absRect(b *cssbox.Box, ed edges, cb rect) (border rect, contentW float64) {
 	bx, cw := axisAbs(cb.x, cb.w, b.Style.Left, b.Style.Right, fs, ed.mL, ed.mR, insetsX, wVal, wAuto, fillW)
 	by, _ := axisAbs(cb.y, cb.h, b.Style.Top, b.Style.Bottom, fs, ed.mT, ed.mB, insetsY, hVal, hAuto, hVal)
 
+	// The returned border-box WIDTH/HEIGHT are advisory: the abs-pos pass
+	// (resolveAbsolute) uses the laid-out fragment's own border box for W/H and reads
+	// only border.x/border.y from this result to reposition the origin. They are still
+	// computed for completeness and for a future caller that wants the resolved box
+	// without laying out an interior.
 	bw := cw + insetsX
 	bh := hVal + insetsY
 	if hAuto {
-		// Height is content-derived: the caller lays out the interior and sets the
-		// real height; absRect returns a provisional 0-content height here. The
-		// two-pass caller recomputes by/bh once the interior height is known when
-		// only `top` (not bottom) is specified. (When both top+bottom are specified
-		// with height:auto, the derived height below wins.)
+		// height:auto: the laid-out interior's content height is authoritative (the
+		// caller keeps the fragment's own H). When both top+bottom are specified the
+		// height is instead derived from the offsets; otherwise it is left at the
+		// border insets (the caller's fragment H supplies the content).
 		if !isAuto2(b.Style.Top, fs) && !isAuto2(b.Style.Bottom, fs) {
-			// both specified: derive height from offsets.
 			topV, _ := resolveLen(b.Style.Top, fs, cb.h)
 			botV, _ := resolveLen(b.Style.Bottom, fs, cb.h)
 			bh = cb.h - topV - botV - ed.mT - ed.mB
@@ -87,7 +90,7 @@ func absRect(b *cssbox.Box, ed edges, cb rect) (border rect, contentW float64) {
 				bh = 0
 			}
 		} else {
-			bh = insetsY // content height filled in by the caller
+			bh = insetsY
 		}
 	}
 	return rect{x: bx, y: by, w: bw, h: bh}, cw
@@ -141,4 +144,16 @@ func axisAbs(cbStart, cbExtent float64, startOff, endOff gcss.Length, fontSizePt
 func isAuto2(l gcss.Length, fontSizePt float64) bool {
 	_, a := resolveLen(l, fontSizePt, 0)
 	return a
+}
+
+// absWidthIsOffsetConstrained reports whether an abs/fixed box's used width is
+// determined by its left+right offsets (both specified) with width:auto — CSS
+// 10.3.7's "shrink to fit the offsets" case. When true, the box's used content width
+// is the value absRect returns (cb.w - left - right - margins - insets), NOT the
+// containing-block fill a plain auto width gets; the abs-pos pass must lay the box's
+// interior out at that width. (The single-offset and explicit-width cases use the
+// normal width resolution, so this returns false for them.)
+func absWidthIsOffsetConstrained(b *cssbox.Box) bool {
+	fs := b.Style.FontSizePt
+	return isAuto2(b.Style.Width, fs) && !isAuto2(b.Style.Left, fs) && !isAuto2(b.Style.Right, fs)
 }

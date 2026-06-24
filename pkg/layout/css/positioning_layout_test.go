@@ -286,6 +286,37 @@ func TestAbsoluteNoAncestorIsPage(t *testing.T) {
 	}
 }
 
+// TestAbsoluteLeftRightAutoWidthLaidOut: an abs box with both left+right specified and
+// width:auto is sized by the constraint solve (width = cb.w - left - right) — the used
+// width must reach the laid-out fragment, not just absRect. Regression for the abs-pos
+// pass laying the interior out at the full containing-block width and ignoring the
+// offset-derived width.
+func TestAbsoluteLeftRightAutoWidthLaidOut(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	// width:auto (left at default-auto in posStyle), both offsets set, in a 200pt page.
+	absStyle := posStyle()
+	absStyle.Left = px(30)
+	absStyle.Right = px(50)
+	absStyle.Height = px(20)
+	abs := posBox(absStyle, cssbox.PosAbsolute)
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, abs)
+	frag := eng.layoutTree(context.Background(), root, 200)
+
+	if len(frag.Positioned) != 1 {
+		t.Fatalf("root.Positioned = %d, want 1", len(frag.Positioned))
+	}
+	af := frag.Positioned[0]
+	// border-box left = cb.x + left = 30; width = cb.w - left - right = 200-30-50 = 120.
+	if !approx(af.X, 30) {
+		t.Errorf("abs X = %v, want 30 (cb left + left offset)", af.X)
+	}
+	if !approx(af.W, 120) {
+		t.Errorf("abs W = %v, want 120 (cb.w - left - right); the offset-derived width must reach the fragment", af.W)
+	}
+}
+
 // TestPositionedFloatPlacedAndOffset: float:left; position:relative; top:5; left:5 —
 // the float fragment is at the float edge, IsFloat, carrying RelOffsetX/Y == (5,5),
 // and is NOT additionally placed on a Positioned slice (it paints via the Floats
@@ -469,4 +500,42 @@ func TestRelativeParentAbsChildPaintCoords(t *testing.T) {
 		t.Errorf("abs child painted at (%v,%v), want (%v,%v) = parent content origin + relative offset",
 			bg.Rule.XPt, bg.Rule.YPt, wantX, wantY)
 	}
+}
+
+// TestZIndexParsedButNotSortedLogs: a non-auto z-index is parsed (it cascades) but the
+// minimal stacking pass does not sort on it — positioned boxes paint in document order.
+// The degradation must be visible: a debug log is emitted. (Document-order painting is
+// already covered by the stacking-pass tests; this pins the parse + the logged
+// degradation so the z-index cut is discoverable.)
+func TestZIndexParsedButNotSortedLogs(t *testing.T) {
+	var logged bool
+	logf := func(format string, _ ...any) {
+		if containsZIndex(format) {
+			logged = true
+		}
+	}
+	// An absolutely-positioned box with an explicit z-index. layoutTreeFor builds via
+	// the cascade (so z-index is parsed) and lays out with the capturing logf.
+	frag := layoutTreeFor(t, reset+`<div style="position:absolute; top:0; left:0; width:20px; height:20px; z-index:5"></div>`, 200, logf)
+	if frag == nil {
+		t.Fatal("nil root fragment")
+	}
+	// The box is positioned (it laid out without error).
+	if len(frag.Positioned) != 1 {
+		t.Fatalf("root.Positioned = %d, want 1 (the abs box)", len(frag.Positioned))
+	}
+	if !logged {
+		t.Errorf("non-auto z-index did not emit a degradation log (the z-index cut must be visible)")
+	}
+}
+
+// containsZIndex reports whether a log format string mentions z-index (helper for the
+// degradation-log assertion).
+func containsZIndex(s string) bool {
+	for i := 0; i+7 <= len(s); i++ {
+		if s[i:i+7] == "z-index" {
+			return true
+		}
+	}
+	return false
 }
