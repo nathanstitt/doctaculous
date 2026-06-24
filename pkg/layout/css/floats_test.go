@@ -1,0 +1,150 @@
+package css
+
+import (
+	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+)
+
+const eps = 1e-6
+
+func approx(a, b float64) bool { d := a - b; return d < eps && d > -eps }
+
+// newCtx makes a context spanning [left,right].
+func newCtx(left, right float64) *floatContext {
+	return &floatContext{cbLeft: left, cbRight: right}
+}
+
+// TestEdgesNoFloats: with no floats, the edges are the containing block edges.
+func TestEdgesNoFloats(t *testing.T) {
+	c := newCtx(0, 200)
+	if l := c.leftEdge(0, 20); !approx(l, 0) {
+		t.Errorf("leftEdge no floats = %v, want 0", l)
+	}
+	if r := c.rightEdge(0, 20); !approx(r, 200) {
+		t.Errorf("rightEdge no floats = %v, want 200", r)
+	}
+}
+
+// TestLeftFloatNarrowsLeftEdge: a left float pushes the left edge to its right
+// margin edge within its vertical band, and only within it.
+func TestLeftFloatNarrowsLeftEdge(t *testing.T) {
+	c := newCtx(0, 200)
+	c.floats = []floatBox{{side: cssbox.FloatLeft, x: 0, y: 0, w: 60, h: 50}}
+	if l := c.leftEdge(0, 20); !approx(l, 60) {
+		t.Errorf("leftEdge inside band = %v, want 60", l)
+	}
+	if l := c.leftEdge(60, 20); !approx(l, 0) { // below the float's bottom (y=50)
+		t.Errorf("leftEdge below band = %v, want 0", l)
+	}
+	if r := c.rightEdge(0, 20); !approx(r, 200) { // a left float doesn't move the right edge
+		t.Errorf("rightEdge with left float = %v, want 200", r)
+	}
+}
+
+// TestRightFloatNarrowsRightEdge mirrors the left case.
+func TestRightFloatNarrowsRightEdge(t *testing.T) {
+	c := newCtx(0, 200)
+	c.floats = []floatBox{{side: cssbox.FloatRight, x: 150, y: 0, w: 50, h: 50}}
+	if r := c.rightEdge(0, 20); !approx(r, 150) {
+		t.Errorf("rightEdge inside band = %v, want 150", r)
+	}
+	if r := c.rightEdge(60, 20); !approx(r, 200) {
+		t.Errorf("rightEdge below band = %v, want 200", r)
+	}
+}
+
+// TestOppositeFloatsNarrowBoth: a left and a right float narrow from both edges in
+// the overlapping band.
+func TestOppositeFloatsNarrowBoth(t *testing.T) {
+	c := newCtx(0, 200)
+	c.floats = []floatBox{
+		{side: cssbox.FloatLeft, x: 0, y: 0, w: 40, h: 30},
+		{side: cssbox.FloatRight, x: 160, y: 0, w: 40, h: 30},
+	}
+	if l := c.leftEdge(0, 20); !approx(l, 40) {
+		t.Errorf("leftEdge = %v, want 40", l)
+	}
+	if r := c.rightEdge(0, 20); !approx(r, 160) {
+		t.Errorf("rightEdge = %v, want 160", r)
+	}
+}
+
+// TestPlaceStacksThenWraps: two left floats fit side by side; a third that doesn't
+// fit wraps to a new row below the shallower of the two.
+func TestPlaceStacksThenWraps(t *testing.T) {
+	c := newCtx(0, 200)
+	f1 := c.place(cssbox.FloatLeft, 80, 40, 0) // left edge: x=0
+	if !approx(f1.x, 0) || !approx(f1.y, 0) {
+		t.Fatalf("f1 = %+v, want x=0 y=0", f1)
+	}
+	f2 := c.place(cssbox.FloatLeft, 80, 60, 0) // next to f1: x=80
+	if !approx(f2.x, 80) || !approx(f2.y, 0) {
+		t.Fatalf("f2 = %+v, want x=80 y=0", f2)
+	}
+	// f3 width 80 cannot fit at y=0 (remaining 200-160=40 < 80): nextDropY finds
+	// f1 bottom=40 (shallowest overlapping float). At y=40, f2 still occupies [0,60)
+	// pushing leftEdge to 160, so still only 40px available — not enough. nextDropY
+	// then finds f2 bottom=60. At y=60 no floats overlap: leftEdge=0, 200px available.
+	// So f3 ends up at x=0, y=60.
+	f3 := c.place(cssbox.FloatLeft, 80, 30, 0)
+	if !approx(f3.x, 0) || !approx(f3.y, 60) {
+		t.Fatalf("f3 = %+v, want x=0 y=60", f3)
+	}
+}
+
+// TestPlaceRightStacks: right floats stack from the right edge leftward.
+func TestPlaceRightStacks(t *testing.T) {
+	c := newCtx(0, 200)
+	f1 := c.place(cssbox.FloatRight, 50, 40, 0) // right margin edge at 200 -> x=150
+	if !approx(f1.x, 150) || !approx(f1.y, 0) {
+		t.Fatalf("f1 = %+v, want x=150 y=0", f1)
+	}
+	f2 := c.place(cssbox.FloatRight, 50, 40, 0) // next left of f1 -> x=100
+	if !approx(f2.x, 100) || !approx(f2.y, 0) {
+		t.Fatalf("f2 = %+v, want x=100 y=0", f2)
+	}
+}
+
+// TestPlaceOverflowWide: a float wider than the band is placed at the edge at the
+// requested y (allowed to overflow) rather than looping forever.
+func TestPlaceOverflowWide(t *testing.T) {
+	c := newCtx(0, 100)
+	f := c.place(cssbox.FloatLeft, 250, 30, 10)
+	if !approx(f.x, 0) || !approx(f.y, 10) {
+		t.Fatalf("overflow-wide float = %+v, want x=0 y=10", f)
+	}
+}
+
+// TestPlaceNotAboveY: a float never rises above the requested y (content order).
+func TestPlaceNotAboveY(t *testing.T) {
+	c := newCtx(0, 200)
+	f := c.place(cssbox.FloatLeft, 50, 20, 100)
+	if f.y < 100-eps {
+		t.Errorf("float placed at y=%v, want >= 100", f.y)
+	}
+}
+
+// TestClearY drops to the bottom of the matching floats.
+func TestClearY(t *testing.T) {
+	c := newCtx(0, 200)
+	c.floats = []floatBox{
+		{side: cssbox.FloatLeft, x: 0, y: 0, w: 40, h: 30},    // bottom 30
+		{side: cssbox.FloatRight, x: 160, y: 0, w: 40, h: 70}, // bottom 70
+	}
+	if y := c.clearY("left", 0); !approx(y, 30) {
+		t.Errorf("clearY(left) = %v, want 30", y)
+	}
+	if y := c.clearY("right", 0); !approx(y, 70) {
+		t.Errorf("clearY(right) = %v, want 70", y)
+	}
+	if y := c.clearY("both", 0); !approx(y, 70) {
+		t.Errorf("clearY(both) = %v, want 70", y)
+	}
+	if y := c.clearY("none", 0); !approx(y, 0) {
+		t.Errorf("clearY(none) = %v, want 0", y)
+	}
+	if y := c.clearY("both", 90); !approx(y, 90) { // already below all floats
+		t.Errorf("clearY(both, 90) = %v, want 90", y)
+	}
+}
