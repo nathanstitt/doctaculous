@@ -40,7 +40,7 @@ func Build(ctx context.Context, doc *html.Document, loader resource.ResourceLoad
 	resolver := gcss.NewResolver(sheets, logf)
 
 	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root))
-	normalize(root)
+	normalize(root) // anonymous-box fixups + whitespace handling (anon.go)
 	return root, nil
 }
 
@@ -167,8 +167,3 @@ func classifyDisplay(b *cssbox.Box, display string) {
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayBlock, cssbox.BlockFC
 	}
 }
-
-// normalize applies anonymous-box fixups and whitespace handling to the tree.
-// Implemented in anon.go (Task 9); this no-op stub leaves the tree unchanged
-// until then.
-func normalize(_ *cssbox.Box) {}
