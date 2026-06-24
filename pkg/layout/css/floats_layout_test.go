@@ -177,7 +177,7 @@ func TestAppendItemsNestedBFCAtomic(t *testing.T) {
 	}
 	// Outer float paints before the inner BFC atom (outer float layer precedes outer
 	// content phase, which is where the inner BFC paints).
-	if idxOuterFloat > idxInnerBg {
+	if idxOuterFloat >= idxInnerBg {
 		t.Errorf("outer float (%d) painted after inner BFC bg (%d); want before", idxOuterFloat, idxInnerBg)
 	}
 	// Inner BFC paints atomically and in its own Appendix-E order: inner bg, then its

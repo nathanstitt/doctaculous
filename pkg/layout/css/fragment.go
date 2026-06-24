@@ -10,9 +10,12 @@ import (
 
 // Fragment is one positioned box in page space (points, Y-down, origin at the
 // page top-left). Produced by the CSS layout engine; read-only after layout, so a
-// fragment tree may be shared across the render fan-out without locks. Children
-// paint after this box's own background and border, in slice order, giving correct
-// normal-flow paint order (background, border, then content; parent before child).
+// fragment tree may be shared across the render fan-out without locks. Paint order
+// follows CSS 2.1 Appendix E for a fragment that establishes a block formatting
+// context (IsBFC): in-flow block backgrounds/borders, then floats, then in-flow
+// inline content. A non-BFC fragment keeps the simpler parent-before-child tree
+// order (its own background and border, then its content, then its children). See
+// AppendItems.
 //
 // Fragment is the recursive analogue of layout.Item: the layout engine emits this
 // tree, and AppendItems flattens it into the flat layout.Page.Items slice the paint
@@ -95,6 +98,11 @@ type GlyphFragment struct {
 //
 // AppendItems only reads the fragment tree; it does not mutate it, so it is safe to
 // call on a tree shared across the render fan-out.
+//
+// The 3-phase BFC ordering is the seam the positioning slice generalizes into a full
+// stacking-context pass (CSS 2.1 Appendix E z-index layers): positioned descendants
+// and z-ordered layers will be inserted relative to the float phase, so keep the phase
+// split intact when extending this.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 	if f.IsBFC {
 		dst = f.appendDecorations(dst) // in-flow backgrounds + borders (skip floats)
@@ -125,7 +133,7 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 // phase via its own AppendItems — its internal block/float/inline layering is
 // self-contained, so it must not be flattened into this BFC's decoration layer).
 func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
-	if f.IsFloat {
+	if f.IsFloat { // defensive: a float attaches at the BFC root's Floats, not here; never recurse into one
 		return dst
 	}
 	dst = f.appendSelfDecorations(dst)
@@ -145,7 +153,7 @@ func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
 // atomic inline / BFC as one item in step 7), rather than being split across this
 // BFC's phases.
 func (f *Fragment) appendContent(dst []layout.Item) []layout.Item {
-	if f.IsFloat {
+	if f.IsFloat { // defensive: a float attaches at the BFC root's Floats, not here; never recurse into one
 		return dst
 	}
 	dst = f.appendSelfContent(dst)
