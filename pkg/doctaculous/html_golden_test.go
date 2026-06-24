@@ -160,6 +160,42 @@ var htmlGoldens = []struct {
 	// vertical space). The multi-float "two-on-a-row-then-wrap" behavior is covered
 	// instead by pkg/layout/css/floats_test.go (TestPlaceStacksThenWraps stacking/wrap
 	// geometry) and is visible in the float-figure golden's figure placement.
+	{
+		// position:relative shifts a box at paint time WITHOUT moving its neighbors:
+		// three stacked block boxes, the middle (green) one relatively offset
+		// down+right so it overlaps the blue box below and paints ON TOP of it
+		// (positioned content paints after in-flow content). The red and blue boxes
+		// hold their in-flow column positions; the blue box does NOT slide up into the
+		// green box's vacated row (relative reserves its in-flow space). Block-level
+		// boxes are used deliberately: relative offset on an inline-block atom is a
+		// documented no-op in this slice, so a block fixture is what exercises it.
+		name:       "position-relative",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .box { width: 90px; height: 45px; }
+  .a { background: #cc3333; }
+  .b { background: #33aa33; position: relative; top: 18px; left: 70px; }
+  .c { background: #3355cc; }
+</style></head><body>
+  <div class="box a"></div><div class="box b"></div><div class="box c"></div>
+</body></html>`,
+	},
+	{
+		// position:absolute pins a child to a corner of its relatively-positioned
+		// container, painted ABOVE the container's own content. Eyeball: the small
+		// box sits at the container's top-right corner, on top of the container's
+		// background/text.
+		name:       "position-absolute",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .box { position: relative; width: 200px; height: 120px; background: #dddddd; }
+  .pin { position: absolute; top: 0; right: 0; width: 40px; height: 40px; background: #cc3333; }
+</style></head><body>
+  <div class="box">Container text<div class="pin"></div></div>
+</body></html>`,
+	},
 }
 
 // quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!-- REFERENCE for abs-pos.html. The SAME container, but the child stays in normal
+     flow (position:static) and is placed at the same 40px/30px coordinates via
+     margin-left:40px/margin-top:30px. The container's 1px padding (identical to the
+     test) gives both pages the same (1,1) content origin and blocks parent/first-
+     child margin collapse-through, so margin-top:30 pushes the child DOWN within the
+     container instead of shifting the container itself. A static child's border box
+     then lands at content-origin + (40,30) — exactly where the abs child's margin
+     edge lands in the test. The container keeps the same explicit 120px content
+     height; the static child (30+50=80px) fits within it and so does not affect the
+     container height. Identical pixels iff abs placement matches the equivalent
+     static-margin offset. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  .cb { position: relative; width: 200px; height: 120px; padding: 1px; background: #cccccc; }
+  .p { margin-top: 30px; margin-left: 40px; width: 50px; height: 50px; background: #cc3333; }
+</style>
+</head>
+<body>
+  <div class="cb"><div class="p"></div></div>
+</body>
+</html>

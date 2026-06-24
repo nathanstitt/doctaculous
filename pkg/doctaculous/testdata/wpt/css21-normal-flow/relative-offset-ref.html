@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!-- REFERENCE for relative-offset.html. The SAME box placed at the shifted (16,16)
+     position via margin-top:15px/margin-left:15px in normal flow (position:static).
+     It lives in the SAME fixed-height, 1px-padded container so the page bounds match
+     the test (the container, not the box's flow position, sets the page height) and
+     the padding blocks parent/first-child margin collapse-through (so margin-top:15
+     pushes the box down WITHIN the frame rather than shifting the frame itself). The
+     box's border box lands at (16,16) — exactly where the relative offset paints it
+     in the test. Identical pixels iff a relative offset equals the same box placed at
+     the shifted coordinates with margins. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  .frame { width: 120px; height: 90px; padding: 1px; }
+  .box { margin-top: 15px; margin-left: 15px; width: 50px; height: 50px; background: #3366cc; }
+</style>
+</head>
+<body>
+  <div class="frame"><div class="box"></div></div>
+</body>
+</html>
