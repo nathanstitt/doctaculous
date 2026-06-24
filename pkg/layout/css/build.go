@@ -151,10 +151,19 @@ func floatOf(cs gcss.ComputedStyle) cssbox.FloatKind {
 }
 
 // applyFloatBlockify promotes a floated inline-level box to block-level, per CSS
-// 2.1 §9.7 (a float computes display to a block-level value). A floated <img>
-// stays BoxReplaced (block-level replaced); a floated display:inline/inline-block
-// element becomes a block box so the layout engine lays it out as a float. Boxes
-// that are already block-level, and non-floated boxes, are unchanged.
+// 2.1 §9.7 (a float computes display to a block-level value). Only a box that is
+// still inline-level when this runs is promoted — in practice a display:inline
+// element (Kind=BoxInline) and the inline anonymous/text kinds; a display:block or
+// display:inline-block element already has Kind=BoxBlock (set by classifyDisplay)
+// and is left unchanged. The box's Formatting is deliberately preserved: a floated
+// display:inline element keeps InlineFC so its text/inline children still lay out in
+// an inline formatting context inside the now block-level box. A floated <img> stays
+// BoxReplaced — replaced sizing handles a block-level replaced box.
+//
+// The BoxReplaced guard is defensive: in generate, the replacedTags override sets
+// Kind=BoxReplaced AFTER this call, so a box is never BoxReplaced when
+// applyFloatBlockify runs today; the guard protects any future caller that inverts
+// that order.
 func applyFloatBlockify(b *cssbox.Box, cs gcss.ComputedStyle) {
 	if floatOf(cs) == cssbox.FloatNone {
 		return

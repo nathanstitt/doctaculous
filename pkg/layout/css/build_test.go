@@ -204,3 +204,36 @@ func TestNoBlockifyWithoutFloat(t *testing.T) {
 		t.Errorf("non-floated inline: Kind=%v, want BoxInline", b.Kind)
 	}
 }
+
+// TestNoBlockifyFloatedInlineBlock: a floated display:inline-block element already
+// has a block-level Kind (classifyDisplay maps inline-block to BoxBlock), so
+// applyFloatBlockify leaves it unchanged — it does NOT reset DisplayInlineBlock to
+// DisplayBlock.
+func TestNoBlockifyFloatedInlineBlock(t *testing.T) {
+	cs := gcss.ComputedStyle{Display: "inline-block", Float: "left"}
+	b := &cssbox.Box{Style: cs}
+	classifyDisplay(b, cs.Display)
+	applyFloatBlockify(b, cs)
+	if b.Kind != cssbox.BoxBlock {
+		t.Errorf("floated inline-block: Kind=%v, want BoxBlock (unchanged)", b.Kind)
+	}
+	if b.Display != cssbox.DisplayInlineBlock {
+		t.Errorf("floated inline-block: Display=%v, want DisplayInlineBlock (unchanged)", b.Display)
+	}
+}
+
+// TestBlockifyFloatedInlinePreservesFormatting: a floated display:inline box becomes
+// block-level but KEEPS its inline formatting context (InlineFC) so its inline/text
+// children still lay out inline inside the now block-level box.
+func TestBlockifyFloatedInlinePreservesFormatting(t *testing.T) {
+	cs := gcss.ComputedStyle{Display: "inline", Float: "left"}
+	b := &cssbox.Box{Style: cs}
+	classifyDisplay(b, cs.Display)
+	if b.Formatting != cssbox.InlineFC {
+		t.Fatalf("precondition: classifyDisplay should set InlineFC for inline, got %v", b.Formatting)
+	}
+	applyFloatBlockify(b, cs)
+	if b.Formatting != cssbox.InlineFC {
+		t.Errorf("floated inline: Formatting=%v, want InlineFC preserved", b.Formatting)
+	}
+}
