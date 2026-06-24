@@ -215,7 +215,6 @@ func TestFloatPlacedOutOfFlow(t *testing.T) {
 	floatStyle := gcss.ComputedStyle{Display: "block", Float: "left",
 		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
 		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx}}
-	floatStyle.Float = "left"
 	floated := blockBox(floatStyle)
 	floated.Float = cssbox.FloatLeft
 

@@ -107,6 +107,8 @@ type blockResult struct {
 // The fragment's X/Y are the border-box top-left: X = originX + usedMarginLeft,
 // Y = marginTopEdgeY + result.marginTop. Children are positioned absolutely in
 // page space within the fragment.
+//
+// bandOriginY is b's content-box top measured in the BFC-root-local frame (the frame the float context fc is queried in — see layoutBlockChildren's frame model); fc is the current block formatting context's float context.
 func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, originX, marginTopEdgeY, bandOriginY float64, fc *floatContext) blockResult {
 	if b.Kind == cssbox.BoxReplaced {
 		// A block-level replaced box (e.g. <img style="display:block">) is sized by
@@ -239,6 +241,8 @@ type interior struct {
 // according to b's formatting context. contentW is the content width children flow
 // into; contentX is the page-space x of the content box's left edge (children that
 // establish their own page-space position, i.e. blocks, use it directly).
+//
+// bandOriginY and fc thread the float context: bandOriginY is this box's content-box top in the BFC-root frame, and fc is the BFC's float context (a fresh one is created here if b establishes its own BFC).
 func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
 	// A box that establishes a new BFC (inline-block today) isolates floats: its
 	// interior gets a fresh context spanning its own content box, and its own band
@@ -382,11 +386,11 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 // on the just-appended floatBox so the BFC owner (layoutTree / layoutInterior) can
 // collect it via floats2frags.
 func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, contentX, placeY float64, fc *floatContext) {
-	// Lay the float out (provisional origin) to learn its border-box size. It is laid
-	// in its own fresh context if it establishes a BFC (it is block-level; a float
-	// itself establishes a BFC for its contents) — layoutBlock handles that via
-	// establishesNewBFC. Pass placeY as bandOriginY so any nested float math is framed
-	// consistently; the provisional marginTopEdgeY is 0.
+	// Lay the float out (provisional origin) to learn its border-box size. A float is
+	// block-level and establishes its own BFC for its contents, so layoutInterior
+	// gives it a fresh float context (it does not inherit this BFC's floats). placeY is
+	// passed as bandOriginY for the float's own margin-box arithmetic; its interior
+	// resets to its own frame (bandOriginY=0) in layoutInterior.
 	res := e.layoutBlock(ctx, child, cbWidth, contentX, 0, placeY, fc)
 	if res.frag == nil {
 		return
