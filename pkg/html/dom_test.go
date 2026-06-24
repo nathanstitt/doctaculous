@@ -36,6 +36,9 @@ func TestElementAccessors(t *testing.T) {
 	if el.Parent() != css.Node(root) {
 		t.Error("Parent() should return the root element as a css.Node")
 	}
+	if got := root.Children(); len(got) != 1 || got[0] != DOMNode(el) {
+		t.Errorf("root.Children() = %v, want [el]", got)
+	}
 }
 
 func TestRootParentIsNil(t *testing.T) {

@@ -57,8 +57,11 @@ func (e *Element) Attr(key string) (string, bool) {
 	return v, ok
 }
 
-// Text is an owned character-data node.
+// Text is an owned character-data node. Data is exported directly (no accessor)
+// because Text is a simple value carrier: it has no interface contract and box
+// generation reads it as a plain string.
 type Text struct {
+	// Data is the raw character content of this text node.
 	Data   string
 	parent *Element
 }
