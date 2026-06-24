@@ -19,7 +19,7 @@ func TestEndToEndBoxTree(t *testing.T) {
     <title>t</title>
     <style>
       .lead { color: rgb(10, 20, 30); }
-      em { display: inline; }
+      em { display: inline; } /* redundant (inline is the default) but confirms the cascade keeps em inline */
     </style>
     <link rel="stylesheet" href="ext.css">
   </head>
@@ -49,7 +49,8 @@ func TestEndToEndBoxTree(t *testing.T) {
 	}
 	body := root.Children[0]
 
-	// body children: h1 (block), p (block), div (block), img (replaced).
+	// body children: h1 (block), p (block), div (block), and the inline <img>
+	// wrapped in an anon block (see the img assertion below for why).
 	if len(body.Children) != 4 {
 		t.Fatalf("body children = %d, want 4: %s", len(body.Children), dump(body))
 	}
@@ -70,7 +71,10 @@ func TestEndToEndBoxTree(t *testing.T) {
 	if p.Style.Color.R != 10 || p.Style.Color.G != 20 || p.Style.Color.B != 30 {
 		t.Errorf("p.lead color = %v, want rgb(10,20,30)", p.Style.Color)
 	}
-	// p has all-inline content -> no anonymous blocks.
+	// p has all-inline content -> inline children, no anonymous blocks.
+	if len(p.Children) == 0 {
+		t.Errorf("p should have inline children (text + em), got none: %s", dump(p))
+	}
 	for _, c := range p.Children {
 		if c.Kind == cssbox.BoxAnonBlock {
 			t.Errorf("p should have no anon blocks: %s", dump(p))
