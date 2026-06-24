@@ -31,7 +31,8 @@ const cssDefaultLineMult = 1.15
 // Inline-box decoration (backgrounds/borders/padding on a BoxInline / BoxAnonInline)
 // is deferred: this pass renders inline TEXT plus atomic inline-blocks/replaced
 // boxes; an inline element box contributes only its text leaves' glyphs.
-func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, contentTopY, contentX float64) (lines []LineFragment, height float64, atomics []*Fragment) {
+func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, contentTopY, contentX, bandOriginY float64, fc *floatContext) (lines []LineFragment, height float64, atomics []*Fragment) {
+	_, _ = bandOriginY, fc // float-aware narrowing is wired in Task 7
 	// 1. Gather the inline-level descendants into neutral styled runs, laying out
 	//    any atomic boxes (inline-block / replaced) eagerly so their size is known.
 	var runs []inline.Run
@@ -132,8 +133,11 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			*runs = append(*runs, atomicRunFor(child, frag, contentW))
 		case child.Display == cssbox.DisplayInlineBlock:
 			// An inline-block establishes a new BFC; lay it out as a block at its
-			// resolved width and carry its border box as an atomic unit.
-			res := e.layoutBlock(ctx, child, contentW, 0, 0)
+			// resolved width and carry its border box as an atomic unit. It gets a fresh
+			// float context (its internal floats stay self-contained) and bandOriginY 0;
+			// the IFC then positions the whole atom (subtree + any internal floats) on
+			// the line via translateFragment.
+			res := e.layoutBlock(ctx, child, contentW, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: contentW})
 			frag := res.frag
 			*atomics = append(*atomics, frag)
 			*runs = append(*runs, atomicRunFor(child, frag, contentW))

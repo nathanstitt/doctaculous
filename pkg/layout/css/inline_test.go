@@ -318,7 +318,7 @@ func TestInlineBlockAtomics(t *testing.T) {
 		},
 	}
 	e := New(nil, nil, nil)
-	res := e.layoutBlock(context.Background(), ifc, 1000, 0, 0)
+	res := e.layoutBlock(context.Background(), ifc, 1000, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: 1000})
 	frag := res.frag
 
 	if len(frag.Children) != 2 {
@@ -416,7 +416,7 @@ func TestInlineReplacedFromAttrs(t *testing.T) {
 		},
 	}
 	e := New(nil, nil, nil)
-	lines, h, atomics := e.layoutInline(context.Background(), ifc, 1000, 0, 0)
+	lines, h, atomics := e.layoutInline(context.Background(), ifc, 1000, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: 1000})
 	// A replaced box now builds its own border-box Fragment (carrying the decoded
 	// image, or nil for a placeholder when no image decodes — here there is no loader,
 	// so the image is nil but the box still reserves its attr-given 40x20 size).

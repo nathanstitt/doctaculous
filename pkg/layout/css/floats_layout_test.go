@@ -1,10 +1,13 @@
 package css
 
 import (
+	"context"
 	"image/color"
 	"testing"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -185,5 +188,88 @@ func TestAppendItemsNestedBFCAtomic(t *testing.T) {
 	if idxInnerBg >= idxInnerFloat || idxInnerFloat >= idxInnerGlyph {
 		t.Errorf("inner BFC internal order wrong: bg=%d float=%d glyph=%d; want bg<float<glyph",
 			idxInnerBg, idxInnerFloat, idxInnerGlyph)
+	}
+}
+
+// blockBox builds a minimal block box with the given style and children. It fills
+// in the two CSS-initial values whose zero Length value is NOT their initial
+// (max-width/max-height initial is "none", modeled as UnitAuto; the zero Length is
+// {0,UnitPx} = "max-width:0") so a bare literal style behaves like a real cascaded
+// block (auto/no-max), matching the styles box generation produces via initialStyle.
+func blockBox(style gcss.ComputedStyle, kids ...*cssbox.Box) *cssbox.Box {
+	if style.MaxWidth == (gcss.Length{}) {
+		style.MaxWidth = gcss.Length{Unit: gcss.UnitAuto}
+	}
+	if style.MaxHeight == (gcss.Length{}) {
+		style.MaxHeight = gcss.Length{Unit: gcss.UnitAuto}
+	}
+	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: style, Children: kids}
+}
+
+// TestFloatPlacedOutOfFlow: a left-floated child div is placed at the content-box
+// left, marked IsFloat, collected on the root's Floats, and does NOT advance the
+// in-flow cursor (a following in-flow block starts at y=0, beside the float).
+func TestFloatPlacedOutOfFlow(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	floatStyle := gcss.ComputedStyle{Display: "block", Float: "left",
+		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx}}
+	floatStyle.Float = "left"
+	floated := blockBox(floatStyle)
+	floated.Float = cssbox.FloatLeft
+
+	following := blockBox(gcss.ComputedStyle{Display: "block",
+		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, floated, following)
+
+	frag := eng.layoutTree(context.Background(), root, 200)
+	if frag == nil {
+		t.Fatal("nil root fragment")
+	}
+	if !frag.IsBFC {
+		t.Errorf("root fragment not marked IsBFC")
+	}
+	if len(frag.Floats) != 1 {
+		t.Fatalf("root has %d floats, want 1", len(frag.Floats))
+	}
+	ff := frag.Floats[0]
+	if !ff.IsFloat {
+		t.Errorf("float fragment not marked IsFloat")
+	}
+	if ff.X != 0 || ff.Y != 0 {
+		t.Errorf("float at (%v,%v), want (0,0)", ff.X, ff.Y)
+	}
+	// The following in-flow block is a normal child; it should start at y=0 (the
+	// float did not consume vertical space).
+	if len(frag.Children) != 1 {
+		t.Fatalf("root has %d in-flow children, want 1 (the float is not a child)", len(frag.Children))
+	}
+	if frag.Children[0].Y != 0 {
+		t.Errorf("following block Y=%v, want 0 (float out of flow)", frag.Children[0].Y)
+	}
+}
+
+// TestClearDropsBelowFloat: a clear:left block starts below a preceding left float.
+func TestClearDropsBelowFloat(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	floated := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx}})
+	floated.Float = cssbox.FloatLeft
+
+	cleared := blockBox(gcss.ComputedStyle{Display: "block", Clear: "left",
+		Height: gcss.Length{Value: 20, Unit: gcss.UnitPx}})
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, floated, cleared)
+	frag := eng.layoutTree(context.Background(), root, 200)
+
+	if len(frag.Children) != 1 {
+		t.Fatalf("want 1 in-flow child, got %d", len(frag.Children))
+	}
+	if frag.Children[0].Y < 40-1e-6 {
+		t.Errorf("cleared block Y=%v, want >= 40 (below the float)", frag.Children[0].Y)
 	}
 }
