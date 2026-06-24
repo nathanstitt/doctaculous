@@ -25,13 +25,16 @@ backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 **Reflowable documents** (DOCX today; HTML/EPUB next) share a second pipeline that meets the PDF
 pipeline at `render.Device`. During the HTML-rendering program there are **two box models**: the
 existing **flat** model (`pkg/layout/box.Document` — DOCX's `pkg/docx` parse → `pkg/docx/style`
-cascade → `pkg/docx/lower` → `pkg/layout` reflow engine → `pkg/layout/paint`), and a new **recursive,
-format-neutral** model (`pkg/layout/cssbox`) that the forthcoming CSS layout engine consumes. A reflow
-frontend is a parse+lower step producing one of these box models (DOCX → `box.Document` today; HTML →
-`cssbox` via `pkg/html` + `pkg/css` + `pkg/layout/css`); it never touches line-breaking or pagination.
-These converge late: a dedicated sub-project re-points DOCX lowering onto `cssbox` and retires the flat
-model, so one recursive engine drives every reflow format. Font outlines for both pipelines come from
-`pkg/font` (`pkg/font/family.go` exposes named-family faces for reflow); `pkg/layout/font` caches them.
+cascade → `pkg/docx/lower` → `pkg/layout` reflow engine → `pkg/layout/paint`), and a **recursive,
+format-neutral** model (`pkg/layout/cssbox`) that the CSS layout engine (`pkg/layout/css`) consumes. A
+reflow frontend is a parse+lower step producing one of these box models (DOCX → `box.Document` today;
+HTML → `cssbox` via `pkg/html` + `pkg/css` + `pkg/layout/css`); it never touches line-breaking or
+pagination. Both engines now share one **inline-layout core** (`pkg/layout/inline`: shaping,
+greedy line-breaking, alignment/justification math), so the flat engine and the CSS inline formatting
+context use the same shaper and breaker. These converge late: a dedicated sub-project re-points DOCX
+lowering onto `cssbox` and retires the flat model, so one recursive engine drives every reflow format.
+Font outlines for both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces
+for reflow); `pkg/layout/font` caches them.
 
 The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML/EPUB)
 must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
@@ -177,8 +180,30 @@ what is done vs. pending.
   genuinely unknown display values normalize to block. `<img>` becomes a replaced leaf box (no
   decoding yet). External `<link>` stylesheets resolve through a `pkg/resource.ResourceLoader` seam
   with hermetic in-memory/testdata loaders (no HTTP yet). This is the second landed slice of the HTML
-  reflow frontend (sub-project 2); layout + paint of the box tree is next. See
+  reflow frontend (sub-project 2). See
   `docs/superpowers/specs/2026-06-23-html-box-generation-design.md`.
+- **HTML rendering — block + inline normal flow** (`pkg/layout/inline`, `pkg/layout/css`, extended
+  `pkg/layout/paint`, `pkg/doctaculous` `OpenHTML`; covered by box/fragment-position assertions, the
+  `html-*` golden images, and WPT-style normal-flow reftests): the CSS layout engine turns a `cssbox`
+  tree into a positioned fragment tree and paints it, so **`OpenHTML(path)` / `OpenHTMLBytes(data,
+  opts...)` render a real page** (single tall image at a fixed viewport, default 1280px; returns the
+  same `*Document` the toolkit rasterizes, reusing `reflowRenderer`). This is sub-project 3 of the
+  HTML-rendering roadmap (the first-pixels milestone). Pieces: a shared **inline-layout core**
+  (`pkg/layout/inline`: `Shape`/`Break`/`Place` — styled runs → shaped glyphs → greedy lines →
+  alignment math) extracted from the flat DOCX engine, which now delegates to it (DOCX goldens
+  unchanged = the extraction is behavior-preserving); the **block formatting context**
+  (`pkg/layout/css/block.go`: the box model — width incl. `auto`/`%`, `box-sizing`, `min/max-width`,
+  padding, borders, backgrounds, em→pt and %→pt resolution, **vertical margin collapsing** for
+  adjacent siblings + parent/first-child + parent/last-child through zero border/padding, auto/fixed
+  height); the **inline formatting context** (`pkg/layout/css/inline.go`: text shaping/breaking,
+  `text-align`, `line-height`, and inline-block/replaced atoms); the **fragment tree**
+  (`pkg/layout/css/fragment.go`, flattened to `layout.Item`); and **paint** extended with backgrounds
+  and 4-side styled borders (solid/dashed/dotted/double). Two enabling additions: **CSS shorthand
+  expansion** in `pkg/css` (`margin`/`padding`/`border`/`background` → longhands, so real pages style
+  boxes) and **`min/max-width`/`-height` + `box-sizing`** on `ComputedStyle`; box generation now treats
+  **inline-block as inline-level outer** so it flows in the IFC. Unsupported layout modes (flex/grid/
+  table) fall back to block normal flow; the engine recovers at the page boundary (never panics). See
+  `docs/superpowers/specs/2026-06-23-html-block-inline-flow-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -208,13 +233,19 @@ that skip into real output.
    PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
    content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
    fixes bold/italic fidelity).
-6. **New reflow frontends** — **HTML** and **EPUB** (ZIP + OPF spine reusing the HTML frontend per
-   chapter, `OpenEPUB`). These validate the neutral-engine design: each is only a parse+lower step; the
-   engine, paint, and raster are reused unchanged. The CSS parse+cascade layer (`pkg/css`) and the HTML
-   parse + box-generation layer (`pkg/html`, `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/resource`) are
-   the first landed slices of the HTML frontend (see the Done section); the **CSS layout engine** that
-   turns the `cssbox` tree into positioned fragments and paints it — plus the `OpenHTML`/`OpenURL`
-   public API — comes next.
+6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, and block+inline
+   normal-flow layout/paint with `OpenHTML` are done — see the Done section). Roughly in order, each a
+   parse/layout slice with its own fixtures + golden/WPT tests: **replaced content + images**
+   (`<img>` decode + intrinsic sizing + `object-fit`; today an `<img>`/inline-block atom sizes only from
+   its `width`/`height` and otherwise renders as a zero/placeholder box); **floats + positioning**
+   (float/clear, relative/absolute/fixed, z-order, overflow clipping); **tables**; **web fonts**
+   (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today flex/grid/table fall back to block
+   normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network fetching behind the existing seam,
+   which currently has only hermetic loaders); **pagination / CSS paged media** (the default stays a
+   single tall image); and **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter).
+   Fidelity follow-ups within the existing engine: inline-block horizontal margins, full
+   `vertical-align`/line-box ascent including atoms, `margin:auto` centering, and the deferred
+   margin-collapse edge cases (empty-block collapse-through, clearance, `min-height` interaction).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
