@@ -947,7 +947,7 @@ func TestAppendItemsFloatPaintOrder(t *testing.T) {
 	if idxSiblingBg < 0 || idxFloatBg < 0 || idxGlyph < 0 {
 		t.Fatalf("missing items: siblingBg=%d floatBg=%d glyph=%d (items=%d)", idxSiblingBg, idxFloatBg, idxGlyph, len(items))
 	}
-	if !(idxSiblingBg < idxFloatBg && idxFloatBg < idxGlyph) {
+	if idxSiblingBg >= idxFloatBg || idxFloatBg >= idxGlyph { // De Morgan of !(a<b && b<c); golangci-lint QF1001
 		t.Errorf("paint order wrong: siblingBg=%d floatBg=%d glyph=%d; want siblingBg < floatBg < glyph",
 			idxSiblingBg, idxFloatBg, idxGlyph)
 	}
@@ -1005,7 +1005,7 @@ func TestAppendItemsBlockBgBeforeInlineContent(t *testing.T) {
 	if idxParentBg < 0 || idxNestedBg < 0 || idxGlyph < 0 {
 		t.Fatalf("missing items: parentBg=%d nestedBg=%d glyph=%d", idxParentBg, idxNestedBg, idxGlyph)
 	}
-	if !(idxParentBg < idxNestedBg && idxNestedBg < idxGlyph) {
+	if idxParentBg >= idxNestedBg || idxNestedBg >= idxGlyph { // De Morgan; golangci-lint QF1001
 		t.Errorf("Appendix E order violated: parentBg=%d nestedBg=%d glyph=%d; want parentBg < nestedBg < glyph",
 			idxParentBg, idxNestedBg, idxGlyph)
 	}
@@ -1068,7 +1068,7 @@ func TestAppendItemsNestedBFCAtomic(t *testing.T) {
 	}
 	// Inner BFC paints atomically and in its own Appendix-E order: inner bg, then its
 	// float, then its glyph — contiguous, with nothing else between.
-	if !(idxInnerBg < idxInnerFloat && idxInnerFloat < idxInnerGlyph) {
+	if idxInnerBg >= idxInnerFloat || idxInnerFloat >= idxInnerGlyph { // De Morgan; golangci-lint QF1001
 		t.Errorf("inner BFC internal order wrong: bg=%d float=%d glyph=%d; want bg<float<glyph",
 			idxInnerBg, idxInnerFloat, idxInnerGlyph)
 	}
