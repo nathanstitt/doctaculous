@@ -1,6 +1,7 @@
 package css
 
 import (
+	"image/color"
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -62,6 +63,23 @@ func TestBlockInInlineSplitsInline(t *testing.T) {
 		if !c.Kind.IsBlockLevel() {
 			t.Errorf("after block-in-inline split, all children must be block-level: %s", dump(outer))
 		}
+	}
+}
+
+func TestBlockInInlinePreservesInlineStyle(t *testing.T) {
+	// The split-out anonymous-inline fragments must carry the original inline's
+	// style (here, the span's red color) so styling survives the split. After the
+	// inline-in-block wrap pass the anon-inline fragments are nested inside
+	// anon-blocks, so search the whole subtree rather than just direct children.
+	root := build(t, `<html><head><style>span{color:red}</style></head><body><div><span>a<div>B</div>c</span></div></body></html>`, nil)
+	outer := root.Children[0].Children[0] // html>body>div(outer)
+	anon := firstByKind(outer, cssbox.BoxAnonInline)
+	if anon == nil {
+		t.Fatalf("expected an anonymous-inline fragment from the split: %s", dump(outer))
+	}
+	red := color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	if anon.Style.Color != red {
+		t.Errorf("anon-inline color = %v, want span's red (style must be preserved across the split)", anon.Style.Color)
 	}
 }
 

@@ -58,6 +58,11 @@ func containsBlockLevel(b *cssbox.Box) bool {
 // producing a flat slice of block-level boxes and anonymous-inline boxes that
 // carry the inline fragments. The inline's own style is copied onto each
 // anonymous-inline fragment so styling is preserved.
+//
+// The style is copied by value (css.ComputedStyle is a value type), so the
+// fragments do not alias the source inline's style. If ComputedStyle ever gains
+// a mutable reference field (map/slice/pointer), this would need a deep copy to
+// avoid the fragments sharing it.
 func splitOneInline(inline *cssbox.Box) []*cssbox.Box {
 	var out []*cssbox.Box
 	var run []*cssbox.Box
