@@ -104,6 +104,11 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 // inherits the parent's computed style for font/color, but a text run is always
 // inline-level, so its carried Display is forced to "inline" rather than the
 // parent element's (display is not a CSS-inherited property).
+//
+// Only the inherited (font/color/line-height/text-align) fields of the carried
+// Style are meaningful on a text box; the parent's box-level fields (width,
+// margins, borders) are copied along but have no meaning for a text leaf and
+// should not be read by the layout engine.
 func makeTextBox(data string, parent gcss.ComputedStyle) *cssbox.Box {
 	if data == "" {
 		return nil
