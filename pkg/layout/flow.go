@@ -14,9 +14,9 @@ import (
 	"context"
 	"image/color"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/box"
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
 
 // defaultLineMult is the line-height multiplier applied to the natural font
@@ -142,7 +142,7 @@ func (e *Engine) layoutBlock(st *flowState, b box.Block) {
 		firstW = lineW
 	}
 
-	lines := breakLines(glyphs, lineW, firstW)
+	lines := inline.Break(glyphs, lineW, firstW)
 
 	for i, ln := range lines {
 		lineHeight := e.lineHeight(b.LineHeight, ln)
@@ -163,51 +163,30 @@ func (e *Engine) layoutBlock(st *flowState, b box.Block) {
 	st.penY += b.SpaceAfterPt
 }
 
-// shapeBlock turns a block's inlines into a flat slice of shaped glyphs, resolving
-// each inline's face and measuring every rune. Inlines whose family has no bundled
-// face are skipped (logged once per family by the cache miss path).
-func (e *Engine) shapeBlock(b box.Block) []shapedGlyph {
-	var out []shapedGlyph
+// shapeBlock turns a block's inlines into a flat slice of shaped glyphs by adapting
+// them into the neutral inline.Run model and delegating to the shared inline core.
+// Inlines whose family has no bundled face are skipped (logged once per family by
+// the cache miss path).
+func (e *Engine) shapeBlock(b box.Block) []inline.Glyph {
+	runs := make([]inline.Run, 0, len(b.Inlines))
 	for _, in := range b.Inlines {
-		if in.ForceBreak {
-			out = append(out, shapedGlyph{hardBreak: true})
-			continue
-		}
-		style := pkgfont.Style{Bold: in.Face.Bold, Italic: in.Face.Italic}
-		face, ok := e.faces.Resolve(in.Face.Family, style)
-		if !ok {
-			e.logf("layout: no font for family %q; skipping run", in.Face.Family)
-			continue
-		}
-		asc, desc, gap := face.Metrics()
-		col := glyphColor{R: in.Color.R, G: in.Color.G, B: in.Color.B, A: in.Color.A}
-		if in.Color.A == 0 {
-			col.A = 0xff // a zero-alpha color is unset; treat as opaque
-		}
-		for _, r := range in.Text {
-			outline, advEm, ok := face.Glyph(r)
-			if !ok {
-				continue
-			}
-			out = append(out, shapedGlyph{
-				outline:   outline,
-				advance:   advEm * in.SizePt,
-				color:     col,
-				sizePt:    in.SizePt,
-				ascentPt:  asc * in.SizePt,
-				descentPt: desc * in.SizePt,
-				lineGapPt: gap * in.SizePt,
-				isSpace:   r == ' ' || r == '\t',
-			})
-		}
+		runs = append(runs, inline.Run{
+			Text:   in.Text,
+			Family: in.Face.Family,
+			Bold:   in.Face.Bold,
+			Italic: in.Face.Italic,
+			SizePt: in.SizePt,
+			Color:  in.Color,
+			Break:  in.ForceBreak,
+		})
 	}
-	return out
+	return inline.Shape(e.faces, runs, e.logf)
 }
 
 // lineHeight computes a line's height from the block's line-height spec and the
 // line's own font metrics. The natural height is ascent + descent + line gap.
-func (e *Engine) lineHeight(spec box.LineHeight, ln line) float64 {
-	natural := ln.ascentPt + ln.descentPt + ln.lineGapPt
+func (e *Engine) lineHeight(spec box.LineHeight, ln inline.Line) float64 {
+	natural := ln.AscentPt + ln.DescentPt + ln.LineGapPt
 	switch spec.Mode {
 	case box.LineHeightExact:
 		return spec.ValuePt
@@ -227,9 +206,9 @@ func (e *Engine) lineHeight(spec box.LineHeight, ln line) float64 {
 
 // ascentOf returns a line's ascent, falling back to a nominal value for an empty
 // line so an empty paragraph still occupies sensible vertical space.
-func ascentOf(ln line) float64 {
-	if ln.ascentPt > 0 {
-		return ln.ascentPt
+func ascentOf(ln inline.Line) float64 {
+	if ln.AscentPt > 0 {
+		return ln.AscentPt
 	}
 	return 0
 }
@@ -237,61 +216,45 @@ func ascentOf(ln line) float64 {
 // emitLine places a line's glyphs at the given baseline, applying horizontal
 // alignment. lineW is the content width available to this line; isLast suppresses
 // full justification on the final line of a paragraph (per convention).
-func (e *Engine) emitLine(st *flowState, ln line, xStart, baseline, lineW float64, align box.Align, isLast bool) {
-	if len(ln.glyphs) == 0 {
+func (e *Engine) emitLine(st *flowState, ln inline.Line, xStart, baseline, lineW float64, align box.Align, isLast bool) {
+	if len(ln.Glyphs) == 0 {
 		return
 	}
-	x := xStart
-	extraPerSpace := 0.0
+	p := inline.Place(toInlineAlign(align), xStart, lineW, ln.WidthPt, inline.CountSpaces(ln.Glyphs), isLast)
+	x := p.StartX
 
-	switch align {
-	case box.AlignRight:
-		x = xStart + (lineW - ln.widthPt)
-	case box.AlignCenter:
-		x = xStart + (lineW-ln.widthPt)/2
-	case box.AlignJustify:
-		if !isLast {
-			if n := countSpaces(ln.glyphs); n > 0 {
-				extraPerSpace = (lineW - ln.widthPt) / float64(n)
-				if extraPerSpace < 0 {
-					extraPerSpace = 0
-				}
-			}
-		}
-	}
-
-	for _, gl := range ln.glyphs {
-		if gl.outline != nil {
+	for _, gl := range ln.Glyphs {
+		if gl.Outline != nil {
 			st.cur = append(st.cur, Item{
 				Kind: GlyphKind,
 				Glyph: GlyphItem{
-					Outline: gl.outline,
+					Outline: gl.Outline,
 					XPt:     x,
 					YPt:     baseline,
-					SizePt:  gl.sizePt,
-					Color:   color.RGBA{R: gl.color.R, G: gl.color.G, B: gl.color.B, A: gl.color.A},
+					SizePt:  gl.SizePt,
+					Color:   color.RGBA{R: gl.Color.R, G: gl.Color.G, B: gl.Color.B, A: gl.Color.A},
 				},
 			})
 		}
-		x += gl.advance
-		if gl.isSpace {
-			x += extraPerSpace
+		x += gl.Advance
+		if gl.Space {
+			x += p.ExtraPerSpace
 		}
 	}
 }
 
-// countSpaces counts break-opportunity glyphs excluding any trailing run of
-// spaces (which receive no justification stretch).
-func countSpaces(glyphs []shapedGlyph) int {
-	end := len(glyphs)
-	for end > 0 && glyphs[end-1].isSpace {
-		end--
+// toInlineAlign maps the flat box model's alignment onto the inline core's neutral
+// alignment vocabulary. The switch is explicit rather than a cast because the two
+// enums are independent types whose integer values must not be assumed equal.
+func toInlineAlign(a box.Align) inline.Align {
+	switch a {
+	case box.AlignCenter:
+		return inline.AlignCenter
+	case box.AlignRight:
+		return inline.AlignRight
+	case box.AlignJustify:
+		return inline.AlignJustify
+	default:
+		return inline.AlignLeft
 	}
-	n := 0
-	for i := 0; i < end; i++ {
-		if glyphs[i].isSpace {
-			n++
-		}
-	}
-	return n
 }
