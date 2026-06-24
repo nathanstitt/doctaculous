@@ -241,8 +241,8 @@ func TestOriginUALosesToAuthorAcrossSpecificity(t *testing.T) {
 	// so neither specificity nor source order favors the author — only origin
 	// precedence can make the author's lower-specificity rule win. This is what
 	// "author normal beats UA normal" actually means.
-	author := Parse(`div { color: green; }`)        // type selector: specificity (0,0,1)
-	ua := Parse(`#lead { color: red; }`)            // id selector:   specificity (1,0,0)
+	author := Parse(`div { color: green; }`) // type selector: specificity (0,0,1)
+	ua := Parse(`#lead { color: red; }`)     // id selector: specificity (1,0,0)
 	r := NewResolver([]OriginSheet{
 		{Sheet: author, Origin: OriginAuthor},
 		{Sheet: ua, Origin: OriginUA}, // listed last: source order would favor it, but origin must override
@@ -264,6 +264,22 @@ func TestUAImportantBeatsAuthorNormal(t *testing.T) {
 	cs := r.ComputeRoot(&fakeNode{tag: "p"})
 	if (cs.Color != color.RGBA{255, 0, 0, 255}) {
 		t.Errorf("color = %v, want red (UA !important beats author normal)", cs.Color)
+	}
+}
+
+func TestUAImportantBeatsAuthorImportant(t *testing.T) {
+	// The top of the cascade ladder: UA-important outranks author-important. The
+	// author rule is listed last and has equal specificity, so only origin
+	// precedence in the important pass can make the UA rule win.
+	author := Parse(`p { color: green !important; }`)
+	ua := Parse(`p { color: red !important; }`)
+	r := NewResolver([]OriginSheet{
+		{Sheet: ua, Origin: OriginUA},
+		{Sheet: author, Origin: OriginAuthor},
+	}, nil)
+	cs := r.ComputeRoot(&fakeNode{tag: "p"})
+	if (cs.Color != color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("color = %v, want red (UA !important beats author !important)", cs.Color)
 	}
 }
 
