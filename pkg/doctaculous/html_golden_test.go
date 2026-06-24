@@ -134,6 +134,32 @@ var htmlGoldens = []struct {
 </body></html>`,
 		loader: quadLoader(),
 	},
+	{
+		// A left-floated figure box with paragraph text wrapping beside it, then a
+		// cleared block below. Eyeball: text hugs the float's right edge for the first
+		// lines, returns to full width below the float, and the cleared block sits
+		// under the float.
+		name:       "float-figure",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .fig { float: left; width: 70px; height: 60px; background: #cc3333; margin: 0 8px 4px 0; }
+  .cap { clear: left; background: #eeeeee; }
+</style></head><body>
+  <div class="fig"></div>
+  <p>This paragraph wraps its text beside the floated red figure box and then continues below it once the lines drop past the figure's bottom edge.</p>
+  <div class="cap">A cleared caption sits below the float.</div>
+</body></html>`,
+	},
+	// NOTE: the planned "float-row" golden (a body whose ONLY children are three
+	// left-floated swatches) is intentionally omitted. Per CSS 2.1, floats do not
+	// extend the height of a non-BFC parent, and the body here establishes no BFC,
+	// so a float-only body has zero in-flow content height and the page collapses to
+	// a degenerate 1×1 bitmap (paints nothing). That matches the float model the
+	// geometry tests lock down (TestFloatPlacedOutOfFlow: a float consumes no
+	// vertical space). The multi-float "two-on-a-row-then-wrap" behavior is covered
+	// instead by pkg/layout/css/floats_layout_test.go (stacking/wrap geometry) and is
+	// visible in the float-figure golden's figure placement.
 }
 
 // quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL

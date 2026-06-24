@@ -132,14 +132,19 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 // subtrees (an inline-block / new-BFC box paints as a single atom in the content
 // phase via its own AppendItems — its internal block/float/inline layering is
 // self-contained, so it must not be flattened into this BFC's decoration layer).
+//
+// f itself may be a float here: a float establishes its own BFC, so its AppendItems
+// takes the IsBFC branch and calls this on the float as the decoration-phase root of
+// its OWN context — it must paint its own background/border. The float-skip therefore
+// applies to in-flow CHILDREN (a floated child is painted by the BFC's float layer,
+// not in this in-flow recursion), not to f itself.
 func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
-	if f.IsFloat { // defensive: a float attaches at the BFC root's Floats, not here; never recurse into one
-		return dst
-	}
 	dst = f.appendSelfDecorations(dst)
 	for _, c := range f.Children {
-		if c.IsBFC {
-			continue // painted whole in the content phase (atomic)
+		if c.IsFloat || c.IsBFC {
+			// A floated child paints in the BFC root's float layer; a nested BFC child
+			// paints whole in the content phase (atomic). Skip both here.
+			continue
 		}
 		dst = c.appendDecorations(dst)
 	}
@@ -152,12 +157,16 @@ func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
 // decoration → float → content phases as a self-contained unit (CSS paints an
 // atomic inline / BFC as one item in step 7), rather than being split across this
 // BFC's phases.
+//
+// As in appendDecorations, f itself may be a float (its own BFC's content-phase
+// root) and must paint its own inline content; only floated CHILDREN are skipped
+// (they paint in the BFC root's float layer).
 func (f *Fragment) appendContent(dst []layout.Item) []layout.Item {
-	if f.IsFloat { // defensive: a float attaches at the BFC root's Floats, not here; never recurse into one
-		return dst
-	}
 	dst = f.appendSelfContent(dst)
 	for _, c := range f.Children {
+		if c.IsFloat {
+			continue // painted in the BFC root's float layer, not as in-flow content
+		}
 		if c.IsBFC {
 			dst = c.AppendItems(dst) // atomic: its own full phase sequence
 			continue

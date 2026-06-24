@@ -191,6 +191,50 @@ func TestAppendItemsNestedBFCAtomic(t *testing.T) {
 	}
 }
 
+// TestAppendItemsFloatPaintsOwnSubtree: a float fragment that establishes its OWN BFC
+// (IsBFC && IsFloat — which every real float does, since a float establishes a BFC for
+// its contents) must paint its own background/border/content when reached through the
+// BFC root's float layer. This pins the fix for a bug where appendDecorations/
+// appendContent returned early on any IsFloat fragment, so a float-with-BFC (the real
+// engine's shape, unlike TestAppendItemsFloatPaintOrder's non-BFC float) painted
+// nothing. The float-skip must apply only to floated CHILDREN, not to the float itself.
+func TestAppendItemsFloatPaintsOwnSubtree(t *testing.T) {
+	// A float that — like the engine's placeFloat output — is both IsFloat and IsBFC,
+	// with a background and a glyph of its own.
+	floatFrag := &Fragment{
+		X: 0, Y: 0, W: 50, H: 50,
+		Background: color.RGBA{255, 0, 0, 255},
+		Lines:      []LineFragment{glyphLine(20)},
+		IsFloat:    true,
+		IsBFC:      true,
+	}
+	root := &Fragment{
+		X: 0, Y: 0, W: 200, H: 50,
+		Floats: []*Fragment{floatFrag},
+		IsBFC:  true,
+	}
+
+	items := root.AppendItems(nil)
+
+	var sawFloatBg, sawFloatGlyph bool
+	for i := range items {
+		switch items[i].Kind {
+		case layout.BackgroundKind:
+			if items[i].Rule.Color == (color.RGBA{255, 0, 0, 255}) {
+				sawFloatBg = true
+			}
+		case layout.GlyphKind:
+			sawFloatGlyph = true
+		}
+	}
+	if !sawFloatBg {
+		t.Errorf("float's own background not painted (a float-with-BFC must paint its decorations via the float layer)")
+	}
+	if !sawFloatGlyph {
+		t.Errorf("float's own glyph not painted (a float-with-BFC must paint its content via the float layer)")
+	}
+}
+
 // blockBox builds a minimal block box with the given style and children.
 //
 // It emulates initialStyle()'s auto/none conventions. A zero-value Length is

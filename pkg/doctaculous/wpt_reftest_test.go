@@ -51,6 +51,14 @@ var wptReftests = []struct {
 	{"percent-width", 400, "a percentage width resolves against the containing block width", nil},
 	{"padding-shorthand", 320, "the 2-value padding shorthand equals the 4-value form", nil},
 	{"img-vs-div", 200, "a solid <img> sized W×H equals a <div> of the same size and background", solidSwatchLoader()},
+	{"float-left", 200, "a left float paints at the container's top-left, independent of the following in-flow block", nil},
+	// NOTE: the planned "float-row" reftest (float version vs an inline-block version,
+	// two-on-a-row-then-wrap) is intentionally dropped. The float test page's body
+	// holds ONLY floats, which (per CSS 2.1) do not extend a non-BFC parent's height,
+	// so it renders a 1×1 page; the inline-block reference renders 200×30. Their
+	// bounds differ, so they cannot be a pixel-equivalent reftest pair. The
+	// multi-float row layout is covered by pkg/layout/css/floats_layout_test.go
+	// (stacking/wrap geometry) instead.
 }
 
 // swatchColor is the solid color shared by the img-vs-div reftest's image and the
