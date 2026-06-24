@@ -55,6 +55,13 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	for i := range breakLines {
 		line := breakLines[i]
 		lh := e.effectiveLineHeight(b, line)
+		// Known simplification: the baseline is placed from the TEXT ascent
+		// (ascentOfLine), so when a line mixes text with an inline-block/replaced atom
+		// taller than that ascent, the atom (bottom-aligned below) extends above the
+		// line top. effectiveLineHeight floors the line HEIGHT to the atom height so the
+		// next line doesn't overlap, but the within-line top alignment is not raised to
+		// fit the atom. Proper inline-box vertical-align / line-box ascent including
+		// atomics is deferred (a later sub-project).
 		baselineY := penY + ascentOfLine(line)
 
 		spaceCount := inline.CountSpaces(line.Glyphs)
@@ -216,6 +223,26 @@ func firstInlineTextAlign(b *cssbox.Box) string {
 	return ""
 }
 
+// firstInlineLineHeight returns the inherited line-height carried by b's first
+// BoxText descendant (walking inline descendants depth-first), with its font size
+// for em resolution, or ok=false if b has no text leaf. It mirrors
+// firstInlineTextAlign: an anonymous block's own Style is zero-valued, so its
+// line-height (a CSS-inherited property) must be recovered from a text leaf, which
+// carries the cascaded line-height/font-size from the real ancestor (see
+// makeTextBox). The first BoxText is authoritative — every text leaf under the same
+// anon block shares the inherited value.
+func firstInlineLineHeight(b *cssbox.Box) (lh gcss.Length, fontSizePt float64, ok bool) {
+	for _, c := range b.Children {
+		if c.Kind == cssbox.BoxText {
+			return c.Style.LineHeight, c.Style.FontSizePt, true
+		}
+		if l, fs, found := firstInlineLineHeight(c); found {
+			return l, fs, true
+		}
+	}
+	return gcss.Length{}, 0, false
+}
+
 // mapTextAlign maps a CSS text-align keyword to the inline core's neutral Align,
 // defaulting (empty / unknown / "left") to AlignLeft.
 func mapTextAlign(s string) inline.Align {
@@ -234,35 +261,62 @@ func mapTextAlign(s string) inline.Align {
 // effectiveLineHeight computes a line's height from b's line-height and the line's
 // own metrics. UnitAuto ("normal") uses the natural height (ascent+descent+gap)
 // times cssDefaultLineMult; UnitPx/UnitPt is that exact value in points; UnitEm is
-// the value times b's font size. A line containing atomic inline boxes is never
-// shorter than its tallest atomic (which rests bottom-aligned on the baseline), so
-// the atomic extent is a floor on every mode. Unitless multipliers (e.g.
-// line-height:1.5) are not supported yet: the cascade drops a bare number, so they
-// arrive as UnitAuto and degrade to the metrics-based default.
+// the value times b's font size (see resolveLineHeight). A line containing atomic
+// inline boxes is never shorter than its tallest atomic (which rests bottom-aligned
+// on the baseline), so the atomic extent is a floor on every mode. Unitless
+// multipliers (e.g. line-height:1.5) are not supported yet: the cascade drops a bare
+// number, so they arrive as UnitAuto and degrade to the metrics-based default.
 //
-// An anonymous box (BoxAnonBlock/BoxAnonInline) is the exception: it carries a
-// zero-value ComputedStyle, so its LineHeight reads as Length{Value: 0, Unit: UnitPx}
-// — which the UnitPx case would take literally as height 0, collapsing every line to a
-// single baseline. So an anonymous box's line-height is always treated as auto, the
-// same zero-value-Style-is-not-the-CSS-initial-value reasoning isAnonymous documents
-// for width/height in block.go.
+// An anonymous box (BoxAnonBlock/BoxAnonInline) is handled specially: it carries a
+// zero-value ComputedStyle, so reading its own LineHeight gives Length{0, UnitPx} —
+// which the UnitPx case would take literally as height 0, collapsing every line to a
+// single baseline. But line-height is a CSS *inherited* property, so the real value
+// lives on the anon box's text leaves (makeTextBox copies the cascaded line-height
+// and font-size onto them). We therefore recover the inherited line-height (and the
+// font size for em resolution) from the first text leaf via firstInlineLineHeight and
+// resolve THAT — so e.g. a div with line-height:30px gives its bare-text anon block a
+// 30px line box, not the auto default. Only when the anon box has no text leaf at all
+// do we fall back to auto. (Same zero-value-Style-is-not-the-CSS-initial-value
+// reasoning isAnonymous documents for width/height in block.go.)
 func (e *Engine) effectiveLineHeight(b *cssbox.Box, line inline.Line) float64 {
-	atomic := maxAtomicHeight(line)
 	var h float64
-	switch lh := b.Style.LineHeight; {
-	case isAnonymous(b): // zero-value Style: treat line-height as auto (see isAnonymous)
-		h = (line.AscentPt + line.DescentPt + line.LineGapPt) * cssDefaultLineMult
-	case lh.Unit == gcss.UnitPx, lh.Unit == gcss.UnitPt:
-		h = lh.Value
-	case lh.Unit == gcss.UnitEm:
-		h = lh.Value * b.Style.FontSizePt
-	default: // UnitAuto / unsupported: metrics × default multiplier
-		h = (line.AscentPt + line.DescentPt + line.LineGapPt) * cssDefaultLineMult
+	if isAnonymous(b) {
+		if lh, fs, ok := firstInlineLineHeight(b); ok {
+			h = resolveLineHeight(lh, fs, line)
+		} else {
+			h = autoLineHeight(line) // no text leaf: nothing to inherit from
+		}
+	} else {
+		h = resolveLineHeight(b.Style.LineHeight, b.Style.FontSizePt, line)
 	}
-	if atomic > h {
+	if atomic := maxAtomicHeight(line); atomic > h {
 		h = atomic
 	}
 	return h
+}
+
+// resolveLineHeight turns a line-height Length plus a font size into a line height in
+// points, against the line's own metrics: UnitPx/UnitPt is the exact value, UnitEm is
+// the value times fontSizePt, and UnitAuto ("normal") or any unsupported unit falls
+// back to the natural metrics-based height. Both the real-element path and the
+// anonymous-block path (which supplies the inherited line-height/font-size from a text
+// leaf) share this so the two stay in lockstep. The atomic-height floor is applied by
+// the caller, not here.
+func resolveLineHeight(lh gcss.Length, fontSizePt float64, line inline.Line) float64 {
+	switch lh.Unit {
+	case gcss.UnitPx, gcss.UnitPt:
+		return lh.Value
+	case gcss.UnitEm:
+		return lh.Value * fontSizePt
+	default: // UnitAuto / unsupported: metrics × default multiplier
+		return autoLineHeight(line)
+	}
+}
+
+// autoLineHeight is the "normal"/auto line height: the line's natural height
+// (ascent+descent+gap) times cssDefaultLineMult.
+func autoLineHeight(line inline.Line) float64 {
+	return (line.AscentPt + line.DescentPt + line.LineGapPt) * cssDefaultLineMult
 }
 
 // ascentOfLine returns the line's ascent used to place its baseline below the pen

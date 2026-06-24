@@ -218,6 +218,46 @@ func TestInlineAnonBlockLineHeight(t *testing.T) {
 	}
 }
 
+// TestInlineAnonBlockInheritedLineHeight (M1 fix): line-height is a CSS *inherited*
+// property, so a bare text node before a block sibling — wrapped in an anonymous
+// block whose own Style is zero-valued — must honor the line-height INHERITED from
+// its containing element, not fall back to the auto default. Here the div sets
+// line-height:40px; the anon block's text leaves carry that inherited 40px, so the
+// anon block's wrapped lines must stride by exactly 40 (not the metrics×1.15 auto
+// height the old code forced for every anonymous box).
+//
+// On the pre-fix code (which unconditionally used the auto computation for an
+// anonymous box) this stride would be ~the 16px serif auto line height (> 16, < 80,
+// and not 40), so the `== 40` assertion fails; the fix makes it pass.
+func TestInlineAnonBlockInheritedLineHeight(t *testing.T) {
+	body := layoutBody(t, reset+`<div style="width:60px;line-height:40px">word word word word word word<p>x</p></div>`, 1000)
+	div := body.Children[0]
+	if len(div.Children) < 1 {
+		t.Fatalf("div has %d children, want >= 1 (anon block + p)", len(div.Children))
+	}
+	anon := div.Children[0]
+	if anon.DebugTag != "anon-block" {
+		t.Fatalf("first div child DebugTag = %q, want anon-block", anon.DebugTag)
+	}
+	// Six "word"s in a 60px box wrap to multiple lines, so we can measure a stride.
+	if len(anon.Lines) < 2 {
+		t.Fatalf("anon-block lines = %d, want >= 2 (wrapping bare text)", len(anon.Lines))
+	}
+	// The inherited line-height:40px sets the EXACT inter-baseline stride. With the
+	// old auto fallback this would be metrics×1.15 (~the band TestInlineWrapping
+	// checks), never exactly 40.
+	stride := anon.Lines[1].BaselineY - anon.Lines[0].BaselineY
+	if stride != 40 {
+		t.Errorf("anon-block inter-baseline stride = %v, want 40 (inherited line-height:40px)", stride)
+	}
+	// Uniform across every line (the inherited value is constant).
+	for i := 2; i < len(anon.Lines); i++ {
+		if dy := anon.Lines[i].BaselineY - anon.Lines[i-1].BaselineY; dy != 40 {
+			t.Errorf("anon-block stride not constant: 40 then %v (line %d)", dy, i)
+		}
+	}
+}
+
 // TestInlineEmptyParagraph: an empty paragraph produces no glyphs and ~no inline
 // height, and never panics.
 func TestInlineEmptyParagraph(t *testing.T) {
