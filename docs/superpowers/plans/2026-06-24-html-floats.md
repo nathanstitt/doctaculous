@@ -1296,6 +1296,16 @@ import (
 
 // blockBox builds a minimal block box with the given style and children.
 func blockBox(style gcss.ComputedStyle, kids ...*cssbox.Box) *cssbox.Box {
+	// Emulate initialStyle()'s max-* convention: a zero-value Length is {0, UnitPx},
+	// which resolveContentWidth/resolveFixedHeight read as "max:0" (clamping to 0).
+	// Real box-gen gets MaxWidth/MaxHeight=UnitAuto ("none") from the cascade, so a
+	// test style that omits them must set them too, or e.g. a 60x40 float clamps to 0x0.
+	if style.MaxWidth == (gcss.Length{}) {
+		style.MaxWidth = gcss.Length{Unit: gcss.UnitAuto}
+	}
+	if style.MaxHeight == (gcss.Length{}) {
+		style.MaxHeight = gcss.Length{Unit: gcss.UnitAuto}
+	}
 	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: style, Children: kids}
 }
 
@@ -1308,9 +1318,8 @@ func TestFloatPlacedOutOfFlow(t *testing.T) {
 	floatStyle := gcss.ComputedStyle{Display: "block", Float: "left",
 		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
 		Height: gcss.Length{Value: 40, Unit: gcss.UnitPx}}
-	floatStyle.Float = "left"
 	floated := blockBox(floatStyle)
-	floated.Float = cssbox.FloatLeft
+	floated.Float = cssbox.FloatLeft // the cssbox box-level field the engine reads
 
 	following := blockBox(gcss.ComputedStyle{Display: "block",
 		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
