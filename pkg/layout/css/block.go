@@ -687,6 +687,9 @@ func shiftFragment(f *Fragment, dy float64) {
 	for _, c := range f.Children {
 		shiftFragment(c, dy)
 	}
+	for _, fl := range f.Floats {
+		shiftFragment(fl, dy)
+	}
 }
 
 // shiftLines translates inline line baselines by dy (the inline content of the box

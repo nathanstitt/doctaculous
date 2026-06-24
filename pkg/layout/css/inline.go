@@ -413,4 +413,7 @@ func translateFragment(f *Fragment, dx, dy float64) {
 	for _, c := range f.Children {
 		translateFragment(c, dx, dy)
 	}
+	for _, fl := range f.Floats {
+		translateFragment(fl, dx, dy)
+	}
 }
