@@ -192,8 +192,18 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// float context (its internal floats stay self-contained) and bandOriginY 0;
 			// the IFC then positions the whole atom (subtree + any internal floats) on
 			// the line via translateFragment.
-			res := e.layoutBlock(ctx, child, contentW, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: contentW})
+			// Positioning inside an inline atom is self-contained: give it a fresh
+			// throwaway positionedContext and the page sentinel as its abs-pos CB, then
+			// resolve that context immediately against the atom's own provisional frame.
+			// Relative/abs positioning of inline ATOMS (and abs descendants of an
+			// inline-block) is out of scope this slice (the atom is repositioned on the
+			// line by translateFragment, which does not move its Positioned layer), so
+			// these resolve approximately against the atom's provisional box — a
+			// documented limitation; block-level positioning is exact.
+			atomPos := &positionedContext{}
+			res := e.layoutBlock(ctx, child, contentW, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: contentW}, atomPos, posCBOwner{isPage: true})
 			frag := res.frag
+			e.resolveAbsolute(ctx, atomPos, frag, contentW, 0)
 			*atomics = append(*atomics, frag)
 			*runs = append(*runs, atomicRunFor(child, frag, contentW))
 		case child.Kind == cssbox.BoxInline || child.Kind == cssbox.BoxAnonInline:

@@ -75,16 +75,31 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 		return nil
 	}
 	fc := &floatContext{cbLeft: 0, cbRight: viewportW}
+	posCtx := &positionedContext{}
+	pageCB := posCBOwner{isPage: true}
 	// Root BFC: bandOriginY = 0 (its content-box top defines the frame origin).
-	res := e.layoutBlock(ctx, root, viewportW, 0, 0, 0, fc)
+	res := e.layoutBlock(ctx, root, viewportW, 0, 0, 0, fc, posCtx, pageCB)
 	if res.frag != nil {
 		res.frag.IsBFC = true
+		res.frag.IsStackingContext = true // the ICB establishes the root stacking context
 		// The root is the BFC owner: collect any floats placed directly in it. (A
 		// nested-BFC box collects its own via layoutInterior -> in.bfcFloats.)
 		if res.frag.Floats == nil {
 			res.frag.Floats = fc.floats2frags()
 		}
+		// The root is the outermost stacking context: consume any relative-positioned
+		// descendants that bubbled all the way up without a closer positioned ancestor.
+		res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 	}
+	// PASS 2: resolve abs/fixed boxes now that the page height and all ancestor
+	// fragments are final. An abs-pos box does NOT extend the page height in this
+	// slice (matching the float non-enclosure decision); growing the page for an
+	// abs-pos box positioned past the bottom is deferred.
+	pageH := 0.0
+	if res.frag != nil {
+		pageH = res.frag.Y + res.frag.H
+	}
+	e.resolveAbsolute(ctx, posCtx, res.frag, viewportW, pageH)
 	return res.frag
 }
 
@@ -97,6 +112,42 @@ type blockResult struct {
 	frag         *Fragment
 	marginTop    float64 // used top margin, already folded with the first child's per collapse-through
 	marginBottom float64 // used bottom margin, already folded with the last child's per collapse-through
+	// pendingPositioned bubbles relatively-positioned descendant fragments that have
+	// not yet found their nearest stacking-context owner up to the caller (analogous
+	// to bfcFloats surfacing a nested BFC's floats one level). layoutBlock sets it to
+	// the interior's unconsumed pending list when b is NOT a stacking context (bubble),
+	// or nil when b consumed them onto its own frag.Positioned. The parent's
+	// layoutBlockChildren collects each child's pendingPositioned into its own list, so
+	// a relative box under static ancestors bubbles up until a stacking-context
+	// ancestor (or the root, in layoutTree) consumes it. Read by the parent loop.
+	pendingPositioned []*Fragment
+}
+
+// posCBOwner names the containing block for absolutely-positioned descendants: the
+// nearest positioned-ancestor fragment + its box (whose CONTENT box is the CB,
+// derived by deflating the final border box), or the page sentinel (isPage) for the
+// ICB / fixed CB. A fragment POINTER is captured (not a rect) because the ancestor
+// is shifted into final page position as the recursion unwinds; pass 2 reads it
+// after that, so coordinates are final. (See the spec: "How positioning threads".)
+type posCBOwner struct {
+	frag   *Fragment
+	box    *cssbox.Box
+	isPage bool
+}
+
+// deferredAbs is one collected absolutely/fixed-positioned box awaiting pass 2. Its
+// stacking-context owner is NOT stored — it is derived in pass 2 from cb (cb.isPage ?
+// root : cb.frag), since every positioned box is its own stacking context.
+type deferredAbs struct {
+	box *cssbox.Box
+	cb  posCBOwner // its containing-block owner
+}
+
+// positionedContext accumulates deferred abs/fixed boxes during the in-flow pass for
+// resolution in the abs-pos pass. Per-Layout-call mutable state threaded by pointer
+// through one goroutine; never escapes the call (concurrency-safe, like floatContext).
+type positionedContext struct {
+	deferred []deferredAbs
 }
 
 // layoutBlock lays out block box b into a containing block of width cbWidth whose
@@ -109,7 +160,12 @@ type blockResult struct {
 // page space within the fragment.
 //
 // bandOriginY is b's content-box top measured in the BFC-root-local frame (the frame the float context fc is queried in — see layoutBlockChildren's frame model); fc is the current block formatting context's float context.
-func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, originX, marginTopEdgeY, bandOriginY float64, fc *floatContext) blockResult {
+//
+// posCtx collects abs/fixed descendants (out of flow) for the abs-pos pass; posCB is
+// the containing-block owner for absolutely-positioned descendants (the page sentinel
+// at the root, or the nearest positioned ancestor's fragment+box). These thread
+// exactly like fc/bandOriginY do for floats.
+func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, originX, marginTopEdgeY, bandOriginY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) blockResult {
 	if b.Kind == cssbox.BoxReplaced {
 		// A block-level replaced box (e.g. <img style="display:block">) is sized by
 		// the replaced-element algorithm, not the block content flow: with width:auto
@@ -140,7 +196,19 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	// and the stacker's later shift repositions in-flow fragments — floats are
 	// placed directly in the BFC frame, so they don't need that shift.)
 	childBandOrigin := bandOriginY + ed.mT + ed.bT + ed.pT
-	in := e.layoutInterior(ctx, b, contentW, contentX, childBandOrigin, fc)
+
+	// A box that establishes a positioned containing block becomes the posCB owner for
+	// its interior's abs-pos descendants (its own content box is their CB). Its frag is
+	// not built yet, so capture {box: b} now and back-fill .frag after the frag exists
+	// (below). A static box passes the inherited posCB through unchanged. Record where
+	// posCtx.deferred ends so the back-fill targets only THIS box's newly-collected
+	// abs-pos descendants.
+	childPosCB := posCB
+	if establishesStackingContext(b) {
+		childPosCB = posCBOwner{box: b}
+	}
+	deferredBefore := len(posCtx.deferred)
+	in := e.layoutInterior(ctx, b, contentW, contentX, childBandOrigin, fc, posCtx, childPosCB)
 
 	// Resolve the box's own collapse-resolved top/bottom margins and the offset of
 	// the content-box top from the border-box top's "natural" position.
@@ -220,7 +288,29 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		frag.Floats = in.bfcFloats
 	}
 
-	return blockResult{frag: frag, marginTop: marginTop, marginBottom: marginBottom}
+	// Positioning. A positioned box establishes a stacking context and is the nearest
+	// stacking-context owner for the relative descendants its interior bubbled up: it
+	// CONSUMES them onto its own Positioned layer. A static box does not own them — it
+	// BUBBLES them up via blockResult.pendingPositioned so an ancestor stacking context
+	// (ultimately the root, in layoutTree) consumes them.
+	bubble := in.pendingPositioned
+	if establishesStackingContext(b) {
+		frag.IsStackingContext = true
+		frag.Positioned = append(frag.Positioned, in.pendingPositioned...)
+		bubble = nil
+		// Back-fill the CB owner of any abs/fixed descendant this box collected: their
+		// containing block is THIS box's content box, but its frag did not exist when
+		// they were recorded (only {box: b} was captured). Wire them to frag now so the
+		// abs-pos pass deflates the right (final) border box. (fixed descendants carry
+		// the page sentinel and box==nil, so they are not matched here.)
+		for j := deferredBefore; j < len(posCtx.deferred); j++ {
+			if posCtx.deferred[j].cb.box == b && posCtx.deferred[j].cb.frag == nil {
+				posCtx.deferred[j].cb.frag = frag
+			}
+		}
+	}
+
+	return blockResult{frag: frag, marginTop: marginTop, marginBottom: marginBottom, pendingPositioned: bubble}
 }
 
 // interior is the laid-out content of a block box in a local frame whose
@@ -235,6 +325,10 @@ type interior struct {
 	leadingMargin  float64     // first in-flow child's top margin (block flow only)
 	trailingMargin float64     // last in-flow child's bottom margin (block flow only)
 	bfcFloats      []*Fragment // floats placed in this box's OWN BFC (set only when b establishes one)
+	// pendingPositioned holds relative-positioned descendants laid out in this box's
+	// interior that have not yet found their stacking-context owner (bubbles up like
+	// bfcFloats, but for the positioned layer). layoutBlock consumes or re-bubbles it.
+	pendingPositioned []*Fragment
 }
 
 // layoutInterior lays out b's children into a local frame (content-box top at 0)
@@ -243,7 +337,13 @@ type interior struct {
 // establish their own page-space position, i.e. blocks, use it directly).
 //
 // bandOriginY and fc thread the float context: bandOriginY is this box's content-box top in the BFC-root frame, and fc is the BFC's float context (a fresh one is created here if b establishes its own BFC).
-func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
+//
+// posCtx and posCB thread positioning (see layoutBlock): posCtx collects abs/fixed
+// descendants, posCB names the abs-pos containing-block owner. They pass straight
+// through to layoutBlockChildren (block flow); the InlineFC case does not collect
+// positioned descendants (relative inline atoms / abs descendants of an IFC are out of
+// scope this slice), so its interior carries no pendingPositioned.
+func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) interior {
 	// A box that establishes a new BFC (inline-block today) isolates floats: its
 	// interior gets a fresh context spanning its own content box, and its own band
 	// frame (origin 0). Otherwise children share the parent's context and frame, so a
@@ -266,14 +366,14 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		lines, h, atomics := e.layoutInline(ctx, b, contentW, 0, contentX, childBand, childFC)
 		in = interior{lines: lines, children: atomics, contentHeight: h}
 	case cssbox.BlockFC:
-		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC)
+		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	default:
 		// TableFC / FlexFC / GridFC: their real layout algorithms are later
 		// sub-projects. Degrade to block normal flow so the children still position
 		// and paint (per the degradation contract: the box arrives with its true
 		// Formatting; the fallback is at this layout stage).
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
-		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC)
+		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	}
 
 	// A new BFC's floats are self-contained: surface them so layoutBlock attaches them
@@ -306,15 +406,16 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 // BFC-root frame (they attach to the BFC root's Floats, not to a shifted child) —
 // see placeFloat. A nested BFC resets bandOriginY to 0 and uses its own context
 // (layoutInterior).
-func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
+func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) interior {
 	var (
-		out        []*Fragment
-		prevBottom float64 // previous in-flow sibling's reported bottom margin
-		prevBorder float64 // previous in-flow sibling's border-box bottom (local Y)
-		leading    float64
-		trailing   float64
-		first      = true
-		cursorY    float64 // local content-top-0 Y of the in-flow cursor
+		out               []*Fragment
+		pendingPositioned []*Fragment // relative descendants bubbling to the nearest stacking-context ancestor
+		prevBottom        float64     // previous in-flow sibling's reported bottom margin
+		prevBorder        float64     // previous in-flow sibling's border-box bottom (local Y)
+		leading           float64
+		trailing          float64
+		first             = true
+		cursorY           float64 // local content-top-0 Y of the in-flow cursor
 	)
 	for _, child := range b.Children {
 		if err := ctx.Err(); err != nil {
@@ -331,10 +432,25 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			continue
 		}
 
+		// Absolutely/fixed-positioned child: out of flow. Collect for pass 2. It does
+		// not advance the cursor, collapse margins, or join Children. (box-gen forces an
+		// abs/fixed box's Float to none, so this precedes — and excludes it from — the
+		// float branch below.)
+		if child.Position == cssbox.PosAbsolute || child.Position == cssbox.PosFixed {
+			cb := posCB
+			if child.Position == cssbox.PosFixed {
+				cb = posCBOwner{isPage: true} // fixed: the page (viewport)
+			}
+			posCtx.deferred = append(posCtx.deferred, deferredAbs{box: child, cb: cb})
+			continue // no SC owner stored; pass 2 derives it from cb
+		}
+
 		if child.Float != cssbox.FloatNone {
 			// Place the float in the BFC-root frame at the current in-flow band:
-			// bandOriginY (this content box's top in that frame) + cursorY (local).
-			e.placeFloat(ctx, child, contentW, contentX, bandOriginY+cursorY, fc)
+			// bandOriginY (this content box's top in that frame) + cursorY (local). A
+			// float establishes its own BFC; pass posCtx + the float-as-CB owner so a
+			// positioned float's abs descendants resolve against it.
+			e.placeFloat(ctx, child, contentW, contentX, bandOriginY+cursorY, fc, posCtx, posCB)
 			continue // a float does not advance the in-flow cursor or collapse margins
 		}
 
@@ -351,7 +467,7 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		// sits at res.marginTop, which we now know and use to place it exactly. Pass
 		// bandOriginY+startY as the child's band origin so a nested in-flow block
 		// knows its position in the BFC-root frame (its IFC queries floats there).
-		res := e.layoutBlock(ctx, child, contentW, contentX, 0, bandOriginY+startY, fc)
+		res := e.layoutBlock(ctx, child, contentW, contentX, 0, bandOriginY+startY, fc, posCtx, posCB)
 
 		var borderTop float64 // desired local Y of this child's border-box top
 		if first {
@@ -369,12 +485,28 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		shiftFragment(res.frag, borderTop-res.marginTop)
 		out = append(out, res.frag)
 
+		// A relative child stays in flow (its space is reserved above) but is flagged
+		// positioned and carries a paint-time offset; it bubbles to the nearest
+		// stacking-context ancestor (which lifts it into the positioned layer). cbH is
+		// passed 0: px/em top/bottom offsets ignore it, and a % top/bottom degrades to 0
+		// against an as-yet-unknown containing-block height (documented deferral).
+		if child.Position == cssbox.PosRelative {
+			dx, dy := relativeOffset(child, contentW, 0)
+			res.frag.IsPositioned = true
+			res.frag.IsStackingContext = true
+			res.frag.RelOffsetX, res.frag.RelOffsetY = dx, dy
+			pendingPositioned = append(pendingPositioned, res.frag)
+		}
+		// Bubble up any relative descendants the child did not consume (it is a static
+		// box, or itself a stacking context that bubbled nothing).
+		pendingPositioned = append(pendingPositioned, res.pendingPositioned...)
+
 		prevBorder = res.frag.Y + res.frag.H
 		prevBottom = res.marginBottom
 		trailing = res.marginBottom
 		cursorY = prevBorder
 	}
-	return interior{children: out, contentHeight: prevBorder, leadingMargin: leading, trailingMargin: trailing}
+	return interior{children: out, contentHeight: prevBorder, leadingMargin: leading, trailingMargin: trailing, pendingPositioned: pendingPositioned}
 }
 
 // placeFloat lays out a floated child and places it in the float context at
@@ -385,13 +517,18 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 // layer), not to a shifted in-flow child. The fragment is marked IsFloat and recorded
 // on the just-appended floatBox so the BFC owner (layoutTree / layoutInterior) can
 // collect it via floats2frags.
-func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, contentX, placeY float64, fc *floatContext) {
+func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, contentX, placeY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) {
 	// Lay the float out (provisional origin) to learn its border-box size. A float is
 	// block-level and establishes its own BFC for its contents, so layoutInterior
 	// gives it a fresh float context (it does not inherit this BFC's floats). placeY is
 	// passed as bandOriginY for the float's own margin-box arithmetic; its interior
-	// resets to its own frame (bandOriginY=0) in layoutInterior.
-	res := e.layoutBlock(ctx, child, cbWidth, contentX, 0, placeY, fc)
+	// resets to its own frame (bandOriginY=0) in layoutInterior. posCtx/posCB thread
+	// positioning: a float establishes its own BFC, so abs descendants whose CB is the
+	// float resolve against it; a positioned float is their CB owner (set inside
+	// layoutBlock). The posCB passed in is the float's own enclosing CB, used for abs
+	// descendants that escape to an ancestor (the float is not their CB unless it is
+	// itself positioned, which layoutBlock handles).
+	res := e.layoutBlock(ctx, child, cbWidth, contentX, 0, placeY, fc, posCtx, posCB)
 	if res.frag == nil {
 		return
 	}
@@ -409,8 +546,117 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	translateFragment(res.frag, dx, dy)
 	res.frag.IsFloat = true
 
+	// A relatively-positioned descendant of the float is IN FLOW (a normal entry in
+	// res.frag.Children), so translateFragment(res.frag, …) above ALREADY moved it by
+	// the placement delta — it must NOT be translated again. We only GATHER any relatives
+	// that bubbled up (the float is static, so its layoutBlock did not consume them onto
+	// frag.Positioned) onto the float's own Positioned layer, so the float's AppendItems
+	// paints them in its positioned phase. Relatives the float already consumed (when the
+	// float is itself a stacking context) are on res.frag.Positioned and stay there —
+	// also already moved by translateFragment. (Abs/fixed descendants are deferred to
+	// pass 2 and are not present on the fragment here.)
+	res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
+
+	// A relatively-positioned float is placed at the float edge AND offset at paint
+	// time: stamp the offset on the float fragment so the Floats-layer translate
+	// (AppendItems) shifts its emitted item range. It is NOT additionally added to a
+	// Positioned slice — it paints via the Floats layer. cbH ~0 (px/em offsets ignore
+	// it; a % top/bottom degrades to 0).
+	if child.Position == cssbox.PosRelative {
+		rdx, rdy := relativeOffset(child, cbWidth, 0)
+		res.frag.IsPositioned = true
+		res.frag.RelOffsetX, res.frag.RelOffsetY = rdx, rdy
+	}
+
 	// Record the fragment on the just-appended floatBox (fc.place appended it last).
 	fc.floats[len(fc.floats)-1].frag = res.frag
+}
+
+// resolveAbsolute lays out and positions every deferred absolutely/fixed-positioned
+// box (pass 2), now that the page and all ancestor fragments are final. For each: it
+// resolves the containing-block CONTENT rect from the captured owner, lays out the
+// box's own subtree as an independent block (its own fresh floatContext; the SAME
+// posCtx so nested abs-pos descendants are appended to this loop and resolved
+// transitively), computes the used border-box rect via absRect, translates the
+// fragment there, marks it positioned + stacking context, and appends it to the
+// owning stacking context's Positioned layer.
+func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext, root *Fragment, viewportW, pageH float64) {
+	pageRect := rect{x: 0, y: 0, w: viewportW, h: pageH}
+	// Iterate by index: laying out a deferred box may APPEND more deferred boxes to
+	// posCtx.deferred (a transitive abs-pos descendant collected by its layoutBlock),
+	// which this same loop then resolves. The index walk (not range) picks them up.
+	for i := 0; i < len(posCtx.deferred); i++ {
+		d := posCtx.deferred[i]
+		cb := e.resolveCBRect(d.cb, pageRect)
+		ed := usedEdges(d.box, cb.w)
+		border, _ := absRect(d.box, ed, cb)
+
+		// Lay out the box's subtree as a block at the CB CONTENT width, at a provisional
+		// origin (originX = cb.x, marginTopEdgeY = cb.y, bandOriginY 0), with a FRESH
+		// floatContext (its floats are self-contained) and the SAME posCtx (so its own
+		// abs-pos descendants are collected for this loop). Its posCB owner is the box
+		// ITSELF (it is a positioned ancestor / new CB); its own layoutBlock sets
+		// IsStackingContext + consumes its interior's pending relatives onto
+		// frag.Positioned (the same consume-or-bubble as pass 1). The frag is not built
+		// before layoutBlock returns, so any nested abs descendant recorded {box: d.box}
+		// is back-filled with the built frag just below.
+		childFC := &floatContext{cbLeft: cb.x, cbRight: cb.x + cb.w}
+		before := len(posCtx.deferred)
+		res := e.layoutBlock(ctx, d.box, cb.w, cb.x, cb.y, 0, childFC, posCtx, posCBOwner{box: d.box})
+		frag := res.frag
+		if frag == nil {
+			continue
+		}
+		// Back-fill nested abs descendants' CB owner to this just-built frag (their CB
+		// is d.box's content box; they were recorded with cb.box == d.box, frag nil).
+		for j := before; j < len(posCtx.deferred); j++ {
+			if posCtx.deferred[j].cb.box == d.box && posCtx.deferred[j].cb.frag == nil {
+				posCtx.deferred[j].cb.frag = frag
+			}
+		}
+
+		// Move the provisional fragment to its resolved border-box origin. (absRect's
+		// provisional height stands for a fixed/derived height; for a top-only auto
+		// height the laid-out fragment's own content-derived H is authoritative and is
+		// preserved by the translate, which only moves the origin. A bottom-only
+		// auto-height box is positioned against a provisional zero content height — a
+		// documented deferral.)
+		translateFragment(frag, border.x-frag.X, border.y-frag.Y)
+		if isHeightAuto(d.box) && isAuto2(d.box.Style.Top, d.box.Style.FontSizePt) && !isAuto2(d.box.Style.Bottom, d.box.Style.FontSizePt) {
+			e.logf("css layout: abs-pos bottom-only auto-height box positioned against a provisional height (approximate)")
+		}
+		frag.IsPositioned = true
+		frag.IsStackingContext = true
+		frag.RelOffsetX, frag.RelOffsetY = 0, 0 // abs/fixed bake position into coords
+
+		// Attach to the owning stacking context's Positioned layer: the root for a page
+		// CB, else the nearest-positioned-ancestor fragment (itself a stacking context).
+		owner := root
+		if !d.cb.isPage && d.cb.frag != nil {
+			owner = d.cb.frag
+		}
+		if owner != nil {
+			owner.Positioned = append(owner.Positioned, frag)
+		}
+	}
+}
+
+// resolveCBRect turns a captured posCBOwner into the containing-block CONTENT rect in
+// final page coordinates: the page rect for the page sentinel, else the ancestor
+// fragment's final border box deflated by the ancestor box's border+padding. (The
+// usedEdges percentage basis is the ancestor's border-box width — approximate for %
+// border/padding, which are rare.)
+func (e *Engine) resolveCBRect(o posCBOwner, pageRect rect) rect {
+	if o.isPage || o.frag == nil {
+		return pageRect
+	}
+	ed := usedEdges(o.box, o.frag.W)
+	return rect{
+		x: o.frag.X + ed.bL + ed.pL,
+		y: o.frag.Y + ed.bT + ed.pT,
+		w: o.frag.W - ed.bL - ed.bR - ed.pL - ed.pR,
+		h: o.frag.H - ed.bT - ed.bB - ed.pT - ed.pB,
+	}
 }
 
 // The inline formatting context (layoutInline) lives in inline.go; it is the hook
@@ -476,11 +722,25 @@ func usedEdges(b *cssbox.Box, cbWidth float64) edges {
 
 // establishesNewBFC reports whether b establishes a new block formatting context,
 // which suppresses margin collapsing between the box and its in-flow children. In
-// the supported subset an inline-block does (its interior is an independent BFC) and
-// a float does (CSS 9.7: a float establishes a BFC for its contents); overflow≠visible
-// — the other BFC trigger — is not modeled yet.
+// the supported subset an inline-block does (its interior is an independent BFC), a
+// float does (CSS 9.7: a float establishes a BFC for its contents), and an
+// absolutely/fixed-positioned box does (it isolates its float context and
+// margin-collapsing — without this an abs box containing a float would orphan it);
+// overflow≠visible — the other BFC trigger — is not modeled yet. A relative box does
+// NOT establish a BFC (only abs/fixed/float/inline-block do).
 func establishesNewBFC(b *cssbox.Box) bool {
+	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
+		return true
+	}
 	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone
+}
+
+// establishesStackingContext reports whether b establishes a CSS stacking context.
+// In the supported subset: any positioned box (relative/absolute/fixed). The page
+// root is treated as a stacking context by layoutTree directly. (Full CSS also
+// includes opacity<1, transforms, etc. — none modeled yet.)
+func establishesStackingContext(b *cssbox.Box) bool {
+	return b.Position != cssbox.PosStatic
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous
