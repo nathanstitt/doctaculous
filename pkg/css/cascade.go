@@ -266,6 +266,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		if c, ok := parseColor(newTokenizer(d.Value)); ok {
 			cs.BackgroundColor = c
 		}
+	case "background":
+		// Color-only support for now; see applyBackground.
+		applyBackground(cs, d.Value)
 	case "font-family":
 		cs.FontFamily = firstFamily(d.Value)
 	case "font-size":
@@ -296,6 +299,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		setLength(&cs.MarginBottom, d.Value)
 	case "margin-left":
 		setLength(&cs.MarginLeft, d.Value)
+	case "margin":
+		applyBoxLengths(d.Value, parseMarginComponent,
+			&cs.MarginTop, &cs.MarginRight, &cs.MarginBottom, &cs.MarginLeft)
 	case "padding-top":
 		setLength(&cs.PaddingTop, d.Value)
 	case "padding-right":
@@ -304,6 +310,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		setLength(&cs.PaddingBottom, d.Value)
 	case "padding-left":
 		setLength(&cs.PaddingLeft, d.Value)
+	case "padding":
+		applyBoxLengths(d.Value, parsePaddingComponent,
+			&cs.PaddingTop, &cs.PaddingRight, &cs.PaddingBottom, &cs.PaddingLeft)
 	case "width":
 		setLength(&cs.Width, d.Value)
 	case "height":
@@ -353,6 +362,32 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		cs.BorderBottomStyle = d.Value
 	case "border-left-style":
 		cs.BorderLeftStyle = d.Value
+	case "border-width":
+		applyBoxLengths(d.Value, parseBorderWidthComponent,
+			&cs.BorderTopWidth, &cs.BorderRightWidth, &cs.BorderBottomWidth, &cs.BorderLeftWidth)
+	case "border-style":
+		applyBorderStyle(cs, d.Value)
+	case "border-color":
+		applyBorderColor(cs, d.Value)
+	case "border":
+		// width||style||color applied to all four sides.
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderTopWidth, &cs.BorderTopColor, &cs.BorderTopStyle},
+			borderSide{&cs.BorderRightWidth, &cs.BorderRightColor, &cs.BorderRightStyle},
+			borderSide{&cs.BorderBottomWidth, &cs.BorderBottomColor, &cs.BorderBottomStyle},
+			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
+	case "border-top":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderTopWidth, &cs.BorderTopColor, &cs.BorderTopStyle})
+	case "border-right":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderRightWidth, &cs.BorderRightColor, &cs.BorderRightStyle})
+	case "border-bottom":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderBottomWidth, &cs.BorderBottomColor, &cs.BorderBottomStyle})
+	case "border-left":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
 	}
 	// default: unsupported property — ignored on purpose.
 }
