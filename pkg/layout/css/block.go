@@ -675,7 +675,8 @@ func shiftFragments(frags []*Fragment, dy float64) {
 
 // shiftFragment translates one fragment and its descendants (children and inline
 // line baselines) by dy. Block children were positioned in page-space X already, so
-// only Y moves.
+// only Y moves. Floats are recursed separately from Children because a nested BFC's
+// floats live in Floats (not Children) and must ride any repositioning of the BFC subtree.
 func shiftFragment(f *Fragment, dy float64) {
 	f.Y += dy
 	for li := range f.Lines {

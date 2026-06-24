@@ -393,7 +393,8 @@ func atomicLineExtent(line inline.Line) float64 {
 // It is used to move an atomic inline box's already-laid-out fragment from its
 // provisional origin to its position on a line; unlike shiftFragment (block flow,
 // vertical-only) it moves X too, because an atomic's horizontal position is set
-// here rather than by the block stacker.
+// here rather than by the block stacker. Floats are recursed in addition to Children
+// so a repositioned nested BFC carries its inner floats by the same delta.
 func translateFragment(f *Fragment, dx, dy float64) {
 	if dx == 0 && dy == 0 {
 		return

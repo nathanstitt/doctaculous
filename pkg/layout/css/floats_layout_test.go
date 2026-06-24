@@ -488,7 +488,7 @@ func TestNestedBFCFloatRidesShift(t *testing.T) {
 
 // TestFloatedInlineBlockifies: a <span style="float:left"> goes through box
 // generation as a block-level float and lays out (placed out of flow), proving the
-// CSS 9.7 blockify path reaches layout. Uses the public OpenHTMLBytes path.
+// CSS 9.7 blockify path reaches layout.
 func TestFloatedInlineBlockifies(t *testing.T) {
 	// This exercises build.go + layout together; if a doctaculous-level helper is
 	// heavier than needed, assert via box generation directly:
