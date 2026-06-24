@@ -60,7 +60,7 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	//    box, so the clamp leaves the float-narrowing intact.
 	penY := contentTopY
 	rest := glyphs
-	lineHGuess := e.lineHeightGuess(b)             // representative band height (see Task 7 Step 4)
+	lineHGuess := e.lineHeightGuess(b)             // representative band height for the float-band queries
 	cbLeft, cbRight := contentX, contentX+contentW // this box's own content box (clamp bounds)
 	for len(rest) > 0 {
 		bandY := bandOriginY + (penY - contentTopY) // this line's Y in the BFC-root frame
@@ -104,6 +104,9 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			g := &line.Glyphs[gi]
 			switch {
 			case g.Atomic != nil:
+				// Place the atom: its border-box left = x + the atom's left margin (the
+				// margin is part of the advance); its top = baselineY - BaselinePt, i.e.
+				// bottom-aligned so the atom's baseline rests on the line baseline.
 				if frag, ok := g.Atomic.Ref.(*Fragment); ok && frag != nil {
 					translateFragment(frag, (x+g.Atomic.MarginLeftPt)-frag.X, (baselineY-g.Atomic.BaselinePt)-frag.Y)
 				}
