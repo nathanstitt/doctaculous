@@ -416,11 +416,14 @@ func TestPlaceStacksThenWraps(t *testing.T) {
 	if !approx(f2.x, 80) || !approx(f2.y, 0) {
 		t.Fatalf("f2 = %+v, want x=80 y=0", f2)
 	}
-	// f3 width 80 cannot fit at y=0 (remaining 200-160=40 < 80): wraps below f1
-	// (the shallower float, bottom y=40), back to the left edge x=0.
+	// f3 width 80 cannot fit at y=0 (remaining 200-160=40 < 80). It drops past f1's
+	// bottom (y=40), but f2 (height 60) still overlaps the band at y=40, so the
+	// remaining width is still only 40 — it must drop again past f2's bottom (y=60),
+	// where both floats have cleared and the full 200 is available. So f3 lands at
+	// x=0, y=60 (a TWO-step wrap, because the two floats have different heights).
 	f3 := c.place(cssbox.FloatLeft, 80, 30, 0)
-	if !approx(f3.x, 0) || !approx(f3.y, 40) {
-		t.Fatalf("f3 = %+v, want x=0 y=40", f3)
+	if !approx(f3.x, 0) || !approx(f3.y, 60) {
+		t.Fatalf("f3 = %+v, want x=0 y=60", f3)
 	}
 }
 
