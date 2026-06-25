@@ -206,13 +206,7 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			}})
 			dst = f.appendBand(dst, ord.negatives, true, true) // CB-owned negatives, clipped
 			dst = f.appendChildDecorations(dst)
-			for _, fl := range f.Floats {
-				start := len(dst)
-				dst = fl.AppendItems(dst)
-				if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
-					translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
-				}
-			}
+			dst = f.appendFloatLayer(dst)
 			dst = f.appendContent(dst)
 			dst = f.appendBand(dst, ord.middle, true, true)    // CB-owned middle, clipped
 			dst = f.appendBand(dst, ord.positives, true, true) // CB-owned positives, clipped
@@ -225,13 +219,7 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 		// 3-phase in-flow sequence, then middle, then positives.
 		dst = f.appendBand(dst, ord.negatives, false, false)
 		dst = f.appendDecorations(dst)
-		for _, fl := range f.Floats {
-			start := len(dst)
-			dst = fl.AppendItems(dst)
-			if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
-				translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
-			}
-		}
+		dst = f.appendFloatLayer(dst)
 		dst = f.appendContent(dst)
 		dst = f.appendBand(dst, ord.middle, false, false)
 		dst = f.appendBand(dst, ord.positives, false, false)
@@ -245,6 +233,23 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			continue
 		}
 		dst = c.AppendItems(dst)
+	}
+	return dst
+}
+
+// appendFloatLayer emits the fragment's float layer (CSS 2.1 Appendix E: floats paint
+// after in-flow block decorations and before in-flow inline content). Each float in
+// f.Floats is flattened via its own AppendItems (a float establishes its own BFC), and
+// a relatively-positioned float's RelOffset is applied via translateItems over the
+// item range it just emitted. Shared by both the clipping and non-clipping branches of
+// AppendItems so the float-paint sequence is written once.
+func (f *Fragment) appendFloatLayer(dst []layout.Item) []layout.Item {
+	for _, fl := range f.Floats {
+		start := len(dst)
+		dst = fl.AppendItems(dst)
+		if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
+			translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
+		}
 	}
 	return dst
 }
