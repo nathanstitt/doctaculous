@@ -71,4 +71,11 @@ func TestFixupCaptionStaysDirectChild(t *testing.T) {
 	if tbl.Children[0].Display != cssbox.DisplayTableCaption {
 		t.Fatalf("caption not first child after fixup")
 	}
+	if len(tbl.Children) != 2 {
+		t.Fatalf("want [caption, anon-row-group], got %d children", len(tbl.Children))
+	}
+	rg := tbl.Children[1]
+	if rg.Kind != cssbox.BoxAnonTablePart || rg.Display != cssbox.DisplayTableRowGroup {
+		t.Errorf("bare row after caption should be wrapped in an anon row-group; got kind=%v display=%v", rg.Kind, rg.Display)
+	}
 }

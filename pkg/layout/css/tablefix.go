@@ -25,16 +25,19 @@ func anonPart(d cssbox.DisplayKind, kids []*cssbox.Box) *cssbox.Box {
 	return &cssbox.Box{Kind: cssbox.BoxAnonTablePart, Display: d, Formatting: fc, Children: kids}
 }
 
+// isWSText reports whether b is a text box that is entirely collapsible whitespace.
 func isWSText(b *cssbox.Box) bool {
 	return b.Kind == cssbox.BoxText && isAllWS(b.Text)
 }
 
+// isRowGroup reports whether d is one of the three row-group display kinds (body/header/footer).
 func isRowGroup(d cssbox.DisplayKind) bool {
 	return d == cssbox.DisplayTableRowGroup ||
 		d == cssbox.DisplayTableHeaderGroup ||
 		d == cssbox.DisplayTableFooterGroup
 }
 
+// isColumnPart reports whether d is a table-column or table-column-group.
 func isColumnPart(d cssbox.DisplayKind) bool {
 	return d == cssbox.DisplayTableColumn || d == cssbox.DisplayTableColumnGroup
 }
@@ -83,7 +86,7 @@ func fixupTable(tbl *cssbox.Box) {
 			out = append(out, c)
 		case c.Display == cssbox.DisplayTableRow:
 			flushMisc()
-			fixupRow(c)
+			wrapStrayInRow(c)
 			looseRows = append(looseRows, c)
 		case c.Display == cssbox.DisplayTableCell:
 			flushMisc()
@@ -115,7 +118,7 @@ func fixupRowGroup(rg *cssbox.Box) {
 			// drop
 		case c.Display == cssbox.DisplayTableRow:
 			flushMisc()
-			fixupRow(c)
+			wrapStrayInRow(c)
 			out = append(out, c)
 		case c.Display == cssbox.DisplayTableCell:
 			flushMisc()
@@ -126,12 +129,6 @@ func fixupRowGroup(rg *cssbox.Box) {
 	}
 	flushMisc()
 	rg.Children = out
-}
-
-// fixupRow repairs a row: cells stay; any non-cell content (stray text/blocks) is
-// wrapped in anonymous cells; whitespace dropped.
-func fixupRow(row *cssbox.Box) {
-	wrapStrayInRow(row)
 }
 
 // wrapStrayInRow replaces runs of non-cell children of a row with anonymous cells.
