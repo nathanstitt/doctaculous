@@ -317,7 +317,7 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	}
 
 	// A box that establishes its own BFC owns its floats' paint layer.
-	if establishesNewBFC(b) {
+	if newBFC {
 		frag.IsBFC = true
 		frag.Floats = in.bfcFloats
 	}
