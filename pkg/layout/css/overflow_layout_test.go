@@ -209,3 +209,48 @@ func TestScrollLogsDegradation(t *testing.T) {
 		t.Errorf("overflow:scroll did not log a degradation; logs=%v", logs)
 	}
 }
+
+// TestClipBracketsOwnFloatLayer: a clipping box that ALSO contains a float brackets its
+// own float layer (the float's items fall inside the box's ClipPush/ClipPop).
+func TestClipBracketsOwnFloatLayer(t *testing.T) {
+	eng := New(nil, nil, nil)
+	floated := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:           gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		Height:          gcss.Length{Value: 200, Unit: gcss.UnitPx},
+		BackgroundColor: color.RGBA{4, 4, 4, 255}})
+	floated.Float = cssbox.FloatLeft
+
+	clip := blockBox(gcss.ComputedStyle{Display: "block", Overflow: "hidden",
+		Height: gcss.Length{Value: 50, Unit: gcss.UnitPx}}, floated)
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, clip)
+
+	items := eng.layoutTree(context.Background(), root, 200).AppendItems(nil)
+	push, pop := clipBoundsReal(items)
+	bg := bgIndex(items, color.RGBA{4, 4, 4, 255})
+	if push < 0 || pop < 0 || push >= bg || bg >= pop {
+		t.Errorf("float bg at %d not inside the clip box's bracket [%d,%d]", bg, push, pop)
+	}
+}
+
+// TestPositionedClippingBoxStillClips: a box that is BOTH position:relative AND
+// overflow:hidden is a stacking context and a clipping box; its in-flow overflowing
+// child is still bracketed by a clip.
+func TestPositionedClippingBoxStillClips(t *testing.T) {
+	eng := New(nil, nil, nil)
+	tall := blockBox(gcss.ComputedStyle{Display: "block",
+		Height:          gcss.Length{Value: 200, Unit: gcss.UnitPx},
+		BackgroundColor: color.RGBA{6, 6, 6, 255}})
+
+	clipStyle := posStyle()
+	clipStyle.Overflow = "hidden"
+	clipStyle.Height = gcss.Length{Value: 50, Unit: gcss.UnitPx}
+	clip := posBox(clipStyle, cssbox.PosRelative, tall)
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, clip)
+	items := eng.layoutTree(context.Background(), root, 200).AppendItems(nil)
+	push, pop := clipBoundsReal(items)
+	bg := bgIndex(items, color.RGBA{6, 6, 6, 255})
+	if push < 0 || pop < 0 || push >= bg || bg >= pop {
+		t.Errorf("child bg at %d not inside the positioned+clip box's bracket [%d,%d]", bg, push, pop)
+	}
+}
