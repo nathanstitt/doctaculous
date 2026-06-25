@@ -552,3 +552,48 @@ func TestFloatedInlineBlockifies(t *testing.T) {
 		t.Fatalf("blockified floated inline not placed as a float (Floats=%d)", len(frag.Floats))
 	}
 }
+
+// TestOverflowEnclosesFloats: an overflow:hidden box whose ONLY children are floats
+// grows to enclose them (content height = the floats' bottom), instead of collapsing
+// to zero height.
+func TestOverflowEnclosesFloats(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	f1 := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 60, Unit: gcss.UnitPx}})
+	f1.Float = cssbox.FloatLeft
+	f2 := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 80, Unit: gcss.UnitPx}})
+	f2.Float = cssbox.FloatLeft
+
+	wrap := blockBox(gcss.ComputedStyle{Display: "block", Overflow: "hidden"}, f1, f2)
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, wrap)
+
+	frag := eng.layoutTree(context.Background(), root, 200)
+	if len(frag.Children) != 1 {
+		t.Fatalf("want 1 child (the wrapper), got %d", len(frag.Children))
+	}
+	wrapFrag := frag.Children[0]
+	if wrapFrag.H < 80-1e-6 || wrapFrag.H > 80+1e-6 {
+		t.Errorf("overflow:hidden wrapper H = %v, want 80 (encloses its floats)", wrapFrag.H)
+	}
+}
+
+// TestInlineBlockNoFloatsHeightUnchanged: the enclosure change must NOT alter a BFC
+// box that has no floats. An inline-block with a fixed-height in-flow child keeps its
+// content-derived height (the float enclosure is a no-op: maxBottom()==0).
+func TestInlineBlockNoFloatsHeightUnchanged(t *testing.T) {
+	eng := New(nil, nil, nil)
+	child := blockBox(gcss.ComputedStyle{Display: "block",
+		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
+	ib := blockBox(gcss.ComputedStyle{Display: "block"}, child)
+	ib.Display = cssbox.DisplayInlineBlock
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, ib)
+	frag := eng.layoutTree(context.Background(), root, 200)
+	ibFrag := frag.Children[0]
+	if ibFrag.H < 30-1e-6 || ibFrag.H > 30+1e-6 {
+		t.Errorf("inline-block (no floats) H = %v, want 30 (enclosure is a no-op)", ibFrag.H)
+	}
+}

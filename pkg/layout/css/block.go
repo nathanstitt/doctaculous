@@ -261,6 +261,15 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		contentH = 0
 	}
 
+	// Float-height enclosure (CSS 10.6.7): a box that establishes a BFC grows to enclose
+	// its floats — its content height includes the bottom of the lowest float in its own
+	// BFC. Guarded to an auto-height BFC: a fixed height is authoritative (and clips the
+	// floats with overflow:hidden), and a non-BFC box does not enclose floats. in.floatsBottom
+	// is 0 for a BFC box with no floats, so this is a no-op there.
+	if newBFC && heightAuto && in.floatsBottom > contentH {
+		contentH = in.floatsBottom
+	}
+
 	borderH := contentH + ed.pT + ed.pB + ed.bT + ed.bB
 
 	// Position: border-box top-left in page space.
@@ -350,6 +359,10 @@ type interior struct {
 	leadingMargin  float64     // first in-flow child's top margin (block flow only)
 	trailingMargin float64     // last in-flow child's bottom margin (block flow only)
 	bfcFloats      []*Fragment // floats placed in this box's OWN BFC (set only when b establishes one)
+	// floatsBottom is the bottom of the lowest float placed in this box's OWN BFC (set
+	// only when b establishes one), in the box's local content-top-0 frame. layoutBlock
+	// folds it into the content height so a BFC box encloses its floats (CSS 10.6.7).
+	floatsBottom float64
 	// pendingPositioned holds relative-positioned descendants laid out in this box's
 	// interior that have not yet found their stacking-context owner (bubbles up like
 	// bfcFloats, but for the positioned layer). layoutBlock consumes or re-bubbles it.
@@ -405,6 +418,7 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 	// to b's own fragment (the float paint layer for b's BFC).
 	if establishesNewBFC(b) {
 		in.bfcFloats = childFC.floats2frags()
+		in.floatsBottom = childFC.maxBottom()
 	}
 	return in
 }

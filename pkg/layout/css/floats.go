@@ -141,6 +141,20 @@ func (c *floatContext) clearY(clear string, y float64) float64 {
 	return out
 }
 
+// maxBottom returns the largest float bottom (f.y + f.h) over all placed floats in
+// this context, or 0 if there are none. A box that establishes a BFC uses it to grow
+// its content height to enclose its floats (CSS 10.6.7). The value is in the same
+// frame the context is queried in (the BFC-root-local frame).
+func (c *floatContext) maxBottom() float64 {
+	out := 0.0
+	for i := range c.floats {
+		if bottom := c.floats[i].y + c.floats[i].h; bottom > out {
+			out = bottom
+		}
+	}
+	return out
+}
+
 // floats2frags returns the fragments of the placed floats, in placement order, for
 // the BFC owner to attach to its fragment's Floats slice (the float paint layer).
 // nil-frag entries are skipped. This is also why floatBox carries frag: the geometry
