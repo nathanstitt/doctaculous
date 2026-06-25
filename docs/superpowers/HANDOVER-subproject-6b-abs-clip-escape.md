@@ -1,5 +1,36 @@
 # Handover — Sub-project 6b: the deferred clip-escape sub-cases (abs/fixed intervening-clip + positioned-clip-box relative)
 
+**Status: DONE** on branch `feat/html-zindex-6b` (off `feat/html-zindex`). Outcome differs from the plan
+below — read this banner before the rest, which is preserved for context.
+
+**What landed (and what didn't):**
+- **Sub-case B (positioned-clip-box relative escape) — FIXED.** A `position:relative` descendant of a
+  *positioned* `overflow:hidden` box is now clipped to it. The fix turned out *simpler* than scoped here: a
+  clipping positioned box CB-owns (clips) **every** relative descendant it consumes (`CBOwned: frag.Clips` in
+  the `block.go` consume branch), not just a "direct child" — because a relative descendant only reaches the
+  consume list if no positioned box sits between it and the box (any such box, a stacking context, consumes
+  it first), so the box IS its nearest positioned ancestor. This also covers a relative descendant separated
+  from the box by *static* intermediates (a case the "direct child" framing below would have missed).
+- **Float-internal clip chain — FIXED.** `translateRects` in `placeFloat` re-translates a float-captured
+  clip chain by the float's placement delta (was logged as approximate).
+- **Sub-case A (abs/fixed intervening-clip) — NOT A BUG; not implemented.** The premise below ("every
+  overflow≠visible ancestor between a box and its CB clips it") is **incorrect per CSS 2.1 §11.1.1**, which
+  excepts a descendant whose containing block is an *ancestor of* the clipping box. So 5c's "escape" was
+  **already the correct behavior**, not a deferral. There is no tree configuration where an "intervening clip
+  chain" is needed for an abs box: whenever an overflow box *does* clip an abs descendant, that descendant's
+  CB is the box or a descendant, so it already paints inside the box's own bracket. The clip-ancestor
+  threading this handover describes was therefore NOT built (it would have introduced a regression — it made
+  the pre-existing, spec-correct `TestClipAbsChildOutsideCBNotClipped` fail). Verified against the spec text,
+  MDN/CSS-Tricks, and the 5c design doc (which itself classifies this case as "the supported, correct
+  escape").
+
+Covered by `pkg/layout/css/clipescape_layout_test.go`, the `html-clip-relative-escape` golden, and the
+`positioned-clip-relative` WPT reftest. CLAUDE.md's Done/TODO were updated accordingly.
+
+---
+
+**[Original handover below — its sub-case-A premise is superseded by the banner above.]**
+
 **Status:** Not started. Sub-project **6 (full z-index stacking + the *relative* clip-escape)** is DONE on
 branch `feat/html-zindex` (**PR #9**, chained on `feat/html-overflow`).
 **Next action:** Same flow as #1–#6 — brainstorm → spec (`docs/superpowers/specs/`) → plan

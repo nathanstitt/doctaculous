@@ -290,16 +290,16 @@ what is done vs. pending.
   golden/reftest 5a had to drop); and **sibling-BFC float avoidance** — a BFC box laid out next to an outer
   float shifts/narrows its border box past the float band, or drops below it when the band is too narrow
   (CSS 9.5). Degrades gracefully: a **`position:relative` descendant of a *non-positioned* `overflow:hidden`
-  box is now clipped** to that box (the clip rect rides the descendant's bubble to the ancestor's positioned
-  layer as a `PositionedInfo.ClipChain`; see the full-z-index-stacking bullet) — but two narrower clip-escape
-  sub-cases remain deferred: an **`absolute`/`fixed` descendant** whose containing block lies *beyond* an
-  intervening `overflow:hidden` box still paints unclipped by that box (it needs clip-ancestor threading
-  through layout — deferred to a follow-up 6b), and a **`position:relative` descendant of a *positioned*
-  `overflow:hidden` box** paints unclipped in the escaped band (it lands on the box's own positioned layer
-  with `CBOwned=false`; pre-existing 5c behavior, still deferred). A clip chain captured **inside a float**
-  is not re-translated by `placeFloat` (rare; logged). `overflow-x`/`overflow-y` are not modeled (single
-  shorthand only). Non-overflow pages stay byte-identical; the shared inline core is **untouched**. See
-  `docs/superpowers/specs/2026-06-24-html-overflow-design.md`.
+  box is clipped** to that box (the clip rect rides the descendant's bubble to the ancestor's positioned
+  layer as a `PositionedInfo.ClipChain`; see the full-z-index-stacking bullet). The **`position:relative`
+  descendant of a *positioned* `overflow:hidden` box** is now clipped too (sub-project 6b — see the
+  full-z-index-stacking bullet), and the float-internal clip chain is re-translated. The **`absolute`/`fixed`
+  intervening-clip case is not a gap**: per CSS 2.1 §11.1.1 an overflow box does NOT clip an abs/fixed
+  descendant whose containing block is an ancestor of that box (verified against the spec in 6b — the prior
+  "escape" is the correct behavior, not a deferral); when an overflow box *does* clip an abs descendant, that
+  descendant's CB is the box or a descendant, so it already paints inside the box's own bracket.
+  `overflow-x`/`overflow-y` are not modeled (single shorthand only). Non-overflow pages stay byte-identical;
+  the shared inline core is **untouched**. See `docs/superpowers/specs/2026-06-24-html-overflow-design.md`.
 - **HTML rendering — full z-index stacking** (`pkg/layout/css/fragment.go` sort/bands, `block.go`
   clip-chain bubble; covered by `zindex_layout_test.go` item-stream order tests, the `html-zindex-*`
   goldens, and the `zindex-negative`/`zindex-order`/`relative-clip-escape` WPT reftests): the positioned
@@ -312,9 +312,18 @@ what is done vs. pending.
   though it paints in an ancestor's positioned layer (the clip rect rides the descendant's bubble as a
   `PositionedInfo.ClipChain`, bracketing its item range in `appendBand`). The `Fragment` now retains its
   source `cssbox.Box` (the z-index source, read — never mutated — at flatten time; motivated by future
-  SPA-snapshot re-flow). Deferred to **6b**: the *absolute/fixed* intervening-clip sub-case (needs new
-  clip-ancestor threading through layout) and the *positioned-clip-box* relative-escape sub-case (paints in
-  the escaped band); a float-internal clip chain is not re-translated (logged). See
+  SPA-snapshot re-flow). **Sub-project 6b** closed the two remaining relative clip-escape gaps and corrected
+  the third: (a) a `position:relative` descendant of a ***positioned*** `overflow:hidden` box is now clipped
+  to it — a clipping positioned box CB-owns (clips) **every** relative descendant it consumes, since reaching
+  its consume list means no positioned box sits between them, so the box is the descendant's nearest
+  positioned ancestor and its in-flow painting bubbles up to the box's layer (`CBOwned: frag.Clips` in the
+  `block.go` consume branch; this also covers a relative descendant separated from the box by *static*
+  intermediates); (b) a clip chain captured **inside a float** is now re-translated by the float's placement
+  delta (`translateRects` in `placeFloat`), so its bracket lands at the float's final position; and (c) the
+  *absolute/fixed* intervening-clip case was found to be **not a gap** — CSS 2.1 §11.1.1 does not clip an
+  abs/fixed descendant whose CB is an ancestor of the overflow box, so 5c's "escape" was already correct (no
+  clip-ancestor threading was needed). Covered by `clipescape_layout_test.go`, the `html-clip-relative-escape`
+  golden, and the `positioned-clip-relative` WPT reftest. See
   `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
@@ -347,14 +356,9 @@ that skip into real output.
    fixes bold/italic fidelity).
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**, and
-   **positioning** (relative/absolute/fixed) are done — see the Done section). Roughly in order, each a
-   parse/layout slice with its own fixtures + golden/WPT tests: **the abs/fixed intervening-clip escape**
-   (sub-project 6b — full z-index stacking and the *relative* clip-escape landed; the remaining gap is an
-   `absolute`/`fixed` descendant whose containing block is an ancestor *beyond* an intervening
-   `overflow:hidden` box, which still paints unclipped by that box — the `ClipChain` flatten machinery
-   exists, but capturing the chain for an abs box needs clip-ancestor threading through layout that the
-   relative path did not; the *positioned-clip-box* relative-escape sub-case is grouped here too; see
-   `docs/superpowers/HANDOVER-subproject-6b-abs-clip-escape.md`); **tables**; **web fonts**
+   **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, and the
+   **clip-escape sub-cases** (sub-project 6b) are done — see the Done section). Roughly in order, each a
+   parse/layout slice with its own fixtures + golden/WPT tests: **tables**; **web fonts**
    (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
    flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
