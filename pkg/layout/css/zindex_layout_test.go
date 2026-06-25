@@ -270,6 +270,13 @@ func TestZIndexAllAutoByteIdentical(t *testing.T) {
 	for i := range autoItems {
 		if autoItems[i].Kind != zeroItems[i].Kind {
 			t.Errorf("item %d kind differs: auto=%v zero=%v", i, autoItems[i].Kind, zeroItems[i].Kind)
+			continue
+		}
+		// The three boxes carry distinct background colors; comparing the per-index color
+		// proves the stable sort kept document order (a reorder would swap colors at an
+		// index), so auto and explicit-0 both land in the middle band in document order.
+		if autoItems[i].Kind == layout.BackgroundKind && autoItems[i].Rule.Color != zeroItems[i].Rule.Color {
+			t.Errorf("item %d background color differs (reorder): auto=%v zero=%v", i, autoItems[i].Rule.Color, zeroItems[i].Rule.Color)
 		}
 	}
 }
