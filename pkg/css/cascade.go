@@ -70,6 +70,15 @@ type ComputedStyle struct {
 	// "fill" (default) | "contain" | "cover" | "none" | "scale-down".
 	ObjectFit string
 
+	// Overflow is the CSS overflow shorthand: "visible" (default) | "hidden" |
+	// "scroll" | "auto". Not inherited. overflow≠visible establishes a block
+	// formatting context and clips the box's content to its padding box. In this
+	// no-scrollbars single-tall-page model, scroll/auto clip exactly like hidden
+	// (there is no scroll position or scrollbar chrome). overflow-x/overflow-y are
+	// not modeled (a single shorthand value suffices since every clip keyword clips
+	// identically here).
+	Overflow string
+
 	// Float is the CSS float value: "none" (default) | "left" | "right". Not
 	// inherited. The box generator maps it to cssbox.FloatKind.
 	Float string
@@ -272,10 +281,11 @@ func initialStyle() ComputedStyle {
 		MinHeight:   Length{Unit: UnitPx},   // CSS initial min-height is 0
 		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
 		BoxSizing:   "content-box",
-		ObjectFit:   "fill",   // CSS initial object-fit
-		Float:       "none",   // CSS initial float
-		Clear:       "none",   // CSS initial clear
-		Position:    "static", // CSS initial position
+		ObjectFit:   "fill",    // CSS initial object-fit
+		Overflow:    "visible", // CSS initial overflow
+		Float:       "none",    // CSS initial float
+		Clear:       "none",    // CSS initial clear
+		Position:    "static",  // CSS initial position
 		Top:         Length{Unit: UnitAuto},
 		Right:       Length{Unit: UnitAuto},
 		Bottom:      Length{Unit: UnitAuto},
@@ -370,6 +380,11 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "fill", "contain", "cover", "none", "scale-down":
 			cs.ObjectFit = d.Value
+		}
+	case "overflow":
+		switch d.Value {
+		case "visible", "hidden", "scroll", "auto":
+			cs.Overflow = d.Value
 		}
 	case "float":
 		switch d.Value {

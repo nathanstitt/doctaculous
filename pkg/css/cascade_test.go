@@ -556,3 +556,39 @@ func TestPositionNotInherited(t *testing.T) {
 		t.Errorf("z-index inherited: ZIndexAuto=%v, want true (auto)", child.ZIndexAuto)
 	}
 }
+
+// TestApplyOverflow: each valid overflow keyword is accepted; an invalid one is
+// dropped (the prior value is preserved).
+func TestApplyOverflow(t *testing.T) {
+	for _, kw := range []string{"visible", "hidden", "scroll", "auto"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "overflow", Value: kw})
+		if cs.Overflow != kw {
+			t.Errorf("overflow %q not applied, got %q", kw, cs.Overflow)
+		}
+	}
+	cs := initialStyle()
+	cs.Overflow = "hidden"
+	applyDeclaration(&cs, Declaration{Property: "overflow", Value: "clip"}) // unsupported
+	if cs.Overflow != "hidden" {
+		t.Errorf("overflow after invalid keyword = %q, want hidden preserved", cs.Overflow)
+	}
+}
+
+// TestOverflowInitialVisible: the initial value is "visible".
+func TestOverflowInitialVisible(t *testing.T) {
+	if cs := initialStyle(); cs.Overflow != "visible" {
+		t.Errorf("initial overflow = %q, want visible", cs.Overflow)
+	}
+}
+
+// TestOverflowNotInherited: overflow is not inherited (a child of an overflow:hidden
+// parent computes "visible").
+func TestOverflowNotInherited(t *testing.T) {
+	parent := initialStyle()
+	parent.Overflow = "hidden"
+	child := inheritFrom(parent)
+	if child.Overflow != "visible" {
+		t.Errorf("child overflow = %q, want visible (not inherited)", child.Overflow)
+	}
+}
