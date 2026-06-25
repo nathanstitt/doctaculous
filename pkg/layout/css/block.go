@@ -502,11 +502,45 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			}
 		}
 
+		// Sibling-BFC float avoidance (CSS 9.5): a child that establishes its own BFC
+		// must not overlap an outer float in the PARENT's BFC — its whole border box
+		// sits beside the float (unlike a normal block, whose border box slides under
+		// the float while only its inline content narrows). Narrow + shift the child to
+		// the float band at its Y; if it cannot fit, drop it below the float band.
+		childOriginX := contentX
+		childWidth := contentW
+		if establishesNewBFC(child) {
+			h := bfcChildBandHeight(child, contentW)
+			for {
+				left := fc.leftEdge(bandOriginY+startY, h)
+				right := fc.rightEdge(bandOriginY+startY, h)
+				avail := right - left
+				if left <= contentX+1e-6 && right >= contentX+contentW-1e-6 {
+					break // no float intrudes at this band: full width, no shift
+				}
+				if avail >= childWidthFor(child, contentW)+1e-6 || avail >= contentW-1e-6 {
+					childOriginX = left
+					childWidth = right - left
+					break // fits beside the float
+				}
+				next := fc.nextDropY(bandOriginY+startY, h) - bandOriginY
+				if next <= startY {
+					// No lower opportunity: lay out beside at the narrowed band (overflow
+					// allowed) rather than spinning.
+					childOriginX = left
+					childWidth = right - left
+					e.logf("css layout: overflow≠visible box cannot fit beside a float; placed at the narrowed band")
+					break
+				}
+				startY = next // drop below the float and retry at full width there
+			}
+		}
+
 		// Lay the child out at a provisional margin edge of 0; its border top then
 		// sits at res.marginTop, which we now know and use to place it exactly. Pass
 		// bandOriginY+startY as the child's band origin so a nested in-flow block
 		// knows its position in the BFC-root frame (its IFC queries floats there).
-		res := e.layoutBlock(ctx, child, contentW, contentX, 0, bandOriginY+startY, fc, posCtx, posCB)
+		res := e.layoutBlock(ctx, child, childWidth, childOriginX, 0, bandOriginY+startY, fc, posCtx, posCB)
 
 		var borderTop float64 // desired local Y of this child's border-box top
 		if first {
@@ -877,6 +911,31 @@ func resolveContentWidth(b *cssbox.Box, cbWidth float64, ed edges) float64 {
 		minW -= insets
 	}
 	return clampMaxMin(contentW, minW, maxW, hasMax)
+}
+
+// bfcChildBandHeight estimates the vertical extent of a BFC child for the float-band
+// query in sibling avoidance, before the child is laid out. It uses the child's
+// resolved fixed height when it has one, else a small nonzero probe (1pt) so the band
+// query at least samples the child's top row (the band is coarse; the height feedback
+// is not iterated — consistent with the per-line line-height approximation in the IFC).
+func bfcChildBandHeight(b *cssbox.Box, cbWidth float64) float64 {
+	if !isHeightAuto(b) {
+		ed := usedEdges(b, cbWidth)
+		if h := resolveFixedHeight(b, cbWidth, ed); h > 0 {
+			return h
+		}
+	}
+	return 1
+}
+
+// childWidthFor returns a BFC child's resolved border-box width for the
+// fits-beside-the-float test in sibling avoidance: the width its border box wants when
+// laid out at the full containing width (auto fills, fixed is used). It mirrors
+// resolveContentWidth + the border/padding insets so the fit test compares like with
+// like.
+func childWidthFor(b *cssbox.Box, cbWidth float64) float64 {
+	ed := usedEdges(b, cbWidth)
+	return resolveContentWidth(b, cbWidth, ed) + ed.pL + ed.pR + ed.bL + ed.bR
 }
 
 // clampMaxMin clamps v to at most maxV (only when hasMax), then to at least minV,
