@@ -56,6 +56,9 @@ var wptReftests = []struct {
 	{"relative-offset", 240, "a relative offset == the same box placed at the shifted position with margins", nil},
 	{"overflow-hidden", 200, "an overflow:hidden box clips an oversized child to its box (== a box authored to fit)", nil},
 	{"float-row", 200, "an overflow:hidden wrapper encloses its floats (== an explicit-height row of the same swatches)", nil},
+	{"zindex-negative", 200, "a negative z-index box paints behind in-flow content (== the boxes authored in paint order)", nil},
+	{"zindex-order", 200, "z-index inverts document paint order (== the boxes authored in z-order)", nil},
+	{"relative-clip-escape", 200, "a relative child of a non-positioned overflow:hidden box is clipped to it (== the visible portion authored to fit)", nil},
 }
 
 // swatchColor is the solid color shared by the img-vs-div reftest's image and the
