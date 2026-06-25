@@ -49,7 +49,8 @@ func Build(ctx context.Context, doc *html.Document, loader resource.ResourceLoad
 		// empty document.
 		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, nil
 	}
-	normalize(root) // anonymous-box fixups + whitespace handling (anon.go)
+	normalize(root)   // anonymous-box fixups + whitespace handling (anon.go)
+	fixupTables(root) // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
 	return root, nil
 }
 
