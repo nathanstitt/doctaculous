@@ -11,6 +11,7 @@ func TestBoxKindPredicates(t *testing.T) {
 		{BoxAnonBlock, true, false},
 		{BoxInline, false, true},
 		{BoxAnonInline, false, true},
+		{BoxAnonTablePart, true, false},
 		{BoxText, false, true},
 		{BoxReplaced, false, true}, // a bare <img> is inline-level by default
 	}
@@ -47,16 +48,6 @@ func TestTableDisplayKinds(t *testing.T) {
 			t.Fatalf("duplicate DisplayKind value %d", k)
 		}
 		seen[k] = true
-	}
-}
-
-func TestAnonTablePartIsBlockLevelAndAnonymous(t *testing.T) {
-	b := &Box{Kind: BoxAnonTablePart}
-	if !b.Kind.IsBlockLevel() {
-		t.Errorf("BoxAnonTablePart should be block-level for surrounding flow")
-	}
-	if b.Kind.IsInlineLevel() {
-		t.Errorf("BoxAnonTablePart should not be inline-level")
 	}
 }
 
