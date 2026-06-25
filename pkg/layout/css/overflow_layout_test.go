@@ -42,7 +42,7 @@ func TestClipFragmentFlaggedWithPaddingBox(t *testing.T) {
 }
 
 // TestClipAbsChildCBOwnedFlagged: an absolute child of an overflow:hidden positioned
-// box is collected on that box's Positioned with PositionedClip=true (the box IS its
+// box is collected on that box's Positioned with PositionedInfo[0].CBOwned=true (the box IS its
 // CB), so it will be clipped.
 func TestClipAbsChildCBOwnedFlagged(t *testing.T) {
 	eng := New(nil, nil, nil)
@@ -68,8 +68,8 @@ func TestClipAbsChildCBOwnedFlagged(t *testing.T) {
 	if len(cont.Positioned) != 1 {
 		t.Fatalf("container Positioned len = %d, want 1", len(cont.Positioned))
 	}
-	if len(cont.PositionedClip) != 1 || !cont.PositionedClip[0] {
-		t.Errorf("PositionedClip = %v, want [true] (abs child's CB is the container)", cont.PositionedClip)
+	if len(cont.PositionedInfo) != 1 || !cont.PositionedInfo[0].CBOwned {
+		t.Errorf("PositionedInfo = %v, want [{CBOwned:true}] (abs child's CB is the container)", cont.PositionedInfo)
 	}
 }
 

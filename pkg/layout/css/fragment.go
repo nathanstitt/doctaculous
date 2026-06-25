@@ -91,15 +91,32 @@ type Fragment struct {
 	// ClipRect is the clip rectangle when Clips is true: the padding box (the border
 	// box deflated by the border widths), in page space. Zero when !Clips.
 	ClipRect rect
-	// PositionedClip parallels Positioned: PositionedClip[i] reports whether
-	// Positioned[i]'s containing block is THIS fragment, so a clipping fragment wraps
-	// that entry inside its clip (CSS clips a positioned descendant only when the box
-	// is also its containing block). An entry that merely bubbled through this fragment
-	// (its CB is an ancestor) has PositionedClip[i]=false and paints OUTSIDE the
-	// bracket. len(PositionedClip) == len(Positioned) when set; a nil slice means "no
-	// entry is CB-owned" (read defensively in the positioned loop). Only consulted on a
-	// clipping fragment.
-	PositionedClip []bool
+	// PositionedInfo parallels Positioned: per-entry clip metadata telling the stacking
+	// pass how to clip each positioned descendant painted in THIS holder's positioned
+	// layer. len(PositionedInfo) == len(Positioned) when set; a nil/short slice reads as
+	// the zero value (CBOwned=false, no clip chain) — the safe default, consulted only on
+	// a clipping fragment.
+	PositionedInfo []PositionedInfo
+}
+
+// PositionedInfo is one entry of a Fragment's PositionedInfo slice (parallel to
+// Positioned): how to clip the matching positioned descendant when it paints in this
+// holder's positioned layer.
+type PositionedInfo struct {
+	// CBOwned reports that Positioned[i]'s containing block IS this holder fragment.
+	// A clipping holder paints a CB-owned entry INSIDE its own clip bracket; a
+	// non-CB-owned (bubbled-through) entry paints after ClipPop, outside this holder's
+	// own clip.
+	CBOwned bool
+	// ClipChain holds the padding-box rects of every overflow≠visible box the descendant
+	// passed THROUGH between itself and this holder, outermost-first. Empty for the
+	// common case. When non-empty, the positioned phase brackets THIS entry's emitted
+	// item range in a nested ClipPush(rect)…ClipPop for each rect — so a positioned
+	// descendant of a non-positioned overflow:hidden box is cut at that box's padding box
+	// even though it paints in an ancestor's layer (CSS: every overflow≠visible ancestor
+	// between the box and its CB clips it). The holder's OWN clip (when CBOwned) is
+	// applied by the bracket, NOT by this chain.
+	ClipChain []rect
 }
 
 // ImageContent is a decoded replaced-element image carried on a Fragment. CX,CY,
@@ -234,15 +251,15 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 //   - f.Clips == false: the whole layer is emitted in one call; onlyCBOwned is ignored.
 //     This is the non-clipping path and is byte-identical to the prior single loop.
 //   - f.Clips == true: the clipping path calls this TWICE — once with onlyCBOwned=true
-//     (inside the clip bracket: entries whose containing block IS f, PositionedClip[i]
+//     (inside the clip bracket: entries whose containing block IS f, PositionedInfo[i].CBOwned
 //     true) and once with onlyCBOwned=false (after ClipPop: the escaped entries, whose
 //     CB is an ancestor). So CB-owned descendants are clipped and escaped ones are not.
 //
-// A missing/short PositionedClip entry counts as not-CB-owned (false), the safe default.
+// A missing/short PositionedInfo entry counts as not-CB-owned (false), the safe default.
 func (f *Fragment) appendPositioned(dst []layout.Item, onlyCBOwned bool) []layout.Item {
 	for i, pf := range f.Positioned {
 		if f.Clips {
-			owned := i < len(f.PositionedClip) && f.PositionedClip[i]
+			owned := i < len(f.PositionedInfo) && f.PositionedInfo[i].CBOwned
 			if owned != onlyCBOwned {
 				continue
 			}

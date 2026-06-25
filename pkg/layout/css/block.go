@@ -90,7 +90,7 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 		// The root is the outermost stacking context: consume any relative-positioned
 		// descendants that bubbled all the way up without a closer positioned ancestor.
 		for range res.pendingPositioned {
-			res.frag.PositionedClip = append(res.frag.PositionedClip, false)
+			res.frag.PositionedInfo = append(res.frag.PositionedInfo, PositionedInfo{CBOwned: false})
 		}
 		res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 	}
@@ -332,7 +332,7 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		frag.IsStackingContext = true
 		frag.Box = b
 		for range in.pendingPositioned {
-			frag.PositionedClip = append(frag.PositionedClip, false)
+			frag.PositionedInfo = append(frag.PositionedInfo, PositionedInfo{CBOwned: false})
 		}
 		frag.Positioned = append(frag.Positioned, in.pendingPositioned...)
 		bubble = nil
@@ -635,7 +635,7 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	// also already moved by translateFragment. (Abs/fixed descendants are deferred to
 	// pass 2 and are not present on the fragment here.)
 	for range res.pendingPositioned {
-		res.frag.PositionedClip = append(res.frag.PositionedClip, false)
+		res.frag.PositionedInfo = append(res.frag.PositionedInfo, PositionedInfo{CBOwned: false})
 	}
 	res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 
@@ -736,7 +736,8 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 			owner = d.cb.frag
 		}
 		if owner != nil {
-			owner.PositionedClip = append(owner.PositionedClip, !d.cb.isPage && d.cb.frag != nil && owner == d.cb.frag)
+			cbOwned := !d.cb.isPage && d.cb.frag != nil && owner == d.cb.frag
+			owner.PositionedInfo = append(owner.PositionedInfo, PositionedInfo{CBOwned: cbOwned})
 			owner.Positioned = append(owner.Positioned, frag)
 		}
 	}

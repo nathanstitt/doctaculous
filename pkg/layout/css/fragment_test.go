@@ -296,8 +296,8 @@ func TestAppendItemsNonClippingByteIdentical(t *testing.T) {
 }
 
 // TestAppendItemsClipWrapsCBOwnedPositioned: an abs-pos descendant whose CB IS the
-// clipping box (PositionedClip[i]=true) paints INSIDE the bracket; one whose CB is
-// outside (PositionedClip[i]=false) paints OUTSIDE (after ClipPop).
+// clipping box (PositionedInfo[i].CBOwned=true) paints INSIDE the bracket; one whose CB is
+// outside (PositionedInfo[i].CBOwned=false) paints OUTSIDE (after ClipPop).
 func TestAppendItemsClipWrapsCBOwnedPositioned(t *testing.T) {
 	owned := &Fragment{X: 0, Y: 0, W: 10, H: 10, Background: color.RGBA{7, 7, 7, 255}, IsPositioned: true, IsStackingContext: true}
 	escaped := &Fragment{X: 0, Y: 0, W: 10, H: 10, Background: color.RGBA{8, 8, 8, 255}, IsPositioned: true, IsStackingContext: true}
@@ -305,7 +305,7 @@ func TestAppendItemsClipWrapsCBOwnedPositioned(t *testing.T) {
 		X: 0, Y: 0, W: 100, H: 50, IsBFC: true, IsStackingContext: true, Clips: true,
 		ClipRect:       rect{x: 0, y: 0, w: 100, h: 50},
 		Positioned:     []*Fragment{owned, escaped},
-		PositionedClip: []bool{true, false},
+		PositionedInfo: []PositionedInfo{{CBOwned: true}, {CBOwned: false}},
 	}
 	items := clip.AppendItems(nil)
 	idx := map[string]int{}
