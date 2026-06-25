@@ -484,3 +484,47 @@ graceful behavior.
   enclosure height math), and **delete the throwaways** (confirm `git status` clean).
 - **Propagate review fixes back into this spec/the plan**, and **update CLAUDE.md's Done/TODO** when the
   PR lands (move overflow clipping + the two float interactions out of the §6 TODO into Done).
+
+## Review fixes folded in
+
+The spec self-review and the per-task two-stage reviews (spec + code-quality) during implementation
+surfaced these, all folded into the shipped slice:
+
+1. **The relative-descendant-escapes-a-non-positioned-clip gap** — found during the spec self-review (not
+   implementation): a `position:relative`/positioned descendant of a *non-positioned* `overflow:hidden`
+   box bubbles past the clip to a higher positioned layer and paints unclipped, because a non-positioned
+   clipping box is a BFC but not a stacking context. Browsers clip it. Scoped **out** and documented as a
+   deferral (grouped with the full-z-index slice, whose machinery the fix needs); the common in-flow
+   overflow case and abs-pos-with-CB-the-clipping-box are clipped correctly. See "The clip in the stacking
+   pass" and "Deferred".
+
+2. **The abs-pos clip-escape rule was verified adversarially, end-to-end** — the Task 4 spec reviewer
+   built a throwaway fragment tree (CB-owned + escaped positioned descendants) and confirmed the escaped
+   one paints after `ClipPop`; the Task 6 reviewer went further, temporarily inverting the production CB
+   rule to prove `TestClipAbsChildOutsideCBNotClipped` FAILS when an escaped child is wrongly clipped, then
+   reverting. The rule is load-bearing and is now covered both by hand-built-fragment unit tests (Task 4)
+   and full-layout tests (Task 6).
+
+3. **The `PositionedClip` parallel-slice invariant** — the Task 4 code reviewer flagged that the parallel
+   `PositionedClip`/`Positioned` slices must stay the same length at *every* append site or a CB-owned
+   entry could under-clip. The Task 5 review then verified, with an exhaustive grep, that all four
+   `Positioned` append sites (`layoutTree`, `layoutBlock` consume, `placeFloat`, `resolveAbsolute`) have an
+   adjacent matching `PositionedClip` append and that no other code path mutates either slice.
+
+4. **The sibling-BFC placement loop was proven spin-free** — the Task 8 reviewer traced `nextDropY`
+   semantics (returns a float bottom strictly greater than the query Y, else the query Y unchanged) to
+   confirm `startY` strictly increases on the only continuing branch, bounded by the finite set of float
+   bottoms, and ran a pathological 5000px-child throwaway that terminated immediately.
+
+5. **A QF1001 (De Morgan) lint slip in a test** — the Task 6 test assertions used the plan's `if \!(a && b)`
+   form, which golangci-lint v2 flags (QF1001). It was caught during a later task's lint run and rewritten
+   to the equivalent De Morgan form (`if a >= b || ...`), preserving the assertions exactly. Lesson: write
+   test assertions in De-Morgan'd form in the plan, and run `golangci-lint` (not just `gofmt`) per task —
+   the final verification (Task 14) confirmed `golangci-lint run` reports 0 issues across all changed
+   packages.
+
+No review changed a load-bearing design decision; the architecture shipped as designed. Every existing
+golden and reftest stayed byte-identical (verified by running the goldens without `-update`), and the two
+new goldens were eyeballed in review (the `overflow-hidden` golden visibly cuts the oversized child at the
+padding-box edge with the border at full size; the restored `float-row` golden shows the `overflow:hidden`
+wrapper enclosing its three floated swatches).
