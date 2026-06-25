@@ -33,3 +33,37 @@ func TestLeafBoxesHaveNoChildren(t *testing.T) {
 		}
 	}
 }
+
+func TestTableDisplayKinds(t *testing.T) {
+	// The new table-part display kinds must be distinct values.
+	kinds := []DisplayKind{
+		DisplayTable, DisplayTableRowGroup, DisplayTableHeaderGroup,
+		DisplayTableFooterGroup, DisplayTableRow, DisplayTableColumn,
+		DisplayTableColumnGroup, DisplayTableCaption, DisplayTableCell,
+	}
+	seen := map[DisplayKind]bool{}
+	for _, k := range kinds {
+		if seen[k] {
+			t.Fatalf("duplicate DisplayKind value %d", k)
+		}
+		seen[k] = true
+	}
+}
+
+func TestAnonTablePartIsBlockLevelAndAnonymous(t *testing.T) {
+	b := &Box{Kind: BoxAnonTablePart}
+	if !b.Kind.IsBlockLevel() {
+		t.Errorf("BoxAnonTablePart should be block-level for surrounding flow")
+	}
+	if b.Kind.IsInlineLevel() {
+		t.Errorf("BoxAnonTablePart should not be inline-level")
+	}
+}
+
+func TestSpanFieldsDefaultZero(t *testing.T) {
+	// A non-table box never sets spans; the grid builder reads zero as 1.
+	b := &Box{Kind: BoxBlock}
+	if b.ColSpan != 0 || b.RowSpan != 0 {
+		t.Errorf("spans default to zero; got col=%d row=%d", b.ColSpan, b.RowSpan)
+	}
+}

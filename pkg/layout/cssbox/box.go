@@ -25,6 +25,11 @@ const (
 	// BoxAnonInline is an anonymous inline box produced when an inline box is
 	// split around a block-level descendant (block-in-inline).
 	BoxAnonInline
+	// BoxAnonTablePart is an anonymous table / row-group / row / cell wrapper
+	// inserted by the anonymous-table-box fixup (CSS 17.2.1). Like BoxAnonBlock/
+	// BoxAnonInline it carries a zero-value ComputedStyle; its Display/Formatting
+	// say which table part it stands in for. isAnonymous() treats it as anonymous.
+	BoxAnonTablePart
 	// BoxReplaced is a replaced element (e.g. <img>): a leaf sized by intrinsics
 	// in a later sub-project.
 	BoxReplaced
@@ -35,7 +40,7 @@ const (
 // IsBlockLevel reports whether the kind participates in a block formatting
 // context as a block-level box.
 func (k BoxKind) IsBlockLevel() bool {
-	return k == BoxBlock || k == BoxAnonBlock
+	return k == BoxBlock || k == BoxAnonBlock || k == BoxAnonTablePart
 }
 
 // IsInlineLevel reports whether the kind participates in an inline formatting
@@ -55,7 +60,13 @@ const (
 	DisplayInlineBlock
 	DisplayListItem
 	DisplayTable
+	DisplayTableRowGroup
+	DisplayTableHeaderGroup
+	DisplayTableFooterGroup
 	DisplayTableRow
+	DisplayTableColumn
+	DisplayTableColumnGroup
+	DisplayTableCaption
 	DisplayTableCell
 	DisplayFlex
 	DisplayGrid
@@ -126,4 +137,12 @@ type Box struct {
 	Formatting FormattingContext
 	Float      FloatKind
 	Position   PositionKind
+
+	// ColSpan / RowSpan are the HTML colspan/rowspan presentational attributes,
+	// read in pkg/html (like <img width/height>), honored only for a
+	// DisplayTableCell box; <col span> reuses ColSpan on a DisplayTableColumn box.
+	// Zero means "absent" and reads as 1 in the grid builder, so non-table boxes
+	// (which never set these) are unaffected.
+	ColSpan int
+	RowSpan int
 }
