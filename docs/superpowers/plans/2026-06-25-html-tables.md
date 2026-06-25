@@ -1496,6 +1496,8 @@ git commit -m "css/layout: table grid construction (visual-order rows, occupancy
 
 This task makes a table actually render: solve fixed-layout column widths, lay each cell out, size rows to the tallest cell, position everything, and return the `interior`. Wire it into `layoutInterior`. Auto layout, spanning width/height, vertical-align, captions, and collapse come in later tasks (use top-align + equal/leftover split + a single-cell-per-slot assumption refined later).
 
+> **GRID-FIELD NOTE (important — the plan changed during Task 6):** Task 6 committed the grid structs WITHOUT the layout fields that were unused at the time (golangci-lint's `unused` linter is enforced and `//nolint` is forbidden). So `pkg/layout/css/table.go` currently has `gridRow{box, cells}`, `gridCol{hasWidth, width, pct}`, `gridCell{box, row, col, rowSpan, colSpan}` — and NO `height`/`y`/`frag`/`min`/`max`/`x`. THIS task uses several of them, so ADD them back to the structs as part of this task: add `height float64` and `y float64` to `gridRow`; add `x float64` to `gridCol` (the code below sets `g.cols[ci].x` and reads `g.cols[gc.col].x`); add `frag *Fragment` to `gridCell`. (Leave `gridCol.min`/`max` OUT — Task 8 adds those when it first reads them in the auto-width solve.) Every field you add here MUST be read by code you write in this task, or `unused` will fail again. The code blocks below use `gr.height`, `gr.y`, `g.cols[...].x`, and `gc.frag` — so adding exactly those four fields (height, y, x, frag) keeps the commit lint-clean.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `pkg/layout/css/table_layout_test.go`. It lays out a table via the engine and asserts fragment geometry (mirror `overflow_layout_test.go`'s pattern — grep it for how to build an Engine, lay out a tree, and walk fragments by `DebugTag` or structure):
@@ -1888,6 +1890,8 @@ git commit -m "css/layout: fixed table layout (column widths, cell layout, row h
 - Test: `pkg/layout/css/table_layout_test.go` (append)
 
 Implement CSS 17.5.2.2: per-column min/max content widths (via Task 5's measurement), table used width, and distribution. Spanning-cell distribution to columns lands in Task 9; this task handles non-spanning cells + the distribution math + percentage columns.
+
+> **GRID-FIELD NOTE:** `gridCol` does NOT yet have `min`/`max` fields (Task 6 omitted them to stay lint-clean; this is the first task to read them). ADD `min, max float64` to the `gridCol` struct in `table.go` as part of this task. The `solveAutoWidths` code below reads/writes `g.cols[ci].min` and `g.cols[ci].max`, so adding them keeps the commit lint-clean. (`gridCol.x`, `gridRow.height/y`, `gridCell.frag` were already added by Task 7.)
 
 - [ ] **Step 1: Write the failing test**
 
