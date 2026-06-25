@@ -19,18 +19,14 @@ type tableGrid struct {
 }
 
 type gridRow struct {
-	box    *cssbox.Box // the DisplayTableRow box (real or anonymous)
-	cells  []*gridCell // cells ORIGINATING in this row (not spanned into it)
-	height float64     // solved later
-	y      float64     // solved later
+	box   *cssbox.Box // the DisplayTableRow box (real or anonymous)
+	cells []*gridCell // cells ORIGINATING in this row (not spanned into it)
 }
 
 type gridCol struct {
 	hasWidth bool
 	width    float64 // specified/hint width (px) when hasWidth
 	pct      float64 // percentage width [0..100], or <0 when none
-	min, max float64 // content min/max-content (auto layout, later tasks)
-	x        float64 // solved left offset within the table content box
 }
 
 type gridCell struct {
@@ -38,7 +34,6 @@ type gridCell struct {
 	row, col int // origin slot (top-left), 0-based
 	rowSpan  int
 	colSpan  int
-	frag     *Fragment // laid out by a later task; nil now
 }
 
 // buildGrid recovers the grid from a fixed-up table box. It flattens row-groups in
