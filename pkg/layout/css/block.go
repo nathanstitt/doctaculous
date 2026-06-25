@@ -330,6 +330,7 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	bubble := in.pendingPositioned
 	if establishesStackingContext(b) {
 		frag.IsStackingContext = true
+		frag.Box = b
 		for range in.pendingPositioned {
 			frag.PositionedClip = append(frag.PositionedClip, false)
 		}
@@ -622,6 +623,7 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	dy := (fb.y + res.marginTop) - res.frag.Y
 	translateFragment(res.frag, dx, dy)
 	res.frag.IsFloat = true
+	res.frag.Box = child
 
 	// A relatively-positioned descendant of the float is IN FLOW (a normal entry in
 	// res.frag.Children), so translateFragment(res.frag, …) above ALREADY moved it by
@@ -724,6 +726,7 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		e.logZIndexUnsupported(d.box)
 		frag.IsPositioned = true
 		frag.IsStackingContext = true
+		frag.Box = d.box
 		frag.RelOffsetX, frag.RelOffsetY = 0, 0 // abs/fixed bake position into coords
 
 		// Attach to the owning stacking context's Positioned layer: the root for a page

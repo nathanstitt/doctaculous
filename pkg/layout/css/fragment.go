@@ -5,6 +5,7 @@ import (
 	"image/color"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -29,6 +30,17 @@ type Fragment struct {
 	Children   []*Fragment    // child box fragments (block children; atomic inline boxes)
 	Image      *ImageContent  // decoded replaced-element image (set for a replaced box), painted in the content box
 	DebugTag   string         // optional label for test lookup; not used in paint
+
+	// Box is the source cssbox.Box this fragment was produced from, retained so the
+	// flatten/paint stage can read style-driven paint facts that are not pre-resolved
+	// onto the fragment — today the stacking z-index (Box.Style.ZIndex/ZIndexAuto),
+	// later opacity/isolation and SPA-snapshot re-flow. Set after layout; the flatten
+	// stage only READS it and never mutates it, so the fragment tree stays safe to
+	// share across the concurrent render fan-out — which holds only because layout has
+	// fully completed before any flatten begins (there is no incremental relayout in
+	// this engine yet). A nil Box reads as the initial style (z-index auto):
+	// anonymous/synthetic fragments and the page root need not set it.
+	Box *cssbox.Box
 
 	// IsFloat marks a fragment produced by a floated box. The float paint phases
 	// skip such subtrees during the in-flow passes and paint them in the float pass
