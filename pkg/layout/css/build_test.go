@@ -334,6 +334,9 @@ func TestTableUADisplaysAndSpans(t *testing.T) {
 	if firstByDisplay(tbl, cssbox.DisplayTableFooterGroup) == nil {
 		t.Error("no tfoot/table-footer-group box")
 	}
+	if firstByDisplay(tbl, cssbox.DisplayTableRowGroup) == nil {
+		t.Error("no tbody/table-row-group box")
+	}
 	if firstByDisplay(tbl, cssbox.DisplayTableColumnGroup) == nil {
 		t.Error("no colgroup/table-column-group box")
 	}

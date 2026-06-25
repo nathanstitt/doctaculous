@@ -15,11 +15,11 @@ ul, ol, blockquote, pre, form, figure, figcaption, hr, h1, h2, h3, h4, h5, h6 {
 li { display: list-item; }
 tr { display: table-row; }
 td, th { display: table-cell; }
-table   { display: table; }
-thead   { display: table-header-group; }
-tbody   { display: table-row-group; }
-tfoot   { display: table-footer-group; }
-col      { display: table-column; }
+table { display: table; }
+thead { display: table-header-group; }
+tbody { display: table-row-group; }
+tfoot { display: table-footer-group; }
+col { display: table-column; }
 colgroup { display: table-column-group; }
 caption { display: table-caption; }
 head, title, meta, link, style, script { display: none; }
