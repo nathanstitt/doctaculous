@@ -1,0 +1,14 @@
+<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  /* Reference: the SAME visible pixels as positioned-clip-relative.html, authored so the
+     red rectangle already fits inside the box (no clipping needed). The test's relative
+     child paints from (30,30) sized 60x60 but is clipped to the box's 80x80 padding box,
+     so its visible region is (30,30)-(80,80) = 50x50. Here we place a 50x50 red box at
+     (30,30) directly, which needs no overflow clip. */
+  .clip { position: relative; width: 80px; height: 80px; background: #dddddd; }
+  .visible { position: absolute; left: 30px; top: 30px; width: 50px; height: 50px; background: #cc3333; }
+</style></head><body>
+  <div class="clip">
+    <div class="visible"></div>
+  </div>
+</body></html>
