@@ -393,6 +393,21 @@ Every unsupported / edge case degrades silently (no panic; recovery at the page 
   clip-ancestor threading that 6b adds** (`resolveAbsolute` has only the CB owner, not the chain of clips
   the box passed through), so 6 neither fixes nor logs it — it is documented here and in the CLAUDE.md
   Done note as a known, scoped gap. (The *relative* analogue IS fully handled in 6.)
+- **The positioned-clip-box relative-escape sub-case (pre-existing 5c deferral, still deferred)** — a
+  `position:relative` descendant of a ***positioned*** `overflow:hidden` box (the box is then a stacking
+  context, so the descendant lands on the box's **own** `Positioned` with `CBOwned=false`) paints in the
+  **escaped band after `ClipPop`**, unclipped. This is NOT the case the relative-clip-escape fix targets
+  (that case is a *non-positioned* clip box, where the descendant bubbles *past* the box and the `ClipChain`
+  carries the clip). It is the same gap 5c's overflow spec already deferred ("a relative descendant of a
+  positioned clipping box is not specially clipped"), and the chain mechanism does not reach it because the
+  descendant never bubbles *out of* the box. Grouped with 6b (the consume branch would need to recognize
+  when `b` is the descendant's own CB and set `CBOwned=true` so the box's own bracket clips it). Degrades
+  silently (unclipped, no panic); unchanged by 6.
+- **A clip chain captured inside a float (known limitation, logged)** — if a relative descendant bubbles out
+  of a non-positioned clip box that sits **inside a float**, the captured `ClipChain` rects are in the
+  float's pre-translation local frame, and `placeFloat`'s `translateFragment` does not re-offset them (that
+  translate predates the chain). A rare nesting; `placeFloat` emits a one-line `(approximate)` debug log
+  (matching the 5b/5c float-offset deferral family). No panic.
 
 The CLAUDE.md degradation notes flip when the PR lands: the positioning + overflow Done bullets' "z-index
 parsed but not sorted on" becomes **supported (full Appendix E ordering)**; the overflow bullet's "a
