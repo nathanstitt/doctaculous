@@ -738,19 +738,27 @@ func usedEdges(b *cssbox.Box, cbWidth float64) edges {
 	}
 }
 
+// clips reports whether b clips its overflow (CSS overflow ≠ visible). hidden,
+// scroll, and auto all clip in this model (scroll/auto have no scroll affordance in
+// the single-tall-page model, so they clip exactly like hidden). A clipping box also
+// establishes a block formatting context (see establishesNewBFC).
+func clips(b *cssbox.Box) bool {
+	return b.Style.Overflow != "" && b.Style.Overflow != "visible"
+}
+
 // establishesNewBFC reports whether b establishes a new block formatting context,
 // which suppresses margin collapsing between the box and its in-flow children. In
 // the supported subset an inline-block does (its interior is an independent BFC), a
 // float does (CSS 9.7: a float establishes a BFC for its contents), and an
 // absolutely/fixed-positioned box does (it isolates its float context and
 // margin-collapsing — without this an abs box containing a float would orphan it);
-// overflow≠visible — the other BFC trigger — is not modeled yet. A relative box does
-// NOT establish a BFC (only abs/fixed/float/inline-block do).
+// an overflow≠visible box does (it clips its content, which requires a BFC). A
+// relative box does NOT establish a BFC (only abs/fixed/float/inline-block do).
 func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
 		return true
 	}
-	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone
+	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
 }
 
 // establishesStackingContext reports whether b establishes a CSS stacking context.

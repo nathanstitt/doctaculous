@@ -11,6 +11,7 @@ import (
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
 // --- unit tests for the box-model helpers ---
@@ -485,4 +486,32 @@ func bodyOf(t *testing.T, root *Fragment) *Fragment {
 		t.Fatalf("html fragment has no children (expected body)")
 	}
 	return root.Children[len(root.Children)-1]
+}
+
+// TestClipsPredicate: clips() is true for overflow hidden/scroll/auto, false for
+// visible and the empty string.
+func TestClipsPredicate(t *testing.T) {
+	mk := func(ov string) *cssbox.Box {
+		return &cssbox.Box{Style: gcss.ComputedStyle{Overflow: ov}}
+	}
+	for _, ov := range []string{"hidden", "scroll", "auto"} {
+		if !clips(mk(ov)) {
+			t.Errorf("clips(overflow:%q) = false, want true", ov)
+		}
+	}
+	for _, ov := range []string{"visible", ""} {
+		if clips(mk(ov)) {
+			t.Errorf("clips(overflow:%q) = true, want false", ov)
+		}
+	}
+}
+
+// TestOverflowEstablishesBFC: a box with overflow≠visible establishes a new BFC.
+func TestOverflowEstablishesBFC(t *testing.T) {
+	if !establishesNewBFC(&cssbox.Box{Style: gcss.ComputedStyle{Overflow: "hidden"}}) {
+		t.Errorf("overflow:hidden does not establish a BFC, want it to")
+	}
+	if establishesNewBFC(&cssbox.Box{Style: gcss.ComputedStyle{Overflow: "visible"}}) {
+		t.Errorf("overflow:visible establishes a BFC, want it not to")
+	}
 }
