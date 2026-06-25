@@ -1,7 +1,7 @@
 # Handover — Sub-project 6b: the deferred clip-escape sub-cases (abs/fixed intervening-clip + positioned-clip-box relative)
 
 **Status:** Not started. Sub-project **6 (full z-index stacking + the *relative* clip-escape)** is DONE on
-branch `feat/html-zindex` (PR to follow, chained on `feat/html-overflow`).
+branch `feat/html-zindex` (**PR #9**, chained on `feat/html-overflow`).
 **Next action:** Same flow as #1–#6 — brainstorm → spec (`docs/superpowers/specs/`) → plan
 (`docs/superpowers/plans/`) → subagent-driven execution (per task: implement → spec-review →
 code-quality-review → fix) → holistic final review → finish branch / PR.
