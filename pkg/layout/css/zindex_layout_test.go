@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -175,5 +176,100 @@ func TestZStableWithinBand(t *testing.T) {
 	// is middle, so auto paints BEFORE positive. Assert that too.
 	if i2 >= i1 || i4 >= i1 {
 		t.Errorf("z:auto (middle) must paint before z:5 (positive): auto=%d,%d pos=%d,%d", i2, i4, i1, i3)
+	}
+}
+
+// TestRelativeChildOfNonPositionedClipIsClipped: a position:relative child of a
+// NON-positioned overflow:hidden box, offset so it would spill past the clip edge,
+// must still be clipped to the clip box's padding box — its background paints BETWEEN a
+// ClipPush(clipRect) and a ClipPop even though the child bubbles to an ancestor's
+// positioned layer (it is not the clip box's CB). The adversarial part: the offset
+// pushes it past the edge, so an UNclipped render would paint outside the box.
+func TestRelativeChildOfNonPositionedClipIsClipped(t *testing.T) {
+	eng := New(nil, nil, nil)
+	childBG := color.RGBA{77, 0, 0, 255}
+
+	// Relative child, offset down+right past the clip box edge.
+	childStyle := zfill(60, childBG, 40, 40, 0, true) // z:auto; big offset
+	child := posBox(childStyle, cssbox.PosRelative)
+
+	// Non-positioned overflow:hidden clip box, small, containing the child.
+	clipStyle := posStyle() // static (NON-positioned) → BFC but not a stacking context
+	clipStyle.Width = gcss.Length{Value: 50, Unit: gcss.UnitPx}
+	clipStyle.Height = gcss.Length{Value: 50, Unit: gcss.UnitPx}
+	clipStyle.Overflow = "hidden"
+	clip := posBox(clipStyle, cssbox.PosStatic, child)
+	root := posBox(posStyle(), cssbox.PosStatic, clip)
+
+	items := eng.layoutTree(context.Background(), root, 200).AppendItems(nil)
+	push, pop := clipBoundsReal(items)
+	ci := bgIndex(items, childBG)
+	if push < 0 || pop < 0 {
+		t.Fatalf("expected a clip bracket; push=%d pop=%d", push, pop)
+	}
+	if ci < 0 {
+		t.Fatal("child background not painted")
+	}
+	if ci <= push || ci >= pop {
+		t.Errorf("relative child background at %d must be INSIDE the clip bracket (push=%d, pop=%d)", ci, push, pop)
+	}
+}
+
+// TestZIndexInsideClipOrdersWithinBracket: two absolutely-positioned boxes whose
+// containing block IS an overflow:hidden box paint INSIDE the clip bracket, ordered by
+// z-index (the z:2 box after the z:1 box, both between ClipPush and ClipPop).
+func TestZIndexInsideClipOrdersWithinBracket(t *testing.T) {
+	eng := New(nil, nil, nil)
+	underBG := color.RGBA{0, 0, 60, 255}
+	overBG := color.RGBA{60, 0, 0, 255}
+
+	under := posBox(zfill(60, underBG, 10, 10, 1, false), cssbox.PosAbsolute)
+	over := posBox(zfill(60, overBG, 30, 30, 2, false), cssbox.PosAbsolute)
+	clipStyle := posStyle() // position:relative + overflow:hidden => the abs boxes' CB and a clip
+	clipStyle.Width = gcss.Length{Value: 100, Unit: gcss.UnitPx}
+	clipStyle.Height = gcss.Length{Value: 100, Unit: gcss.UnitPx}
+	clipStyle.Overflow = "hidden"
+	clip := posBox(clipStyle, cssbox.PosRelative, under, over)
+	root := posBox(posStyle(), cssbox.PosStatic, clip)
+
+	items := eng.layoutTree(context.Background(), root, 200).AppendItems(nil)
+	push, pop := clipBoundsReal(items)
+	ui, oi := bgIndex(items, underBG), bgIndex(items, overBG)
+	if push < 0 || pop < 0 || ui < 0 || oi < 0 {
+		t.Fatalf("missing items: push=%d pop=%d under=%d over=%d", push, pop, ui, oi)
+	}
+	// Both inside the bracket, and z:2 (over) after z:1 (under). De-Morgan'd condition
+	// (golangci-lint QF1001 forbids if !(a && b)).
+	if ui <= push || ui >= pop || oi <= push || oi >= pop {
+		t.Errorf("both abs boxes must paint inside the clip bracket: under=%d over=%d (push=%d pop=%d)", ui, oi, push, pop)
+	}
+	if oi <= ui {
+		t.Errorf("z:2 box at %d must paint after z:1 box at %d", oi, ui)
+	}
+}
+
+// TestZIndexAllAutoByteIdentical: a page whose positioned boxes are ALL z:auto produces
+// the SAME item stream regardless of the sort (the stable sort is the identity on equal
+// keys). Asserted by comparing the all-auto stream to the stream with the boxes given
+// EXPLICIT z-index:0 (also the middle band, same document order) — they must be equal,
+// proving auto and explicit-0 both land in document order with no reordering.
+func TestZIndexAllAutoByteIdentical(t *testing.T) {
+	eng := New(nil, nil, nil)
+	build := func(z int, auto bool) []layout.Item {
+		a := posBox(zfill(40, color.RGBA{1, 0, 0, 255}, 0, 0, z, auto), cssbox.PosRelative)
+		b := posBox(zfill(40, color.RGBA{0, 1, 0, 255}, 5, 5, z, auto), cssbox.PosRelative)
+		c := posBox(zfill(40, color.RGBA{0, 0, 1, 255}, 10, 10, z, auto), cssbox.PosRelative)
+		root := posBox(posStyle(), cssbox.PosStatic, a, b, c)
+		return eng.layoutTree(context.Background(), root, 200).AppendItems(nil)
+	}
+	autoItems := build(0, true)
+	zeroItems := build(0, false)
+	if len(autoItems) != len(zeroItems) {
+		t.Fatalf("item count differs: auto=%d zero=%d", len(autoItems), len(zeroItems))
+	}
+	for i := range autoItems {
+		if autoItems[i].Kind != zeroItems[i].Kind {
+			t.Errorf("item %d kind differs: auto=%v zero=%v", i, autoItems[i].Kind, zeroItems[i].Kind)
+		}
 	}
 }
