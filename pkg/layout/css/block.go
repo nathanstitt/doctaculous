@@ -572,7 +572,6 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			res.frag.IsPositioned = true
 			res.frag.IsStackingContext = true
 			res.frag.RelOffsetX, res.frag.RelOffsetY = dx, dy
-			e.logZIndexUnsupported(child)
 			pendingPositioned = append(pendingPositioned, res.frag)
 		}
 		// Bubble up any relative descendants the child did not consume (it is a static
@@ -723,7 +722,6 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		if isAuto2(d.box.Style.Left, fs) && isAuto2(d.box.Style.Right, fs) {
 			e.logf("css layout: abs-pos box with no horizontal offset placed at its containing block's left (static-position approximation)")
 		}
-		e.logZIndexUnsupported(d.box)
 		frag.IsPositioned = true
 		frag.IsStackingContext = true
 		frag.Box = d.box
@@ -851,17 +849,6 @@ func establishesNewBFC(b *cssbox.Box) bool {
 // includes opacity<1, transforms, etc. — none modeled yet.)
 func establishesStackingContext(b *cssbox.Box) bool {
 	return b.Position != cssbox.PosStatic
-}
-
-// logZIndexUnsupported emits a one-time-per-box debug note when a positioned box
-// carries a non-auto z-index, which the minimal stacking pass does NOT yet sort on
-// (positioned boxes paint in document order). Surfacing it keeps the degradation
-// visible per the design's degradation contract; full z-index ordering is a later
-// slice.
-func (e *Engine) logZIndexUnsupported(b *cssbox.Box) {
-	if !b.Style.ZIndexAuto {
-		e.logf("css layout: z-index:%d not yet honored (positioned boxes paint in document order)", b.Style.ZIndex)
-	}
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous

@@ -3,6 +3,7 @@ package css
 import (
 	"image"
 	"image/color"
+	"sort"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -74,10 +75,11 @@ type Fragment struct {
 	// ordering for its subtree, ending with its positioned layer.
 	IsStackingContext bool
 	// Positioned holds the fragments of positioned descendants painted in this
-	// stacking context's positioned layer (after in-flow content). Kept separate
-	// from Children so in-flow tree order is untouched; a descendant in Positioned
-	// is skipped in the in-flow passes (IsPositioned) so it paints exactly once.
-	// In the minimal cut these paint in document order (no z-index sort).
+	// stacking context's positioned layer. Kept separate from Children so in-flow
+	// tree order is untouched; a descendant in Positioned is skipped in the in-flow
+	// passes (IsPositioned) so it paints exactly once. AppendItems z-index-sorts these
+	// into three Appendix E bands (negatives before decorations, the z:auto/0 middle
+	// after in-flow content, positives last); see sortedPositioned and AppendItems.
 	Positioned []*Fragment
 
 	// Clips marks a fragment whose box has overflow ≠ visible: the stacking pass
@@ -160,60 +162,68 @@ type GlyphFragment struct {
 	Color   color.RGBA
 }
 
-// AppendItems appends f's drawing primitives, and its descendants', to dst in CSS
-// paint order and returns the extended slice. For a fragment that establishes a
-// stacking context (IsStackingContext — the root and every positioned box) OR a block
-// formatting context (IsBFC — inline-blocks and floats), the order follows the
-// supported subset of CSS 2.1 Appendix E within the context (4 phases): in-flow block
-// backgrounds/borders (appendDecorations), then the float layer (Floats), then in-flow
-// inline content / images / atomics (appendContent), then the positioned layer
-// (Positioned) — each in-flow phase skipping floated AND positioned subtrees so they
-// paint exactly once in their own layer. A plain BFC that is not a stacking context has
-// an empty Positioned slice, so the positioned phase is a no-op and the order reduces to
-// the prior 3-phase sequence (preserving byte-identical output for non-positioned
-// pages). A non-BFC, non-stacking fragment paints its own background/border/inline/image
-// then recurses into its children (normal-flow tree order), skipping floated and
-// positioned children, which is what the context phases call per in-flow subtree.
+// AppendItems appends f's drawing primitives, and its descendants', to dst in CSS 2.1
+// Appendix E paint order, returning the extended slice. For a fragment that establishes
+// a stacking context (IsStackingContext — the root and every positioned box) OR a block
+// formatting context (IsBFC — inline-blocks and floats), the positioned layer is split
+// by z-index into three bands (sortedPositioned): NEGATIVE z paints BEFORE the context's
+// in-flow decorations (Appendix E step 2, behind in-flow content); then in-flow block
+// decorations, the float layer, and in-flow inline content/images (steps 3–5, each
+// skipping floated AND positioned subtrees); then the MIDDLE band (z:auto / z:0 in
+// document order, step 6); then the POSITIVE band (step 7). The sort is STABLE so equal
+// keys keep document order — a context whose positioned boxes are all z:auto produces
+// the same stream as the prior document-order pass (byte-identical for the existing
+// corpus). A plain BFC that is not a stacking context has an empty positioned layer, so
+// all three bands are empty and the order reduces to decorations → floats → content. A
+// non-BFC, non-stacking fragment paints self then recurses children (skipping floated
+// and positioned children), unchanged.
 //
-// A relatively-positioned descendant carries a paint-time offset (RelOffsetX/Y); the
-// positioned (and float, for a positioned float) layer applies it via translateItems
-// over the descendant's freshly-flattened item range, so the whole positioned subtree
-// rides the relative shift. AppendItems itself never mutates the fragment tree (only the
-// appended dst items are translated), so it is safe to call on a tree shared across the
-// render fan-out.
+// A clipping fragment (Clips) brackets its CONTENTS — children's decorations, floats,
+// in-flow content, the CB-owned subset of each band — with a ClipPush(ClipRect)/ClipPop
+// pair (its own background/border paint outside it). CB-owned negatives paint inside the
+// bracket behind the children; escaped entries (CB is an ancestor) paint outside it. An
+// entry carrying a ClipChain (a positioned descendant that bubbled through an
+// overflow≠visible box on its way to this holder) is itself bracketed by that chain's
+// rects, so it is clipped to the intervening box even when it paints in this layer.
 //
-// The positioned-layer loop is the seam the deferred full-z-index slice extends: it
-// gains a z-index sort and splits into negative / zero / positive sub-layers (with the
-// negative sub-layer moving before appendDecorations and the positive after this loop).
-// The phase split is written so that slice re-points the collection, not rewrites the
-// pass — keep it intact when extending this.
+// A relatively-positioned entry carries a paint-time RelOffset, applied via
+// translateItems over its freshly-flattened range. AppendItems never mutates the
+// fragment tree (the sort packs a local copy; only appended dst items are translated),
+// so it is safe on a tree shared across the render fan-out.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 	if f.IsStackingContext || f.IsBFC {
+		ord := f.sortedPositioned()
 		if f.Clips {
-			// Clipping context: own decorations paint UNCLIPPED, then a clip bracket wraps
-			// the children's decorations, the float layer, the in-flow content, and the
-			// CB-owned subset of the positioned layer. Escaped positioned descendants (CB
-			// outside this box) paint AFTER ClipPop, unclipped.
-			dst = f.appendSelfDecorations(dst) // own bg + border — outside the clip
+			// Clipping context. Own decorations paint UNCLIPPED. Then: escaped negatives
+			// (CB is an ancestor) unclipped & behind; the clip bracket wraps CB-owned
+			// negatives (behind the children), child decorations, the float layer, in-flow
+			// content, and the CB-owned middle+positive bands; escaped middle+positive
+			// paint after ClipPop (unclipped — their CB is an ancestor).
+			dst = f.appendSelfDecorations(dst)
+			dst = f.appendBand(dst, ord.negatives, true, false) // escaped negatives, unclipped
 			dst = append(dst, layout.Item{Kind: layout.ClipPushKind, Rule: layout.RuleItem{
 				XPt: f.ClipRect.x, YPt: f.ClipRect.y, WPt: f.ClipRect.w, HPt: f.ClipRect.h,
 			}})
-			dst = f.appendChildDecorations(dst) // children's bg/border — clipped
-			for _, fl := range f.Floats {       // the float layer — clipped
+			dst = f.appendBand(dst, ord.negatives, true, true) // CB-owned negatives, clipped
+			dst = f.appendChildDecorations(dst)
+			for _, fl := range f.Floats {
 				start := len(dst)
 				dst = fl.AppendItems(dst)
 				if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
 					translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
 				}
 			}
-			dst = f.appendContent(dst) // in-flow inline content + images — clipped
-			dst = f.appendPositioned(dst, true)
+			dst = f.appendContent(dst)
+			dst = f.appendBand(dst, ord.middle, true, true)    // CB-owned middle, clipped
+			dst = f.appendBand(dst, ord.positives, true, true) // CB-owned positives, clipped
 			dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
-			dst = f.appendPositioned(dst, false)
+			dst = f.appendBand(dst, ord.middle, true, false)    // escaped middle, unclipped
+			dst = f.appendBand(dst, ord.positives, true, false) // escaped positives, unclipped
 			return dst
 		}
-		// Non-clipping stacking context / BFC: the prior 4-phase order (decorations →
-		// floats → in-flow content → positioned layer), unchanged.
+		// Non-clipping stacking context / BFC: negatives BEFORE decorations, then the
+		// 3-phase in-flow sequence, then middle, then positives.
+		dst = f.appendBand(dst, ord.negatives, false, false)
 		dst = f.appendDecorations(dst)
 		for _, fl := range f.Floats {
 			start := len(dst)
@@ -223,14 +233,11 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			}
 		}
 		dst = f.appendContent(dst)
-		dst = f.appendPositioned(dst, false)
+		dst = f.appendBand(dst, ord.middle, false, false)
+		dst = f.appendBand(dst, ord.positives, false, false)
 		return dst
 	}
-	// Non-BFC, non-stacking fragment: paint self, then recurse (normal tree order),
-	// skipping floated AND positioned children (painted by the owning stacking context's
-	// float / positioned layers). This is the per-subtree behavior the context phases
-	// invoke; it is unchanged from the prior single-pass AppendItems except for those
-	// skips.
+	// Non-BFC, non-stacking fragment: unchanged.
 	dst = f.appendSelfDecorations(dst)
 	dst = f.appendSelfContent(dst)
 	for _, c := range f.Children {
@@ -238,37 +245,6 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			continue
 		}
 		dst = c.AppendItems(dst)
-	}
-	return dst
-}
-
-// appendPositioned emits the fragment's positioned layer (each entry painted fully via
-// its own AppendItems, with a relatively-positioned entry's RelOffset applied over its
-// emitted range). It paints positioned descendants in document order (the minimal
-// z-index cut).
-//
-// onlyCBOwned selects which subset to emit, and is only meaningful when f.Clips:
-//   - f.Clips == false: the whole layer is emitted in one call; onlyCBOwned is ignored.
-//     This is the non-clipping path and is byte-identical to the prior single loop.
-//   - f.Clips == true: the clipping path calls this TWICE — once with onlyCBOwned=true
-//     (inside the clip bracket: entries whose containing block IS f, PositionedInfo[i].CBOwned
-//     true) and once with onlyCBOwned=false (after ClipPop: the escaped entries, whose
-//     CB is an ancestor). So CB-owned descendants are clipped and escaped ones are not.
-//
-// A missing/short PositionedInfo entry counts as not-CB-owned (false), the safe default.
-func (f *Fragment) appendPositioned(dst []layout.Item, onlyCBOwned bool) []layout.Item {
-	for i, pf := range f.Positioned {
-		if f.Clips {
-			owned := i < len(f.PositionedInfo) && f.PositionedInfo[i].CBOwned
-			if owned != onlyCBOwned {
-				continue
-			}
-		}
-		start := len(dst)
-		dst = pf.AppendItems(dst)
-		if pf.RelOffsetX != 0 || pf.RelOffsetY != 0 {
-			translateItems(dst, start, pf.RelOffsetX, pf.RelOffsetY)
-		}
 	}
 	return dst
 }
@@ -426,6 +402,111 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 			dst[i].Image.YPt += dy
 		}
 	}
+}
+
+// positionedEntry pairs a positioned descendant's fragment with its per-entry clip
+// metadata, so the z-sort moves the two together without index bookkeeping.
+type positionedEntry struct {
+	frag *Fragment
+	info PositionedInfo
+}
+
+// sortedBands is a fragment's positioned layer split into the three CSS 2.1 Appendix E
+// z-index bands, each in stable (z, document) order. negatives paint BEFORE the
+// context's decorations (step 2, behind in-flow content); middle paints after content
+// (step 6, z:auto and z:0 in document order); positives paint last (step 7).
+type sortedBands struct {
+	negatives []positionedEntry // zKey < 0
+	middle    []positionedEntry // zKey == 0 (auto + explicit 0)
+	positives []positionedEntry // zKey > 0
+}
+
+// zIndex returns f's stacking sort inputs from its source box. A nil Box reads as the
+// initial value (z-index auto).
+func (f *Fragment) zIndex() (z int, auto bool) {
+	if f.Box != nil {
+		return f.Box.Style.ZIndex, f.Box.Style.ZIndexAuto
+	}
+	return 0, true
+}
+
+// zKey is f's numeric stacking sort key: auto and explicit 0 both map to 0 (the middle
+// band), so they sort together and stable order preserves document order among them.
+func (f *Fragment) zKey() int {
+	z, auto := f.zIndex()
+	if auto {
+		return 0
+	}
+	return z
+}
+
+// sortedPositioned packs f's positioned layer into a fresh []positionedEntry (zipping
+// Positioned[i] with PositionedInfo[i], a missing info read as the zero value),
+// STABLE-sorts it by zKey ascending (document order — the slice's existing order —
+// breaks ties), and splits it into the three z-bands. Building a fresh slice each call
+// keeps f.Positioned/f.PositionedInfo read-only, so the shared fragment tree stays safe
+// to flatten concurrently. When every entry is z:auto (the entire pre-z-index corpus),
+// the negative/positive bands are empty and middle is the entries in their original
+// document order — so AppendItems reduces to the prior document-order pass and output
+// stays byte-identical.
+func (f *Fragment) sortedPositioned() sortedBands {
+	n := len(f.Positioned)
+	if n == 0 {
+		return sortedBands{}
+	}
+	entries := make([]positionedEntry, n)
+	for i, pf := range f.Positioned {
+		var info PositionedInfo
+		if i < len(f.PositionedInfo) {
+			info = f.PositionedInfo[i]
+		}
+		entries[i] = positionedEntry{frag: pf, info: info}
+	}
+	sort.SliceStable(entries, func(a, b int) bool {
+		return entries[a].frag.zKey() < entries[b].frag.zKey()
+	})
+	// Partition at the first zKey>=0 and first zKey>0 boundaries.
+	negEnd := 0
+	for negEnd < n && entries[negEnd].frag.zKey() < 0 {
+		negEnd++
+	}
+	midEnd := negEnd
+	for midEnd < n && entries[midEnd].frag.zKey() == 0 {
+		midEnd++
+	}
+	return sortedBands{
+		negatives: entries[:negEnd],
+		middle:    entries[negEnd:midEnd],
+		positives: entries[midEnd:],
+	}
+}
+
+// appendBand emits one band's positioned entries (already in stable z/document order)
+// to dst. When filterCB is true (the clipping path), only entries whose
+// info.CBOwned == wantCBOwned are emitted; when false (the non-clipping path), all
+// entries are emitted and wantCBOwned is ignored. For each emitted entry it brackets
+// the entry's item range in its ClipChain (outer→inner ClipPush … inner→outer ClipPop)
+// and applies the relative RelOffset over the emitted range.
+func (f *Fragment) appendBand(dst []layout.Item, band []positionedEntry, filterCB, wantCBOwned bool) []layout.Item {
+	for _, e := range band {
+		if filterCB && e.info.CBOwned != wantCBOwned {
+			continue
+		}
+		for _, r := range e.info.ClipChain { // outermost first
+			dst = append(dst, layout.Item{Kind: layout.ClipPushKind, Rule: layout.RuleItem{
+				XPt: r.x, YPt: r.y, WPt: r.w, HPt: r.h,
+			}})
+		}
+		start := len(dst)
+		dst = e.frag.AppendItems(dst)
+		if e.frag.RelOffsetX != 0 || e.frag.RelOffsetY != 0 {
+			translateItems(dst, start, e.frag.RelOffsetX, e.frag.RelOffsetY)
+		}
+		for range e.info.ClipChain {
+			dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
+		}
+	}
+	return dst
 }
 
 // Page returns a single Page sized widthPt × heightPt whose Items are the flattened
