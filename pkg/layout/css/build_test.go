@@ -314,3 +314,54 @@ func TestAbsInlineBlockifies(t *testing.T) {
 		t.Errorf("abs-pos inline did not blockify: Kind=%v", b.Kind)
 	}
 }
+
+func TestTableUADisplaysAndSpans(t *testing.T) {
+	src := `<table><caption>C</caption><colgroup><col span="2"></colgroup>
+		<thead><tr><th colspan="2">H</th></tr></thead>
+		<tbody><tr><td rowspan="2">A</td><td>B</td></tr></tbody>
+		<tfoot><tr><td>F</td></tr></tfoot></table>`
+	root := build(t, src, nil)
+	tbl := firstByDisplay(root, cssbox.DisplayTable)
+	if tbl == nil {
+		t.Fatal("no DisplayTable box; <table> UA rule missing")
+	}
+	if firstByDisplay(tbl, cssbox.DisplayTableCaption) == nil {
+		t.Error("no caption box")
+	}
+	if firstByDisplay(tbl, cssbox.DisplayTableHeaderGroup) == nil {
+		t.Error("no thead/table-header-group box")
+	}
+	if firstByDisplay(tbl, cssbox.DisplayTableFooterGroup) == nil {
+		t.Error("no tfoot/table-footer-group box")
+	}
+	if firstByDisplay(tbl, cssbox.DisplayTableColumnGroup) == nil {
+		t.Error("no colgroup/table-column-group box")
+	}
+	col := firstByDisplay(tbl, cssbox.DisplayTableColumn)
+	if col == nil || col.ColSpan != 2 {
+		t.Errorf("col span not read onto box: %+v", col)
+	}
+	th := firstByDisplay(tbl, cssbox.DisplayTableCell)
+	if th == nil || th.ColSpan != 2 {
+		t.Errorf("th colspan=2 not read; got %+v", th)
+	}
+	rs := findCellWithRowSpan(tbl, 2)
+	if rs == nil {
+		t.Error("td rowspan=2 not read onto a cell box")
+	}
+}
+
+func findCellWithRowSpan(b *cssbox.Box, n int) *cssbox.Box {
+	if b == nil {
+		return nil
+	}
+	if b.Display == cssbox.DisplayTableCell && b.RowSpan == n {
+		return b
+	}
+	for _, c := range b.Children {
+		if r := findCellWithRowSpan(c, n); r != nil {
+			return r
+		}
+	}
+	return nil
+}

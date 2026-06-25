@@ -13,7 +13,7 @@ func uaStyle(tag string) css.ComputedStyle {
 }
 
 func TestUADisplayDefaults(t *testing.T) {
-	blocks := []string{"div", "p", "h1", "h6", "section", "ul", "ol", "table", "blockquote"}
+	blocks := []string{"div", "p", "h1", "h6", "section", "ul", "ol", "blockquote"}
 	for _, tag := range blocks {
 		if d := uaStyle(tag).Display; d != "block" {
 			t.Errorf("%s display = %q, want block", tag, d)
@@ -23,12 +23,28 @@ func TestUADisplayDefaults(t *testing.T) {
 		t.Errorf("li display = %q, want list-item", d)
 	}
 	// Table parts: box generation switches on exactly these values.
+	if d := uaStyle("table").Display; d != "table" {
+		t.Errorf("table display = %q, want table", d)
+	}
 	if d := uaStyle("tr").Display; d != "table-row" {
 		t.Errorf("tr display = %q, want table-row", d)
 	}
 	for _, tag := range []string{"td", "th"} {
 		if d := uaStyle(tag).Display; d != "table-cell" {
 			t.Errorf("%s display = %q, want table-cell", tag, d)
+		}
+	}
+	tableParts := map[string]string{
+		"thead":    "table-header-group",
+		"tbody":    "table-row-group",
+		"tfoot":    "table-footer-group",
+		"col":      "table-column",
+		"colgroup": "table-column-group",
+		"caption":  "table-caption",
+	}
+	for tag, want := range tableParts {
+		if d := uaStyle(tag).Display; d != want {
+			t.Errorf("%s display = %q, want %q", tag, d, want)
 		}
 	}
 	for _, tag := range []string{"head", "script", "style", "title"} {

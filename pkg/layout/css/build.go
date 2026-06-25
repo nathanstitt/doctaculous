@@ -7,6 +7,8 @@ package css
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/html"
@@ -89,6 +91,16 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 	}
 	applyBlockify(b, cs) // CSS 9.7: a float OR an abs/fixed box blockifies an inline-level box
 
+	// HTML presentational span attributes onto table-part boxes (CSS does not carry
+	// these). colspan/rowspan apply to a cell; <col span>/<colgroup span> reuse ColSpan.
+	switch b.Display {
+	case cssbox.DisplayTableCell:
+		b.ColSpan = attrSpan(e, "colspan")
+		b.RowSpan = attrSpan(e, "rowspan")
+	case cssbox.DisplayTableColumn, cssbox.DisplayTableColumnGroup:
+		b.ColSpan = attrSpan(e, "span")
+	}
+
 	if replacedTags[e.Tag()] {
 		b.Kind = cssbox.BoxReplaced
 		b.Replaced = &cssbox.ReplacedContent{Tag: e.Tag(), Attrs: attrSnapshot(e)}
@@ -129,6 +141,21 @@ func makeTextBox(data string, parent gcss.ComputedStyle) *cssbox.Box {
 	style := parent
 	style.Display = "inline"
 	return &cssbox.Box{Kind: cssbox.BoxText, Text: data, Style: style, Display: cssbox.DisplayInline}
+}
+
+// attrSpan reads an HTML span attribute (colspan/rowspan/span) as a positive
+// integer, defaulting to 1 when absent, non-numeric, or < 1 (HTML clamps these to
+// at least 1). The box stores the resolved value (never 0) on a span-bearing box.
+func attrSpan(e *html.Element, name string) int {
+	v, ok := e.Attr(name)
+	if !ok {
+		return 1
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
 }
 
 // attrSnapshot copies the relevant attributes of a replaced element.
@@ -218,6 +245,18 @@ func classifyDisplay(b *cssbox.Box, display string) {
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayListItem, cssbox.BlockFC
 	case "table":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTable, cssbox.TableFC
+	case "table-row-group":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableRowGroup, cssbox.TableFC
+	case "table-header-group":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableHeaderGroup, cssbox.TableFC
+	case "table-footer-group":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableFooterGroup, cssbox.TableFC
+	case "table-column":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableColumn, cssbox.TableFC
+	case "table-column-group":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableColumnGroup, cssbox.TableFC
+	case "table-caption":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableCaption, cssbox.BlockFC
 	case "table-row":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableRow, cssbox.TableFC
 	case "table-cell":
