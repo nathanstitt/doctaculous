@@ -114,7 +114,7 @@ func TestClipInFlowChildClipped(t *testing.T) {
 		t.Fatalf("no clip bracket emitted (push=%d pop=%d)", push, pop)
 	}
 	bg := bgIndex(items, color.RGBA{2, 2, 2, 255})
-	if !(push < bg && bg < pop) {
+	if push >= bg || bg >= pop {
 		t.Errorf("in-flow child bg at %d not inside the clip bracket [%d,%d]", bg, push, pop)
 	}
 }
@@ -180,7 +180,7 @@ func TestClipAbsChildCBOwnedClipped(t *testing.T) {
 
 	push, pop := clipBoundsReal(items)
 	bg := bgIndex(items, color.RGBA{9, 9, 9, 255})
-	if !(push >= 0 && pop >= 0 && push < bg && bg < pop) {
+	if push < 0 || pop < 0 || push >= bg || bg >= pop {
 		t.Errorf("abs child bg at %d not inside the clip bracket [%d,%d]; CB is the clip box, must be clipped", bg, push, pop)
 	}
 }
