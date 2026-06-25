@@ -14,8 +14,11 @@ import (
 // PaintPage makes, so tests can assert what was drawn and where without
 // rasterizing. All other Device methods are no-ops.
 type recordDevice struct {
-	glyphs []recordedGlyph
-	fills  []recordedFill
+	glyphs   []recordedGlyph
+	fills    []recordedFill
+	saves    int
+	restores int
+	clips    []*render.Path
 }
 
 type recordedGlyph struct {
@@ -38,9 +41,9 @@ func (d *recordDevice) FillGlyph(outline *render.Path, c render.FillColor, _ str
 	d.glyphs = append(d.glyphs, recordedGlyph{outline: outline, color: c})
 }
 func (d *recordDevice) FillShading(render.Shader, render.Matrix, string) {}
-func (d *recordDevice) PushClip(*render.Path, render.FillRule)           {}
-func (d *recordDevice) Save()                                            {}
-func (d *recordDevice) Restore()                                         {}
+func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)       { d.clips = append(d.clips, p) }
+func (d *recordDevice) Save()                                            { d.saves++ }
+func (d *recordDevice) Restore()                                         { d.restores++ }
 
 // triangle returns a small closed outline in em units so a glyph is non-empty.
 func triangle() *render.Path {
@@ -243,4 +246,62 @@ func TestPaintRuleSkipsDegenerate(t *testing.T) {
 	if dev.fills[0].paint.Rule != render.NonZero {
 		t.Errorf("rule fill uses %v, want NonZero", dev.fills[0].paint.Rule)
 	}
+}
+
+// TestPaintClipPushPop: a ClipPushKind item drives Save()+PushClip(rect); a
+// ClipPopKind drives Restore(). The pushed clip rect's corners map through the page
+// matrix (here a 1:1 scale), so a 10,20,30,40 clip becomes a path at those coords.
+func TestPaintClipPushPop(t *testing.T) {
+	page := &layout.Page{
+		WidthPt: 100, HeightPt: 100,
+		Items: []layout.Item{
+			{Kind: layout.ClipPushKind, Rule: layout.RuleItem{XPt: 10, YPt: 20, WPt: 30, HPt: 40}},
+			{Kind: layout.GlyphKind, Glyph: layout.GlyphItem{Outline: triangle(), XPt: 12, YPt: 22, SizePt: 4, Color: color.RGBA{A: 0xff}}},
+			{Kind: layout.ClipPopKind},
+		},
+	}
+	dev := &recordDevice{}
+	PaintPage(dev, page, render.Scale(1, 1))
+
+	if dev.saves != 1 || dev.restores != 1 {
+		t.Errorf("saves=%d restores=%d, want 1/1", dev.saves, dev.restores)
+	}
+	if len(dev.clips) != 1 {
+		t.Fatalf("pushed %d clips, want 1", len(dev.clips))
+	}
+	minX, minY, maxX, maxY := pathBounds(dev.clips[0])
+	if minX != 10 || minY != 20 || maxX != 40 || maxY != 60 {
+		t.Errorf("clip bounds = (%v,%v)-(%v,%v), want (10,20)-(40,60)", minX, minY, maxX, maxY)
+	}
+	if len(dev.glyphs) != 1 {
+		t.Errorf("painted %d glyphs, want 1 (between push and pop)", len(dev.glyphs))
+	}
+}
+
+// pathBounds returns the axis-aligned bounding box of a path's MoveTo/LineTo points.
+func pathBounds(p *render.Path) (minX, minY, maxX, maxY float64) {
+	first := true
+	for _, s := range p.Segments {
+		if s.Kind != render.MoveTo && s.Kind != render.LineTo {
+			continue
+		}
+		if first {
+			minX, minY, maxX, maxY = s.P0.X, s.P0.Y, s.P0.X, s.P0.Y
+			first = false
+			continue
+		}
+		if s.P0.X < minX {
+			minX = s.P0.X
+		}
+		if s.P0.Y < minY {
+			minY = s.P0.Y
+		}
+		if s.P0.X > maxX {
+			maxX = s.P0.X
+		}
+		if s.P0.Y > maxY {
+			maxY = s.P0.Y
+		}
+	}
+	return
 }

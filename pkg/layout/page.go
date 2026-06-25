@@ -95,6 +95,16 @@ const (
 	// ImageKind is a decoded raster image drawn into a content box (Item.Image is
 	// set), e.g. an <img> replaced element.
 	ImageKind
+	// ClipPushKind pushes a clip rectangle (Item.Rule carries the rect; Color is
+	// unused). The painter saves the clip state and intersects the active clip with
+	// the rect, so subsequent items paint clipped until the matching ClipPopKind.
+	// Emitted by the CSS layout engine for an overflow≠visible box (its padding box).
+	// Not a drawing primitive: it carries no color. Pushes and pops are balanced by
+	// construction (every push has a matching pop from the same AppendItems call).
+	ClipPushKind
+	// ClipPopKind pops the most recent clip pushed by ClipPushKind (the painter
+	// restores the prior clip state). Carries no geometry.
+	ClipPopKind
 )
 
 // Item is one drawing primitive on a page. It is a small tagged union rather than

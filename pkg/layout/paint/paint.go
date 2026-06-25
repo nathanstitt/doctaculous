@@ -39,6 +39,14 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 			paintBorder(dev, &it.Border, mat)
 		case layout.ImageKind:
 			paintImage(dev, &it.Image, mat)
+		case layout.ClipPushKind:
+			// Save the clip state, then intersect the active clip with the rect (mapped
+			// through the page matrix). A degenerate rect makes clipRect a no-op push, but
+			// Save/Restore still balance, so the stream stays well-formed.
+			dev.Save()
+			clipRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.XPt+it.Rule.WPt, it.Rule.YPt+it.Rule.HPt)
+		case layout.ClipPopKind:
+			dev.Restore()
 		}
 	}
 }
