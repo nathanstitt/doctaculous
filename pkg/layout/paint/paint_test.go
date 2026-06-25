@@ -278,6 +278,31 @@ func TestPaintClipPushPop(t *testing.T) {
 	}
 }
 
+// TestClipCutsPixels: a background that extends past a clip rect is painted only
+// inside the clip. A 100x100 page, clip rect [0,0,50,50], a background covering the
+// whole page: a pixel at (25,25) is the background color; a pixel at (75,75) is the
+// white page background (clipped out).
+func TestClipCutsPixels(t *testing.T) {
+	bg := color.RGBA{0x33, 0x66, 0x99, 0xff}
+	page := &layout.Page{
+		WidthPt: 100, HeightPt: 100,
+		Items: []layout.Item{
+			{Kind: layout.ClipPushKind, Rule: layout.RuleItem{XPt: 0, YPt: 0, WPt: 50, HPt: 50}},
+			{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 0, YPt: 0, WPt: 100, HPt: 100, Color: bg}},
+			{Kind: layout.ClipPopKind},
+		},
+	}
+	img := newRasterPage(100, 100, page)
+
+	if got := img.RGBAAt(25, 25); !isColor(got, bg, 2) {
+		t.Errorf("pixel (25,25) = %v, want background %v (inside clip)", got, bg)
+	}
+	white := color.RGBA{0xff, 0xff, 0xff, 0xff}
+	if got := img.RGBAAt(75, 75); !isColor(got, white, 0) {
+		t.Errorf("pixel (75,75) = %v, want white %v (clipped out)", got, white)
+	}
+}
+
 // pathBounds returns the axis-aligned bounding box of a path's MoveTo/LineTo points.
 func pathBounds(p *render.Path) (minX, minY, maxX, maxY float64) {
 	first := true
