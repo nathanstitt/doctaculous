@@ -89,6 +89,9 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 		}
 		// The root is the outermost stacking context: consume any relative-positioned
 		// descendants that bubbled all the way up without a closer positioned ancestor.
+		for range res.pendingPositioned {
+			res.frag.PositionedClip = append(res.frag.PositionedClip, false)
+		}
 		res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 	}
 	// PASS 2: resolve abs/fixed boxes now that the page height and all ancestor
@@ -282,6 +285,25 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
 	frag.Border[layout.EdgeLeft] = BorderEdge{Width: ed.bL, Color: b.Style.BorderLeftColor, Style: mapBorderStyle(b.Style.BorderLeftStyle)}
 
+	// overflow≠visible: this box clips its content to its padding box (the border box
+	// deflated by the border widths). The stacking pass brackets the fragment's
+	// contents with a clip; its own background/border paint unclipped.
+	if clips(b) {
+		frag.Clips = true
+		frag.ClipRect = rect{
+			x: borderX + ed.bL,
+			y: borderY + ed.bT,
+			w: borderW - ed.bL - ed.bR,
+			h: borderH - ed.bT - ed.bB,
+		}
+		if frag.ClipRect.w < 0 {
+			frag.ClipRect.w = 0
+		}
+		if frag.ClipRect.h < 0 {
+			frag.ClipRect.h = 0
+		}
+	}
+
 	// A box that establishes its own BFC owns its floats' paint layer.
 	if establishesNewBFC(b) {
 		frag.IsBFC = true
@@ -296,6 +318,9 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	bubble := in.pendingPositioned
 	if establishesStackingContext(b) {
 		frag.IsStackingContext = true
+		for range in.pendingPositioned {
+			frag.PositionedClip = append(frag.PositionedClip, false)
+		}
 		frag.Positioned = append(frag.Positioned, in.pendingPositioned...)
 		bubble = nil
 		// Back-fill the CB owner of any abs/fixed descendant this box collected: their
@@ -556,6 +581,9 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	// float is itself a stacking context) are on res.frag.Positioned and stay there —
 	// also already moved by translateFragment. (Abs/fixed descendants are deferred to
 	// pass 2 and are not present on the fragment here.)
+	for range res.pendingPositioned {
+		res.frag.PositionedClip = append(res.frag.PositionedClip, false)
+	}
 	res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 
 	// A relatively-positioned float is placed at the float edge AND offset at paint
@@ -654,6 +682,7 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 			owner = d.cb.frag
 		}
 		if owner != nil {
+			owner.PositionedClip = append(owner.PositionedClip, !d.cb.isPage && d.cb.frag != nil && owner == d.cb.frag)
 			owner.Positioned = append(owner.Positioned, frag)
 		}
 	}
