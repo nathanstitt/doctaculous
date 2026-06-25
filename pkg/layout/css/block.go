@@ -345,7 +345,17 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		frag.IsStackingContext = true
 		frag.Box = b
 		for _, pp := range in.pendingPositioned {
-			frag.PositionedInfo = append(frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: pp.clipChain})
+			// Sub-case B: when b CLIPS (overflow≠visible), every relative descendant it
+			// consumes is clipped to b's padding box — it paints INSIDE the box's own
+			// ClipPush/ClipPop bracket (CBOwned). This is correct for ALL consumed relatives,
+			// not just direct children: a relative descendant only reaches this consume list
+			// if no positioned box sits between it and b (any such box, being a stacking
+			// context, would have consumed it first), so b IS its nearest positioned ancestor
+			// and its painting bubbles up to b's layer as in-flow content b must clip. A
+			// relative descendant that bubbled through an intervening NON-positioned clip box
+			// also carries that box's rect in pp.clipChain, so both clips apply. When b does
+			// not clip, this reduces to false as before (byte-identical).
+			frag.PositionedInfo = append(frag.PositionedInfo, PositionedInfo{CBOwned: frag.Clips, ClipChain: pp.clipChain})
 			frag.Positioned = append(frag.Positioned, pp.frag)
 		}
 		bubble = nil
@@ -360,12 +370,19 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 			}
 		}
 	} else if frag.Clips {
-		// b is a NON-positioned (not a stacking context) overflow≠visible box: any
-		// relative descendant bubbling past it is clipped to b's padding box even though
-		// it will paint in an ancestor's layer (CSS). Prepend b's clip rect (already
-		// computed above as frag.ClipRect) to each still-bubbling entry's chain, so the
-		// outermost box ends up first as the entry rises. This is the relative-clip-escape
-		// fix; the abs/fixed intervening-clip analogue is deferred to 6b.
+		// b is a NON-positioned (not a stacking context) overflow≠visible box: a relative
+		// descendant bubbling past it is in-flow content of b, so b's overflow clips it
+		// even though it paints in an ancestor's positioned layer. Prepend b's clip rect
+		// (already computed above as frag.ClipRect) to each still-bubbling entry's chain,
+		// so the outermost box ends up first as the entry rises. (This is the in-flow
+		// relative-clip-escape fix. The abs/fixed analogue is NOT a gap: an abs box whose
+		// CB is an ancestor outside b is correctly NOT clipped by b — CSS 2.1 §11.1.1
+		// excepts a descendant whose containing block is an ancestor of the clipping box.
+		// When an overflow box DOES clip an abs descendant, that descendant's CB is the box
+		// or a descendant of it, so the descendant is already clipped — either by riding
+		// that CB's own ClipPush/ClipPop bracket, or, when an intervening non-positioned
+		// clip box like b sits above the CB, by b's rect prepended onto the CB's bubble
+		// chain. So no separate abs clip-chain threading is needed.)
 		grown := make([]pendingPos, len(bubble))
 		for i, pp := range bubble {
 			grown[i] = pendingPos{frag: pp.frag, clipChain: prependRect(frag.ClipRect, pp.clipChain)}
@@ -382,6 +399,22 @@ func prependRect(r rect, chain []rect) []rect {
 	out := make([]rect, 0, len(chain)+1)
 	out = append(out, r)
 	out = append(out, chain...)
+	return out
+}
+
+// translateRects returns a copy of chain with every rect's origin shifted by (dx,dy);
+// the width/height are unchanged. A nil/empty chain returns nil (no allocation). Used
+// to move a clip chain captured in a float's pre-translation local frame into the
+// float's final placed frame (placeFloat). A fresh slice is returned so the result does
+// not alias the source backing array.
+func translateRects(chain []rect, dx, dy float64) []rect {
+	if len(chain) == 0 {
+		return nil
+	}
+	out := make([]rect, len(chain))
+	for i, r := range chain {
+		out[i] = rect{x: r.x + dx, y: r.y + dy, w: r.w, h: r.h}
+	}
 	return out
 }
 
@@ -668,10 +701,12 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	// also already moved by translateFragment. (Abs/fixed descendants are deferred to
 	// pass 2 and are not present on the fragment here.)
 	for _, pp := range res.pendingPositioned {
-		if len(pp.clipChain) > 0 {
-			e.logf("css layout: clip chain on a relative descendant inside a float is not re-translated (approximate)")
-		}
-		res.frag.PositionedInfo = append(res.frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: pp.clipChain})
+		// A clip chain captured inside the float holds rects in the float's
+		// pre-translation local frame; translateFragment moved the float subtree by
+		// (dx,dy) but not these rects (they ride the pending entry, not the fragment), so
+		// re-translate them by the same delta so the clip brackets the descendant at the
+		// float's FINAL placed position.
+		res.frag.PositionedInfo = append(res.frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: translateRects(pp.clipChain, dx, dy)})
 		res.frag.Positioned = append(res.frag.Positioned, pp.frag)
 	}
 
