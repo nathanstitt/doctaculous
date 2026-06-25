@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 	"image/color"
+	"strings"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
@@ -182,5 +183,29 @@ func TestClipAbsChildCBOwnedClipped(t *testing.T) {
 	bg := bgIndex(items, color.RGBA{9, 9, 9, 255})
 	if push < 0 || pop < 0 || push >= bg || bg >= pop {
 		t.Errorf("abs child bg at %d not inside the clip bracket [%d,%d]; CB is the clip box, must be clipped", bg, push, pop)
+	}
+}
+
+// TestScrollLogsDegradation: an overflow:scroll box logs that scroll/auto clip like
+// hidden (no scroll affordance in this model); overflow:hidden does NOT log.
+func TestScrollLogsDegradation(t *testing.T) {
+	var logs []string
+	logf := func(format string, args ...any) { logs = append(logs, format) }
+	eng := New(nil, nil, logf)
+
+	scrollBox := blockBox(gcss.ComputedStyle{Display: "block", Overflow: "scroll",
+		Width:  gcss.Length{Value: 50, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 50, Unit: gcss.UnitPx}})
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, scrollBox)
+	eng.layoutTree(context.Background(), root, 200)
+
+	found := false
+	for _, l := range logs {
+		if strings.Contains(l, "scroll") || strings.Contains(l, "auto") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("overflow:scroll did not log a degradation; logs=%v", logs)
 	}
 }

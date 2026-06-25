@@ -311,6 +311,9 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		if frag.ClipRect.h < 0 {
 			frag.ClipRect.h = 0
 		}
+		if b.Style.Overflow == "scroll" || b.Style.Overflow == "auto" {
+			e.logf("css layout: overflow:%s clips like hidden (no scroll affordance in the single-tall-page model)", b.Style.Overflow)
+		}
 	}
 
 	// A box that establishes its own BFC owns its floats' paint layer.
