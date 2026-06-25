@@ -52,7 +52,7 @@ func (e *Engine) measureContent(ctx context.Context, b *cssbox.Box, wantMax bool
 // unbroken width (max-content) or the widest zero-width-break line (min-content).
 func (e *Engine) measureInline(ctx context.Context, b *cssbox.Box, wantMax bool) float64 {
 	var runs []inline.Run
-	var atomics []*Fragment // discarded; measure-only
+	var atomics []*Fragment // gatherInlineRuns fully lays out inline-block atoms; their fragments are unused in measure mode, but that layout cost is real
 	e.gatherInlineRuns(ctx, b, 1e9, &runs, &atomics)
 	if len(runs) == 0 {
 		return 0
@@ -88,7 +88,7 @@ func specifiedFixedWidth(b *cssbox.Box) (float64, bool) {
 		return 0, false
 	}
 	val, isAuto := resolveLen(b.Style.Width, b.Style.FontSizePt, 0)
-	if isAuto {
+	if isAuto { // defensive: UnitAuto already excluded above, so this cannot fire today
 		return 0, false
 	}
 	if b.Style.BoxSizing == "border-box" {
