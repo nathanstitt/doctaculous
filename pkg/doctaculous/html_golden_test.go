@@ -308,6 +308,89 @@ var htmlGoldens = []struct {
   </div>
 </body></html>`,
 	},
+	{
+		// A 2x3 table with per-cell borders + alternating row backgrounds (separate
+		// borders, default border-spacing). Eyeball: a clean grid, gaps between cells.
+		name:       "table-basic",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-spacing: 4px; }
+  td { border: 2px solid #335; padding: 6px; background: #dde; }
+  tr:nth-child(2) td { background: #cce; }
+</style></head><body>
+  <table>
+    <tr><td>R1C1</td><td>R1C2</td><td>R1C3</td></tr>
+    <tr><td>R2C1</td><td>R2C2</td><td>R2C3</td></tr>
+  </table>
+</body></html>`,
+	},
+	{
+		// A header cell spanning two columns over a 2-column body. Eyeball: the header
+		// stretches across both columns; the body cells sit beneath each half.
+		name:       "table-colspan",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-spacing: 0; }
+  td, th { border: 1px solid #444; padding: 6px; }
+  th { background: #ccd; }
+</style></head><body>
+  <table>
+    <tr><th colspan="2">Header</th></tr>
+    <tr><td>A</td><td>B</td></tr>
+  </table>
+</body></html>`,
+	},
+	{
+		// Auto layout: columns sized by their content (a short and a long column).
+		// Eyeball: the long-text column is visibly wider than the short one.
+		name:       "table-auto",
+		viewportPx: 300,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-spacing: 0; }
+  td { border: 1px solid #555; padding: 4px; }
+</style></head><body>
+  <table>
+    <tr><td>Hi</td><td>A considerably longer cell of content</td></tr>
+    <tr><td>Yo</td><td>Short</td></tr>
+  </table>
+</body></html>`,
+	},
+	{
+		// border-collapse:collapse: shared single edges between cells. Eyeball: no gaps,
+		// single (not doubled) lines between cells, the wider border winning at shared edges.
+		name:       "table-collapse",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-collapse: collapse; }
+  td { border: 2px solid #336; padding: 6px; }
+  td.thick { border: 5px solid #933; }
+</style></head><body>
+  <table>
+    <tr><td>A</td><td class="thick">B</td></tr>
+    <tr><td>C</td><td>D</td></tr>
+  </table>
+</body></html>`,
+	},
+	{
+		// A captioned table (caption-side:top). Eyeball: the caption sits above the grid.
+		name:       "table-caption",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-spacing: 0; }
+  caption { font-weight: bold; padding: 4px; }
+  td { border: 1px solid #444; padding: 6px; }
+</style></head><body>
+  <table>
+    <caption>Quarterly Results</caption>
+    <tr><td>Q1</td><td>Q2</td></tr>
+  </table>
+</body></html>`,
+	},
 }
 
 // quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL
