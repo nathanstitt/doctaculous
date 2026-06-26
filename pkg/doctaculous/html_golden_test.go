@@ -391,6 +391,33 @@ var htmlGoldens = []struct {
   </table>
 </body></html>`,
 	},
+	{
+		// Web font: text rendered with an @font-face family served from memory. The
+		// Pacifico glyphs are visibly distinct from the base-14 substitutes, proving
+		// the downloaded face is used (not LoadStandard). The WOFF2 source exercises
+		// the full Brotli + glyf-transform decode path.
+		name:       "webfont",
+		viewportPx: 360,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  @font-face { font-family: "Web Face"; src: url(web.woff2) format("woff2"); }
+  p { font-family: "Web Face", sans-serif; font-size: 48px; color: #202020; }
+</style></head><body>
+  <p>Web Font AaGg</p>
+</body></html>`,
+		loader: webfontGoldenLoader(),
+	},
+}
+
+// webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for
+// the web-font golden. It panics on a missing fixture (a test-setup error). The
+// WOFF2 exercises the full decode path (Brotli + glyf transform).
+func webfontGoldenLoader() resource.ResourceLoader {
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fonts", "webfont.woff2"))
+	if err != nil {
+		panic("webfont golden fixture: " + err.Error())
+	}
+	return resource.MapLoader{"web.woff2": {Data: data}}
 }
 
 // quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL
