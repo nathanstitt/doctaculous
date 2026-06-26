@@ -109,6 +109,75 @@ func TestResolveMissingVariantResolves(t *testing.T) {
 	}
 }
 
+// recordingLoader records every ref requested (to prove which @font-face entry won).
+type recordingLoader struct {
+	inner resource.MapLoader
+	refs  []string
+}
+
+func (r *recordingLoader) Load(ctx context.Context, ref string) ([]byte, string, error) {
+	r.refs = append(r.refs, ref)
+	return r.inner.Load(ctx, ref)
+}
+
+func TestResolveBestFirstPicksMatchingStyle(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	loader := &recordingLoader{inner: resource.MapLoader{
+		"reg.ttf":  {Data: ttf},
+		"bold.ttf": {Data: ttf},
+	}}
+	faces := []gcss.FontFace{
+		{Family: "Two", Sources: []gcss.FontSource{{URL: "reg.ttf"}}},
+		{Family: "Two", Weight: "bold", Sources: []gcss.FontSource{{URL: "bold.ttf"}}},
+	}
+	c := NewFaceCacheWithFonts(faces, loader, nil, nil)
+	if _, ok := c.Resolve("Two", pkgfont.Style{Bold: true}); !ok {
+		t.Fatal("bold resolve miss")
+	}
+	if _, ok := c.Resolve("Two", pkgfont.Style{}); !ok {
+		t.Fatal("regular resolve miss")
+	}
+	// The bold request must have fetched bold.ttf; the regular request reg.ttf.
+	var sawBold, sawReg bool
+	for _, ref := range loader.refs {
+		if ref == "bold.ttf" {
+			sawBold = true
+		}
+		if ref == "reg.ttf" {
+			sawReg = true
+		}
+	}
+	if !sawBold || !sawReg {
+		t.Fatalf("expected both bold.ttf and reg.ttf fetched (best-style-first); got refs=%v", loader.refs)
+	}
+}
+
+// Case/whitespace variants of the same family share one cache entry (one fetch).
+func TestResolveFamilyCaseVariantsShareCache(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	loader := &countingLoader{inner: resource.MapLoader{"u.ttf": {Data: ttf}}}
+	faces := []gcss.FontFace{{Family: "Web Face", Sources: []gcss.FontSource{{URL: "u.ttf"}}}}
+	c := NewFaceCacheWithFonts(faces, loader, nil, nil)
+	if _, ok := c.Resolve("Web Face", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(Web Face) miss")
+	}
+	if _, ok := c.Resolve("web face", pkgfont.Style{}); !ok { // different case
+		t.Fatal("Resolve(web face) miss")
+	}
+	if _, ok := c.Resolve("  Web Face  ", pkgfont.Style{}); !ok { // whitespace
+		t.Fatal("Resolve(padded) miss")
+	}
+	if got := atomic.LoadInt32(&loader.calls); got != 1 {
+		t.Fatalf("loader called %d times across 3 case/space variants, want 1 (shared cache)", got)
+	}
+}
+
 // local() with no provider skips to the next src (a url()).
 func TestResolveLocalNoProviderFallsToURL(t *testing.T) {
 	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))

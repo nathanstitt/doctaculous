@@ -1,8 +1,11 @@
 package doctaculous
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
@@ -88,6 +91,38 @@ func TestWebFontIgnoredDescriptors(t *testing.T) {
 	loader := resource.MapLoader{"web.ttf": {Data: ttf}}
 	if _, err := OpenHTMLBytes(html, WithResourceLoader(loader)); err != nil {
 		t.Fatalf("ignored descriptors caused an error: %v", err)
+	}
+}
+
+// A failed @font-face fetch logs a degradation message (the "debug log" half of
+// the degrade-gracefully contract), not just a silent fallback.
+func TestWebFontFailureLogs(t *testing.T) {
+	var mu sync.Mutex
+	var logged []string
+	logf := func(format string, args ...any) {
+		mu.Lock()
+		logged = append(logged, fmt.Sprintf(format, args...))
+		mu.Unlock()
+	}
+	html := []byte(`<!DOCTYPE html><html><head><style>
+		@font-face { font-family: "Arial"; src: url(missing.woff2) }
+		p { font-family: "Arial" }
+	</style></head><body><p>x</p></body></html>`)
+	loader := resource.MapLoader{} // 404
+	if _, err := OpenHTMLBytes(html, WithResourceLoader(loader), WithLogf(logf)); err != nil {
+		t.Fatalf("OpenHTMLBytes: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, m := range logged {
+		if strings.Contains(m, "missing.woff2") || strings.Contains(strings.ToLower(m), "font-face") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no @font-face degradation log captured; logs=%v", logged)
 	}
 }
 

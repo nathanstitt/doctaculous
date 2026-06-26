@@ -98,3 +98,49 @@ python -m fontTools.ttLib.woff2 compress -o webfont.woff2 webfont.ttf
 
 All three font files round-trip back to a valid `TTFont` with the same 53-entry
 cmap, confirming the WOFF/WOFF2 encodings are sound.
+
+## Composite-glyph fixtures (`composite.ttf`, `composite.woff2`)
+
+The Latin subset above contains only **simple** glyphs, so the WOFF2 glyf-transform
+decoder's composite-glyph reconstruction path (`reconstructCompositeGlyph`) was never
+exercised by a fixture. `composite.ttf` and `composite.woff2` close that gap.
+
+`composite.ttf` is `webfont.ttf` (the OFL Pacifico subset above) with **one extra
+glyph added**: a synthetic **composite** glyph mapped to **U+0040 ('@')** that
+references two glyphs already present in the subset — component `A` at the origin and
+component `B` translated by (300, 100) font units. No new outlines were copied in; the
+composite is built entirely from outlines already in the OFL-licensed subset, so the
+file remains an OFL-1.1 derivative of Pacifico (same `OFL.txt` applies). `webfont.ttf`
+has 54 glyphs; `composite.ttf` has 55 (the added composite).
+
+`composite.woff2` is `composite.ttf` compressed with the standard **glyf transform**
+(fonttools `compress`, the default), so decoding it drives the composite-glyph branch
+of the transform reconstruction.
+
+### Exact commands
+
+Using the same `fonttools` + `brotli` venv as above (fontTools 4.63.0, brotli 1.2.0),
+run a small build script that, against `webfont.ttf`:
+
+1. constructs a composite `Glyph` (`numberOfContours = -1`) with two
+   `GlyphComponent`s — `A` at (0, 0) and `B` at (300, 100), `ARGS_ARE_XY_VALUES`;
+2. appends it to the glyph order, adds an `hmtx` entry, maps U+0040 to it in every
+   Unicode cmap subtable, and recomputes its bbox (`recalcBounds`);
+3. saves `composite.ttf`; then
+4. `fontTools.ttLib.woff2.compress("composite.ttf", "composite.woff2")`.
+
+(The `post` table is format 3.0, so the added glyph carries no stored name; on reload
+fontTools auto-names it `at` from its cmap entry. The Go decoder resolves '@' via the
+cmap, so the name is immaterial.)
+
+### Verification
+
+| file             | size (bytes) | first 4 bytes | notes                                   |
+|------------------|-------------:|---------------|-----------------------------------------|
+| `composite.ttf`  |       10 804 | `00 01 00 00` | 55 glyphs; glyph at U+0040 is composite |
+| `composite.woff2`|        6 124 | `wOF2`        | glyf transform; composite intact        |
+
+Both round-trip back to a `TTFont` whose U+0040 glyph is composite with 2 components
+(`A`@(0,0), `B`@(300,100)); the Go round-trip test
+(`TestDecodeWOFF2CompositeGlyphRoundTrips`) asserts the WOFF2-reconstructed composite
+outline matches the bare TTF's exactly and is non-empty.

@@ -81,7 +81,7 @@ func normalizeFamily(s string) string { return strings.ToLower(strings.TrimSpace
 // the family (the caller skips affected runs). Results — including misses — are
 // cached, so repeated calls for the same (family, style) are cheap.
 func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
-	key := faceKey{family: family, style: style}
+	key := faceKey{family: normalizeFamily(family), style: style}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

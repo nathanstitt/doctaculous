@@ -45,6 +45,44 @@ func TestDecodeWOFF2RoundTrips(t *testing.T) {
 	}
 }
 
+// TestDecodeWOFF2CompositeGlyphRoundTrips exercises reconstructCompositeGlyph (the
+// composite branch of the glyf transform, which Pacifico's Latin subset never hits)
+// via a synthetic fixture: composite.ttf adds one composite glyph at U+0040 ('@')
+// built from two existing components (A + a translated B), and composite.woff2 is
+// that file under the standard glyf transform. The composite's reconstructed outline
+// must match the bare TTF's exactly — proving the component records survive the
+// transform round-trip — and must be non-empty (the components actually expanded).
+func TestDecodeWOFF2CompositeGlyphRoundTrips(t *testing.T) {
+	ttf, err := os.ReadFile(fixturePath(t, "composite.ttf"))
+	if err != nil {
+		t.Fatalf("read composite ttf: %v", err)
+	}
+	w2, err := os.ReadFile(fixturePath(t, "composite.woff2"))
+	if err != nil {
+		t.Fatalf("read composite woff2: %v", err)
+	}
+	bare, err := LoadSFNT(ttf)
+	if err != nil {
+		t.Fatalf("LoadSFNT(composite ttf): %v", err)
+	}
+	got, err := LoadSFNT(w2)
+	if err != nil {
+		t.Fatalf("LoadSFNT(composite woff2): %v", err)
+	}
+	// The composite glyph itself: identical geometry from the transformed WOFF2.
+	const composite = '@'
+	out, _, ok := bare.Glyph(composite)
+	if !ok {
+		t.Fatalf("bare TTF has no glyph for %q (fixture build problem)", composite)
+	}
+	if out == nil || len(out.Segments) == 0 {
+		t.Fatalf("composite glyph %q has no outline; the components did not expand", composite)
+	}
+	assertSameGlyph(t, bare, got, composite)
+	// A plain simple glyph in the same fixture still round-trips (the file is sound).
+	assertSameGlyph(t, bare, got, 'A')
+}
+
 func TestDecodeWOFF2CorruptTransformDegrades(t *testing.T) {
 	w2, err := os.ReadFile(fixturePath(t, "webfont.woff2"))
 	if err != nil {
