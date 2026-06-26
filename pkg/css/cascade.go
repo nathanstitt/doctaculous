@@ -600,6 +600,10 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		if n, ok := parseInt(d.Value); ok {
 			cs.Order = n
 		}
+	case "flex":
+		applyFlexShorthand(cs, d.Value)
+	case "gap":
+		applyGapShorthand(cs, d.Value)
 	}
 	// default: unsupported property — ignored on purpose.
 }

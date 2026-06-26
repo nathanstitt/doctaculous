@@ -359,3 +359,44 @@ func TestBorderShorthandWithRGBColor(t *testing.T) {
 		t.Errorf("color = %v, want rgb(10,20,30)", cs.BorderTopColor)
 	}
 }
+
+func TestFlexShorthandKeywords(t *testing.T) {
+	cases := []struct {
+		val          string
+		grow, shrink float64
+		basisVal     float64
+		basisUnit    LengthUnit
+	}{
+		{"none", 0, 0, 0, UnitAuto},
+		{"auto", 1, 1, 0, UnitAuto},
+		{"initial", 0, 1, 0, UnitAuto},
+		{"1", 1, 1, 0, UnitPercent},    // flex:<number> => <n> 1 0%
+		{"2 3", 2, 3, 0, UnitPercent},  // flex:<g> <s> => g s 0%
+		{"100px", 1, 1, 100, UnitPx},   // flex:<length> => 1 1 <length>
+		{"2 100px", 2, 1, 100, UnitPx}, // flex:<g> <basis> => g 1 basis
+		{"2 0 50px", 2, 0, 50, UnitPx}, // flex:<g> <s> <basis>
+	}
+	for _, c := range cases {
+		cs := initialStyle()
+		applyOne(&cs, "flex", c.val)
+		if cs.FlexGrow != c.grow || cs.FlexShrink != c.shrink {
+			t.Errorf("flex:%q grow/shrink = %v/%v, want %v/%v", c.val, cs.FlexGrow, cs.FlexShrink, c.grow, c.shrink)
+		}
+		if cs.FlexBasis.Unit != c.basisUnit || cs.FlexBasis.Value != c.basisVal {
+			t.Errorf("flex:%q basis = %v, want {%v %v}", c.val, cs.FlexBasis, c.basisVal, c.basisUnit)
+		}
+	}
+}
+
+func TestGapShorthand(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "gap", "10px")
+	if cs.RowGap != (Length{10, UnitPx}) || cs.ColumnGap != (Length{10, UnitPx}) {
+		t.Errorf("gap:10px = row %v col %v, want both 10px", cs.RowGap, cs.ColumnGap)
+	}
+	cs2 := initialStyle()
+	applyOne(&cs2, "gap", "10px 20px")
+	if cs2.RowGap != (Length{10, UnitPx}) || cs2.ColumnGap != (Length{20, UnitPx}) {
+		t.Errorf("gap:10px 20px = row %v col %v, want 10px/20px", cs2.RowGap, cs2.ColumnGap)
+	}
+}
