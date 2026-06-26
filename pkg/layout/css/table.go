@@ -248,6 +248,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	}
 
 	// Lay out each cell at its column width; capture natural height.
+	natH := map[*gridCell]float64{}
 	for _, gc := range g.cells {
 		cw := g.cellWidth(gc)
 		cellPos := &positionedContext{}
@@ -259,6 +260,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		// is approximate here, like the inline-block atom case — exact cross-cell
 		// positioning is out of scope.)
 		if gc.frag != nil {
+			natH[gc] = gc.frag.H
 			e.resolveAbsolute(ctx, cellPos, gc.frag, cw, gc.frag.H)
 		}
 	}
@@ -295,6 +297,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		cw := g.cellWidth(gc)
 		ch := gc.rowBandHeight(g)
 		stretchCellFragment(gc.frag, cx, cy, cw, ch)
+		applyCellVAlign(gc.frag, gc.box, natH[gc], ch)
 		children = append(children, gc.frag)
 	}
 
@@ -648,9 +651,46 @@ func (e *Engine) distributeRowspanHeights(g *tableGrid) {
 // stretchCellFragment positions a cell's border-box fragment at (x,y) and stretches
 // it to (w,h) — table cells fill their row band. It translates the fragment's whole
 // subtree so its top-left lands at (x,y), then sets the border box to (w,h). Content
-// keeps its top-left origin (top-aligned for now; vertical-align is a later task).
+// keeps its top-left origin; vertical-align shift is applied separately by applyCellVAlign.
 func stretchCellFragment(f *Fragment, x, y, w, h float64) {
 	translateFragment(f, x-f.X, y-f.Y)
 	f.W = w
 	f.H = h
+}
+
+// applyCellVAlign shifts a cell's content down within its row band per vertical-align.
+// b is the cell's cssbox.Box (used to read its VerticalAlign style).
+// natH is the content's natural (pre-stretch) height; bandH the row band height.
+// top (and baseline, treated as top for now) keep content at the band top; middle
+// centers it; bottom drops it to the band bottom. The shift moves the fragment's
+// children and inline lines, leaving the border box (which fills the band) in place.
+func applyCellVAlign(f *Fragment, b *cssbox.Box, natH, bandH float64) {
+	va := "baseline"
+	if b != nil {
+		va = b.Style.VerticalAlign
+	}
+	var dy float64
+	switch va {
+	case "bottom":
+		dy = bandH - natH
+	case "middle":
+		dy = (bandH - natH) / 2
+	default:
+		dy = 0 // top, baseline (≈ top here), and sub/super/text-* fall back to top
+	}
+	if dy <= 0 {
+		return
+	}
+	shiftCellContent(f, dy)
+}
+
+// shiftCellContent translates a cell fragment's content (child fragments + inline
+// lines) down by dy, without moving the cell's own border box.
+func shiftCellContent(f *Fragment, dy float64) {
+	for _, c := range f.Children {
+		translateFragment(c, 0, dy)
+	}
+	for i := range f.Lines {
+		f.Lines[i].BaselineY += dy
+	}
 }

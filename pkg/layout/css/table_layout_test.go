@@ -279,3 +279,105 @@ func TestRowspanDistributesExcessHeight(t *testing.T) {
 		t.Errorf("rowspan-2 cell should fill a 100-tall band across both grown rows")
 	}
 }
+
+func TestVerticalAlignBottomShiftsContent(t *testing.T) {
+	// A 60-tall row (forced by a tall sibling). A short cell with vertical-align:bottom
+	// must have its inner content near the bottom of the band, not the top.
+	tall := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			Height: gcss.Length{Value: 60, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+			MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
+	innerSt := gcss.ComputedStyle{Height: gcss.Length{Value: 10, Unit: gcss.UnitPx},
+		Width: gcss.Length{Value: 20, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+		MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+	inner := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: innerSt}
+	short := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx}, VerticalAlign: "bottom",
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{inner}}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{tall, short}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 200)
+	// Find the inner 20x10 fragment and the short cell (40x60 with a child).
+	var inner10, shortCell *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 20 && f.H == 10 {
+			inner10 = f
+		}
+		if f.W == 40 && f.H == 60 && len(f.Children) > 0 {
+			shortCell = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if inner10 == nil || shortCell == nil {
+		t.Fatalf("missing fragments inner=%v cell=%v", inner10, shortCell)
+	}
+	offset := inner10.Y - shortCell.Y
+	if offset < 40 {
+		t.Errorf("vertical-align:bottom should push 10-tall content near the band bottom (~50); got offset %v", offset)
+	}
+}
+
+func TestVerticalAlignTopIsDefault(t *testing.T) {
+	// Without vertical-align, content stays at the band top (offset ~0).
+	tall := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			Height: gcss.Length{Value: 60, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+			MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
+	innerSt := gcss.ComputedStyle{Height: gcss.Length{Value: 10, Unit: gcss.UnitPx},
+		Width: gcss.Length{Value: 20, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+		MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+	inner := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: innerSt}
+	short := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{inner}}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{tall, short}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 200)
+	var inner10, shortCell *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 20 && f.H == 10 {
+			inner10 = f
+		}
+		if f.W == 40 && f.H == 60 && len(f.Children) > 0 {
+			shortCell = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if inner10 == nil || shortCell == nil {
+		t.Fatalf("missing fragments inner=%v cell=%v", inner10, shortCell)
+	}
+	offset := inner10.Y - shortCell.Y
+	if offset > 5 {
+		t.Errorf("default (top) vertical-align should keep content at the band top (~0); got offset %v", offset)
+	}
+}
