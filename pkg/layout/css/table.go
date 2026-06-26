@@ -369,6 +369,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		leadingMargin:    0,
 		trailingMargin:   0,
 		collapsedBorders: collapsedBorders,
+		intrinsicWidth:   tableContentW,
 	}
 }
 

@@ -226,6 +226,17 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	deferredBefore := len(posCtx.deferred)
 	in := e.layoutInterior(ctx, b, contentW, contentX, childBandOrigin, fc, posCtx, childPosCB)
 
+	// CSS tables are shrink-to-fit: a width:auto table's box wraps its grid, not the
+	// containing block. layoutTable reports the grid width as in.intrinsicWidth; adopt
+	// it (recomputing the border-box width) when the table's width is auto and the grid
+	// is narrower than the resolved (container-fill) content width.
+	if b.Formatting == cssbox.TableFC && in.intrinsicWidth > 0 {
+		if _, isAuto := resolveLen(b.Style.Width, b.Style.FontSizePt, cbWidth); isAuto && in.intrinsicWidth < contentW {
+			contentW = in.intrinsicWidth
+			borderW = contentW + ed.pL + ed.pR + ed.bL + ed.bR
+		}
+	}
+
 	// Resolve the box's own collapse-resolved top/bottom margins and the offset of
 	// the content-box top from the border-box top's "natural" position.
 	//
@@ -445,6 +456,11 @@ type interior struct {
 	// table interior, to be copied onto the table fragment. Nil for every non-table
 	// interior so non-collapse pages are byte-identical.
 	collapsedBorders []layout.BorderItem
+	// intrinsicWidth is a table's grid-content width (Σ column widths + border-spacing),
+	// reported by layoutTable so layoutBlock can shrink a width:auto table box to wrap
+	// its grid (CSS tables are shrink-to-fit, §17.5.2). Zero for non-table interiors
+	// (which keep the resolved block content width).
+	intrinsicWidth float64
 }
 
 // layoutInterior lays out b's children into a local frame (content-box top at 0)

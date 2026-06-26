@@ -637,3 +637,59 @@ func TestTableInsideOverflowHiddenNoPanic(t *testing.T) {
 		t.Fatal("a table inside overflow:hidden should lay out without panic")
 	}
 }
+
+func TestAutoWidthTableBoxWrapsGrid(t *testing.T) {
+	// A width:auto table with a table-level border and two 50px cells in a wide
+	// viewport must have its BOX wrap the ~100px grid, not fill the container.
+	mkCell := func() *cssbox.Box {
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+			Style: gcss.ComputedStyle{Width: gcss.Length{Value: 50, Unit: gcss.UnitPx},
+				Height:   gcss.Length{Value: 20, Unit: gcss.UnitPx},
+				MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
+	}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{mkCell(), mkCell()}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	// table-level border so the box width is observable; auto width; border-spacing 0.
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "auto", Width: gcss.Length{Unit: gcss.UnitAuto},
+			MaxWidth:       gcss.Length{Unit: gcss.UnitAuto},
+			BorderTopWidth: gcss.Length{Value: 1, Unit: gcss.UnitPx}, BorderTopStyle: "solid",
+			BorderRightWidth: gcss.Length{Value: 1, Unit: gcss.UnitPx}, BorderRightStyle: "solid",
+			BorderBottomWidth: gcss.Length{Value: 1, Unit: gcss.UnitPx}, BorderBottomStyle: "solid",
+			BorderLeftWidth: gcss.Length{Value: 1, Unit: gcss.UnitPx}, BorderLeftStyle: "solid"},
+		Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Style:    gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 600) // wide viewport
+	// Find the table fragment: it's the one with a non-zero border (the 1px table border)
+	// and contains the cells. Its W should be ~100 (grid: 50+50) + 2 (the 1px L/R borders)
+	// = ~102, NOT ~600 (the container width).
+	var tableW float64 = -1
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		// the table fragment has a top border width > 0 and is wider than a single cell
+		if f.Border[0].Width > 0 && f.W > 60 {
+			tableW = f.W
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if tableW < 0 {
+		t.Fatal("table fragment (with border) not found")
+	}
+	if tableW > 150 {
+		t.Errorf("auto-width table box should wrap its ~100px grid (+borders), not fill the 600px container; got W=%v", tableW)
+	}
+	if tableW < 95 {
+		t.Errorf("auto-width table box should be at least the ~100px grid width; got W=%v", tableW)
+	}
+}
