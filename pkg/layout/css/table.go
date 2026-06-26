@@ -246,6 +246,23 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		g.cols[ci].x = x
 		x += g.cols[ci].width + g.spacingH
 	}
+	tableContentW := x // total content width: column widths + all border-spacing
+
+	// Caption: a block laid out at the table content width, placed above (top) or below.
+	var captionFrag *Fragment
+	captionH := 0.0
+	if g.caption != nil {
+		res := e.layoutBlock(ctx, g.caption, tableContentW, contentX, 0, 0,
+			&floatContext{cbLeft: contentX, cbRight: contentX + tableContentW}, &positionedContext{}, posCBOwner{isPage: true})
+		captionFrag = res.frag
+		if captionFrag != nil {
+			captionH = captionFrag.H
+		}
+	}
+	gridDY := 0.0
+	if g.caption != nil && g.table.Style.CaptionSide != "bottom" {
+		gridDY = captionH // caption on top: shift the grid down by the caption height
+	}
 
 	// Lay out each cell at its column width; capture natural height.
 	natH := map[*gridCell]float64{}
@@ -293,7 +310,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 			continue
 		}
 		cx := contentX + g.cols[gc.col].x
-		cy := g.rows[gc.row].y
+		cy := g.rows[gc.row].y + gridDY
 		cw := g.cellWidth(gc)
 		ch := gc.rowBandHeight(g)
 		stretchCellFragment(gc.frag, cx, cy, cw, ch)
@@ -301,9 +318,21 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		children = append(children, gc.frag)
 	}
 
+	gridBottom := tableContentH + gridDY
+	if captionFrag != nil {
+		if g.table.Style.CaptionSide == "bottom" {
+			translateFragment(captionFrag, 0, gridBottom-captionFrag.Y) // just below the grid
+			children = append(children, captionFrag)
+			gridBottom += captionH
+		} else {
+			translateFragment(captionFrag, 0, 0-captionFrag.Y) // at local Y 0 (the very top)
+			children = append(children, captionFrag)
+		}
+	}
+
 	return interior{
 		children:       children,
-		contentHeight:  tableContentH,
+		contentHeight:  gridBottom,
 		leadingMargin:  0,
 		trailingMargin: 0,
 	}

@@ -383,3 +383,82 @@ func TestVerticalAlignTopIsDefault(t *testing.T) {
 		t.Errorf("default (top) vertical-align should keep content at the band top (~0); got offset %v", offset)
 	}
 }
+
+func TestCaptionTopShiftsGridDown(t *testing.T) {
+	capSt := gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 24, Unit: gcss.UnitPx},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+	caption := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCaption,
+		Formatting: cssbox.BlockFC, Style: capSt}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{fixedCell(50, 30)}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "fixed", CaptionSide: "top", Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{caption, rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 200)
+	// The cell (50x30) must sit at y >= 24 (below the caption).
+	var cellY float64 = -1
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 50 && f.H == 30 {
+			cellY = f.Y
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if cellY < 24 {
+		t.Errorf("caption-side:top should push the grid below the 24px caption; cell Y=%v", cellY)
+	}
+}
+
+func TestCaptionBottomBelowGrid(t *testing.T) {
+	capSt := gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 24, Unit: gcss.UnitPx},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+	caption := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCaption,
+		Formatting: cssbox.BlockFC, Style: capSt}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{fixedCell(50, 30)}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "fixed", CaptionSide: "bottom", Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{caption, rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 200)
+	// caption-side:bottom: the cell sits at the TOP (y ~0), the caption below it (y >= 30).
+	var cellY float64 = -1
+	var capY float64 = -1
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 50 && f.H == 30 {
+			cellY = f.Y
+		}
+		if f.H == 24 && f.W > 0 {
+			capY = f.Y
+		} // the caption fragment (24 tall)
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if cellY < 0 || cellY > 5 {
+		t.Errorf("caption-side:bottom should keep the grid at the top (~0); cell Y=%v", cellY)
+	}
+	if capY < 30 {
+		t.Errorf("caption-side:bottom should place the caption below the 30px row; caption Y=%v", capY)
+	}
+}
