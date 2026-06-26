@@ -302,6 +302,9 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		Lines:      in.lines,
 		DebugTag:   debugTag(b),
 	}
+	if len(in.collapsedBorders) > 0 {
+		frag.Collapsed = in.collapsedBorders
+	}
 	frag.Border[layout.EdgeTop] = BorderEdge{Width: ed.bT, Color: b.Style.BorderTopColor, Style: mapBorderStyle(b.Style.BorderTopStyle)}
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
@@ -438,6 +441,10 @@ type interior struct {
 	// interior that have not yet found their stacking-context owner (bubbles up like
 	// bfcFloats, but for the positioned layer). layoutBlock consumes or re-bubbles it.
 	pendingPositioned []pendingPos
+	// collapsedBorders holds the resolved border-collapse:collapse edge strips for a
+	// table interior, to be copied onto the table fragment. Nil for every non-table
+	// interior so non-collapse pages are byte-identical.
+	collapsedBorders []layout.BorderItem
 }
 
 // layoutInterior lays out b's children into a local frame (content-box top at 0)

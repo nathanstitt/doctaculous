@@ -71,6 +71,63 @@ func TestFixedTableTwoByTwoGeometry(t *testing.T) {
 	}
 }
 
+func TestCollapseProducesEdgesAndClearsCellBorders(t *testing.T) {
+	mkCell := func() *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width:             gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			Height:            gcss.Length{Value: 20, Unit: gcss.UnitPx},
+			MaxWidth:          gcss.Length{Unit: gcss.UnitAuto},
+			MaxHeight:         gcss.Length{Unit: gcss.UnitAuto},
+			BorderTopWidth:    gcss.Length{Value: 2, Unit: gcss.UnitPx},
+			BorderRightWidth:  gcss.Length{Value: 2, Unit: gcss.UnitPx},
+			BorderBottomWidth: gcss.Length{Value: 2, Unit: gcss.UnitPx},
+			BorderLeftWidth:   gcss.Length{Value: 2, Unit: gcss.UnitPx},
+			BorderTopStyle:    "solid",
+			BorderRightStyle:  "solid",
+			BorderBottomStyle: "solid",
+			BorderLeftStyle:   "solid",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC, Style: st}
+	}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{mkCell(), mkCell()}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "fixed", BorderCollapse: "collapse", Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 200)
+	collapsed := 0
+	cellBorders := 0
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		collapsed += len(f.Collapsed)
+		if f.W == 40 {
+			for _, be := range f.Border {
+				if be.Width > 0 {
+					cellBorders++
+				}
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if collapsed == 0 {
+		t.Error("collapse mode should produce resolved edge strips")
+	}
+	if cellBorders != 0 {
+		t.Errorf("collapse mode should clear per-cell borders; found %d", cellBorders)
+	}
+}
+
 func TestTableRowHeightIsTallestCell(t *testing.T) {
 	st := gcss.ComputedStyle{TableLayout: "fixed"}
 	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,

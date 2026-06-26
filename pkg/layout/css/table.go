@@ -4,6 +4,7 @@ import (
 	"context"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -338,11 +339,36 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		}
 	}
 
+	// border-collapse:collapse — resolve shared edges and clear per-cell borders so the
+	// collapsed grid lines (stored on the table fragment) don't double-paint.
+	var collapsedBorders []layout.BorderItem
+	if g.collapse {
+		cellAt := func(r, c int) *gridCell {
+			for i := 0; i < len(g.cells); i++ {
+				gc := g.cells[i]
+				if r >= gc.row && r < gc.row+gc.rowSpan && c >= gc.col && c < gc.col+gc.colSpan {
+					return gc
+				}
+			}
+			return nil
+		}
+		collapsedBorders = g.buildCollapsedBorders(cellAt)
+		// In collapse mode the resolved grid edges replace per-cell borders: clear each
+		// cell fragment's own border so it does not double-paint.
+		for i := 0; i < len(g.cells); i++ {
+			gc := g.cells[i]
+			if gc.frag != nil {
+				gc.frag.Border = [4]BorderEdge{}
+			}
+		}
+	}
+
 	return interior{
-		children:       children,
-		contentHeight:  gridBottom,
-		leadingMargin:  0,
-		trailingMargin: 0,
+		children:         children,
+		contentHeight:    gridBottom,
+		leadingMargin:    0,
+		trailingMargin:   0,
+		collapsedBorders: collapsedBorders,
 	}
 }
 
