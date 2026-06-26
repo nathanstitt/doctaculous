@@ -50,15 +50,6 @@ func LoadSFNT(data []byte) (*Face, error) {
 	return &Face{prog: prog, names: prog.nameToGID()}, nil
 }
 
-// decodeWOFF1 is replaced by woff1.go in Task 4. It will decode the WOFF1 table
-// directory into []sfntTable and feed them to buildSFNT; until then it is a stub
-// that returns a typed error. (The buildSFNT reference keeps the shared reassembly
-// seam wired in for Tasks 4/6.)
-func decodeWOFF1(data []byte) ([]byte, error) {
-	_ = buildSFNT
-	return nil, fmt.Errorf("%w: WOFF1 decode not yet implemented", ErrInvalidWOFF)
-}
-
 // decodeWOFF2 is replaced by woff2.go in Task 6. It will decode (and de-transform)
 // the WOFF2 tables into []sfntTable and feed them to buildSFNT; until then it is a
 // stub that returns a typed error. (The buildSFNT reference keeps the shared
