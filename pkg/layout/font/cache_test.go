@@ -90,3 +90,35 @@ func TestNewFaceCacheUnchanged(t *testing.T) {
 		t.Fatal("NewFaceCache Resolve(unknown) hit, want miss")
 	}
 }
+
+// Missing variant: @font-face supplies only regular; a bold request still resolves
+// (downloaded face reused as the coarse best match, or bundled fallback) — no panic.
+func TestResolveMissingVariantResolves(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	loader := &countingLoader{inner: resource.MapLoader{"r.ttf": {Data: ttf}}}
+	faces := []gcss.FontFace{{Family: "Display", Sources: []gcss.FontSource{{URL: "r.ttf"}}}}
+	c := NewFaceCacheWithFonts(faces, loader, nil, nil)
+	if _, ok := c.Resolve("Display", pkgfont.Style{}); !ok {
+		t.Fatal("regular miss, want the downloaded face")
+	}
+	if _, ok := c.Resolve("Display", pkgfont.Style{Bold: true}); !ok {
+		t.Fatal("bold miss, want a resolved face (downloaded face reused for the missing variant)")
+	}
+}
+
+// local() with no provider skips to the next src (a url()).
+func TestResolveLocalNoProviderFallsToURL(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	loader := &countingLoader{inner: resource.MapLoader{"u.ttf": {Data: ttf}}}
+	faces := []gcss.FontFace{{Family: "X", Sources: []gcss.FontSource{{Local: "nope"}, {URL: "u.ttf"}}}}
+	c := NewFaceCacheWithFonts(faces, loader, nil, nil) // nil provider -> local() can't match
+	if _, ok := c.Resolve("X", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(X) miss, want the url() fallback after the local() skip")
+	}
+}
