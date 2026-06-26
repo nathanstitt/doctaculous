@@ -260,7 +260,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		}
 	}
 	gridDY := 0.0
-	if g.caption != nil && g.table.Style.CaptionSide != "bottom" {
+	if g.caption != nil && g.caption.Style.CaptionSide != "bottom" {
 		gridDY = captionH // caption on top: shift the grid down by the caption height
 	}
 
@@ -320,7 +320,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 
 	gridBottom := tableContentH + gridDY
 	if captionFrag != nil {
-		if g.table.Style.CaptionSide == "bottom" {
+		if g.caption.Style.CaptionSide == "bottom" {
 			translateFragment(captionFrag, 0, gridBottom-captionFrag.Y) // just below the grid
 			children = append(children, captionFrag)
 			gridBottom += captionH

@@ -386,7 +386,8 @@ func TestVerticalAlignTopIsDefault(t *testing.T) {
 
 func TestCaptionTopShiftsGridDown(t *testing.T) {
 	capSt := gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 24, Unit: gcss.UnitPx},
-		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+		CaptionSide: "top"}
 	caption := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCaption,
 		Formatting: cssbox.BlockFC, Style: capSt}
 	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
@@ -422,7 +423,8 @@ func TestCaptionTopShiftsGridDown(t *testing.T) {
 
 func TestCaptionBottomBelowGrid(t *testing.T) {
 	capSt := gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 24, Unit: gcss.UnitPx},
-		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+		CaptionSide: "bottom"}
 	caption := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCaption,
 		Formatting: cssbox.BlockFC, Style: capSt}
 	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
@@ -460,5 +462,47 @@ func TestCaptionBottomBelowGrid(t *testing.T) {
 	}
 	if capY < 30 {
 		t.Errorf("caption-side:bottom should place the caption below the 30px row; caption Y=%v", capY)
+	}
+}
+
+func TestCaptionSideOnCaptionElementHonored(t *testing.T) {
+	// caption-side:bottom set DIRECTLY on <caption> (not the table) must place the
+	// caption below the grid — exercises the inherited property read from the caption.
+	src := `<table style="border-spacing:0">
+		<caption style="caption-side:bottom; height:20px">C</caption>
+		<tr><td style="height:30px;width:40px">X</td></tr>
+	</table>`
+	root := build(t, src, nil)
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), root, 200)
+	// Find the cell (height ~30) and the caption (height ~20). The caption Y must be
+	// BELOW the cell Y (caption-side:bottom). With the BUG, the caption would be at the top.
+	var cellY, capY float64 = -1, -1
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		// cell: a 40-wide, ~30-tall fragment
+		if f.W >= 38 && f.W <= 42 && f.H >= 28 && f.H <= 32 {
+			cellY = f.Y
+		}
+		// caption: ~20 tall (its specified height); H differs from the cell's ~30
+		if f.H >= 18 && f.H <= 22 {
+			capY = f.Y
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if cellY < 0 {
+		t.Fatalf("cell fragment not found")
+	}
+	if capY < 0 {
+		t.Fatalf("caption fragment not found")
+	}
+	if capY <= cellY {
+		t.Errorf("caption-side:bottom on <caption> should place caption (Y=%v) below the cell (Y=%v)", capY, cellY)
 	}
 }
