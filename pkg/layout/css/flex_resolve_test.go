@@ -112,3 +112,27 @@ func TestResolveAllViolateFreezeTogether(t *testing.T) {
 		t.Errorf("got %v, want [60 60]", got)
 	}
 }
+
+func TestResolveGrowFactorSumBelowOne(t *testing.T) {
+	// Single item, base 100, grow 0.5, in a 300 container => surplus 200. Because the
+	// sum of grow factors (0.5) is < 1, only initialFree*0.5 = 100 of free space is
+	// distributed, so the item grows to 200 (NOT the full 300). This exercises the
+	// §9.7 sub-1 flex-factor-sum rule (the if sumFactor < 1 branch).
+	items := []flexItemSizing{sizing(100, 0.5, 0, 0, -1)}
+	got := resolveFlexibleLengths(items, 300, 0)
+	if !approxF(got[0], 200) {
+		t.Errorf("grow factor sum 0.5 => item = %v, want 200 (only half the surplus distributed)", got[0])
+	}
+}
+
+func TestResolveShrinkFactorSumBelowOne(t *testing.T) {
+	// Single item, base 200, shrink 0.5, in a 100 container => deficit -100. The sum of
+	// shrink factors (0.5) is < 1, so only initialFree*0.5 = -50 of the deficit is
+	// distributed: the item shrinks to 150 (NOT the full 100). Exercises the shrink side
+	// of the sub-1 flex-factor-sum rule.
+	items := []flexItemSizing{sizing(200, 0, 0.5, 0, -1)}
+	got := resolveFlexibleLengths(items, 100, 0)
+	if !approxF(got[0], 150) {
+		t.Errorf("shrink factor sum 0.5 => item = %v, want 150 (only half the deficit applied)", got[0])
+	}
+}
