@@ -144,21 +144,60 @@ func readUIntBase128(b []byte) (uint32, int, error) {
 }
 
 // reconstructWOFF2Tables slices each table from the decompressed block in
-// directory order. (Task 6 replaces this with glyf/loca transform reconstruction.)
+// directory order, reversing the glyf/loca transform when present. The only
+// transform this package supports is the standard glyf transform (and its
+// implied loca rebuild): a transformed glyf entry's bytes are reconstructed into
+// a standard sfnt glyf table via reconstructGlyf, and the resulting loca replaces
+// the (zero-length) transformed loca entry's data. Any other transformed table is
+// unsupported and degrades to a typed error so the caller falls back to a
+// substitute.
 func reconstructWOFF2Tables(flavor uint32, entries []woff2Entry, block []byte) ([]sfntTable, error) {
-	_ = flavor // flavor is used by the Task 6 transform-aware version
+	_ = flavor // flavor selects the sfnt version in buildSFNT, not the table reconstruction
+	glyfTag := woff2KnownTags[10]
+	locaTag := woff2KnownTags[11]
+
 	tables := make([]sfntTable, 0, len(entries))
+	var rebuiltLoca []byte
+	locaIdx := -1
 	off := 0
 	for _, e := range entries {
+		size := int(e.origLength)
 		if e.transformed {
-			return nil, fmt.Errorf("%w: WOFF2 transformed %q not yet supported", ErrInvalidWOFF, e.tag)
+			size = int(e.transLength)
 		}
-		end := off + int(e.origLength)
-		if end > len(block) {
+		end := off + size
+		if end < off || end > len(block) {
 			return nil, fmt.Errorf("%w: WOFF2 table %q out of range", ErrInvalidWOFF, e.tag)
 		}
-		tables = append(tables, sfntTable{tag: e.tag, data: append([]byte(nil), block[off:end]...)})
+		raw := block[off:end]
 		off = end
+
+		switch {
+		case e.transformed && e.tag == glyfTag:
+			glyf, loca, err := reconstructGlyf(raw)
+			if err != nil {
+				return nil, err
+			}
+			rebuiltLoca = loca
+			tables = append(tables, sfntTable{tag: glyfTag, data: glyf})
+		case e.transformed && e.tag == locaTag:
+			// The transformed loca carries no data (transLength 0); it is rebuilt
+			// from glyf. Record its slot and fill it in after the loop so glyf order
+			// in the directory does not matter.
+			locaIdx = len(tables)
+			tables = append(tables, sfntTable{tag: locaTag})
+		case e.transformed:
+			return nil, fmt.Errorf("%w: WOFF2 transformed %q not supported", ErrInvalidWOFF, e.tag)
+		default:
+			tables = append(tables, sfntTable{tag: e.tag, data: append([]byte(nil), raw...)})
+		}
+	}
+
+	if locaIdx >= 0 {
+		if rebuiltLoca == nil {
+			return nil, fmt.Errorf("%w: WOFF2 transformed loca without transformed glyf", ErrInvalidWOFF)
+		}
+		tables[locaIdx].data = rebuiltLoca
 	}
 	return tables, nil
 }
