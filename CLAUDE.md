@@ -411,8 +411,12 @@ that skip into real output.
    **six table background layers** (table → column-groups → columns → row-groups → rows → cells — today
    cell + table backgrounds paint, but `<col>`/row-group background layering is not modeled); the
    **`empty-cells` property** (always rendered as `show`); a **percentage `<col>` width with no cells in
-   its column**; and higher-fidelity 3D border styles in collapse (`ridge`/`groove`/`outset`/`inset`
-   render as `solid`).
+   its column**; higher-fidelity 3D border styles in collapse (`ridge`/`groove`/`outset`/`inset`
+   render as `solid`); the **percentage-column basis is computed slightly differently in fixed
+   (border-spacing included) vs auto (excluded)** layout — only observable with `border-spacing > 0`
+   plus percentage columns, and off by the spacing amount; and **`buildCollapsedBorders` is O(cells²)**
+   (a per-neighbor linear scan — fine for normal tables, a perf cliff for very large collapsed grids;
+   retain `buildGrid`'s occupancy map to make it O(1)).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
