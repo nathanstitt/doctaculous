@@ -437,6 +437,8 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 		for ci := range g.cols {
 			g.cols[ci].width = g.cols[ci].min
 		}
+		// sumMax == sumMin (every column fully pinned): no proportional flex room exists,
+		// so any surplus is split equally rather than by the (zero) flex ratio.
 		if used > sumMin && len(g.cols) > 0 {
 			extra := (used - sumMin) / float64(len(g.cols))
 			for ci := range g.cols {
@@ -445,6 +447,12 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 		}
 		return
 	}
+	// Distribute the surplus (used − sumMin) across columns in proportion to each
+	// column's flex room (max − min). This conserves exactly:
+	//   Σ(min + surplus·span/flex) = sumMin + surplus·(Σspan)/flex
+	//                              = sumMin + surplus·flex/flex = sumMin + surplus = used,
+	// so the column widths always sum to the table's used width. flex > 0 here because
+	// this path is only reached when sumMax != sumMin.
 	surplus := used - sumMin
 	flex := sumMax - sumMin
 	for ci := range g.cols {
