@@ -1,6 +1,10 @@
 package css
 
-import "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+import (
+	"context"
+
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+)
 
 // tableGrid is the private intermediate the table layout algorithm operates on: the
 // row/column grid recovered from a fixed-up table box, the single source of truth
@@ -19,14 +23,17 @@ type tableGrid struct {
 }
 
 type gridRow struct {
-	box   *cssbox.Box // the DisplayTableRow box (real or anonymous)
-	cells []*gridCell // cells ORIGINATING in this row (not spanned into it)
+	box    *cssbox.Box // the DisplayTableRow box (real or anonymous)
+	cells  []*gridCell // cells ORIGINATING in this row (not spanned into it)
+	height float64     // resolved row height (tallest non-spanning cell)
+	y      float64     // y-offset of the row's top edge in the table content box
 }
 
 type gridCol struct {
 	hasWidth bool
 	width    float64 // specified/hint width (px) when hasWidth
 	pct      float64 // percentage width [0..100], or <0 when none
+	x        float64 // x-offset of the column's left edge in the table content box
 }
 
 type gridCell struct {
@@ -34,6 +41,7 @@ type gridCell struct {
 	row, col int // origin slot (top-left), 0-based
 	rowSpan  int
 	colSpan  int
+	frag     *Fragment // fragment produced by laying out this cell
 }
 
 // buildGrid recovers the grid from a fixed-up table box. It flattens row-groups in
@@ -194,4 +202,157 @@ func spanOf(cb *cssbox.Box) int {
 		return 1
 	}
 	return cb.ColSpan
+}
+
+// layoutTable is the TableFC entry point (called from layoutInterior). It builds the
+// grid, solves column widths (fixed layout this slice), lays out + positions cells,
+// and returns the interior (cell fragments in the local content-top-0 frame). A table
+// establishes a BFC, so leading/trailing margins are 0. contentW is the table's
+// content-box width; contentX the page-space left of that content box.
+func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
+	_ = bandOriginY // reserved for future use (float interactions)
+	_ = fc          // reserved for future use (float interactions)
+	g := buildGrid(b)
+	if g.table.Style.Direction == "rtl" {
+		e.logf("css layout: RTL tables not supported; laying out LTR")
+	}
+	if len(g.rows) == 0 || len(g.cols) == 0 {
+		return interior{contentHeight: 0}
+	}
+
+	e.solveFixedWidths(g, contentW)
+
+	// Column x-offsets (left content edge of each column), with border-spacing.
+	x := g.spacingH
+	for ci := range g.cols {
+		g.cols[ci].x = x
+		x += g.cols[ci].width + g.spacingH
+	}
+
+	// Lay out each cell at its column width; capture natural height.
+	for _, gc := range g.cells {
+		cw := g.cellWidth(gc)
+		res := e.layoutBlock(ctx, gc.box, cw, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: cw}, &positionedContext{}, posCBOwner{isPage: true})
+		gc.frag = res.frag
+	}
+
+	// Row natural heights = tallest non-spanning cell originating in the row.
+	for _, gr := range g.rows {
+		h := 0.0
+		for _, gc := range gr.cells {
+			if gc.rowSpan == 1 && gc.frag != nil && gc.frag.H > h {
+				h = gc.frag.H
+			}
+		}
+		gr.height = h
+	}
+
+	// Row y-offsets with vertical spacing.
+	y := g.spacingV
+	for _, gr := range g.rows {
+		gr.y = y
+		y += gr.height + g.spacingV
+	}
+	tableContentH := y
+
+	// Position cells: a cell fills its column(s) × row(s) rectangle.
+	var children []*Fragment
+	for _, gc := range g.cells {
+		if gc.frag == nil {
+			continue
+		}
+		cx := contentX + g.cols[gc.col].x
+		cy := g.rows[gc.row].y
+		cw := g.cellWidth(gc)
+		ch := gc.rowBandHeight(g)
+		stretchCellFragment(gc.frag, cx, cy, cw, ch)
+		children = append(children, gc.frag)
+	}
+
+	return interior{
+		children:       children,
+		contentHeight:  tableContentH,
+		leadingMargin:  0,
+		trailingMargin: 0,
+	}
+}
+
+// cellWidth is the border-box width of a cell = sum of spanned columns + the
+// inter-column border-spacing between them.
+func (g *tableGrid) cellWidth(gc *gridCell) float64 {
+	w := 0.0
+	for i := 0; i < gc.colSpan; i++ {
+		w += g.cols[gc.col+i].width
+	}
+	w += float64(gc.colSpan-1) * g.spacingH
+	return w
+}
+
+// rowBandHeight is the total height a cell spans = sum of its rows' heights + the
+// inter-row border-spacing between them.
+func (gc *gridCell) rowBandHeight(g *tableGrid) float64 {
+	h := 0.0
+	for i := 0; i < gc.rowSpan; i++ {
+		h += g.rows[gc.row+i].height
+	}
+	h += float64(gc.rowSpan-1) * g.spacingV
+	return h
+}
+
+// solveFixedWidths implements CSS 17.5.2.1: column widths from the first row's cells
+// + <col> hints + the table width, content-independent. The table used content width
+// fills its container (width:auto), or grows to the column sum if larger. Auto columns
+// split the leftover equally.
+func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
+	used := contentW
+	if len(g.rows) > 0 {
+		for _, gc := range g.rows[0].cells {
+			if w, ok := specifiedFixedWidth(gc.box); ok {
+				per := w / float64(gc.colSpan)
+				for i := 0; i < gc.colSpan; i++ {
+					if !g.cols[gc.col+i].hasWidth {
+						g.cols[gc.col+i].hasWidth = true
+						g.cols[gc.col+i].width = per
+					}
+				}
+			}
+		}
+	}
+	fixedSum := 0.0
+	autoCount := 0
+	for ci := range g.cols {
+		if g.cols[ci].hasWidth {
+			fixedSum += g.cols[ci].width
+		} else {
+			autoCount++
+		}
+	}
+	spacing := g.spacingH * float64(len(g.cols)+1)
+	remain := used - fixedSum - spacing
+	if remain < 0 {
+		remain = 0
+	}
+	if autoCount > 0 {
+		per := remain / float64(autoCount)
+		for ci := range g.cols {
+			if !g.cols[ci].hasWidth {
+				g.cols[ci].width = per
+			}
+		}
+	} else if remain > 0 && fixedSum > 0 {
+		for ci := range g.cols {
+			g.cols[ci].width += remain * (g.cols[ci].width / fixedSum)
+		}
+	}
+	_ = used // used to compute remain above
+}
+
+// stretchCellFragment positions a cell's border-box fragment at (x,y) and stretches
+// it to (w,h) — table cells fill their row band. It translates the fragment's whole
+// subtree so its top-left lands at (x,y), then sets the border box to (w,h). Content
+// keeps its top-left origin (top-aligned for now; vertical-align is a later task).
+func stretchCellFragment(f *Fragment, x, y, w, h float64) {
+	translateFragment(f, x-f.X, y-f.Y)
+	f.W = w
+	f.H = h
 }

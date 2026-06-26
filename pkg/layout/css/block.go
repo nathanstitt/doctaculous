@@ -476,11 +476,13 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		in = interior{lines: lines, children: atomics, contentHeight: h}
 	case cssbox.BlockFC:
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
+	case cssbox.TableFC:
+		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
 	default:
-		// TableFC / FlexFC / GridFC: their real layout algorithms are later
-		// sub-projects. Degrade to block normal flow so the children still position
-		// and paint (per the degradation contract: the box arrives with its true
-		// Formatting; the fallback is at this layout stage).
+		// FlexFC / GridFC: their real layout algorithms are later sub-projects.
+		// Degrade to block normal flow so the children still position and paint
+		// (per the degradation contract: the box arrives with its true Formatting;
+		// the fallback is at this layout stage).
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	}
@@ -911,6 +913,9 @@ func clips(b *cssbox.Box) bool {
 func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
 		return true
+	}
+	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
+		return true // a table and a table cell each establish a BFC
 	}
 	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
 }
