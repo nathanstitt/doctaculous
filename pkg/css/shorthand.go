@@ -272,7 +272,7 @@ func applyFlexShorthand(cs *ComputedStyle, val string) {
 		cs.FlexGrow, cs.FlexShrink, cs.FlexBasis = 0, 1, Length{Unit: UnitAuto}
 		return
 	}
-	fields := strings.Fields(v)
+	fields := splitComponents(v)
 	if len(fields) == 0 || len(fields) > 3 {
 		return // malformed: leave prior values
 	}
@@ -281,10 +281,9 @@ func applyFlexShorthand(cs *ComputedStyle, val string) {
 	grow, shrink := 1.0, 1.0
 	basis := Length{0, UnitPercent}
 	var nums []float64
-	var gotBasis bool
 	for _, f := range fields {
 		if b, ok := parseFlexBasis(f); ok && isBasisToken(f) {
-			basis, gotBasis = b, true
+			basis = b
 			continue
 		}
 		n, ok := parseNonNegNumber(f)
@@ -299,7 +298,6 @@ func applyFlexShorthand(cs *ComputedStyle, val string) {
 	if len(nums) >= 2 {
 		shrink = nums[1]
 	}
-	_ = gotBasis
 	cs.FlexGrow, cs.FlexShrink, cs.FlexBasis = grow, shrink, basis
 }
 
@@ -316,7 +314,7 @@ func isBasisToken(f string) bool {
 
 // applyGapShorthand expands `gap: <row> [<column>]` (a single value sets both).
 func applyGapShorthand(cs *ComputedStyle, val string) {
-	fields := strings.Fields(strings.TrimSpace(val))
+	fields := splitComponents(val)
 	if len(fields) == 0 || len(fields) > 2 {
 		return
 	}

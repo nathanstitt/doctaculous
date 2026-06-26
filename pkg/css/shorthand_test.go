@@ -400,3 +400,18 @@ func TestGapShorthand(t *testing.T) {
 		t.Errorf("gap:10px 20px = row %v col %v, want 10px/20px", cs2.RowGap, cs2.ColumnGap)
 	}
 }
+
+func TestGapShorthandInvalidPreservesPrior(t *testing.T) {
+	cs := initialStyle()
+	cs.RowGap = Length{5, UnitPx}
+	cs.ColumnGap = Length{5, UnitPx}
+	applyOne(&cs, "gap", "bogus")
+	if cs.RowGap != (Length{5, UnitPx}) || cs.ColumnGap != (Length{5, UnitPx}) {
+		t.Errorf("invalid gap should preserve prior values; got row %v col %v", cs.RowGap, cs.ColumnGap)
+	}
+	// Too many components is also invalid and preserves prior values.
+	applyOne(&cs, "gap", "1px 2px 3px")
+	if cs.RowGap != (Length{5, UnitPx}) || cs.ColumnGap != (Length{5, UnitPx}) {
+		t.Errorf("3-value gap should preserve prior values; got row %v col %v", cs.RowGap, cs.ColumnGap)
+	}
+}
