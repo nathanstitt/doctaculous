@@ -33,3 +33,42 @@ func TestParseSrcListSkipsMalformedEntry(t *testing.T) {
 		t.Errorf("sources = %+v, want a.ttf then b.ttf", srcs)
 	}
 }
+
+func TestParseStylesheetCapturesFontFace(t *testing.T) {
+	src := `
+		p { color: red }
+		@font-face {
+			font-family: "My Face";
+			src: url(my.woff2) format("woff2"), url(my.ttf);
+			font-weight: bold;
+			font-style: italic;
+		}
+		@media print { p { color: black } }
+	`
+	sheet := Parse(src)
+	// The normal rule still parses; @media is still skipped (regression guard).
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1: %+v", len(sheet.Rules), sheet.Rules)
+	}
+	if len(sheet.FontFaces) != 1 {
+		t.Fatalf("got %d font faces, want 1: %+v", len(sheet.FontFaces), sheet.FontFaces)
+	}
+	ff := sheet.FontFaces[0]
+	if ff.Family != "My Face" {
+		t.Errorf("family = %q, want \"My Face\"", ff.Family)
+	}
+	if len(ff.Sources) != 2 || ff.Sources[0].URL != "my.woff2" || ff.Sources[0].Format != "woff2" || ff.Sources[1].URL != "my.ttf" {
+		t.Errorf("sources = %+v, want [my.woff2(woff2), my.ttf]", ff.Sources)
+	}
+	if ff.Weight != "bold" || ff.Style != "italic" {
+		t.Errorf("weight/style = %q/%q, want bold/italic", ff.Weight, ff.Style)
+	}
+}
+
+func TestParseFontFaceDroppedWhenNoFamilyOrSrc(t *testing.T) {
+	// No family -> dropped. No src -> dropped.
+	sheet := Parse(`@font-face { src: url(x.ttf) } @font-face { font-family: Foo }`)
+	if len(sheet.FontFaces) != 0 {
+		t.Fatalf("got %d font faces, want 0 (both incomplete): %+v", len(sheet.FontFaces), sheet.FontFaces)
+	}
+}

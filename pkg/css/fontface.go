@@ -19,6 +19,28 @@ type FontSource struct {
 	Format string // format(...) hint, lowercased and unquoted; "" if absent
 }
 
+// parseFontFace maps an @font-face block's declarations to a FontFace. ok is false
+// when the rule lacks a font-family or has no usable src (the caller drops it).
+func parseFontFace(decls []Declaration) (FontFace, bool) {
+	var ff FontFace
+	for _, d := range decls {
+		switch strings.ToLower(d.Property) {
+		case "font-family":
+			ff.Family = unquote(strings.TrimSpace(d.Value))
+		case "src":
+			ff.Sources = parseSrcList(d.Value)
+		case "font-weight":
+			ff.Weight = strings.ToLower(strings.TrimSpace(d.Value))
+		case "font-style":
+			ff.Style = strings.ToLower(strings.TrimSpace(d.Value))
+		}
+	}
+	if ff.Family == "" || len(ff.Sources) == 0 {
+		return FontFace{}, false
+	}
+	return ff, true
+}
+
 // parseSrcList parses an @font-face src descriptor value into ordered sources.
 // Entries are comma-separated at the top level (commas inside (), "" or ” do not
 // split). A malformed entry (neither url() nor local()) is skipped; the rest
