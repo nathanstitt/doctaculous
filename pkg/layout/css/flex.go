@@ -73,8 +73,11 @@ func resolveFlexibleLengths(items []flexItemSizing, innerMain, totalGap float64)
 		}
 	}
 
+	viol := make([]int, n) // per-pass min/max violation flags (+1 up, -1 down, 0 none); reused each pass
+
 	// 4. Loop until no unfrozen items remain.
 	for {
+		// (a) Check for flexible items; exit when all are frozen.
 		anyUnfrozen := false
 		for i := range items {
 			if !frozen[i] {
@@ -142,7 +145,9 @@ func resolveFlexibleLengths(items []flexItemSizing, innerMain, totalGap float64)
 
 		// (d) Fix min/max violations; record the total violation sign.
 		totalViolation := 0.0
-		viol := make([]int, n) // +1 = clamped up (min), -1 = clamped down (max), 0 = none
+		for i := range viol {
+			viol[i] = 0
+		}
 		for i := range items {
 			if frozen[i] {
 				continue

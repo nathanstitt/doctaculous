@@ -102,7 +102,9 @@ func TestResolveNoFlexFactorsStayAtBase(t *testing.T) {
 
 func TestResolveAllViolateFreezeTogether(t *testing.T) {
 	// inner=300, two items base 50, grow 1 each; both max 60 => both want 150 but
-	// both clamp to 60 (max violations, total<0 => freeze all max-violations at once).
+	// both want 150 but clamp to their max 60 => each is a max violation (viol == -1),
+	// so totalViolation < 0 and the freeze step's default branch freezes all -1 (max)
+	// violations in a single pass => [60 60].
 	items := []flexItemSizing{
 		sizing(50, 1, 0, 0, 60),
 		sizing(50, 1, 0, 0, 60),
