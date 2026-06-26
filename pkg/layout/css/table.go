@@ -34,6 +34,7 @@ type gridCol struct {
 	width    float64 // specified/hint width (px) when hasWidth
 	pct      float64 // percentage width [0..100], or <0 when none
 	x        float64 // x-offset of the column's left edge in the table content box
+	min, max float64 // content min/max-content widths (auto layout)
 }
 
 type gridCell struct {
@@ -220,7 +221,11 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		return interior{contentHeight: 0}
 	}
 
-	e.solveFixedWidths(g, contentW)
+	if g.fixed {
+		e.solveFixedWidths(g, contentW)
+	} else {
+		e.solveAutoWidths(ctx, g, contentW)
+	}
 
 	// Column x-offsets (left content edge of each column), with border-spacing.
 	x := g.spacingH
@@ -355,6 +360,105 @@ func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
 			g.cols[ci].width += remain * (g.cols[ci].width / fixedSum)
 		}
 	}
+}
+
+// solveAutoWidths implements CSS 17.5.2.2 (automatic table layout): per-column
+// min/max content widths from non-spanning cells, the table used width, and a
+// distribution of that width across columns between their min and max. Spanning-cell
+// contributions (distributeSpanWidths) and percentage columns are added by later
+// tasks; this handles the non-spanning, non-percentage common case.
+func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW float64) {
+	for ci := range g.cols {
+		g.cols[ci].min = 0
+		g.cols[ci].max = 0
+	}
+	for _, gc := range g.cells {
+		if gc.colSpan != 1 {
+			continue
+		}
+		mn := e.measureMinContent(ctx, gc.box) + horizontalEdges(gc.box)
+		mx := e.measureMaxContent(ctx, gc.box) + horizontalEdges(gc.box)
+		if w, ok := specifiedFixedWidth(gc.box); ok {
+			ew := w + horizontalEdges(gc.box)
+			if ew > mn {
+				mn = ew
+			}
+			mx = ew
+			if mx < mn {
+				mx = mn
+			}
+		}
+		col := &g.cols[gc.col]
+		if mn > col.min {
+			col.min = mn
+		}
+		if mx > col.max {
+			col.max = mx
+		}
+		if col.hasWidth && col.width > col.min {
+			col.min = col.width
+			if col.max < col.min {
+				col.max = col.min
+			}
+		}
+	}
+	e.distributeSpanWidths(ctx, g) // Task 9; no-op until then
+
+	for ci := range g.cols {
+		if g.cols[ci].max < g.cols[ci].min {
+			g.cols[ci].max = g.cols[ci].min
+		}
+	}
+
+	spacing := g.spacingH * float64(len(g.cols)+1)
+	sumMin, sumMax := 0.0, 0.0
+	for ci := range g.cols {
+		sumMin += g.cols[ci].min
+		sumMax += g.cols[ci].max
+	}
+	avail := contentW - spacing
+	if avail < 0 {
+		avail = 0
+	}
+	var used float64
+	if w, ok := specifiedFixedWidth(g.table); ok {
+		used = w - spacing
+	} else {
+		used = sumMax
+		if used > avail {
+			used = avail
+		}
+	}
+	if used < sumMin {
+		used = sumMin
+	}
+
+	if used <= sumMin || sumMax == sumMin {
+		for ci := range g.cols {
+			g.cols[ci].width = g.cols[ci].min
+		}
+		if used > sumMin && len(g.cols) > 0 {
+			extra := (used - sumMin) / float64(len(g.cols))
+			for ci := range g.cols {
+				g.cols[ci].width += extra
+			}
+		}
+		return
+	}
+	surplus := used - sumMin
+	flex := sumMax - sumMin
+	for ci := range g.cols {
+		span := g.cols[ci].max - g.cols[ci].min
+		g.cols[ci].width = g.cols[ci].min + surplus*(span/flex)
+	}
+}
+
+// distributeSpanWidths adds spanning cells' min/max contributions to the columns
+// they cross (CSS 17.5.2.2). Implemented in a later task; until then spanning cells
+// do not influence column widths (they lay out at the summed column widths regardless).
+func (e *Engine) distributeSpanWidths(ctx context.Context, g *tableGrid) {
+	_ = ctx
+	_ = g
 }
 
 // stretchCellFragment positions a cell's border-box fragment at (x,y) and stretches

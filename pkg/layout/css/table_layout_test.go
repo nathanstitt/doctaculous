@@ -106,3 +106,61 @@ func TestTableRowHeightIsTallestCell(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoTableColumnsSizeToContent(t *testing.T) {
+	// col 0 narrow text, col 1 much wider text. Auto layout gives col 1 more width,
+	// and the table must not exceed the available width.
+	mkCell := func(text string) *cssbox.Box {
+		st := gcss.ComputedStyle{FontSizePt: 16, FontFamily: "serif",
+			Width: gcss.Length{Unit: gcss.UnitAuto}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}
+		txt := &cssbox.Box{Kind: cssbox.BoxText, Text: text, Display: cssbox.DisplayInline, Style: st}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell,
+			Formatting: cssbox.InlineFC, Style: st, Children: []*cssbox.Box{txt}}
+	}
+	st := gcss.ComputedStyle{TableLayout: "auto", Width: gcss.Length{Unit: gcss.UnitAuto}}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{mkCell("Hi"), mkCell("A much longer cell of content here")}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: st, Children: []*cssbox.Box{rg}}
+
+	e := New(nil, nil, nil)
+	g := buildGrid(tbl)
+	e.solveAutoWidths(context.Background(), g, 600)
+	if len(g.cols) != 2 {
+		t.Fatalf("want 2 columns, got %d", len(g.cols))
+	}
+	if g.cols[1].width <= g.cols[0].width {
+		t.Errorf("wider-content column should be wider: col0=%v col1=%v", g.cols[0].width, g.cols[1].width)
+	}
+	total := g.cols[0].width + g.cols[1].width
+	if total > 600+0.5 {
+		t.Errorf("table columns (%v) should fit the 600 available width", total)
+	}
+}
+
+func TestAutoTableSpecifiedWidthPinsColumn(t *testing.T) {
+	mkCell := func(w float64) *cssbox.Box {
+		st := gcss.ComputedStyle{Width: gcss.Length{Value: w, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell,
+			Formatting: cssbox.BlockFC, Style: st}
+	}
+	st := gcss.ComputedStyle{TableLayout: "auto", Width: gcss.Length{Unit: gcss.UnitAuto}}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{mkCell(120), mkCell(40)}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: st, Children: []*cssbox.Box{rg}}
+	e := New(nil, nil, nil)
+	g := buildGrid(tbl)
+	e.solveAutoWidths(context.Background(), g, 600)
+	if g.cols[0].width < 119 || g.cols[0].width > 200 {
+		t.Errorf("col0 should be near its 120 spec (with surplus distribution); got %v", g.cols[0].width)
+	}
+	if g.cols[0].width <= g.cols[1].width {
+		t.Errorf("col0 (120 spec) should exceed col1 (40 spec): %v vs %v", g.cols[0].width, g.cols[1].width)
+	}
+}
