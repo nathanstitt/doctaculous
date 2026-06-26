@@ -62,6 +62,7 @@ func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.Res
 	}
 	normalize(root)   // anonymous-box fixups + whitespace handling (anon.go)
 	fixupTables(root) // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
+	fixupFlex(root)   // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
 	return root, faces, nil
 }
 
