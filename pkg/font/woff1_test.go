@@ -2,6 +2,7 @@ package font
 
 import (
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -26,8 +27,11 @@ func TestDecodeWOFF1RoundTrips(t *testing.T) {
 	assertSameGlyph(t, bare, got, 'A')
 }
 
-// assertSameGlyph fails unless rune r has the same advance and outline presence in
-// both faces (the round-trip ground-truth check shared by the WOFF1/WOFF2 tests).
+// assertSameGlyph fails unless rune r decodes to the same advance AND the exact
+// same outline geometry in both faces. It is the round-trip ground-truth check
+// shared by the WOFF1/WOFF2 tests: comparing the full segment list (not just
+// outline presence) is what proves a container/transform decoder reconstructed the
+// real coordinates, so a wrong triplet or sfnt-rebuild can't slip past.
 func assertSameGlyph(t *testing.T, want, got *Face, r rune) {
 	t.Helper()
 	wOut, wAdv, wOK := want.Glyph(r)
@@ -37,6 +41,10 @@ func assertSameGlyph(t *testing.T, want, got *Face, r rune) {
 	}
 	if (wOut == nil) != (gOut == nil) {
 		t.Fatalf("glyph %q outline presence differs: want nil=%v, got nil=%v", r, wOut == nil, gOut == nil)
+	}
+	if wOut != nil && !reflect.DeepEqual(wOut.Segments, gOut.Segments) {
+		t.Fatalf("glyph %q outline geometry differs:\n want %d segs: %+v\n got  %d segs: %+v",
+			r, len(wOut.Segments), wOut.Segments, len(gOut.Segments), gOut.Segments)
 	}
 }
 
