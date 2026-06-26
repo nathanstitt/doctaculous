@@ -597,7 +597,7 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.FlexBasis = l
 		}
 	case "order":
-		if n, ok := parseInteger(d.Value); ok {
+		if n, ok := parseInt(d.Value); ok {
 			cs.Order = n
 		}
 	}
@@ -727,15 +727,6 @@ func parseNonNegNumber(s string) (float64, bool) {
 		return 0, false
 	}
 	return v, true
-}
-
-// parseInteger parses a signed integer (order). Non-integers yield ok=false.
-func parseInteger(s string) (int, bool) {
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil {
-		return 0, false
-	}
-	return n, true
 }
 
 // parseGapLength parses a row-gap/column-gap value. "normal" is the initial value
