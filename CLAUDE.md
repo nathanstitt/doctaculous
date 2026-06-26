@@ -10,7 +10,9 @@ next.
 
 - **Pure Go. No CGo, no native bindings, no WASM engines.** No PDFium / MuPDF / Poppler.
 - **MIT licensed.** Every dependency must be MIT/BSD/Apache and pure Go. No GPL/AGPL.
-- Approved deps: `golang.org/x/image/*` (BSD), `github.com/srwiley/rasterx` (BSD). Add new deps
+- Approved deps: `golang.org/x/image/*` (BSD), `github.com/srwiley/rasterx` (BSD),
+  `github.com/benoitkugler/textlayout` (font parsing), `golang.org/x/net/html` (HTML parse),
+  `github.com/andybalholm/brotli` (MIT, pure-Go — WOFF2 Brotli decompression only). Add new deps
   only if pure-Go + permissive; record the reason in the PR.
 - **Concurrency-first.** Multi-page work fans out across goroutines (bounded worker pool sized to
   `GOMAXPROCS`). A parsed `*Document` is read-only after Open so it's shared without locks.
@@ -354,6 +356,40 @@ what is done vs. pending.
   (no panic); abs/fixed descendants inside a cell or caption resolve against that box (not silently
   dropped). Non-table pages stay byte-identical (the `Fragment.Collapsed` edge list is nil for every
   non-collapse fragment). See `docs/superpowers/specs/2026-06-25-html-tables-design.md`.
+- **HTML rendering — web fonts (`@font-face` + WOFF/WOFF2)** (`pkg/css/fontface.go` (new) + `parse.go`
+  capture, `pkg/font/sfnt.go`/`woff1.go`/`woff2.go`/`woff2glyf.go`/`sfntbuild.go` (new) decode,
+  `pkg/layout/font/system.go` (new) + `cache.go` resolution, `pkg/layout/css/build.go` threading,
+  `pkg/doctaculous/html_backend.go` wiring; covered by `@font-face` parse tests, WOFF1/WOFF2 round-trip +
+  triplet/255UInt16/composite-glyph unit tests, `FaceCache` resolution + no-re-fetch tests, the
+  `html-webfont` golden, the `webfont` WPT reftest, and a degradation matrix): a CSS `@font-face` rule —
+  which the parser previously **discarded** — now resolves a declared family to a **real downloaded face**
+  instead of the bundled base-14 substitute. Pieces: **`@font-face` capture** (`pkg/css`: the at-rule is
+  parsed and kept — `FontFace{Family, Sources []FontSource, Weight, Style}`, with a `src:` tokenizer
+  handling `url(...) format(...)`/`local(...)` and fallback order; every other at-rule is still skipped;
+  the cascade is unchanged — `@font-face` is a side table); **font decode** (`pkg/font`: `LoadSFNT(bytes)`
+  sniffs the leading tag and unwraps **WOFF1** (per-table zlib/raw, stdlib) and **WOFF2** (one Brotli
+  block + the **glyf/loca transform reconstruction** — the transformed point/composite streams, 255UInt16,
+  the triplet coordinate encoding — rebuilt into standard sfnt) to sfnt bytes, then reuses the existing
+  `parseProgram`; raw `.ttf`/`.otf` pass straight through); **`local()` via a system-font adapter**
+  (`pkg/layout/font`: a `SystemFontProvider` interface + a `DiskFontProvider` that loads named fonts from a
+  directory — `local()` is a real source tried in `src` order, falling to the next on no match);
+  **face resolution** (`FaceCache.Resolve` consults a family's `@font-face` sources first — best
+  weight/style match, each source tried in order, decoded lazily and **cached including negative results**
+  so a failed fetch is not retried per glyph — then falls back to `LoadStandard`); and **threading**
+  (`BuildWithFonts` aggregates `@font-face` across UA + `<style>` + `<link>` sheets and hands them to
+  `NewFaceCacheWithFonts` alongside the loader + provider; a new `WithSystemFontProvider` option, and
+  `OpenHTML` defaults a `DiskFontProvider` to the document's directory). Fetches go through the existing
+  `pkg/resource.ResourceLoader` (no new seam; a `MapLoader` serves font bytes in tests). One new dep:
+  `github.com/andybalholm/brotli` (MIT, pure-Go) for WOFF2 Brotli decompression only. The `render.Device`
+  seam, the PDF pipeline, the layout algorithm, and the shared inline core are **untouched** — a different
+  `*font.Face` flows through unchanged. **Byte-identical:** every page with no `@font-face` (and all DOCX)
+  resolves via `LoadStandard` exactly as before (the existing corpus is unchanged). Degrades gracefully
+  (no panic, base-14 fallback + debug log): a 404/missing/corrupt/undecodable font (WOFF1, WOFF2, or a
+  malformed glyf transform), a `local()` with no match, and the deferred descriptors — **synthetic
+  bold/oblique** (a missing variant falls back to the bundled substitute), **`unicode-range`**,
+  **`font-display`**, **variable-font axes**, and **`local()` beyond the disk adapter** (no OS font-store
+  enumeration) — are parsed-and-ignored, never dropping the face. See
+  `docs/superpowers/specs/2026-06-26-html-webfonts-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -386,10 +422,11 @@ that skip into real output.
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**,
    **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
-   **clip-escape sub-cases** (sub-project 6b), and **CSS 2.1 §17 table layout** (sub-project 7) are done
+   **clip-escape sub-cases** (sub-project 6b), **CSS 2.1 §17 table layout** (sub-project 7), and
+   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8) are done
    — see the Done section). Roughly in order, each a
-   parse/layout slice with its own fixtures + golden/WPT tests: **web fonts**
-   (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
+   parse/layout slice with its own fixtures + golden/WPT tests:
+   **flexbox** then **grid** (today
    flex/grid fall back to block normal flow; tables are now a real layout mode); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
@@ -416,7 +453,17 @@ that skip into real output.
    (border-spacing included) vs auto (excluded)** layout — only observable with `border-spacing > 0`
    plus percentage columns, and off by the spacing amount; and **`buildCollapsedBorders` is O(cells²)**
    (a per-neighbor linear scan — fine for normal tables, a perf cliff for very large collapsed grids;
-   retain `buildGrid`'s occupancy map to make it O(1)).
+   retain `buildGrid`'s occupancy map to make it O(1)). Web-font fidelity follow-ups within the existing
+   engine: **synthetic bold/oblique** (a `@font-face` family supplying only one weight/style falls back to
+   the bundled substitute for the missing variant rather than algorithmically emboldening/slanting the
+   downloaded face — note the bundled substitutes themselves still ship regular-only, see item 4);
+   **`unicode-range`** subsetting (captured-but-ignored — the whole face is used for every rune; no
+   per-subset face selection); **`font-display`** (ignored — no async/swap in the synchronous layout);
+   **variable-font axes** (`font-variation-settings` ignored — a variable font resolves to its default
+   instance); **`local()` beyond the `DiskFontProvider`** (no OS font-store enumeration); and a perf nit —
+   the `FaceCache` key is now normalized by family (case/space variants share an entry) but is still keyed
+   by `(family, style)`, so one physical font file is fetched once **per style** (harmless with the
+   hermetic loaders today; worth a content-addressed fetch cache once the HTTP `ResourceLoader` lands).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
