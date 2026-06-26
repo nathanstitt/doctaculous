@@ -35,4 +35,8 @@ func TestCollapseStyleRankAndOwnerTie(t *testing.T) {
 	if resolveCollapsedEdge(cb(0, "none", ownerCell), cb(2, "solid", ownerTable)).style != "solid" {
 		t.Error("a real border beats none")
 	}
+	// two none borders resolve to none (no edge emitted)
+	if got := resolveCollapsedEdge(cb(0, "none", ownerCell), cb(0, "none", ownerTable)); got.style != "none" {
+		t.Errorf("none+none should resolve to a none border (no strip emitted); got style=%q width=%v", got.style, got.width)
+	}
 }

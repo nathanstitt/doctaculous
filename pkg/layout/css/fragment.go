@@ -217,7 +217,9 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			dst = f.appendContent(dst)
 			// Collapsed border-collapse grid lines paint after all cell backgrounds and
 			// content so they are visible on top of cell fills (inside the clip bracket,
-			// so they are clipped with the rest of the table's content).
+			// so they are clipped with the rest of the table's content), but BEFORE the
+			// positioned layer — so a z-indexed positioned descendant of a cell stays
+			// above the grid lines (it paints in a later band).
 			dst = f.appendCollapsedBorders(dst)
 			dst = f.appendBand(dst, ord.middle, true, true)    // CB-owned middle, clipped
 			dst = f.appendBand(dst, ord.positives, true, true) // CB-owned positives, clipped
@@ -234,7 +236,9 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 		dst = f.appendContent(dst)
 		// Collapsed border-collapse grid lines paint after all cell backgrounds and
 		// content so they are visible on top of cell fills (table is a BFC, so this
-		// non-clipping path is the common case for a non-overflow table).
+		// non-clipping path is the common case for a non-overflow table), but BEFORE
+		// the positioned layer — so a z-indexed positioned descendant of a cell
+		// remains above the grid lines (it paints in a later band).
 		dst = f.appendCollapsedBorders(dst)
 		dst = f.appendBand(dst, ord.middle, false, false)
 		dst = f.appendBand(dst, ord.positives, false, false)
