@@ -204,3 +204,78 @@ func TestPercentColumnTakesShare(t *testing.T) {
 		t.Errorf("the auto column should get the ~300px leftover, not a sliver; got %v", g.cols[1].width)
 	}
 }
+
+func TestColspanRaisesSpannedColumns(t *testing.T) {
+	// Row 0: a single wide cell spanning 2 columns (specified width 200).
+	// Row 1: two narrow cells (spec 30 each).
+	// Auto layout: the colspan-2 cell's 200 must push the two columns to sum >= ~200.
+	wide := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		ColSpan: 2, Style: gcss.ComputedStyle{Width: gcss.Length{Value: 200, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}}
+	narrow := func() *cssbox.Box {
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+			Style: gcss.ComputedStyle{Width: gcss.Length{Value: 30, Unit: gcss.UnitPx},
+				MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}}
+	}
+	r0 := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{wide}}
+	r1 := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{narrow(), narrow()}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{r0, r1}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "auto", Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{rg}}
+	e := New(nil, nil, nil)
+	g := buildGrid(tbl)
+	e.solveAutoWidths(context.Background(), g, 600)
+	sum := g.cols[0].width + g.cols[1].width
+	if sum < 190 {
+		t.Errorf("colspan-2 width 200 should raise the two columns to ~200; got sum %v", sum)
+	}
+}
+
+func TestRowspanDistributesExcessHeight(t *testing.T) {
+	// Col 0: a rowspan-2 cell of fixed height 100. Col 1: two cells of height 20 each.
+	// The two rows must grow so they sum (spacing 0) to >= 100.
+	rs := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		RowSpan: 2, Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			Height: gcss.Length{Value: 100, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+			MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
+	small := func() *cssbox.Box {
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+			Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+				Height: gcss.Length{Value: 20, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+				MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
+	}
+	r0 := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{rs, small()}}
+	r1 := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{small()}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{r0, r1}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 200)
+	// The rowspan cell's border box must be 100 tall (it fills both grown rows).
+	var found bool
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 40 && f.H == 100 {
+			found = true
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if !found {
+		t.Errorf("rowspan-2 cell should fill a 100-tall band across both grown rows")
+	}
+}

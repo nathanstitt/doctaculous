@@ -274,6 +274,8 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		gr.height = h
 	}
 
+	e.distributeRowspanHeights(g)
+
 	// Row y-offsets with vertical spacing.
 	y := g.spacingV
 	for _, gr := range g.rows {
@@ -534,12 +536,111 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 	distributeAuto(g.cols, allIdx, used)
 }
 
-// distributeSpanWidths adds spanning cells' min/max contributions to the columns
-// they cross (CSS 17.5.2.2). Implemented in a later task; until then spanning cells
-// do not influence column widths (they lay out at the summed column widths regardless).
+// distributeSpanWidths adds spanning cells' min/max to the columns they cross (CSS
+// 17.5.2.2): if a colspan cell's min (or max) exceeds the sum of its columns' current
+// min (or max), the excess is distributed across those columns in proportion to each
+// column's current max-min headroom (evenly if all equal). Inter-column border-spacing
+// the span covers is excluded from the cell's contribution.
 func (e *Engine) distributeSpanWidths(ctx context.Context, g *tableGrid) {
-	_ = ctx
-	_ = g
+	for _, gc := range g.cells {
+		if gc.colSpan == 1 {
+			continue
+		}
+		mn := e.measureMinContent(ctx, gc.box) + horizontalEdges(gc.box)
+		mx := e.measureMaxContent(ctx, gc.box) + horizontalEdges(gc.box)
+		if w, ok := specifiedFixedWidth(gc.box); ok {
+			ew := w + horizontalEdges(gc.box)
+			if ew > mn {
+				mn = ew
+			}
+			mx = ew
+		}
+		innerSpacing := float64(gc.colSpan-1) * g.spacingH
+		mn -= innerSpacing
+		mx -= innerSpacing
+		if mn < 0 {
+			mn = 0
+		}
+		if mx < mn {
+			mx = mn
+		}
+		distributeExcess(g, gc.col, gc.colSpan, mn, false)
+		distributeExcess(g, gc.col, gc.colSpan, mx, true)
+	}
+}
+
+// distributeExcess raises the columns [col..col+span) so their summed min (or max,
+// when toMax) is at least target, distributing the shortfall in proportion to each
+// column's current max-min headroom (evenly if all zero).
+func distributeExcess(g *tableGrid, col, span int, target float64, toMax bool) {
+	cur := 0.0
+	for i := 0; i < span; i++ {
+		if toMax {
+			cur += g.cols[col+i].max
+		} else {
+			cur += g.cols[col+i].min
+		}
+	}
+	if cur >= target {
+		return
+	}
+	short := target - cur
+	headroom := 0.0
+	for i := 0; i < span; i++ {
+		headroom += g.cols[col+i].max - g.cols[col+i].min
+	}
+	for i := 0; i < span; i++ {
+		var share float64
+		if headroom > 0 {
+			share = short * ((g.cols[col+i].max - g.cols[col+i].min) / headroom)
+		} else {
+			share = short / float64(span)
+		}
+		if toMax {
+			g.cols[col+i].max += share
+		} else {
+			g.cols[col+i].min += share
+			if g.cols[col+i].max < g.cols[col+i].min {
+				g.cols[col+i].max = g.cols[col+i].min
+			}
+		}
+	}
+}
+
+// distributeRowspanHeights grows the rows a rowspan cell covers so their summed height
+// (plus inter-row border-spacing) is at least the cell's border-box height — a spanning
+// cell's height is distributed across its rows. The excess is split in proportion to the
+// rows' current heights (evenly if all zero). One top-to-bottom pass (deterministic;
+// sufficient for the common case).
+func (e *Engine) distributeRowspanHeights(g *tableGrid) {
+	for _, gc := range g.cells {
+		if gc.rowSpan == 1 || gc.frag == nil {
+			continue
+		}
+		cur := 0.0
+		for i := 0; i < gc.rowSpan; i++ {
+			cur += g.rows[gc.row+i].height
+		}
+		cur += float64(gc.rowSpan-1) * g.spacingV
+		need := gc.frag.H
+		if need <= cur {
+			continue
+		}
+		short := need - cur
+		sum := 0.0
+		for i := 0; i < gc.rowSpan; i++ {
+			sum += g.rows[gc.row+i].height
+		}
+		for i := 0; i < gc.rowSpan; i++ {
+			var share float64
+			if sum > 0 {
+				share = short * (g.rows[gc.row+i].height / sum)
+			} else {
+				share = short / float64(gc.rowSpan)
+			}
+			g.rows[gc.row+i].height += share
+		}
+	}
 }
 
 // stretchCellFragment positions a cell's border-box fragment at (x,y) and stretches
