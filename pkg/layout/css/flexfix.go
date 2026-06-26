@@ -4,10 +4,9 @@ import "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 
 // fixupFlex walks the box tree and repairs every flex container's children into
 // proper flex items (CSS Flexbox 4): contiguous runs of inline-level content /
-// text are wrapped in an anonymous block-level flex item, inline-level child
-// boxes are blockified, and whitespace-only text between block-level items is
-// dropped. Block-level children pass through unchanged. Called from Build after
-// fixupTables.
+// text are gathered into an anonymous block-level flex item, and whitespace-only
+// text between block-level items is dropped. Block-level children pass through
+// unchanged. Called from Build after fixupTables.
 func fixupFlex(b *cssbox.Box) {
 	for _, c := range b.Children {
 		fixupFlex(c)
@@ -40,7 +39,10 @@ func flexItems(kids []*cssbox.Box) []*cssbox.Box {
 	for _, c := range kids {
 		switch {
 		case isWSText(c) && len(run) == 0:
-			// Whitespace between block items collapses away (not part of any run).
+			// Whitespace-only text BETWEEN block items (no inline run open) collapses
+			// away. Whitespace that arrives while an inline run IS open falls through to
+			// the default arm and stays in the run (correct per CSS Flexbox §4 — unlike
+			// tablefix.go, which has no inline-run concept and drops whitespace outright).
 		case c.Kind.IsBlockLevel():
 			flush()
 			out = append(out, c)
