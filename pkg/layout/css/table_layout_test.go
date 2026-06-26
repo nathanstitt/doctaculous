@@ -194,4 +194,13 @@ func TestPercentColumnTakesShare(t *testing.T) {
 	if g.cols[1].width <= 0 {
 		t.Errorf("the auto column should still get the remaining width; got %v", g.cols[1].width)
 	}
+	// Conservation: the two columns must sum to the table's used width (~400, the
+	// content width with no border-spacing). col1 must get the leftover, not a sliver.
+	total := g.cols[0].width + g.cols[1].width
+	if total < 395 || total > 405 {
+		t.Errorf("columns should sum to ~400 (the used width); got %v (col0=%v col1=%v)", total, g.cols[0].width, g.cols[1].width)
+	}
+	if g.cols[1].width < 250 {
+		t.Errorf("the auto column should get the ~300px leftover, not a sliver; got %v", g.cols[1].width)
+	}
 }

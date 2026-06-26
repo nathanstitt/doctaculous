@@ -490,9 +490,22 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 			}
 		}
 		if leftover <= nMin || nMax == nMin {
+			// No proportional flex room among the auto columns: give each its min, then
+			// split any remaining leftover (leftover - nMin) equally so the columns still
+			// sum to `used` (conservation), mirroring the non-percentage equal-split path.
+			autoCount := 0
 			for ci := range g.cols {
 				if g.cols[ci].pct < 0 {
 					g.cols[ci].width = g.cols[ci].min
+					autoCount++
+				}
+			}
+			if leftover > nMin && autoCount > 0 {
+				extra := (leftover - nMin) / float64(autoCount)
+				for ci := range g.cols {
+					if g.cols[ci].pct < 0 {
+						g.cols[ci].width += extra
+					}
 				}
 			}
 		} else {
