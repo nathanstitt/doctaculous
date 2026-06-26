@@ -293,7 +293,8 @@ func TestVerticalAlignBottomShiftsContent(t *testing.T) {
 	inner := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: innerSt}
 	short := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
 		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx}, VerticalAlign: "bottom",
-			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
+			Height: gcss.Length{Unit: gcss.UnitAuto}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+			MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
 		Children: []*cssbox.Box{inner}}
 	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
 		Children: []*cssbox.Box{tall, short}}
@@ -327,8 +328,8 @@ func TestVerticalAlignBottomShiftsContent(t *testing.T) {
 		t.Fatalf("missing fragments inner=%v cell=%v", inner10, shortCell)
 	}
 	offset := inner10.Y - shortCell.Y
-	if offset < 40 {
-		t.Errorf("vertical-align:bottom should push 10-tall content near the band bottom (~50); got offset %v", offset)
+	if offset < 45 || offset > 55 {
+		t.Errorf("vertical-align:bottom should place 10-tall content ~50px down (band 60 − content 10); got %v", offset)
 	}
 }
 
@@ -344,7 +345,8 @@ func TestVerticalAlignTopIsDefault(t *testing.T) {
 	inner := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: innerSt}
 	short := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
 		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 40, Unit: gcss.UnitPx},
-			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
+			Height: gcss.Length{Unit: gcss.UnitAuto}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto},
+			MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
 		Children: []*cssbox.Box{inner}}
 	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
 		Children: []*cssbox.Box{tall, short}}

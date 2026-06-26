@@ -665,10 +665,7 @@ func stretchCellFragment(f *Fragment, x, y, w, h float64) {
 // centers it; bottom drops it to the band bottom. The shift moves the fragment's
 // children and inline lines, leaving the border box (which fills the band) in place.
 func applyCellVAlign(f *Fragment, b *cssbox.Box, natH, bandH float64) {
-	va := "baseline"
-	if b != nil {
-		va = b.Style.VerticalAlign
-	}
+	va := b.Style.VerticalAlign
 	var dy float64
 	switch va {
 	case "bottom":
@@ -678,17 +675,23 @@ func applyCellVAlign(f *Fragment, b *cssbox.Box, natH, bandH float64) {
 	default:
 		dy = 0 // top, baseline (≈ top here), and sub/super/text-* fall back to top
 	}
-	if dy <= 0 {
+	if dy <= 0 { // top/baseline: no shift; content taller than band: no negative shift
 		return
 	}
 	shiftCellContent(f, dy)
 }
 
-// shiftCellContent translates a cell fragment's content (child fragments + inline
-// lines) down by dy, without moving the cell's own border box.
+// shiftCellContent translates a cell fragment's content down by dy without moving the
+// cell's own border box: its child fragments, its BFC floats (a cell is a BFC, so a
+// floated child lives in Floats, not Children), and its inline lines all shift. (An
+// abs/fixed descendant in f.Positioned is NOT shifted — it is positioned against the
+// cell's content box, not the in-flow content, per CSS.)
 func shiftCellContent(f *Fragment, dy float64) {
 	for _, c := range f.Children {
 		translateFragment(c, 0, dy)
+	}
+	for _, fl := range f.Floats {
+		translateFragment(fl, 0, dy)
 	}
 	for i := range f.Lines {
 		f.Lines[i].BaselineY += dy
