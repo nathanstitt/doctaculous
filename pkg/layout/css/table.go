@@ -88,7 +88,9 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 		case cssbox.DisplayTableRowGroup:
 			bodyRows = append(bodyRows, collectRows(c)...)
 		case cssbox.DisplayTableRow:
-			bodyRows = append(bodyRows, c) // defensive: a bare row (fixup normally wraps these)
+			// defensive: a bare row with no group affiliation is treated as a body row
+			// (fixup normally wraps these in a row-group first).
+			bodyRows = append(bodyRows, c)
 		}
 	}
 	visualRows := make([]*cssbox.Box, 0, len(headRows)+len(bodyRows)+len(footRows))
@@ -97,7 +99,7 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 	visualRows = append(visualRows, footRows...)
 
 	// 2. Occupancy scan: assign each cell to its origin slot.
-	occupied := [][]bool{}
+	var occupied [][]bool
 	ensure := func(r, c int) {
 		for len(occupied) <= r {
 			occupied = append(occupied, make([]bool, len(g.cols)))
@@ -121,6 +123,7 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 			if cb.Display != cssbox.DisplayTableCell {
 				continue
 			}
+			// Ensure column `col` exists before the skip loop reads occupied[ri][col].
 			ensure(ri, col)
 			for col < len(g.cols) && occupied[ri][col] {
 				col++
@@ -179,6 +182,8 @@ func (g *tableGrid) addColumnHintN(cb *cssbox.Box, n int) {
 			col.hasWidth = true
 			col.width = w
 		}
+		// A percentage <col> width is not captured here; the width-solve step reads it
+		// (later task). col.pct stays -1 for now.
 		g.cols = append(g.cols, col)
 	}
 }
