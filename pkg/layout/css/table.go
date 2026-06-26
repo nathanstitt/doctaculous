@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -191,8 +192,9 @@ func (g *tableGrid) addColumnHintN(cb *cssbox.Box, n int) {
 			col.hasWidth = true
 			col.width = w
 		}
-		// A percentage <col> width is not captured here; the width-solve step reads it
-		// (later task). col.pct stays -1 for now.
+		if pct, ok := pctWidthOf(cb); ok {
+			col.pct = pct
+		}
 		g.cols = append(g.cols, col)
 	}
 }
@@ -203,6 +205,17 @@ func spanOf(cb *cssbox.Box) int {
 		return 1
 	}
 	return cb.ColSpan
+}
+
+// pctWidthOf returns a box's width as a percentage [0..100] and true when its width
+// is specified in percent; false otherwise. (specifiedFixedWidth rejects percent, so
+// percentage widths are read separately for table columns.)
+func pctWidthOf(b *cssbox.Box) (float64, bool) {
+	w := b.Style.Width
+	if w.Unit == gcss.UnitPercent {
+		return w.Value, true
+	}
+	return 0, false
 }
 
 // layoutTable is the TableFC entry point (called from layoutInterior). It builds the
@@ -332,6 +345,19 @@ func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
 					}
 				}
 			}
+			if pct, ok := pctWidthOf(gc.box); ok {
+				for i := 0; i < gc.colSpan; i++ {
+					if g.cols[gc.col+i].pct < 0 {
+						g.cols[gc.col+i].pct = pct
+					}
+				}
+			}
+		}
+	}
+	for ci := range g.cols {
+		if g.cols[ci].pct >= 0 && !g.cols[ci].hasWidth {
+			g.cols[ci].hasWidth = true
+			g.cols[ci].width = used * g.cols[ci].pct / 100
 		}
 	}
 	fixedSum := 0.0
@@ -401,6 +427,9 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 				col.max = col.min
 			}
 		}
+		if pct, ok := pctWidthOf(gc.box); ok && pct > g.cols[gc.col].pct {
+			g.cols[gc.col].pct = pct
+		}
 	}
 	e.distributeSpanWidths(ctx, g) // Task 9; no-op until then
 
@@ -431,6 +460,52 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 	}
 	if used < sumMin {
 		used = sumMin
+	}
+
+	// Percentage columns reserve their share of the used width (clamped to >= min).
+	// The remaining (non-percentage) columns distribute the leftover by min/max below.
+	pctReserved := 0.0
+	pctCols := 0
+	for ci := range g.cols {
+		if g.cols[ci].pct >= 0 {
+			want := used * g.cols[ci].pct / 100
+			if want < g.cols[ci].min {
+				want = g.cols[ci].min
+			}
+			g.cols[ci].width = want
+			pctReserved += want
+			pctCols++
+		}
+	}
+	if pctCols > 0 {
+		leftover := used - pctReserved
+		if leftover < 0 {
+			leftover = 0
+		}
+		nMin, nMax := 0.0, 0.0
+		for ci := range g.cols {
+			if g.cols[ci].pct < 0 {
+				nMin += g.cols[ci].min
+				nMax += g.cols[ci].max
+			}
+		}
+		if leftover <= nMin || nMax == nMin {
+			for ci := range g.cols {
+				if g.cols[ci].pct < 0 {
+					g.cols[ci].width = g.cols[ci].min
+				}
+			}
+		} else {
+			surplus := leftover - nMin
+			flex := nMax - nMin
+			for ci := range g.cols {
+				if g.cols[ci].pct < 0 {
+					span := g.cols[ci].max - g.cols[ci].min
+					g.cols[ci].width = g.cols[ci].min + surplus*(span/flex)
+				}
+			}
+		}
+		return // percentage path complete; skip the all-columns distribution
 	}
 
 	if used <= sumMin || sumMax == sumMin {

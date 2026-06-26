@@ -164,3 +164,34 @@ func TestAutoTableSpecifiedWidthPinsColumn(t *testing.T) {
 		t.Errorf("col0 (120 spec) should exceed col1 (40 spec): %v vs %v", g.cols[0].width, g.cols[1].width)
 	}
 }
+
+func TestPercentColumnTakesShare(t *testing.T) {
+	// col 0: width 25%; col 1: auto with short content. In a 400-wide table, col 0 ≈ 100.
+	pctCell := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 25, Unit: gcss.UnitPercent},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}}
+	autoCell := func() *cssbox.Box {
+		st := gcss.ComputedStyle{FontSizePt: 16, FontFamily: "serif",
+			Width: gcss.Length{Unit: gcss.UnitAuto}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}
+		txt := &cssbox.Box{Kind: cssbox.BoxText, Text: "x", Display: cssbox.DisplayInline, Style: st}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.InlineFC,
+			Style: st, Children: []*cssbox.Box{txt}}
+	}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{pctCell, autoCell()}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	// A fixed-width table so the percentage basis is unambiguous (400px).
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "auto", Width: gcss.Length{Value: 400, Unit: gcss.UnitPx}},
+		Children: []*cssbox.Box{rg}}
+	e := New(nil, nil, nil)
+	g := buildGrid(tbl)
+	e.solveAutoWidths(context.Background(), g, 400)
+	if g.cols[0].width < 90 || g.cols[0].width > 110 {
+		t.Errorf("25%% column of a 400px table should be ~100; got %v", g.cols[0].width)
+	}
+	if g.cols[1].width <= 0 {
+		t.Errorf("the auto column should still get the remaining width; got %v", g.cols[1].width)
+	}
+}
