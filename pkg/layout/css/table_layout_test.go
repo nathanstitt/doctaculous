@@ -563,3 +563,77 @@ func TestCaptionSideOnCaptionElementHonored(t *testing.T) {
 		t.Errorf("caption-side:bottom on <caption> should place caption (Y=%v) below the cell (Y=%v)", capY, cellY)
 	}
 }
+
+func TestRTLTableDegradesGracefully(t *testing.T) {
+	var logged bool
+	logf := func(string, ...any) { logged = true }
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{fixedCell(50, 20), fixedCell(50, 20)}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", Direction: "rtl", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, logf)
+	frag := e.layoutTree(context.Background(), body, 200)
+	if frag == nil {
+		t.Fatal("RTL table should still produce a fragment")
+	}
+	if !logged {
+		t.Error("RTL table should log a degradation message")
+	}
+}
+
+func TestEmptyTableNoPanic(t *testing.T) {
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	if f := e.layoutTree(context.Background(), body, 200); f == nil {
+		t.Fatal("empty table should produce a (zero-size) fragment, not nil")
+	}
+}
+
+func TestCellContainingFloatNoPanic(t *testing.T) {
+	flt := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Float: cssbox.FloatLeft,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 20, Unit: gcss.UnitPx},
+			Height: gcss.Length{Value: 20, Unit: gcss.UnitPx}, Float: "left",
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}}}
+	cell := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 60, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{flt}}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{cell}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	if f := e.layoutTree(context.Background(), body, 200); f == nil {
+		t.Fatal("a cell containing a float should lay out without panic")
+	}
+}
+
+func TestTableInsideOverflowHiddenNoPanic(t *testing.T) {
+	// Flag combination: a table inside an overflow:hidden box (the box clips/establishes a BFC).
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{fixedCell(50, 20), fixedCell(50, 20)}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+	clip := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Overflow: "hidden", Width: gcss.Length{Value: 60, Unit: gcss.UnitPx},
+			Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{tbl}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{clip}}
+	e := New(nil, nil, nil)
+	if f := e.layoutTree(context.Background(), body, 200); f == nil {
+		t.Fatal("a table inside overflow:hidden should lay out without panic")
+	}
+}

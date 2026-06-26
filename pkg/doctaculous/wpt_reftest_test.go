@@ -60,6 +60,9 @@ var wptReftests = []struct {
 	{"zindex-order", 200, "z-index inverts document paint order (== the boxes authored in z-order)", nil},
 	{"relative-clip-escape", 200, "a relative child of a non-positioned overflow:hidden box is clipped to it (== the visible portion authored to fit)", nil},
 	{"positioned-clip-relative", 200, "a relative child of a POSITIONED overflow:hidden box is clipped to it (== the visible portion authored to fit)", nil},
+	{"table-basic", 200, "a fixed 2x2 table == the same cells as sized inline-blocks at the solved rects", nil},
+	{"table-colspan", 200, "a colspan-2 header row == a full-width block over two half-width cells", nil},
+	{"table-auto-width", 200, "an auto table with specified column widths == inline-blocks of those widths", nil},
 }
 
 // swatchColor is the solid color shared by the img-vs-div reftest's image and the
