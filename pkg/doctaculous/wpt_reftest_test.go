@@ -63,6 +63,17 @@ var wptReftests = []struct {
 	{"table-basic", 200, "a fixed 2x2 table == the same cells as sized inline-blocks at the solved rects", nil},
 	{"table-colspan", 200, "a colspan-2 header row == a full-width block over two half-width cells", nil},
 	{"table-auto-width", 200, "an auto table with specified column widths == inline-blocks of those widths", nil},
+	{"webfont", 240, "an @font-face family applied via a class == the same family applied via the inherited body default (same downloaded face, identical pixels)", webfontReftestLoader()},
+}
+
+// webfontReftestLoader serves the committed Pacifico WOFF2 as web.woff2 for the
+// web-font reftest pair (both test and reference resolve "RefFace" from it).
+func webfontReftestLoader() resource.ResourceLoader {
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fonts", "webfont.woff2"))
+	if err != nil {
+		panic("webfont reftest fixture: " + err.Error())
+	}
+	return resource.MapLoader{"web.woff2": {Data: data}}
 }
 
 // swatchColor is the solid color shared by the img-vs-div reftest's image and the
