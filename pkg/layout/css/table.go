@@ -232,8 +232,17 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	// Lay out each cell at its column width; capture natural height.
 	for _, gc := range g.cells {
 		cw := g.cellWidth(gc)
-		res := e.layoutBlock(ctx, gc.box, cw, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: cw}, &positionedContext{}, posCBOwner{isPage: true})
+		cellPos := &positionedContext{}
+		res := e.layoutBlock(ctx, gc.box, cw, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: cw}, cellPos, posCBOwner{isPage: true})
 		gc.frag = res.frag
+		// A cell is a BFC and its own positioned containing block; resolve any abs/fixed
+		// descendants against the cell's provisional box now (mirroring the inline-block
+		// atom path) so they are not silently dropped. (Positioning relative to the cell
+		// is approximate here, like the inline-block atom case — exact cross-cell
+		// positioning is out of scope.)
+		if gc.frag != nil {
+			e.resolveAbsolute(ctx, cellPos, gc.frag, cw, gc.frag.H)
+		}
 	}
 
 	// Row natural heights = tallest non-spanning cell originating in the row.
@@ -277,8 +286,10 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	}
 }
 
-// cellWidth is the border-box width of a cell = sum of spanned columns + the
-// inter-column border-spacing between them.
+// cellWidth returns the column-band width allocated to a cell: the sum of its spanned
+// column widths plus the inter-column border-spacing it spans over. This is passed to
+// layoutBlock as the cell's containing-block width (layoutBlock derives the cell's own
+// border/content box from it).
 func (g *tableGrid) cellWidth(gc *gridCell) float64 {
 	w := 0.0
 	for i := 0; i < gc.colSpan; i++ {
@@ -344,7 +355,6 @@ func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
 			g.cols[ci].width += remain * (g.cols[ci].width / fixedSum)
 		}
 	}
-	_ = used // used to compute remain above
 }
 
 // stretchCellFragment positions a cell's border-box fragment at (x,y) and stretches
