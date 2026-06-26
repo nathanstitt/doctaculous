@@ -388,11 +388,44 @@ func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
 	}
 }
 
+// distributeAuto sets .width on every column whose index is in idxs, distributing
+// `budget` across them: each column gets at least its min-content width, then the
+// surplus (budget − Σmin) is handed out in proportion to each column's flex room
+// (max − min). When the columns have no flex room (Σmax == Σmin) the surplus is split
+// equally instead. This conserves exactly — the assigned widths sum to `budget` (when
+// budget ≥ Σmin) — and is the shared core of both the percentage-leftover and the
+// all-columns distribution passes in solveAutoWidths.
+func distributeAuto(cols []gridCol, idxs []int, budget float64) {
+	sumMin, sumMax := 0.0, 0.0
+	for _, ci := range idxs {
+		sumMin += cols[ci].min
+		sumMax += cols[ci].max
+	}
+	if budget <= sumMin || sumMax == sumMin {
+		for _, ci := range idxs {
+			cols[ci].width = cols[ci].min
+		}
+		if budget > sumMin && len(idxs) > 0 {
+			extra := (budget - sumMin) / float64(len(idxs))
+			for _, ci := range idxs {
+				cols[ci].width += extra
+			}
+		}
+		return
+	}
+	surplus := budget - sumMin
+	flex := sumMax - sumMin
+	for _, ci := range idxs {
+		span := cols[ci].max - cols[ci].min
+		cols[ci].width = cols[ci].min + surplus*(span/flex)
+	}
+}
+
 // solveAutoWidths implements CSS 17.5.2.2 (automatic table layout): per-column
 // min/max content widths from non-spanning cells, the table used width, and a
 // distribution of that width across columns between their min and max. Spanning-cell
-// contributions (distributeSpanWidths) and percentage columns are added by later
-// tasks; this handles the non-spanning, non-percentage common case.
+// contributions (distributeSpanWidths) are added by a later task; percentage columns
+// and the non-spanning common case are handled here.
 func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW float64) {
 	for ci := range g.cols {
 		g.cols[ci].min = 0
@@ -479,74 +512,26 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 	}
 	if pctCols > 0 {
 		leftover := used - pctReserved
+		// Percentage minimums can collectively exceed `used` when the table is narrower
+		// than their mins; clamp the leftover for the auto columns to zero.
 		if leftover < 0 {
 			leftover = 0
 		}
-		nMin, nMax := 0.0, 0.0
+		var autoIdx []int
 		for ci := range g.cols {
 			if g.cols[ci].pct < 0 {
-				nMin += g.cols[ci].min
-				nMax += g.cols[ci].max
+				autoIdx = append(autoIdx, ci)
 			}
 		}
-		if leftover <= nMin || nMax == nMin {
-			// No proportional flex room among the auto columns: give each its min, then
-			// split any remaining leftover (leftover - nMin) equally so the columns still
-			// sum to `used` (conservation), mirroring the non-percentage equal-split path.
-			autoCount := 0
-			for ci := range g.cols {
-				if g.cols[ci].pct < 0 {
-					g.cols[ci].width = g.cols[ci].min
-					autoCount++
-				}
-			}
-			if leftover > nMin && autoCount > 0 {
-				extra := (leftover - nMin) / float64(autoCount)
-				for ci := range g.cols {
-					if g.cols[ci].pct < 0 {
-						g.cols[ci].width += extra
-					}
-				}
-			}
-		} else {
-			surplus := leftover - nMin
-			flex := nMax - nMin
-			for ci := range g.cols {
-				if g.cols[ci].pct < 0 {
-					span := g.cols[ci].max - g.cols[ci].min
-					g.cols[ci].width = g.cols[ci].min + surplus*(span/flex)
-				}
-			}
-		}
+		distributeAuto(g.cols, autoIdx, leftover)
 		return // percentage path complete; skip the all-columns distribution
 	}
 
-	if used <= sumMin || sumMax == sumMin {
-		for ci := range g.cols {
-			g.cols[ci].width = g.cols[ci].min
-		}
-		// sumMax == sumMin (every column fully pinned): no proportional flex room exists,
-		// so any surplus is split equally rather than by the (zero) flex ratio.
-		if used > sumMin && len(g.cols) > 0 {
-			extra := (used - sumMin) / float64(len(g.cols))
-			for ci := range g.cols {
-				g.cols[ci].width += extra
-			}
-		}
-		return
-	}
-	// Distribute the surplus (used − sumMin) across columns in proportion to each
-	// column's flex room (max − min). This conserves exactly:
-	//   Σ(min + surplus·span/flex) = sumMin + surplus·(Σspan)/flex
-	//                              = sumMin + surplus·flex/flex = sumMin + surplus = used,
-	// so the column widths always sum to the table's used width. flex > 0 here because
-	// this path is only reached when sumMax != sumMin.
-	surplus := used - sumMin
-	flex := sumMax - sumMin
+	allIdx := make([]int, len(g.cols))
 	for ci := range g.cols {
-		span := g.cols[ci].max - g.cols[ci].min
-		g.cols[ci].width = g.cols[ci].min + surplus*(span/flex)
+		allIdx[ci] = ci
 	}
+	distributeAuto(g.cols, allIdx, used)
 }
 
 // distributeSpanWidths adds spanning cells' min/max contributions to the columns
