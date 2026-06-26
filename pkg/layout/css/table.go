@@ -423,11 +423,32 @@ func distributeAuto(cols []gridCol, idxs []int, budget float64) {
 	}
 }
 
+// cellMinMax returns a cell's min-content and max-content BORDER-box widths: the
+// measured min/max-content plus the cell's own horizontal border+padding. A specified
+// (non-auto, non-percentage) width pins both — it raises the min floor and sets the
+// max — with max never allowed below min. This is the shared per-cell intrinsic-width
+// computation used by both the non-spanning column pass and the colspan distribution.
+func (e *Engine) cellMinMax(ctx context.Context, gc *gridCell) (mn, mx float64) {
+	mn = e.measureMinContent(ctx, gc.box) + horizontalEdges(gc.box)
+	mx = e.measureMaxContent(ctx, gc.box) + horizontalEdges(gc.box)
+	if w, ok := specifiedFixedWidth(gc.box); ok {
+		ew := w + horizontalEdges(gc.box)
+		if ew > mn {
+			mn = ew
+		}
+		mx = ew
+		if mx < mn {
+			mx = mn
+		}
+	}
+	return mn, mx
+}
+
 // solveAutoWidths implements CSS 17.5.2.2 (automatic table layout): per-column
 // min/max content widths from non-spanning cells, the table used width, and a
 // distribution of that width across columns between their min and max. Spanning-cell
-// contributions (distributeSpanWidths) are added by a later task; percentage columns
-// and the non-spanning common case are handled here.
+// contributions (distributeSpanWidths), percentage columns, and the non-spanning
+// common case are all handled here.
 func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW float64) {
 	for ci := range g.cols {
 		g.cols[ci].min = 0
@@ -437,18 +458,7 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 		if gc.colSpan != 1 {
 			continue
 		}
-		mn := e.measureMinContent(ctx, gc.box) + horizontalEdges(gc.box)
-		mx := e.measureMaxContent(ctx, gc.box) + horizontalEdges(gc.box)
-		if w, ok := specifiedFixedWidth(gc.box); ok {
-			ew := w + horizontalEdges(gc.box)
-			if ew > mn {
-				mn = ew
-			}
-			mx = ew
-			if mx < mn {
-				mx = mn
-			}
-		}
+		mn, mx := e.cellMinMax(ctx, gc)
 		col := &g.cols[gc.col]
 		if mn > col.min {
 			col.min = mn
@@ -466,7 +476,7 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 			g.cols[gc.col].pct = pct
 		}
 	}
-	e.distributeSpanWidths(ctx, g) // Task 9; no-op until then
+	e.distributeSpanWidths(ctx, g) // colspan cells raise spanned columns' min/max before distribution
 
 	for ci := range g.cols {
 		if g.cols[ci].max < g.cols[ci].min {
@@ -546,15 +556,7 @@ func (e *Engine) distributeSpanWidths(ctx context.Context, g *tableGrid) {
 		if gc.colSpan == 1 {
 			continue
 		}
-		mn := e.measureMinContent(ctx, gc.box) + horizontalEdges(gc.box)
-		mx := e.measureMaxContent(ctx, gc.box) + horizontalEdges(gc.box)
-		if w, ok := specifiedFixedWidth(gc.box); ok {
-			ew := w + horizontalEdges(gc.box)
-			if ew > mn {
-				mn = ew
-			}
-			mx = ew
-		}
+		mn, mx := e.cellMinMax(ctx, gc)
 		innerSpacing := float64(gc.colSpan-1) * g.spacingH
 		mn -= innerSpacing
 		mx -= innerSpacing
@@ -564,21 +566,21 @@ func (e *Engine) distributeSpanWidths(ctx context.Context, g *tableGrid) {
 		if mx < mn {
 			mx = mn
 		}
-		distributeExcess(g, gc.col, gc.colSpan, mn, false)
-		distributeExcess(g, gc.col, gc.colSpan, mx, true)
+		distributeExcess(g.cols, gc.col, gc.colSpan, mn, false)
+		distributeExcess(g.cols, gc.col, gc.colSpan, mx, true)
 	}
 }
 
 // distributeExcess raises the columns [col..col+span) so their summed min (or max,
 // when toMax) is at least target, distributing the shortfall in proportion to each
 // column's current max-min headroom (evenly if all zero).
-func distributeExcess(g *tableGrid, col, span int, target float64, toMax bool) {
+func distributeExcess(cols []gridCol, col, span int, target float64, toMax bool) {
 	cur := 0.0
 	for i := 0; i < span; i++ {
 		if toMax {
-			cur += g.cols[col+i].max
+			cur += cols[col+i].max
 		} else {
-			cur += g.cols[col+i].min
+			cur += cols[col+i].min
 		}
 	}
 	if cur >= target {
@@ -587,21 +589,21 @@ func distributeExcess(g *tableGrid, col, span int, target float64, toMax bool) {
 	short := target - cur
 	headroom := 0.0
 	for i := 0; i < span; i++ {
-		headroom += g.cols[col+i].max - g.cols[col+i].min
+		headroom += cols[col+i].max - cols[col+i].min
 	}
 	for i := 0; i < span; i++ {
 		var share float64
 		if headroom > 0 {
-			share = short * ((g.cols[col+i].max - g.cols[col+i].min) / headroom)
+			share = short * ((cols[col+i].max - cols[col+i].min) / headroom)
 		} else {
 			share = short / float64(span)
 		}
 		if toMax {
-			g.cols[col+i].max += share
+			cols[col+i].max += share
 		} else {
-			g.cols[col+i].min += share
-			if g.cols[col+i].max < g.cols[col+i].min {
-				g.cols[col+i].max = g.cols[col+i].min
+			cols[col+i].min += share
+			if cols[col+i].max < cols[col+i].min {
+				cols[col+i].max = cols[col+i].min
 			}
 		}
 	}
