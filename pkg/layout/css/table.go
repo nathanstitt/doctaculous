@@ -246,20 +246,28 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		g.cols[ci].x = x
 		x += g.cols[ci].width + g.spacingH
 	}
-	tableContentW := x // total content width: column widths + all border-spacing
+	tableContentW := x // span of the column grid: Σ column widths + (ncols+1) border-spacing gaps
 
 	// Caption: a block laid out at the table content width, placed above (top) or below.
 	var captionFrag *Fragment
 	captionH := 0.0
 	if g.caption != nil {
+		captionPos := &positionedContext{}
 		res := e.layoutBlock(ctx, g.caption, tableContentW, contentX, 0, 0,
-			&floatContext{cbLeft: contentX, cbRight: contentX + tableContentW}, &positionedContext{}, posCBOwner{isPage: true})
+			&floatContext{cbLeft: contentX, cbRight: contentX + tableContentW}, captionPos, posCBOwner{isPage: true})
 		captionFrag = res.frag
 		if captionFrag != nil {
 			captionH = captionFrag.H
+			// The caption is a block container and its own positioned CB; resolve any
+			// abs/fixed descendants against its provisional box now (mirroring the cell
+			// path) so they are not silently dropped.
+			e.resolveAbsolute(ctx, captionPos, captionFrag, tableContentW, captionFrag.H)
 		}
 	}
 	gridDY := 0.0
+	// caption-side: "top" is the initial value; any non-"bottom" value (including "")
+	// is treated as top. Read from the caption box: caption-side is inherited, so this
+	// honors it whether the author set it on the <table> (inherited) or the <caption>.
 	if g.caption != nil && g.caption.Style.CaptionSide != "bottom" {
 		gridDY = captionH // caption on top: shift the grid down by the caption height
 	}
