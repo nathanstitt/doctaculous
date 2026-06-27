@@ -132,6 +132,24 @@ func TrackListOf(tracks ...TrackSize) TrackList {
 	return tl
 }
 
+// TrackListAutoFill builds a TrackList containing a single repeat(auto-fill, …) run
+// with the given inner fixed-pixel track size. It is exported for out-of-package
+// degradation tests that need to exercise the repeat(auto-fill,…)-with-indefinite-size
+// fallback (1 repetition when the container size is 0) without going through the CSS
+// parser. The inner track is a fixed-length (px) track, which is the common case for
+// repeat(auto-fill, Npx) in real stylesheets.
+func TrackListAutoFill(trackPx float64) TrackList {
+	fn := SizingFn{Kind: TrackLength, Len: Length{Value: trackPx, Unit: UnitPx}}
+	inner := TrackSize{Min: fn, Max: fn}
+	return TrackList{entries: []trackEntry{{
+		isRepeat: true,
+		rep: repeatRun{
+			kind:  repeatAutoFill,
+			inner: []TrackSize{inner},
+		},
+	}}}
+}
+
 // Expand returns the concrete explicit tracks. containerSize is the container's
 // definite content size on this axis (px) for resolving auto-fill/auto-fit; pass 0
 // when indefinite (auto-repeat then yields 1 repetition, the spec fallback). gap is

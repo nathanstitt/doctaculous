@@ -122,6 +122,26 @@ func TestJustifyItems(t *testing.T) {
 	}
 }
 
+// TestGridUnknownAlignmentValueKeepsDefault verifies the "unknown property value →
+// keeps default" grid deferral: an unrecognized justify-items/align-items/align-content
+// value is silently dropped by applyOne, leaving the prior (initial) value — never a
+// bogus string the layout engine would have to interpret.
+func TestGridUnknownAlignmentValueKeepsDefault(t *testing.T) {
+	cs := initialStyle() // JustifyItems "stretch", AlignItems "stretch", AlignContent "start"
+	applyOne(&cs, "justify-items", "bogus")
+	applyOne(&cs, "align-items", "nonsense")
+	applyOne(&cs, "align-content", "wat")
+	if cs.JustifyItems != "stretch" {
+		t.Errorf("justify-items: bogus => %q, want default \"stretch\"", cs.JustifyItems)
+	}
+	if cs.AlignItems != "stretch" {
+		t.Errorf("align-items: nonsense => %q, want default \"stretch\"", cs.AlignItems)
+	}
+	if cs.AlignContent != "start" {
+		t.Errorf("align-content: wat => %q, want default \"start\"", cs.AlignContent)
+	}
+}
+
 // TestJustifySelfDefault checks the initial value.
 func TestJustifySelfDefault(t *testing.T) {
 	cs := initialStyle()
