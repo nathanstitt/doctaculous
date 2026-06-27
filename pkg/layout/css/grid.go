@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 	"math"
+	"sort"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -182,7 +183,7 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 			itemX = areaLeft + aw - itemUsedW
 		case "center":
 			itemX = areaLeft + (aw-itemUsedW)/2
-		default: // start, stretch, baseline (baseline→start per Task 13)
+		default: // start, stretch, baseline (inline axis: baseline same as start)
 			itemX = areaLeft
 		}
 
@@ -213,17 +214,56 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 			itemY = areaTop + ah - itemUsedH
 		case "center":
 			itemY = areaTop + (ah-itemUsedH)/2
-		default: // start, stretch, baseline (baseline→start per Task 13)
+		default: // start, stretch — baseline handled in the post-pass below (start here)
 			itemY = areaTop
 		}
 
 		placeGridFragment(frags[i], itemX, itemY, itemUsedW, itemUsedH)
 	}
 
-	// Content height = last row edge + last row size.
+	// Baseline alignment post-pass: for each row (top-to-bottom), shift baseline-group
+	// items so their first baselines coincide, grow the row if needed, and accumulate a
+	// running downward shift for all subsequent rows. Each grid row is an independent
+	// baseline group (grid-specific; the shared shift primitive is alignBaselineGroup).
+	// When no item in any row has baseline alignment, alignBaselineGroup returns 0 for
+	// every row, rowShift stays 0, the `if rowShift > 0` guard fires no translateFragment
+	// calls, and the content height is byte-identical to the pre-baseline value.
+	rowShift := 0.0
+	seenBaselineRows := make(map[int]bool)
+	rowOrder := []int{}
+	for _, a := range areas {
+		if !seenBaselineRows[a.rowStart] {
+			seenBaselineRows[a.rowStart] = true
+			rowOrder = append(rowOrder, a.rowStart)
+		}
+	}
+	sort.Ints(rowOrder)
+	for _, row := range rowOrder {
+		// Apply the accumulated shift from prior row growths to this row's items.
+		if rowShift > 0 {
+			for i, a := range areas {
+				if a.rowStart == row && frags[i] != nil {
+					translateFragment(frags[i], 0, rowShift)
+				}
+			}
+		}
+		// Build the baseline group for this row and align it.
+		var group []baselineItem
+		for i, a := range areas {
+			if a.rowStart != row {
+				continue
+			}
+			ai := resolveGridAlign(b.Style.AlignItems, items[i].Style.AlignSelf)
+			group = append(group, baselineItem{frag: frags[i], baseline: ai == "baseline"})
+		}
+		extra := alignBaselineGroup(group)
+		rowShift += extra
+	}
+
+	// Content height = last row edge + last row size + any accumulated row growth.
 	contentHeight := 0.0
 	if len(rowPos) > 0 {
-		contentHeight = rowPos[len(rowPos)-1] + lastSize(rowSizes)
+		contentHeight = rowPos[len(rowPos)-1] + lastSize(rowSizes) + rowShift
 	}
 
 	// For inline-grid (display:inline-grid) the container is an inline atom: report the

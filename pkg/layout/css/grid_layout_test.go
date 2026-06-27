@@ -878,3 +878,71 @@ func TestGridMissingAreaFallsToAutoPlacement(t *testing.T) {
 	// Auto-placed at the first free cell: col[0,1) row[0,1) => x=0, y=0, w=100, h=50.
 	assertRect(t, frags[0], 0, 0, 100, 50)
 }
+
+// gridTextItem builds a grid item with text content at the given font size, using
+// InlineFC formatting so the item's fragment carries Lines with a BaselineY.
+func gridTextItem(text string, fontSizePt float64) *cssbox.Box {
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	px0 := gcss.Length{Unit: gcss.UnitPx}
+	st := gcss.ComputedStyle{
+		Width: auto, Height: auto, MaxWidth: auto, MaxHeight: auto,
+		MinWidth: px0, MinHeight: px0,
+		FontFamily: "serif", FontSizePt: fontSizePt,
+		AlignSelf: "auto", JustifySelf: "auto",
+	}
+	textSt := gcss.ComputedStyle{FontFamily: "serif", FontSizePt: fontSizePt}
+	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC, Style: st,
+		Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: text, Style: textSt}}}
+}
+
+// firstFragLines returns the first Lines slice found in the fragment or its
+// in-flow block children (for items whose InlineFC is nested inside a BlockFC wrapper).
+func firstFragLines(f *Fragment) []LineFragment {
+	if f == nil {
+		return nil
+	}
+	if len(f.Lines) > 0 {
+		return f.Lines
+	}
+	for _, c := range f.Children {
+		if ls := firstFragLines(c); len(ls) > 0 {
+			return ls
+		}
+	}
+	return nil
+}
+
+func TestGridBaselineAlignmentCoincidesFirstBaseline(t *testing.T) {
+	// 1-row grid, two items with DIFFERENT font sizes so their first baselines are at
+	// different offsets from the top of their fragments. align-items:baseline must shift
+	// the shorter-baseline item down so both items' first baselines land at the same
+	// page-space Y.
+	cols := mustTrackList(150, 150)
+	rowsTL := gcss.TrackListOfAuto(1) // auto row: sizes to tallest item
+	itemSmall := gridTextItem("Hi", 10)
+	itemLarge := gridTextItem("Hi", 24)
+
+	st := gcss.ComputedStyle{AlignItems: "baseline"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, itemSmall, itemLarge), 400, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+
+	linesSmall := firstFragLines(frags[0])
+	linesLarge := firstFragLines(frags[1])
+	if len(linesSmall) == 0 {
+		t.Fatal("small item fragment has no lines (no text baseline produced)")
+	}
+	if len(linesLarge) == 0 {
+		t.Fatal("large item fragment has no lines (no text baseline produced)")
+	}
+
+	baselineSmall := linesSmall[0].BaselineY
+	baselineLarge := linesLarge[0].BaselineY
+	const eps = 0.01
+	if absf(baselineSmall-baselineLarge) > eps {
+		t.Errorf("baseline alignment: small item baseline=%v, large item baseline=%v; want equal (within %.2f)",
+			baselineSmall, baselineLarge, eps)
+	}
+}
