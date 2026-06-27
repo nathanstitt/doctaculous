@@ -464,6 +464,137 @@ var htmlGoldens = []struct {
 </body></html>`,
 		loader: webfontGoldenLoader(),
 	},
+	{
+		// grid-2x2: a 2x2 explicit grid with four distinct colored cells at fixed
+		// 100x60 px tracks (gap:0). Eyeball: red top-left, green top-right, blue
+		// bottom-left, orange bottom-right — a clean 2x2 mosaic.
+		name:       "grid-2x2",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: 100px 100px;
+    grid-template-rows: 60px 60px;
+    gap: 0;
+  }
+  .a { background: #cc3333; }
+  .b { background: #33aa33; }
+  .c { background: #3355cc; }
+  .d { background: #cc8822; }
+</style></head><body>
+  <div class="grid">
+    <div class="a"></div>
+    <div class="b"></div>
+    <div class="c"></div>
+    <div class="d"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// grid-fr: a 2-column fr grid (1fr 2fr) at viewport 300. The second column
+		// is exactly twice as wide as the first (100px vs 200px). Eyeball: blue
+		// narrow left, teal wide right.
+		name:       "grid-fr",
+		viewportPx: 300,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    grid-template-rows: 80px;
+  }
+  .a { background: #3355cc; }
+  .b { background: #33aa88; }
+</style></head><body>
+  <div class="grid">
+    <div class="a"></div>
+    <div class="b"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// grid-span: a 3-column grid (80px each) where the first item spans two
+		// columns (grid-column:1/3), taking up the full top row width of 160px,
+		// with two regular cells below it. Eyeball: purple bar spanning columns 1-2,
+		// then green in col 1 and red in col 2 on the second row, with an empty
+		// cell in col 3 row 1 (orange).
+		name:       "grid-span",
+		viewportPx: 280,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: 80px 80px 80px;
+    grid-template-rows: 50px 50px;
+  }
+  .span2 { grid-column: 1 / 3; background: #7744cc; }
+  .c3r1  { background: #cc8822; }
+  .c1r2  { background: #33aa33; }
+  .c2r2  { background: #cc3333; }
+</style></head><body>
+  <div class="grid">
+    <div class="span2"></div>
+    <div class="c3r1"></div>
+    <div class="c1r2"></div>
+    <div class="c2r2"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// grid-areas: a named-area layout with a header spanning both columns and
+		// two cells (main + side) below. Eyeball: blue header bar across full width,
+		// green main area on the left, orange side on the right.
+		name:       "grid-areas",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: 160px 80px;
+    grid-template-rows: 40px 80px;
+    grid-template-areas: "hd hd" "main side";
+  }
+  .hd   { grid-area: hd;   background: #3355cc; }
+  .main { grid-area: main; background: #33aa33; }
+  .side { grid-area: side; background: #cc8822; }
+</style></head><body>
+  <div class="grid">
+    <div class="hd"></div>
+    <div class="main"></div>
+    <div class="side"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// grid-auto: a 2-column auto-placement grid with 5 colored cells. The first
+		// four fill two rows; the fifth wraps to a third row alone in column 1.
+		// Eyeball: 4 cells in a 2x2 block (red, green, blue, orange), then purple
+		// alone in the leftmost column of row 3.
+		name:       "grid-auto",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: 100px 100px;
+    grid-auto-rows: 50px;
+  }
+  .a { background: #cc3333; }
+  .b { background: #33aa33; }
+  .c { background: #3355cc; }
+  .d { background: #cc8822; }
+  .e { background: #7744cc; }
+</style></head><body>
+  <div class="grid">
+    <div class="a"></div>
+    <div class="b"></div>
+    <div class="c"></div>
+    <div class="d"></div>
+    <div class="e"></div>
+  </div>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for
