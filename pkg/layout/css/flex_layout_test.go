@@ -300,9 +300,8 @@ func TestAlignItemsCenter(t *testing.T) {
 
 func TestAlignItemsStretch(t *testing.T) {
 	f := alignFrags(t, "stretch", "auto")
-	// short item (no definite... it HAS height 40, so stretch does NOT override a definite
-	// cross size). Per spec, stretch only applies when cross size is auto. Item0 has a
-	// definite height 40 => stays 40 at y0.
+	// item0 has a definite height (40px), so the stretch guard does NOT relayout it —
+	// per spec, stretch only applies when the cross size is auto. It stays h40 at y0.
 	if f[0].H != 40 {
 		t.Errorf("stretch with definite height keeps 40; got %v", f[0].H)
 	}

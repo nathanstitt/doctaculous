@@ -238,6 +238,12 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	}
 
 	items := flexItemBoxes(b)
+	for i := range items {
+		if resolvedAlign(b, items[i]) == "baseline" {
+			e.logf("css layout: align-items/align-self baseline not supported; using flex-start")
+			break
+		}
+	}
 	if len(items) == 0 {
 		return interior{contentHeight: 0}
 	}
@@ -314,9 +320,6 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		// fixed; stretch grows its HEIGHT — pin the fragment height to lineCross).
 		if align == "stretch" && !itemHasDefiniteCross(items[i], ax) {
 			frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, usedMain[i], lineCross)
-		}
-		if align == "baseline" {
-			e.logf("css layout: align-items/align-self baseline not supported; using flex-start")
 		}
 
 		crossPos := crossOffset(align, lineCross, itemCross)
