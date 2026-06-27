@@ -22,7 +22,7 @@ import (
 // predicate is reserved for a box's OWN interior role (see normalize and
 // handleWhitespace, which ask whether a box is itself a block CONTAINER).
 func isBlockLevelOuter(b *cssbox.Box) bool {
-	if b.Display == cssbox.DisplayInlineBlock {
+	if b.Display == cssbox.DisplayInlineBlock || b.Display == cssbox.DisplayInlineFlex {
 		return false
 	}
 	return b.Kind.IsBlockLevel()

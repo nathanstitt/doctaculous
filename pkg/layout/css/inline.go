@@ -186,12 +186,14 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			frag := e.replacedFragment(ctx, child, w, h, 0, 0, contentW)
 			*atomics = append(*atomics, frag)
 			*runs = append(*runs, atomicRunFor(child, frag, contentW))
-		case child.Display == cssbox.DisplayInlineBlock:
-			// An inline-block establishes a new BFC; lay it out as a block at its
-			// resolved width and carry its border box as an atomic unit. It gets a fresh
-			// float context (its internal floats stay self-contained) and bandOriginY 0;
-			// the IFC then positions the whole atom (subtree + any internal floats) on
-			// the line via translateFragment.
+		case child.Display == cssbox.DisplayInlineBlock || child.Display == cssbox.DisplayInlineFlex:
+			// An inline-block or inline-flex establishes a new BFC; lay it out as a
+			// block at its resolved width and carry its border box as an atomic unit.
+			// It gets a fresh float context (its internal floats stay self-contained)
+			// and bandOriginY 0; the IFC then positions the whole atom (subtree + any
+			// internal floats) on the line via translateFragment. For inline-flex the
+			// layoutBlock→layoutInterior→FlexFC path routes to layoutFlex, laying out
+			// the flex items; the outer atom mechanism is identical to inline-block.
 			// Positioning inside an inline atom is self-contained: give it a fresh
 			// throwaway positionedContext and the page sentinel as its abs-pos CB, then
 			// resolve that context immediately against the atom's own provisional frame.

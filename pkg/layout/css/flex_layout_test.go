@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -375,5 +376,132 @@ func TestFlexMainGapSpacesItems(t *testing.T) {
 	frags := flexFrags(t, flexRow(gcss.ComputedStyle{ColumnGap: gcss.Length{Value: 20, Unit: gcss.UnitPx}}, mk(), mk()), 300)
 	if frags[0].X != 0 || frags[1].X != 70 {
 		t.Errorf("column-gap:20 => x0,x70; got x%v,x%v", frags[0].X, frags[1].X)
+	}
+}
+
+func TestInlineFlexFlowsInline(t *testing.T) {
+	// An inline-flex container with two 30px items sits inline after some text. Assert the
+	// flex items lay out (widths 30) — i.e. inline-flex reaches layoutFlex, not a fallback.
+	mk := func() *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 30, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 20, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth:   gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow:   0,
+			FlexShrink: 0,
+			FlexBasis:  gcss.Length{Unit: gcss.UnitAuto},
+			AlignSelf:  "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	ifx := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayInlineFlex, Formatting: cssbox.FlexFC,
+		Style:    gcss.ComputedStyle{FlexDirection: "row", AlignItems: "stretch", JustifyContent: "flex-start", FlexWrap: "nowrap"},
+		Children: []*cssbox.Box{mk(), mk()}}
+	e := New(nil, nil, nil)
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{ifx}}
+	root := e.layoutTree(context.Background(), body, 300)
+	// Find the two 30×20 item fragments anywhere in the tree.
+	var items []*Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 30 && f.H == 20 {
+			items = append(items, f)
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if len(items) != 2 {
+		t.Fatalf("want 2 inline-flex item fragments (30x20), got %d", len(items))
+	}
+}
+
+// TestInlineFlexClassification verifies that display:inline-flex is classified as
+// DisplayInlineFlex / FlexFC by the full HTML build path and that such a container
+// flows inline (isBlockLevelOuter returns false, so a parent block with only inline-flex
+// children reconciles to InlineFC).
+func TestInlineFlexClassification(t *testing.T) {
+	src := `<!DOCTYPE html><html><head><style>
+		.ifx { display: inline-flex; width: 120px; height: 40px; }
+		.item { width: 30px; height: 20px; }
+	</style></head><body>
+		<div class="ifx"><div class="item"></div><div class="item"></div></div>
+	</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	// Walk the box tree to find the inline-flex box.
+	var findFlex func(b *cssbox.Box) *cssbox.Box
+	findFlex = func(b *cssbox.Box) *cssbox.Box {
+		if b.Display == cssbox.DisplayInlineFlex {
+			return b
+		}
+		for _, c := range b.Children {
+			if f := findFlex(c); f != nil {
+				return f
+			}
+		}
+		return nil
+	}
+	ifx := findFlex(root)
+	if ifx == nil {
+		t.Fatal("no DisplayInlineFlex box found in tree")
+	}
+	if ifx.Kind != cssbox.BoxBlock {
+		t.Errorf("inline-flex Kind = %v, want BoxBlock", ifx.Kind)
+	}
+	if ifx.Formatting != cssbox.FlexFC {
+		t.Errorf("inline-flex Formatting = %v, want FlexFC", ifx.Formatting)
+	}
+	// The parent of an inline-flex-only block should reconcile to InlineFC: the
+	// inline-flex box is inline-level-outer (isBlockLevelOuter returns false for it).
+	var findParent func(b, target *cssbox.Box) *cssbox.Box
+	findParent = func(b, target *cssbox.Box) *cssbox.Box {
+		for _, c := range b.Children {
+			if c == target {
+				return b
+			}
+			if p := findParent(c, target); p != nil {
+				return p
+			}
+		}
+		return nil
+	}
+	parent := findParent(root, ifx)
+	if parent == nil {
+		t.Fatal("no parent found for inline-flex box")
+	}
+	if parent.Formatting != cssbox.InlineFC {
+		t.Errorf("parent of inline-flex-only box Formatting = %v, want InlineFC", parent.Formatting)
+	}
+	// Verify the full layout path: lay out and find the two 30×20 item fragments.
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), root, 300)
+	var items []*Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 30 && f.H == 20 {
+			items = append(items, f)
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if len(items) != 2 {
+		t.Fatalf("HTML-path: want 2 inline-flex item fragments (30x20), got %d", len(items))
 	}
 }

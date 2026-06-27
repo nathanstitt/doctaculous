@@ -282,6 +282,8 @@ func classifyDisplay(b *cssbox.Box, display string) {
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableCell, cssbox.BlockFC
 	case "flex":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayFlex, cssbox.FlexFC
+	case "inline-flex":
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayInlineFlex, cssbox.FlexFC
 	case "grid":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayGrid, cssbox.GridFC
 	case "block":
