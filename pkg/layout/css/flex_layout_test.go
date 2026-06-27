@@ -207,3 +207,46 @@ func TestFlexRowReversePlacesFromEnd(t *testing.T) {
 		t.Errorf("row-reverse item1 = x%v w%v, want x150 w50", frags[1].X, frags[1].W)
 	}
 }
+
+// justifyFrags lays out three fixed 50px-wide items in a 300px row with the given
+// justify-content and returns their X positions.
+func justifyFrags(t *testing.T, jc string) []float64 {
+	mk := func() *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 50, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{JustifyContent: jc}, mk(), mk(), mk()), 300)
+	xs := make([]float64, len(frags))
+	for i, f := range frags {
+		xs[i] = f.X
+	}
+	return xs
+}
+
+func TestJustifyContent(t *testing.T) {
+	// 3 items × 50 = 150 used, 150 free in a 300 container.
+	cases := []struct {
+		jc   string
+		want []float64
+	}{
+		{"flex-start", []float64{0, 50, 100}},
+		{"flex-end", []float64{150, 200, 250}},
+		{"center", []float64{75, 125, 175}},
+		{"space-between", []float64{0, 125, 250}},     // gaps of 75 between
+		{"space-around", []float64{25, 125, 225}},     // half-gap 25 at ends, 50 between
+		{"space-evenly", []float64{37.5, 125, 212.5}}, // equal 37.5 everywhere
+	}
+	for _, c := range cases {
+		got := justifyFrags(t, c.jc)
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Errorf("justify-content:%s item %d X = %v, want %v (all: %v)", c.jc, i, got[i], c.want[i], got)
+			}
+		}
+	}
+}

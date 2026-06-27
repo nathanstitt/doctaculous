@@ -296,16 +296,21 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		consumed += usedMain[i]
 	}
 
-	// Position items along the main axis, packed at main-start. For reverse directions,
-	// pack from the main-end: item i sits at (innerMain - mainPos - usedMain[i]).
-	mainPos := 0.0
+	// Distribute free main space according to justify-content.
+	freeMain := innerMain - consumed
+	leading, between := justifyOffsets(b.Style.JustifyContent, freeMain, len(items))
+
+	// Position items along the main axis. For reverse directions, item i sits at
+	// (innerMain - mainPos - usedMain[i]) so it packs from the main-end.
+	// The leading and between offsets accumulate in mainPos identically in both cases.
+	mainPos := leading
 	for i := range items {
 		pos := mainPos
 		if ax.reverseMain {
 			pos = innerMain - mainPos - usedMain[i]
 		}
 		placeFlexFragment(frags[i], ax, contentX, 0, pos, 0, usedMain[i], crossSizes[i])
-		mainPos += usedMain[i] + mainGap
+		mainPos += usedMain[i] + mainGap + between
 	}
 
 	contentHeight := lineCross
@@ -315,6 +320,42 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	// NB: do NOT set interior.intrinsicWidth — that field shrink-to-fits a TABLE box;
 	// a flex container fills its containing-block width like a normal block.
 	return interior{children: frags, contentHeight: contentHeight}
+}
+
+// justifyOffsets returns the leading main offset (before the first item) and the extra
+// spacing inserted between adjacent items, for a given justify-content value. freeSpace
+// is the leftover main space after used sizes + gaps; n is the item count. Negative
+// freeSpace (overflow) is treated as 0 leading / 0 extra for the distributed modes, and
+// flex-end/center still shift by the (negative) free space (overflowing the start).
+func justifyOffsets(jc string, freeSpace float64, n int) (leading, between float64) {
+	if n == 0 {
+		return 0, 0
+	}
+	switch jc {
+	case "flex-end":
+		return freeSpace, 0
+	case "center":
+		return freeSpace / 2, 0
+	case "space-between":
+		if n == 1 || freeSpace < 0 {
+			return 0, 0
+		}
+		return 0, freeSpace / float64(n-1)
+	case "space-around":
+		if freeSpace < 0 {
+			return 0, 0
+		}
+		unit := freeSpace / float64(n)
+		return unit / 2, unit
+	case "space-evenly":
+		if freeSpace < 0 {
+			return 0, 0
+		}
+		unit := freeSpace / float64(n+1)
+		return unit, unit
+	default: // flex-start
+		return 0, 0
+	}
 }
 
 // flexItemBoxes returns the in-flow flex item child boxes (the fixup already wrapped
