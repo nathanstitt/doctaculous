@@ -390,6 +390,36 @@ what is done vs. pending.
   **`font-display`**, **variable-font axes**, and **`local()` beyond the disk adapter** (no OS font-store
   enumeration) — are parsed-and-ignored, never dropping the face. See
   `docs/superpowers/specs/2026-06-26-html-webfonts-design.md`.
+- **HTML rendering — CSS flexbox (single-line, `display: flex`/`inline-flex`)** (`pkg/layout/css/flex.go` +
+  `flexfix.go` (new), `pkg/layout/css/build.go`/`block.go` wiring, `pkg/layout/cssbox` `BoxAnonFlexItem` +
+  `DisplayInlineFlex`, `pkg/css` flex properties + `flex`/`gap` shorthands + a `UnitContent` length unit;
+  covered by flex-property parse/shorthand tests, a pure §9.7 resolver unit suite, fragment-geometry tests,
+  anonymous-flex-item fixup tests, the `flex-*` goldens, and the `flex-*` WPT reftests): a `display:flex` box
+  now lays out as a **real single-line flex container**, replacing the prior block fallback. Pieces: the flex
+  properties on the cascade (`flex-direction`, `flex-wrap`, `justify-content`, `align-items`/`align-self`,
+  `flex-grow`/`shrink`/`basis`, `order`, `row-gap`/`column-gap`, the `flex` and `gap` shorthands); the
+  **anonymous-flex-item fixup** (`flexfix.go`, CSS Flexbox §4 — wrap inline runs, blockify inline-level items,
+  drop inter-item whitespace); an **axis-abstracted `layoutFlex`** (one algorithm for `row`/`column` and the
+  reverses via a `flexAxis` mapping); the **flex base size + hypothetical main size** (`flex-basis` length/%/
+  `auto`→main-size-property→`content`/`content`→max-content, via the table-slice `measure.go`) with the
+  **automatic minimum size** (§4.5, `min-*:auto`→min-content floor on shrink); the **§9.7 flexible-length
+  resolution** carved into a pure `resolveFlexibleLengths` (the multi-pass freeze loop — grow ∝ flex-grow,
+  shrink ∝ flex-shrink×base, min/max clamping by total-violation sign); **`justify-content`** (all six values,
+  composing with `gap`); **`align-items`/`align-self`** cross-axis placement incl. `stretch` (relayout an
+  auto-cross item to the line cross size); and **`inline-flex`** (an inline-level flex container flowing as an
+  inline atom, like inline-block). Each flex item establishes a **BFC** and lays its contents out through the
+  existing block/inline path (`e.layoutBlock`) — the `render.Device` seam, the PDF/DOCX pipelines, and the
+  shared inline core (`pkg/layout/inline`) are **untouched**. **Byte-identical:** every page with no flex
+  container is unchanged (the existing corpus uses block/inline/table). Degrades gracefully (no panic, logged):
+  **`flex-wrap: wrap`/`wrap-reverse`** → single-line (`nowrap`, items overflow); **RTL/`direction`** on a row →
+  LTR; **`align-items: baseline`**/**`align-self: baseline`** → `flex-start`; the **line cross size is the max
+  item's cross size, NOT clamped to a definite container cross size** (CSS Flexbox §9.4 — so `align-items:
+  center`/`flex-end` align within the tallest item's extent, not the container's definite `height`/`width` when
+  one is set; the `flex-align-center` reftest reflects this); and for a **`flex-direction: column` item,
+  `flex-basis: auto`/`content` uses the item's max-content WIDTH as the main-axis (height) proxy** (a documented
+  approximation — `measureMaxContent` returns a width; exact column content height is a 9b refinement). The
+  cross-axis gap (`row-gap` for `row*`) is a no-op on a single line (correct per spec). An empty/degenerate flex
+  container is a zero-size fragment. See `docs/superpowers/specs/2026-06-26-html-flexbox-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -423,11 +453,10 @@ that skip into real output.
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**,
    **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
    **clip-escape sub-cases** (sub-project 6b), **CSS 2.1 §17 table layout** (sub-project 7), and
-   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8) are done
+   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), and **single-line flexbox** (sub-project 9) are done
    — see the Done section). Roughly in order, each a
    parse/layout slice with its own fixtures + golden/WPT tests:
-   **flexbox** then **grid** (today
-   flex/grid fall back to block normal flow; tables are now a real layout mode); **`OpenURL` + the HTTP `ResourceLoader`** (network
+   **grid** (today grid falls back to block normal flow; flexbox and tables are now real layout modes); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
    **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Positioning fidelity
@@ -464,6 +493,18 @@ that skip into real output.
    the `FaceCache` key is now normalized by family (case/space variants share an entry) but is still keyed
    by `(family, style)`, so one physical font file is fetched once **per style** (harmless with the
    hermetic loaders today; worth a content-addressed fetch cache once the HTTP `ResourceLoader` lands).
+   Flexbox fidelity follow-ups within the existing engine: **multi-line flex** (`flex-wrap: wrap`/
+   `wrap-reverse` + `align-content`, the big one — currently single-line `nowrap` with overflow);
+   **RTL/`direction`** on a row (LTR only — logged; needs the general bidi support the engine lacks);
+   the **line cross size clamped to a definite container cross size** (today the line cross size is the
+   max item's cross size — so `align-items: center`/`flex-end` align within the tallest item's extent,
+   not the container's definite `height`/`width` when one is set; the `flex-align-center` reftest
+   reflects this); **full `align-items: baseline`** cross-baseline participation (today collapses to
+   `flex-start`); the **column `flex-basis: auto`/`content` height** (today uses the item's
+   max-content width as the main-axis proxy — a documented approximation; exact column content height
+   is the 9b refinement); and the **`flex-grow`/`shrink` scale factors for cross-axis gaps** (`row-gap`
+   for `row*` is a no-op on a single line — correct per spec, but worth revisiting when multi-line
+   lands).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
