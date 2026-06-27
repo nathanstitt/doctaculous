@@ -348,8 +348,8 @@ func parseTemplateAreas(s string) (GridAreas, bool) {
 	info := make(map[string]*rectInfo)
 	for r, row := range rows {
 		for c, name := range row {
-			if name == "." {
-				continue // null cell — skip
+			if strings.TrimLeft(name, ".") == "" {
+				continue // null cell — skip (CSS §7.3: one or more "." characters)
 			}
 			ri, exists := info[name]
 			if !exists {
@@ -383,7 +383,9 @@ func parseTemplateAreas(s string) (GridAreas, bool) {
 		if boxArea != ri.count {
 			return GridAreas{}, false
 		}
-		// Also verify every cell in the bounding box is indeed this name.
+		// Defensive cross-check: the area==count test above already implies
+		// rectangular contiguity; this scan guards against any future change
+		// to that invariant.
 		for r := ri.rect.RowStart - 1; r < ri.rect.RowEnd; r++ {
 			for c := ri.rect.ColStart - 1; c < ri.rect.ColEnd; c++ {
 				if rows[r][c] != name {
@@ -403,6 +405,8 @@ func parseTemplateAreas(s string) (GridAreas, bool) {
 // parseGridLine parses one grid-line endpoint value. The recognized forms are:
 // `auto` → lineAuto; `span N` / `span` → lineSpan; a non-zero integer → lineNum;
 // an identifier → lineName. ok is false only for truly unrecognizable input.
+// Invalid span counts (zero or negative) are clamped to 1 rather than failing,
+// per the project's graceful-degradation policy.
 func parseGridLine(s string) (GridLine, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {

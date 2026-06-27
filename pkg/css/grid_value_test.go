@@ -213,3 +213,112 @@ func TestParseGridAreaFourValues(t *testing.T) {
 		t.Errorf("AreaName=%q want empty", p.AreaName)
 	}
 }
+
+func TestParseGridAreaThreeValues(t *testing.T) {
+	// grid-area: 1 / 2 / 3 (3 values) => RowStart=lineNum{1}, ColStart=lineNum{2},
+	// RowEnd=lineNum{3}; ColEnd omitted: col-start is lineNum (not lineName) so ColEnd=lineAuto.
+	p, ok := parseGridArea("1 / 2 / 3")
+	if !ok {
+		t.Fatal("parseGridArea ok=false")
+	}
+	if p.RowStart.Kind != lineNum || p.RowStart.N != 1 {
+		t.Errorf("RowStart=%+v want lineNum{1}", p.RowStart)
+	}
+	if p.ColStart.Kind != lineNum || p.ColStart.N != 2 {
+		t.Errorf("ColStart=%+v want lineNum{2}", p.ColStart)
+	}
+	if p.RowEnd.Kind != lineNum || p.RowEnd.N != 3 {
+		t.Errorf("RowEnd=%+v want lineNum{3}", p.RowEnd)
+	}
+	// col-start is numeric, not an ident, so col-end defaults to auto.
+	if p.ColEnd.Kind != lineAuto {
+		t.Errorf("ColEnd=%+v want lineAuto (col-start was numeric, not ident)", p.ColEnd)
+	}
+}
+
+func TestParseGridAreaTwoIdents(t *testing.T) {
+	// grid-area: header / main (2 values, both idents) =>
+	// RowStart=lineName{"header"}, ColStart=lineName{"main"},
+	// RowEnd copies RowStart (ident) = lineName{"header"},
+	// ColEnd copies ColStart (ident) = lineName{"main"}.
+	p, ok := parseGridArea("header / main")
+	if !ok {
+		t.Fatal("parseGridArea ok=false")
+	}
+	if p.RowStart.Kind != lineName || p.RowStart.Name != "header" {
+		t.Errorf("RowStart=%+v want lineName{header}", p.RowStart)
+	}
+	if p.ColStart.Kind != lineName || p.ColStart.Name != "main" {
+		t.Errorf("ColStart=%+v want lineName{main}", p.ColStart)
+	}
+	// Omitted row-end: row-start is ident, so row-end copies row-start.
+	if p.RowEnd.Kind != lineName || p.RowEnd.Name != "header" {
+		t.Errorf("RowEnd=%+v want lineName{header} (copied from row-start)", p.RowEnd)
+	}
+	// Omitted col-end: col-start is ident, so col-end copies col-start.
+	if p.ColEnd.Kind != lineName || p.ColEnd.Name != "main" {
+		t.Errorf("ColEnd=%+v want lineName{main} (copied from col-start)", p.ColEnd)
+	}
+}
+
+func TestParseGridColumnRowBareIdent(t *testing.T) {
+	// grid-column: foo (single ident) => both start and end are lineName{"foo"}.
+	start, end, ok := parseGridColumnRow("foo")
+	if !ok {
+		t.Fatal("parseGridColumnRow ok=false")
+	}
+	if start.Kind != lineName || start.Name != "foo" {
+		t.Errorf("start=%+v want lineName{foo}", start)
+	}
+	if end.Kind != lineName || end.Name != "foo" {
+		t.Errorf("end=%+v want lineName{foo} (copied from start for bare ident)", end)
+	}
+}
+
+func TestParseTemplateAreasSingleCell(t *testing.T) {
+	// Single-cell template: "a" => Named["a"]={1,1,1,1}, Rows=1, Cols=1.
+	ga, ok := parseTemplateAreas(`"a"`)
+	if !ok {
+		t.Fatal("parseTemplateAreas ok=false")
+	}
+	if ga.Rows != 1 {
+		t.Errorf("Rows=%d want 1", ga.Rows)
+	}
+	if ga.Cols != 1 {
+		t.Errorf("Cols=%d want 1", ga.Cols)
+	}
+	want := GridRect{RowStart: 1, RowEnd: 1, ColStart: 1, ColEnd: 1}
+	if ga.Named["a"] != want {
+		t.Errorf("Named[a]=%+v want %+v", ga.Named["a"], want)
+	}
+}
+
+func TestParseTemplateAreasEmpty(t *testing.T) {
+	// Empty/whitespace input => ok=false, no panic.
+	if _, ok := parseTemplateAreas(""); ok {
+		t.Error("expected ok=false for empty input")
+	}
+	if _, ok := parseTemplateAreas("   "); ok {
+		t.Error("expected ok=false for whitespace-only input")
+	}
+}
+
+func TestParseTemplateAreasMultiDotNullCell(t *testing.T) {
+	// CSS §7.3: ".." and "..." are also null cells (one or more "." characters).
+	// ".. a" ".. a" => Named["a"]={1,2,2,2}, Rows=2, Cols=2.
+	ga, ok := parseTemplateAreas(`".. a" ".. a"`)
+	if !ok {
+		t.Fatal("parseTemplateAreas with multi-dot null cell ok=false")
+	}
+	if ga.Rows != 2 || ga.Cols != 2 {
+		t.Errorf("Rows=%d Cols=%d want 2x2", ga.Rows, ga.Cols)
+	}
+	// ".." cells must be treated as null (not named), so only "a" is in Named.
+	if _, exists := ga.Named[".."]; exists {
+		t.Error("multi-dot '..' should be a null cell, not a named area")
+	}
+	wantA := GridRect{RowStart: 1, RowEnd: 2, ColStart: 2, ColEnd: 2}
+	if ga.Named["a"] != wantA {
+		t.Errorf("Named[a]=%+v want %+v", ga.Named["a"], wantA)
+	}
+}
