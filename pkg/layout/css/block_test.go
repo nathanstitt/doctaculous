@@ -285,12 +285,13 @@ func TestBordersAndBackgroundOnFragment(t *testing.T) {
 	}
 }
 
-// Fixture 10: flex/grid/table fall back to block normal flow (with a logged
-// message), still stacking children vertically.
+// FlexFC is wired to layoutFlex: a row flex container lays its items out side by
+// side (not the old block fallback). The exact width split is covered by
+// TestFlexRowGrowDistributesWidth in flex_layout_test.go.
 func TestFlexFCRowLaysOutItemsSideBySide(t *testing.T) {
 	// FlexFC is now wired to layoutFlex (not a block fallback). Two flex items with
-	// explicit basis 0px and grow 1 and 3 each are placed side by side (row direction)
-	// at the same Y and their widths split the 1000px viewport 1:3 => 250 and 750.
+	// explicit basis 0px and grow 1 and 3 each are placed side by side (row direction);
+	// the exact 1:3 width split is asserted in TestFlexRowGrowDistributesWidth.
 	body := layoutBody(t, reset+`<div style="display:flex">
 		<div style="flex:1 1 0px;height:10px"></div>
 		<div style="flex:3 1 0px;height:15px"></div>
@@ -310,6 +311,26 @@ func TestFlexFCRowLaysOutItemsSideBySide(t *testing.T) {
 	// Second item is to the right of the first.
 	if b.X <= a.X {
 		t.Errorf("second item x=%v should be right of first x=%v", b.X, a.X)
+	}
+}
+
+// TestGridFCFallsBackToBlock verifies the GridFC degradation contract: display:grid
+// is not yet implemented and falls back to block normal flow (with a logged message),
+// so its children stack vertically rather than laying out side by side.
+func TestGridFCFallsBackToBlock(t *testing.T) {
+	body := layoutBody(t, reset+`<div style="display:grid">
+		<div style="height:10px"></div>
+		<div style="height:15px"></div>
+	</div>`, 1000)
+	grid := body.Children[0]
+	if len(grid.Children) != 2 {
+		t.Fatalf("grid children = %d, want 2", len(grid.Children))
+	}
+	child1, child2 := grid.Children[0], grid.Children[1]
+	// Block fallback: children stack vertically, so the second child starts below
+	// the first (not side by side as flex/grid would place them).
+	if child2.Y <= child1.Y {
+		t.Errorf("grid fallback: child2.Y=%v should be below child1.Y=%v (block stacking)", child2.Y, child1.Y)
 	}
 }
 
