@@ -111,6 +111,7 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 		// --- Inline axis (justify) ---
 		// The initial layout was at aw (the area width). For non-stretch alignment on an
 		// auto-width item, relayout at max-content to get the shrink-to-fit width.
+		relaidOutInline := false
 		itemUsedW := itemW[i]
 		if ji != "stretch" && gridItemHasAutoWidth(it) {
 			mc := e.measureMaxContent(ctx, it)
@@ -122,13 +123,13 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 			// Relayout at the shrink-to-fit width if it changed.
 			if math.Abs(itemUsedW-itemW[i]) > 0.01 {
 				frags[i], itemNatH[i] = e.layoutGridItem(ctx, it, itemUsedW)
+				relaidOutInline = true
 			}
 		} else if ji == "stretch" {
 			// stretch: item fills the area width (already laid out at aw).
 			itemUsedW = aw
 		}
-		// Definite width overrides: if item has a definite width smaller than aw,
-		// the actual rendered width is itemNatH[i]'s sibling — we read frag.W.
+		// Definite width: Phase 5a already laid the item out at its CSS width; read frag.W.
 		if frags[i] != nil && !gridItemHasAutoWidth(it) {
 			itemUsedW = frags[i].W
 		}
@@ -151,18 +152,15 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 		}
 
 		if ai == "stretch" && gridItemHasAutoHeight(it) {
-			// stretch on auto-height: relayout at the area width, then pin height to ah.
-			if math.Abs(itemUsedW-itemW[i]) > 0.01 {
-				// Already relaid out above at itemUsedW; just pin the height.
-				if frags[i] != nil {
-					frags[i].H = ah
-				}
-			} else {
-				// Relayout at itemUsedW (= aw for stretch-inline) and pin height.
+			// stretch on auto-height: relayout at itemUsedW (= area width when inline also
+			// stretches) so inner content flows at the correct width, then pin height to ah.
+			if !relaidOutInline {
+				// Not yet relaid out at itemUsedW (e.g. a definite-width item, or
+				// stretch-inline at a different width) — relayout so content flows correctly.
 				frags[i], _ = e.layoutGridItem(ctx, it, itemUsedW)
-				if frags[i] != nil {
-					frags[i].H = ah
-				}
+			}
+			if frags[i] != nil {
+				frags[i].H = ah
 			}
 			itemUsedH = ah
 		}

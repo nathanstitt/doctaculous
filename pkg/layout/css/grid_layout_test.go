@@ -477,12 +477,58 @@ func TestGridJustifyItemsStartShrinkToFit(t *testing.T) {
 	if len(frags) != 1 {
 		t.Fatalf("got %d frags want 1", len(frags))
 	}
-	f := frags[0]
-	// x=0 (start alignment); w should be the max-content width (~30px), NOT 200.
-	if f.X > 0.01 {
-		t.Errorf("x=%v want 0 (start alignment)", f.X)
+	// x=0 (start alignment), w=30 (max-content from the 30px inline-block child),
+	// h=60 (row height, block axis stretch default), y=0.
+	assertRect(t, frags[0], 0, 0, 30, 60)
+}
+
+func TestGridDefiniteWidthAutoHeightStretchAlign(t *testing.T) {
+	// Regression test for the Phase 5b block-stretch relayout proxy bug.
+	//
+	// Bug summary: the condition `math.Abs(itemUsedW-itemW[i]) > 0.01` was used as a
+	// proxy for "the inline branch already relaid out the item at itemUsedW". For a
+	// DEFINITE-width item with non-stretch inline alignment (e.g. justify-items:center),
+	// the inline branch is NOT entered (guarded by gridItemHasAutoWidth). After reading
+	// frag.W (e.g. 50), itemUsedW=50 ≠ itemW[i]=200, so the proxy returned true and the
+	// block-stretch path skipped the relayout — leaving the item's content laid out at
+	// the area width (200) from Phase 5a instead of relaying at the definite width (50).
+	//
+	// Why the bug is not unit-observable via child-width assertions: layoutBlock respects
+	// the item's CSS `width:50px` regardless of the `cbWidth` (containing-block width)
+	// parameter passed to layoutGridItem. So `layoutGridItem(ctx, it, 200)` and
+	// `layoutGridItem(ctx, it, 50)` produce the same item content — a child's `width:100%`
+	// resolves against the item's CONTENT box (50px), not against `cbWidth`. Therefore
+	// the geometry is identical with or without the fix for this simple case. The fix is
+	// structural: it removes the incorrect proxy and uses an explicit relaidOutInline flag,
+	// guaranteeing the block-stretch relayout occurs even for definite-width items.
+	//
+	// This test asserts the border-box geometry (x=75,w=50,y=0,h=100) as a regression
+	// guard. The fix itself is verified by inspecting the code path, not by geometry
+	// alone, since `layoutGridItem(ctx, it, 200)` and `layoutGridItem(ctx, it, 50)` are
+	// equivalent for a definite-width item.
+	cols := gcss.TrackListOfPx(200)
+	rowsTL := gcss.TrackListOfPx(100)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+
+	// Grid item: definite width:50px, auto height, no children (geometry check only).
+	itemStyle := gcss.ComputedStyle{
+		Width:    gcss.Length{Value: 50, Unit: gcss.UnitPx},
+		Height:   auto,
+		MaxWidth: auto, MaxHeight: auto,
+		MinWidth:  gcss.Length{Unit: gcss.UnitPx},
+		MinHeight: gcss.Length{Unit: gcss.UnitPx},
+		AlignSelf: "auto", JustifySelf: "auto",
 	}
-	if f.W > 100 {
-		t.Errorf("w=%v want ~30 (shrink-to-fit, not 200)", f.W)
+	item := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Formatting: cssbox.BlockFC, Style: itemStyle}
+
+	// justify-items:center (non-stretch inline), align-items:stretch (default).
+	st := gcss.ComputedStyle{JustifyItems: "center"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
 	}
+	// Item border-box: width=50 (definite), centered in 200px column => x=(200-50)/2=75,
+	// height=100 (block axis stretched to row), y=0.
+	assertRect(t, frags[0], 75, 0, 50, 100)
 }
