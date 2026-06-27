@@ -91,3 +91,125 @@ func TestParseTrackListBadDegrades(t *testing.T) {
 		t.Error("expected ok=false for garbage track list")
 	}
 }
+
+func TestParseTemplateAreas(t *testing.T) {
+	// "a a b" "a a c" => Named["a"]={1,2,1,2}, Named["b"]={1,1,3,3}, Named["c"]={2,2,3,3},
+	// Rows=2, Cols=3.
+	ga, ok := parseTemplateAreas(`"a a b" "a a c"`)
+	if !ok {
+		t.Fatal("parseTemplateAreas ok=false")
+	}
+	if ga.Rows != 2 {
+		t.Errorf("Rows=%d want 2", ga.Rows)
+	}
+	if ga.Cols != 3 {
+		t.Errorf("Cols=%d want 3", ga.Cols)
+	}
+	wantA := GridRect{RowStart: 1, RowEnd: 2, ColStart: 1, ColEnd: 2}
+	if ga.Named["a"] != wantA {
+		t.Errorf("Named[a]=%+v want %+v", ga.Named["a"], wantA)
+	}
+	wantB := GridRect{RowStart: 1, RowEnd: 1, ColStart: 3, ColEnd: 3}
+	if ga.Named["b"] != wantB {
+		t.Errorf("Named[b]=%+v want %+v", ga.Named["b"], wantB)
+	}
+	wantC := GridRect{RowStart: 2, RowEnd: 2, ColStart: 3, ColEnd: 3}
+	if ga.Named["c"] != wantC {
+		t.Errorf("Named[c]=%+v want %+v", ga.Named["c"], wantC)
+	}
+}
+
+func TestParseTemplateAreasNonRectangular(t *testing.T) {
+	// "a a" "a b" => 'a' is non-rectangular (L-shaped) => ok=false
+	if _, ok := parseTemplateAreas(`"a a" "a b"`); ok {
+		t.Error("expected ok=false for non-rectangular area 'a'")
+	}
+}
+
+func TestParseTemplateAreasRagged(t *testing.T) {
+	// "a a" "a a a" => ragged rows => ok=false
+	if _, ok := parseTemplateAreas(`"a a" "a a a"`); ok {
+		t.Error("expected ok=false for ragged rows")
+	}
+}
+
+func TestParseGridColumnNum(t *testing.T) {
+	// grid-column: 1 / 3
+	start, end, ok := parseGridColumnRow("1 / 3")
+	if !ok {
+		t.Fatal("parseGridColumnRow ok=false")
+	}
+	if start.Kind != lineNum || start.N != 1 {
+		t.Errorf("start=%+v want lineNum{1}", start)
+	}
+	if end.Kind != lineNum || end.N != 3 {
+		t.Errorf("end=%+v want lineNum{3}", end)
+	}
+}
+
+func TestParseGridColumnSpan(t *testing.T) {
+	// grid-column: span 2 => start lineSpan{2}, end auto
+	start, end, ok := parseGridColumnRow("span 2")
+	if !ok {
+		t.Fatal("parseGridColumnRow ok=false")
+	}
+	if start.Kind != lineSpan || start.N != 2 {
+		t.Errorf("start=%+v want lineSpan{2}", start)
+	}
+	if end.Kind != lineAuto {
+		t.Errorf("end=%+v want lineAuto", end)
+	}
+}
+
+func TestParseGridColumnNegative(t *testing.T) {
+	// grid-column: 1 / -1 => start lineNum{1}, end lineNum{-1}
+	start, end, ok := parseGridColumnRow("1 / -1")
+	if !ok {
+		t.Fatal("parseGridColumnRow ok=false")
+	}
+	if start.Kind != lineNum || start.N != 1 {
+		t.Errorf("start=%+v want lineNum{1}", start)
+	}
+	if end.Kind != lineNum || end.N != -1 {
+		t.Errorf("end=%+v want lineNum{-1}", end)
+	}
+}
+
+func TestParseGridAreaName(t *testing.T) {
+	// grid-area: foo => {AreaName:"foo"}
+	p, ok := parseGridArea("foo")
+	if !ok {
+		t.Fatal("parseGridArea ok=false")
+	}
+	if p.AreaName != "foo" {
+		t.Errorf("AreaName=%q want %q", p.AreaName, "foo")
+	}
+	// All endpoints should be auto.
+	if p.RowStart.Kind != lineAuto || p.RowEnd.Kind != lineAuto ||
+		p.ColStart.Kind != lineAuto || p.ColEnd.Kind != lineAuto {
+		t.Errorf("expected all auto endpoints for area name, got %+v", p)
+	}
+}
+
+func TestParseGridAreaFourValues(t *testing.T) {
+	// grid-area: 1 / 1 / 3 / 2 => RowStart=1,ColStart=1,RowEnd=3,ColEnd=2
+	p, ok := parseGridArea("1 / 1 / 3 / 2")
+	if !ok {
+		t.Fatal("parseGridArea ok=false")
+	}
+	if p.RowStart.Kind != lineNum || p.RowStart.N != 1 {
+		t.Errorf("RowStart=%+v want lineNum{1}", p.RowStart)
+	}
+	if p.ColStart.Kind != lineNum || p.ColStart.N != 1 {
+		t.Errorf("ColStart=%+v want lineNum{1}", p.ColStart)
+	}
+	if p.RowEnd.Kind != lineNum || p.RowEnd.N != 3 {
+		t.Errorf("RowEnd=%+v want lineNum{3}", p.RowEnd)
+	}
+	if p.ColEnd.Kind != lineNum || p.ColEnd.N != 2 {
+		t.Errorf("ColEnd=%+v want lineNum{2}", p.ColEnd)
+	}
+	if p.AreaName != "" {
+		t.Errorf("AreaName=%q want empty", p.AreaName)
+	}
+}

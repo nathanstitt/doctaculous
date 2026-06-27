@@ -261,6 +261,308 @@ func parseMinmax(tz *tokenizer) (TrackSize, bool) {
 	return TrackSize{Min: minFn, Max: maxFn}, true
 }
 
+// GridAreas is a parsed grid-template-areas value: a map from area name to its
+// rectangle (1-based grid line numbers, end-inclusive cell numbers). Rows is the
+// number of string rows; Cols the number of columns. The zero value has no areas.
+type GridAreas struct {
+	Named map[string]GridRect
+	Rows  int
+	Cols  int
+}
+
+// GridRect is a 1-based, inclusive cell rectangle in the named grid.
+// RowStart..RowEnd and ColStart..ColEnd are the first and last cells (inclusive).
+type GridRect struct{ RowStart, RowEnd, ColStart, ColEnd int }
+
+// lineKind classifies a grid placement endpoint.
+type lineKind int
+
+const (
+	lineAuto lineKind = iota // `auto`
+	lineNum                  // an explicit (possibly negative) line number
+	lineSpan                 // `span <n>`
+	lineName                 // a named line / area-name endpoint (resolved at layout)
+)
+
+// GridLine is one endpoint of grid-column/grid-row (start or end).
+type GridLine struct {
+	Kind lineKind
+	N    int    // line number (lineNum) or span count (lineSpan)
+	Name string // lineName (area name or named line — area names resolve in placement)
+}
+
+// GridPlacement is an item's full placement: the four resolved endpoints plus an
+// optional area name (from `grid-area: name`). AreaName != "" means "place by the
+// named area if it exists, else fall through to the endpoints/auto".
+type GridPlacement struct {
+	ColStart, ColEnd, RowStart, RowEnd GridLine
+	AreaName                           string
+}
+
+// parseTemplateAreas parses a grid-template-areas value (a sequence of quoted
+// strings) into a GridAreas. ok is false if the input is empty, rows have
+// differing column counts (ragged), or any named area is non-rectangular.
+func parseTemplateAreas(s string) (GridAreas, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "none" {
+		return GridAreas{}, false
+	}
+	tz := newTokenizer(s)
+
+	// Collect rows: each row is a slice of cell names (empty string = null cell).
+	var rows [][]string
+	for {
+		tok := nextNonWhitespace(tz)
+		if tok.Kind == TokenEOF {
+			break
+		}
+		if tok.Kind != TokenString {
+			return GridAreas{}, false
+		}
+		// Split the string value on whitespace to get cell names.
+		cells := strings.Fields(tok.Text)
+		if len(cells) == 0 {
+			return GridAreas{}, false
+		}
+		rows = append(rows, cells)
+	}
+	if len(rows) == 0 {
+		return GridAreas{}, false
+	}
+
+	// Validate: all rows must have the same column count (not ragged).
+	cols := len(rows[0])
+	for _, row := range rows[1:] {
+		if len(row) != cols {
+			return GridAreas{}, false
+		}
+	}
+
+	numRows := len(rows)
+
+	// Build the bounding box for each named area and track cell counts.
+	type rectInfo struct {
+		rect  GridRect
+		count int // number of cells with this name
+	}
+	info := make(map[string]*rectInfo)
+	for r, row := range rows {
+		for c, name := range row {
+			if name == "." {
+				continue // null cell — skip
+			}
+			ri, exists := info[name]
+			if !exists {
+				ri = &rectInfo{rect: GridRect{
+					RowStart: r + 1, RowEnd: r + 1,
+					ColStart: c + 1, ColEnd: c + 1,
+				}}
+				info[name] = ri
+			} else {
+				if r+1 < ri.rect.RowStart {
+					ri.rect.RowStart = r + 1
+				}
+				if r+1 > ri.rect.RowEnd {
+					ri.rect.RowEnd = r + 1
+				}
+				if c+1 < ri.rect.ColStart {
+					ri.rect.ColStart = c + 1
+				}
+				if c+1 > ri.rect.ColEnd {
+					ri.rect.ColEnd = c + 1
+				}
+			}
+			ri.count++
+		}
+	}
+
+	// Verify rectangularity: every name's bounding box must be fully occupied by
+	// that name, and the bounding box area must equal the count.
+	for name, ri := range info {
+		boxArea := (ri.rect.RowEnd - ri.rect.RowStart + 1) * (ri.rect.ColEnd - ri.rect.ColStart + 1)
+		if boxArea != ri.count {
+			return GridAreas{}, false
+		}
+		// Also verify every cell in the bounding box is indeed this name.
+		for r := ri.rect.RowStart - 1; r < ri.rect.RowEnd; r++ {
+			for c := ri.rect.ColStart - 1; c < ri.rect.ColEnd; c++ {
+				if rows[r][c] != name {
+					return GridAreas{}, false
+				}
+			}
+		}
+	}
+
+	named := make(map[string]GridRect, len(info))
+	for name, ri := range info {
+		named[name] = ri.rect
+	}
+	return GridAreas{Named: named, Rows: numRows, Cols: cols}, true
+}
+
+// parseGridLine parses one grid-line endpoint value. The recognized forms are:
+// `auto` → lineAuto; `span N` / `span` → lineSpan; a non-zero integer → lineNum;
+// an identifier → lineName. ok is false only for truly unrecognizable input.
+func parseGridLine(s string) (GridLine, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return GridLine{}, false
+	}
+	tz := newTokenizer(s)
+	tok := nextNonWhitespace(tz)
+	switch tok.Kind {
+	case TokenIdent:
+		if strings.EqualFold(tok.Text, "auto") {
+			return GridLine{Kind: lineAuto}, true
+		}
+		if strings.EqualFold(tok.Text, "span") {
+			// Look for an optional integer after "span".
+			next := nextNonWhitespace(tz)
+			if next.Kind == TokenNumber {
+				n := int(next.Num)
+				if n < 1 {
+					n = 1
+				}
+				return GridLine{Kind: lineSpan, N: n}, true
+			}
+			// span with no number → span 1
+			return GridLine{Kind: lineSpan, N: 1}, true
+		}
+		return GridLine{Kind: lineName, Name: tok.Text}, true
+	case TokenNumber:
+		n := int(tok.Num)
+		if n == 0 {
+			return GridLine{}, false // line 0 is invalid
+		}
+		return GridLine{Kind: lineNum, N: n}, true
+	}
+	return GridLine{}, false
+}
+
+// splitSlashParts splits s on `/` tokens and returns the raw substrings.
+// Returns nil if no `/` is found (single-value case).
+func splitSlashParts(s string) []string {
+	tz := newTokenizer(s)
+	var parts []string
+	start := 0
+	pos := 0
+	for {
+		tok := tz.next()
+		if tok.Kind == TokenEOF {
+			parts = append(parts, s[start:])
+			break
+		}
+		if tok.Kind == TokenDelim && tok.Text == "/" {
+			parts = append(parts, s[start:pos])
+			start = pos + 1
+		}
+		pos = tz.pos
+	}
+	if len(parts) == 1 {
+		return nil // no slash found
+	}
+	return parts
+}
+
+// parseGridColumnRow parses a grid-column or grid-row value (start [/ end]) into
+// a pair of GridLine endpoints. For a single value with no `/`: if it's an ident,
+// the end copies the name; otherwise end is auto. ok is false for bad input.
+func parseGridColumnRow(s string) (start, end GridLine, ok bool) {
+	s = strings.TrimSpace(s)
+	parts := splitSlashParts(s)
+	if parts == nil {
+		// Single value.
+		gl, gok := parseGridLine(s)
+		if !gok {
+			return GridLine{}, GridLine{}, false
+		}
+		if gl.Kind == lineName {
+			// CSS: a bare ident sets both start and end to that name.
+			return gl, gl, true
+		}
+		return gl, GridLine{Kind: lineAuto}, true
+	}
+	if len(parts) != 2 {
+		return GridLine{}, GridLine{}, false
+	}
+	startLine, ok1 := parseGridLine(parts[0])
+	endLine, ok2 := parseGridLine(parts[1])
+	if !ok1 || !ok2 {
+		return GridLine{}, GridLine{}, false
+	}
+	return startLine, endLine, true
+}
+
+// parseGridArea parses a grid-area value. If it's a single custom-ident (no `/`),
+// return {AreaName: s}. Otherwise it's <row-start> / <col-start> [/ <row-end> [/ <col-end>]].
+// Omitted trailing values default per CSS spec.
+func parseGridArea(s string) (GridPlacement, bool) {
+	s = strings.TrimSpace(s)
+	parts := splitSlashParts(s)
+	if parts == nil {
+		// Single value: if it's an ident, treat as area name.
+		s2 := strings.TrimSpace(s)
+		tz := newTokenizer(s2)
+		tok := nextNonWhitespace(tz)
+		if tok.Kind == TokenIdent && !strings.EqualFold(tok.Text, "auto") {
+			// Confirm it's just one token.
+			if nextNonWhitespace(tz).Kind == TokenEOF {
+				return GridPlacement{AreaName: tok.Text}, true
+			}
+		}
+		// Single non-ident value: parse as row-start, rest auto.
+		gl, ok := parseGridLine(s2)
+		if !ok {
+			return GridPlacement{}, false
+		}
+		return GridPlacement{RowStart: gl}, true
+	}
+
+	// 2–4 slash-separated values: row-start / col-start / row-end / col-end.
+	// Omitted values: if 2 parts: row-end = row-start (if ident) or auto; col-end = col-start or auto.
+	// The CSS default for omitted values in grid-area shorthand:
+	//   2 values: row-start/col-start; row-end=row-start if ident else auto; col-end=col-start if ident else auto.
+	//   3 values: row-start/col-start/row-end; col-end=col-start if ident else auto.
+	//   4 values: row-start/col-start/row-end/col-end.
+	if len(parts) < 1 || len(parts) > 4 {
+		return GridPlacement{}, false
+	}
+
+	lines := make([]GridLine, len(parts))
+	for i, p := range parts {
+		gl, ok := parseGridLine(p)
+		if !ok {
+			return GridPlacement{}, false
+		}
+		lines[i] = gl
+	}
+
+	var p GridPlacement
+	p.RowStart = lines[0]
+	if len(lines) >= 2 {
+		p.ColStart = lines[1]
+	}
+	if len(lines) >= 3 {
+		p.RowEnd = lines[2]
+	} else {
+		// Omitted row-end: copy row-start if ident, else auto.
+		if p.RowStart.Kind == lineName {
+			p.RowEnd = p.RowStart
+		}
+		// else lineAuto (zero value)
+	}
+	if len(lines) >= 4 {
+		p.ColEnd = lines[3]
+	} else {
+		// Omitted col-end: copy col-start if ident, else auto.
+		if p.ColStart.Kind == lineName {
+			p.ColEnd = p.ColStart
+		}
+		// else lineAuto (zero value)
+	}
+	return p, true
+}
+
 // parseRepeat parses repeat(<count|auto-fill|auto-fit>, <track-list>) with tz
 // positioned after the "repeat" ident.
 func parseRepeat(tz *tokenizer) (repeatRun, bool) {
