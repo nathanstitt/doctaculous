@@ -42,7 +42,7 @@ Read these before starting — every task depends on them.
 | `pkg/render/pdfwrite/object.go` | Writer-side PDF object model + serializer | new |
 | `pkg/render/pdfwrite/device.go` | `render.Device` impl → content-stream operators | new |
 | `pkg/render/pdfwrite/font.go` | CIDFontType2/Type0 subset + Identity-H + ToUnicode | new |
-| `pkg/render/pdfwrite/page.go` | Multi-page document assembly + simple fragmentation | new |
+| `pkg/render/pdfwrite/page.go` | Fragmentation + parallel page render + sequential assembly | new |
 | `pkg/render/pdfwrite/*_test.go` | Unit tests per file | new |
 | `pkg/css/parse.go` + media file | Capture `@media`, tag rules by media | modify |
 | `pkg/doctaculous/pdfwrite_backend.go` | `ConvertHTMLToPDF`, `WritePDF`, `PDFOptions` | new |
@@ -1521,13 +1521,26 @@ git commit -m "pdfwrite: page device emits content-stream ops (fill/stroke/glyph
 
 ---
 
-## Task 7: Document assembly + simple fragmentation (`pkg/render/pdfwrite/page.go`)
+## Task 7: Document assembly + fragmentation + parallel page rendering (`pkg/render/pdfwrite/page.go`)
+
+This task has TWO concurrency phases (see spec §Concurrency):
+- **Parallel render phase:** each page-band renders on a worker into its OWN `pageDevice` (own
+  local `fontEmbedder`/image list). Output is a pure value — content bytes + the faces/images that
+  band used. No shared mutable state, so `go test -race` is clean.
+- **Sequential assembly phase:** one goroutine folds the per-band results into the shared object
+  table + xref, DE-DUPLICATING faces across pages (one embedded subset per face) and assigning
+  final object ids, in page order for deterministic output.
+
+**Prerequisite — make `fontEmbedder` per-page-local.** In Task 5/6 the device held one
+`fontEmbedder`. That is fine: each `pageDevice` already owns its own embedder (`newPageDevice`
+calls `newFontEmbedder()`). The cross-page de-dup happens in the assembly phase here, NOT in the
+embedder. Do not share one embedder across devices.
 
 **Files:**
 - Create: `pkg/render/pdfwrite/page.go`
 - Test: `pkg/render/pdfwrite/page_test.go`
 
-- [ ] **Step 1: Write the failing test (fragmentation + assembly)**
+- [ ] **Step 1: Write the failing tests (fragmentation + assembly + determinism)**
 
 Create `pkg/render/pdfwrite/page_test.go`:
 
@@ -1539,15 +1552,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 )
 
 func TestWriteDocumentPaginatesAndParses(t *testing.T) {
 	// One tall layout page, 600pt content, fragmented onto 200pt-tall PDF pages
 	// (no margins) => 3 pages.
 	pages := &layout.Pages{Pages: []layout.Page{tallTextPage(t, 600)}}
-	opts := Options{PageWidthPt: 300, PageHeightPt: 200}
+	opts := Options{PageWidthPt: 300, PageHeightPt: 200, MarginPt: 0}
 
 	var buf bytes.Buffer
 	if err := WriteDocument(context.Background(), &buf, pages, opts); err != nil {
@@ -1562,20 +1575,41 @@ func TestWriteDocumentPaginatesAndParses(t *testing.T) {
 	}
 }
 
+// TestWriteDocumentDeterministic asserts the parallel render + sequential merge
+// produces byte-identical output across runs (no map-iteration nondeterminism,
+// no worker-order leakage).
+func TestWriteDocumentDeterministic(t *testing.T) {
+	pages := &layout.Pages{Pages: []layout.Page{tallTextPage(t, 600)}}
+	opts := Options{PageWidthPt: 300, PageHeightPt: 200, MarginPt: 0}
+
+	var a, b bytes.Buffer
+	if err := WriteDocument(context.Background(), &a, pages, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDocument(context.Background(), &b, pages, opts); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a.Bytes(), b.Bytes()) {
+		t.Fatal("WriteDocument output not deterministic across runs")
+	}
+}
+
 // tallTextPage builds a layout.Page heightPt tall with a glyph every 20pt so
 // fragmentation has line boxes to break between. (Helper — fill in using
 // layout.Page/Item/GlyphItem and a bundled face.)
 func tallTextPage(t *testing.T, heightPt float64) layout.Page { /* ... */ }
 ```
 
-Implement `tallTextPage` with a bundled Helvetica face, placing one `GlyphKind` item per 20pt of height so there are clean break points.
+Implement `tallTextPage` with a bundled Helvetica face, placing one `GlyphKind` item per 20pt of
+height (all using the SAME face, so the cross-page de-dup is exercised — one font subset must
+serve all 3 pages).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./pkg/render/pdfwrite -run TestWriteDocument`
 Expected: FAIL — `Options`, `WriteDocument` undefined.
 
-- [ ] **Step 3: Implement assembly + fragmentation**
+- [ ] **Step 3: Implement fragmentation + the two-phase writer**
 
 Create `pkg/render/pdfwrite/page.go`:
 
@@ -1586,54 +1620,191 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 
+	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
-// Options controls PDF output geometry.
+// Options controls PDF output geometry and concurrency.
 type Options struct {
 	PageWidthPt  float64 // default US Letter width (612) if <= 0
 	PageHeightPt float64 // default US Letter height (792) if <= 0
-	MarginPt     float64 // uniform content margin; default 36 (0.5in) if < 0 sentinel
+	MarginPt     float64 // uniform content margin; default 36 (0.5in) if zero
 	Title        string
+	Workers      int // page-render worker cap; default GOMAXPROCS if <= 0
 	Logf         func(string, ...any)
 }
 
-// WriteDocument fragments the laid-out pages into fixed-size PDF pages and writes a
-// complete PDF to out. It honors context cancellation between pages and recovers
-// per page so one bad page cannot abort the document.
+// band is a vertical slice [topPt, bottomPt) of a layout page placed on one PDF page.
+type band struct {
+	page      *layout.Page
+	topPt     float64
+	bottomPt  float64
+}
+
+// renderedPage is one worker's pure output: the page's content bytes plus the faces
+// and images it used. It carries NO object ids — those are assigned during the
+// sequential merge, so workers share no writer state.
+type renderedPage struct {
+	index   int             // position in document order, for deterministic assembly
+	content []byte          // raw page-space content (no flip CTM yet)
+	faces   map[*font.Face]map[uint16][]rune // glyphs used, per face
+	images  []pendingImage  // images used, in encounter order
+	faceOrder []*font.Face  // faces in first-use order (deterministic resource naming)
+}
+
+// WriteDocument fragments the laid-out pages into fixed-size PDF pages, renders the
+// pages concurrently, then assembles the PDF sequentially and writes it to out. It
+// honors context cancellation and recovers per page so one bad page cannot abort the
+// document.
 func WriteDocument(ctx context.Context, out io.Writer, pages *layout.Pages, opts Options) error {
 	opts = withDefaults(opts)
-	w := newWriter()
-
-	pagesRef := w.alloc()
-	var kids []object
-
 	contentH := opts.PageHeightPt - 2*opts.MarginPt
-	for _, lp := range pages.Pages {
-		bands := fragment(&lp, contentH)
-		for _, band := range bands {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			pageRef, err := writeOnePage(w, pagesRef, &lp, band, opts)
-			if err != nil {
-				if opts.Logf != nil {
-					opts.Logf("pdfwrite: page skipped: %v", err)
-				}
-				continue
-			}
-			kids = append(kids, pageRef)
+
+	// 1. Fragment every layout page into bands (cheap, sequential).
+	var bands []band
+	for i := range pages.Pages {
+		lp := &pages.Pages[i]
+		for _, b := range fragment(lp, contentH) {
+			bands = append(bands, band{page: lp, topPt: b.topPt, bottomPt: b.bottomPt})
 		}
 	}
 
-	w.put(pagesRef, Dict{
-		"Type":  Name("Pages"),
-		"Kids":  Array(kids),
-		"Count": Int(int64(len(kids))),
-	})
+	// 2. Render bands concurrently into pure renderedPage values (no shared state).
+	rendered := renderBandsParallel(ctx, bands, opts)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// 3. Assemble sequentially: one writer, faces de-duped across pages.
+	return assemble(out, rendered, opts)
+}
+
+// renderBandsParallel renders each band on a bounded worker pool. Results are
+// returned in document order (results[i] corresponds to bands[i]); a band that
+// fails to render is left as a zero renderedPage with content nil and logged.
+func renderBandsParallel(ctx context.Context, bands []band, opts Options) []renderedPage {
+	results := make([]renderedPage, len(bands))
+	workers := opts.Workers
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i := range bands {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil && opts.Logf != nil {
+					opts.Logf("pdfwrite: page %d panicked: %v", idx, r)
+				}
+			}()
+			results[idx] = renderBand(bands[idx], idx, opts)
+		}(i)
+	}
+	wg.Wait()
+	return results
+}
+
+// renderBand paints one band into its own pageDevice and returns a pure value. It
+// touches no shared writer state, so it is safe to call from many goroutines.
+func renderBand(b band, index int, opts Options) renderedPage {
+	dev := newPageDevice(opts.PageWidthPt, opts.PageHeightPt)
+	dev.logf = opts.Logf
+
+	// Translate page space so the band's top maps to the top of the content area.
+	mat := render.Translate(opts.MarginPt, opts.MarginPt-b.topPt)
+	sub := clipPageToBand(b.page, b)
+	paint.PaintPage(dev, sub, mat)
+
+	return renderedPage{
+		index:     index,
+		content:   dev.contentStream(),
+		faces:     dev.embed.used,
+		faceOrder: dev.embed.order, // first-use face order (add to fontEmbedder, Step 4)
+		images:    dev.images,
+	}
+}
+
+// assemble folds the rendered pages into a single PDF, de-duplicating fonts across
+// pages (one embedded subset per face) and writing in document order.
+func assemble(out io.Writer, rendered []renderedPage, opts Options) error {
+	w := newWriter()
+	pagesRef := w.alloc()
+
+	// Merge all faces used anywhere, in deterministic order (page order, then each
+	// page's first-use order), so each face is embedded ONCE.
+	merged := newFontEmbedder()
+	for _, rp := range rendered {
+		for _, face := range rp.faceOrder {
+			for gid, runes := range rp.faces[face] {
+				merged.use(face, gid, runes)
+			}
+		}
+	}
+	// Emit each unique face once; remember its top /Font ref and resource name.
+	faceRef := map[*font.Face]Ref{}
+	for _, face := range merged.orderedFaces() { // deterministic
+		ref := merged.emit(w, face)
+		if ref != 0 {
+			faceRef[face] = ref
+		}
+	}
+
+	var kids []object
+	for _, rp := range rendered {
+		if rp.content == nil {
+			continue // failed/skipped band
+		}
+		flip := fmt.Sprintf("1 0 0 -1 0 %.4f cm\n", opts.PageHeightPt)
+		contentRef := w.addStream(Dict{}, append([]byte(flip), rp.content...))
+
+		// Per-page resources reference the shared face refs by the merged resource
+		// name, plus this page's own embedded images.
+		fonts := Dict{}
+		for _, face := range rp.faceOrder {
+			if ref, ok := faceRef[face]; ok {
+				fonts[merged.resourceName(face)] = ref
+			}
+		}
+		res := Dict{"Font": fonts}
+		if len(rp.images) > 0 {
+			xobjs := Dict{}
+			for _, pi := range rp.images {
+				imgRef, err := embedImage(w, pi.img)
+				if err != nil {
+					if opts.Logf != nil {
+						opts.Logf("pdfwrite: image embed failed: %v", err)
+					}
+					continue
+				}
+				xobjs[pi.name] = imgRef
+			}
+			res["XObject"] = xobjs
+		}
+
+		pageRef := w.alloc()
+		w.put(pageRef, Dict{
+			"Type":      Name("Page"),
+			"Parent":    pagesRef,
+			"MediaBox":  Array{Int(0), Int(0), Real(opts.PageWidthPt), Real(opts.PageHeightPt)},
+			"Contents":  contentRef,
+			"Resources": res,
+		})
+		kids = append(kids, pageRef)
+	}
+
+	w.put(pagesRef, Dict{"Type": Name("Pages"), "Kids": Array(kids), "Count": Int(int64(len(kids)))})
 	catalog := w.alloc()
 	w.put(catalog, Dict{"Type": Name("Catalog"), "Pages": pagesRef})
 	w.setRoot(catalog)
@@ -1645,92 +1816,23 @@ func WriteDocument(ctx context.Context, out io.Writer, pages *layout.Pages, opts
 	return w.serialize(out)
 }
 
-// band is a vertical slice [topPt, bottomPt) of a layout page placed on one PDF page.
-type band struct{ topPt, bottomPt float64 }
-
 // fragment slices a layout page into bands at most contentH tall, breaking between
-// line boxes (never inside one). It groups items by their Y to find break points;
-// a band ends at the last line-box bottom that fits within contentH.
-func fragment(lp *layout.Page, contentH float64) []band {
+// line boxes (never inside one).
+func fragment(lp *layout.Page, contentH float64) []struct{ topPt, bottomPt float64 } {
 	// 1. Collect distinct line-box top/bottom Y values from lp.Items (glyph rows,
 	//    rules, backgrounds). 2. Greedily accumulate rows until the next row would
 	//    exceed contentH; close a band there. 3. A single row taller than contentH
-	//    gets its own band (it overflows, logged by caller). Return the bands.
-	// If lp has no items, return one empty band so a blank page is emitted.
-}
-
-// writeOnePage renders the items of lp that fall within band onto a fresh
-// pageDevice, wraps the content with the page-level Y-flip CTM, embeds fonts and
-// images, and returns the /Page object reference.
-func writeOnePage(w *writer, parent Ref, lp *layout.Page, b band, opts Options) (Ref, error) {
-	dev := newPageDevice(opts.PageWidthPt, opts.PageHeightPt)
-	dev.logf = opts.Logf
-
-	// Translate page space so band.topPt maps to the top of the content area, then
-	// the page-level CTM flips Y. Build the matrix paint uses:
-	//   translate(marginPt, marginPt - band.topPt)
-	mat := render.Translate(opts.MarginPt, opts.MarginPt-b.topPt)
-
-	// Paint only the items within [b.topPt, b.bottomPt). Build a filtered page.
-	sub := clipPageToBand(lp, b)
-	paint.PaintPage(dev, sub, mat)
-
-	// Assemble: prepend the Y-flip CTM, compress, write content stream + resources.
-	flip := fmt.Sprintf("1 0 0 -1 0 %.4f cm\n", opts.PageHeightPt)
-	content := append([]byte(flip), dev.contentStream()...)
-	contentRef := w.addStream(Dict{}, content)
-
-	resources, err := buildResources(w, dev)
-	if err != nil {
-		return 0, err
-	}
-
-	pageRef := w.alloc()
-	w.put(pageRef, Dict{
-		"Type":      Name("Page"),
-		"Parent":    parent,
-		"MediaBox":  Array{Int(0), Int(0), Real(opts.PageWidthPt), Real(opts.PageHeightPt)},
-		"Contents":  contentRef,
-		"Resources": resources,
-	})
-	return pageRef, nil
+	//    gets its own band (it overflows; log via the caller's Logf). 4. If lp has
+	//    no items, return one empty band so a blank page is still emitted.
+	// Return bands as {topPt, bottomPt} pairs in top-to-bottom order.
 }
 
 // clipPageToBand returns a layout.Page containing only the items whose vertical
-// extent intersects band b (so off-page items are not painted).
+// extent intersects band b, so off-page items are not painted.
 func clipPageToBand(lp *layout.Page, b band) *layout.Page {
 	// Copy lp.Items, keeping those with Y in [b.topPt, b.bottomPt). For glyphs use
-	// YPt; for rules/backgrounds/borders/images use their YPt..YPt+HPt. Return a
-	// *layout.Page with the same WidthPt and HeightPt = b.bottomPt-b.topPt.
-}
-
-// buildResources emits the page's /Font and /XObject dictionaries from the device's
-// recorded fonts and images, embedding each.
-func buildResources(w *writer, dev *pageDevice) (Dict, error) {
-	fonts := Dict{}
-	for face := range dev.embed.used {
-		ref := dev.embed.emit(w, face)
-		if ref == 0 {
-			continue // non-embeddable: glyphs were drawn as outlines instead
-		}
-		fonts["/"+dev.embed.resourceName(face)] = ref // key is the resource name
-	}
-	res := Dict{"Font": fonts}
-	if len(dev.images) > 0 {
-		xobjs := Dict{}
-		for _, pi := range dev.images {
-			imgRef, err := embedImage(w, pi.img)
-			if err != nil {
-				if dev.logf != nil {
-					dev.logf("pdfwrite: image embed failed: %v", err)
-				}
-				continue
-			}
-			xobjs[pi.name] = imgRef
-		}
-		res["XObject"] = xobjs
-	}
-	return res, nil
+	// Glyph.YPt; for rules/backgrounds/borders/images use their YPt..YPt+HPt. Return
+	// a *layout.Page with the same WidthPt and HeightPt = b.bottomPt-b.topPt.
 }
 
 // withDefaults fills zero-value Options with US Letter + 0.5in margins.
@@ -1741,20 +1843,61 @@ func withDefaults(o Options) Options {
 	if o.PageHeightPt <= 0 {
 		o.PageHeightPt = 792
 	}
-	if o.MarginPt == 0 {
+	if o.MarginPt < 0 {
+		o.MarginPt = 0
+	} else if o.MarginPt == 0 {
 		o.MarginPt = 36
 	}
 	return o
 }
 ```
 
-Note the `fonts` dict key bug guard: resource dict keys are names WITHOUT the leading slash in this object model (Dict keys are emitted as `/key`). So use `fonts[dev.embed.resourceName(face)] = ref`, NOT `"/"+...`. Fix to:
+**Determinism is non-negotiable.** Two sources of nondeterminism must be eliminated, both covered
+by `TestWriteDocumentDeterministic`:
+1. **Worker order:** `results[idx] = ...` writes to a per-index slot, so output order is document
+   order regardless of which worker finishes first. Never append to a shared slice from workers.
+2. **Map iteration:** never iterate `map[*font.Face]...` directly when assigning object ids or
+   resource names. Always iterate via the recorded first-use ORDER (`faceOrder`/`orderedFaces`).
+   This is why `fontEmbedder` must record face order (Step 4).
+
+- [ ] **Step 4: Add deterministic face ordering to `fontEmbedder`**
+
+The assembly merge must assign object ids and resource names in a stable order, never by map
+iteration. Extend `fontEmbedder` in `pkg/render/pdfwrite/font.go` to record first-use order:
 
 ```go
-		fonts[dev.embed.resourceName(face)] = ref
+type fontEmbedder struct {
+	used  map[*font.Face]map[uint16][]rune
+	res   map[*font.Face]string
+	order []*font.Face // faces in first-use order (deterministic id/name assignment)
+}
 ```
 
-- [ ] **Step 4: Implement `embedImage`**
+In `newFontEmbedder`, initialize nothing extra (nil slice is fine). In `use`, when a face is seen
+for the first time, append it to `order`:
+
+```go
+func (fe *fontEmbedder) use(face *font.Face, gid uint16, runes []rune) {
+	m := fe.used[face]
+	if m == nil {
+		m = map[uint16][]rune{}
+		fe.used[face] = m
+		fe.order = append(fe.order, face) // first sight: record order
+	}
+	if _, seen := m[gid]; !seen {
+		m[gid] = append([]rune(nil), runes...)
+	}
+}
+
+// orderedFaces returns the faces in first-use order, for deterministic emission.
+func (fe *fontEmbedder) orderedFaces() []*font.Face { return fe.order }
+```
+
+`resourceName` already assigns `F0`, `F1`, ... on first call; because the merge calls it (via
+`orderedFaces`) in `order`, names are deterministic. Update the Task 5a `emit` test if it relied
+on map iteration (it only checks substring presence, so it is unaffected).
+
+- [ ] **Step 5: Implement `embedImage`**
 
 Add to `page.go` (or a small `image.go`):
 
@@ -1762,28 +1905,91 @@ Add to `page.go` (or a small `image.go`):
 // embedImage encodes img as an RGB image XObject (Flate), adding an /SMask for
 // alpha when present, and returns its reference.
 func embedImage(w *writer, img image.Image) (Ref, error) {
-	// Convert img to RGBA; pack RGB samples; flate via addStream with
-	// /Type /XObject /Subtype /Image /Width /Height /ColorSpace /DeviceRGB
-	// /BitsPerComponent 8. If any pixel alpha < 255, build a /DeviceGray SMask
-	// image of the alpha channel and set /SMask. Return the image ref.
+	b := img.Bounds()
+	wd, ht := b.Dx(), b.Dy()
+	if wd <= 0 || ht <= 0 {
+		return 0, fmt.Errorf("pdfwrite: empty image")
+	}
+	rgb := make([]byte, 0, wd*ht*3)
+	alpha := make([]byte, 0, wd*ht)
+	hasAlpha := false
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA() // 16-bit; >>8 to 8-bit
+			rgb = append(rgb, byte(r>>8), byte(g>>8), byte(bl>>8))
+			a8 := byte(a >> 8)
+			if a8 != 0xff {
+				hasAlpha = true
+			}
+			alpha = append(alpha, a8)
+		}
+	}
+	dict := Dict{
+		"Type":             Name("XObject"),
+		"Subtype":          Name("Image"),
+		"Width":            Int(int64(wd)),
+		"Height":           Int(int64(ht)),
+		"ColorSpace":       Name("DeviceRGB"),
+		"BitsPerComponent": Int(8),
+	}
+	if hasAlpha {
+		smaskDict := Dict{
+			"Type": Name("XObject"), "Subtype": Name("Image"),
+			"Width": Int(int64(wd)), "Height": Int(int64(ht)),
+			"ColorSpace": Name("DeviceGray"), "BitsPerComponent": Int(8),
+		}
+		smask := w.addStream(smaskDict, alpha)
+		dict["SMask"] = smask
+	}
+	return w.addStream(dict, rgb), nil
 }
 ```
 
-(Import `image` and `image/draw` as needed.)
+(Import `image` and `fmt` in `page.go`; `image` may already be imported via `pendingImage`.)
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 6: Run tests to verify they pass**
 
 Run: `go test ./pkg/render/pdfwrite -run TestWriteDocument`
-Expected: PASS (3 pages, parses).
+Expected: PASS (3 pages, parses; deterministic across runs).
+
+Run: `go test -race ./pkg/render/pdfwrite`
+Expected: PASS — the `-race` run is REQUIRED here: it proves the parallel render phase shares no
+mutable state. If it reports a race, the cause is almost certainly a worker touching shared writer
+or embedder state — workers must touch only their own `pageDevice`.
 
 Run: `go test ./pkg/render/pdfwrite`
 Expected: PASS (all pdfwrite tests).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Add a benchmark proving the speedup**
+
+Add to `page_test.go`:
+
+```go
+func BenchmarkWriteDocument(b *testing.B) {
+	pages := &layout.Pages{Pages: []layout.Page{tallTextPage(nil, 6000)}} // many bands
+	opts := Options{PageWidthPt: 612, PageHeightPt: 792}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var buf bytes.Buffer
+		if err := WriteDocument(context.Background(), &buf, pages, opts); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+```
+
+(Make `tallTextPage` tolerate a nil `*testing.T` for the benchmark, or add a `tallTextPageB`
+helper.) Run with `-cpu 1,4` to compare:
+
+Run: `go test ./pkg/render/pdfwrite -bench BenchmarkWriteDocument -cpu 1,4 -run x`
+Expected: the 4-CPU run is faster than the 1-CPU run (the parallel render phase scales). Record
+the numbers in the commit message.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add pkg/render/pdfwrite/page.go pkg/render/pdfwrite/page_test.go
-git commit -m "pdfwrite: document assembly, simple line-box fragmentation, image embed"
+git add pkg/render/pdfwrite/page.go pkg/render/pdfwrite/font.go pkg/render/pdfwrite/page_test.go
+git commit -m "pdfwrite: parallel page render + sequential assembly, fragmentation, image embed"
 ```
 
 ---
@@ -1985,6 +2191,9 @@ type PDFOptions struct {
 	Print bool
 	// Title sets the PDF /Info /Title metadata.
 	Title string
+	// Workers caps the goroutines used to render pages concurrently. Defaults to
+	// GOMAXPROCS when zero (matching RasterOptions.Workers).
+	Workers int
 	// Logf receives degradation diagnostics (nil -> no-op).
 	Logf func(string, ...any)
 }
@@ -1995,6 +2204,7 @@ func (o PDFOptions) toWriterOptions() pdfwrite.Options {
 		PageHeightPt: o.PageHeightPt,
 		MarginPt:     o.MarginPt,
 		Title:        o.Title,
+		Workers:      o.Workers,
 		Logf:         o.Logf,
 	}
 }
@@ -2167,8 +2377,9 @@ git commit -m "docs: mark HTML->PDF writer device done; note paged-media + text 
 ## Self-review notes (resolved)
 
 - **Spec coverage:** object serializer (T4), device ops (T6), font embed+subset+ToUnicode (T5), DrawGlyph seam (T1) + plumbing (T2,T3), fragmentation (T7), @media print (T8), public API + DOCX bonus (T9), fidelity round-trip + searchable-text (T10). All spec sections map to a task.
-- **Y-flip strategy:** standardized on a single page-level CTM flip (Task 6 Step 3 note, applied in Task 7); the device emits raw page-space coordinates. Do NOT mix per-coordinate `flipY` with the page CTM.
+- **Y-flip strategy:** standardized on a single page-level CTM flip — the `pageDevice` (Task 6) emits raw page-space coordinates and the assembler (Task 7) prepends `1 0 0 -1 0 H cm` to each page's content. The device has no per-coordinate flip; do NOT add one.
 - **Resource dict keys:** keys are stored WITHOUT a leading slash (the Dict serializer adds `/`). Task 7 Step 3 corrects the `fonts[...]` key.
 - **Type consistency:** `Ref` is the object-id type throughout (0 = absent). `font.ProgramKind*`, `font.Face.GID/Outline/ProgramBytes/GlyphAdvance/UnitsPerEm`, `render.GlyphRef`/`glyphFace`, `pdfwrite.Options`/`WriteDocument`/`newPageDevice`/`fontEmbedder` names are used identically across tasks.
 - **Subsetting risk:** Task 5 is split 5a (whole-program embed, ships working) → 5b (glyf zeroing subset). If 5b proves heavy, 5a is a correct fallback; the pipeline does not block on subsetting.
-- **Graceful degradation:** non-embeddable face → outline fill (T5 emit returns 0; device fallback); unsupported shading → skip+log (T6); per-page recover (T7); WritePDF on a non-reflow doc → typed error (T9).
+- **Graceful degradation:** non-embeddable face → outline fill (T5 emit returns 0; device fallback); unsupported shading → skip+log (T6); per-page recover (T7 worker recover); WritePDF on a non-reflow doc → typed error (T9).
+- **Concurrency (per spec §Concurrency, decided after review):** Task 7 splits into a PARALLEL render phase (each band → its own `pageDevice`+`fontEmbedder`, pure `renderedPage` value, no shared state) and a SEQUENTIAL assembly phase (one writer, faces de-duped across pages, object ids assigned in document order). Bounded worker pool sized to `GOMAXPROCS` (overridable via `Options.Workers`/`PDFOptions.Workers`). Two determinism guards are mandatory and tested (`TestWriteDocumentDeterministic`): write worker results into per-index slots (never append from workers), and assign ids/resource-names via recorded first-use order (`fontEmbedder.order`), never by map iteration. `go test -race ./pkg/render/pdfwrite` is a required gate in T7 Step 6; `BenchmarkWriteDocument -cpu 1,4` proves the speedup in T7 Step 7.

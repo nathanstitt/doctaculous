@@ -218,10 +218,24 @@ as normal). Each page = one content stream + shared resources.
 
 ### Concurrency
 
-The writer is inherently sequential (one growing object table / xref), so PDF generation runs
-single-goroutine. This is the *write* path; it does not conflict with the "parsed `*Document`
-is read-only and shared without locks" rule, which governs the *read*/raster path. Context
-cancellation is honored between pages.
+PDF generation is split into a **parallel render phase** and a **sequential assembly phase**,
+matching the project's "multi-page work fans out across goroutines, bounded pool sized to
+`GOMAXPROCS`" rule:
+
+- **Parallel (per page, no shared state):** each page-band is rendered on a worker into its
+  **own `pageDevice`** with its **own local `fontEmbedder`/image list**. The output of a worker
+  is a pure value — the content-stream bytes plus the set of faces/images that page used. No two
+  workers touch shared mutable state, so there is no lock contention and `go test -race` is clean.
+  Font subsetting (the CPU-bound glyf rewrite) also runs in this phase, keyed per face.
+- **Sequential (assembly):** a single goroutine folds the per-page results into the shared object
+  table and xref, **de-duplicating faces across pages** (one embedded subset per face even when
+  many pages use it) and assigning final object ids. The object table / xref is never shared
+  across goroutines, so it stays lock-free.
+
+The fan-out is a bounded worker pool sized to `GOMAXPROCS` (overridable). Results are reassembled
+in page order so output is deterministic. Context cancellation is honored between dispatched pages.
+This is the *write* path; it does not conflict with the "parsed `*Document` is read-only and
+shared without locks" rule, which governs the *read*/raster path.
 
 ## Section 4 — Public API & error handling
 
