@@ -392,6 +392,63 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// flex justify-content:space-between: three fixed-width blue boxes across a
+		// 320px row, first flush-left, last flush-right, equal gaps between them.
+		name:       "flex-justify-between",
+		viewportPx: 320,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .row { display: flex; justify-content: space-between; }
+  .box { width: 60px; height: 40px; background: #4477aa; }
+</style></head><body>
+  <div class="row"><div class="box"></div><div class="box"></div><div class="box"></div></div>
+</body></html>`,
+	},
+	{
+		// flex-grow: two bars filling the full row, green (flex:2) twice as wide as
+		// red (flex:1). Both start at flex-basis:0 so all free space is distributed.
+		name:       "flex-grow",
+		viewportPx: 320,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .row { display: flex; }
+  .a { flex: 1 1 0; height: 40px; background: #aa4444; }
+  .b { flex: 2 1 0; height: 40px; background: #44aa44; }
+</style></head><body>
+  <div class="row"><div class="a"></div><div class="b"></div></div>
+</body></html>`,
+	},
+	{
+		// align-items:center: a short (30px) blue box and a tall (70px) orange box
+		// both vertically centered in a 100px grey row. Eyeball: both are centred in
+		// the strip, gaps above short box equal gaps below it.
+		name:       "flex-align-center",
+		viewportPx: 320,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .row { display: flex; align-items: center; height: 100px; background: #eeeeee; }
+  .s { width: 50px; height: 30px; background: #4477aa; }
+  .t { width: 50px; height: 70px; background: #aa7744; }
+</style></head><body>
+  <div class="row"><div class="s"></div><div class="t"></div></div>
+</body></html>`,
+	},
+	{
+		// flex-direction:column: two boxes stacked vertically (purple then teal),
+		// the second narrower than the first. Eyeball: purple on top, teal below,
+		// no horizontal spreading.
+		name:       "flex-column",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .col { display: flex; flex-direction: column; }
+  .box { width: 120px; height: 40px; background: #6644aa; }
+  .box2 { width: 80px; height: 60px; background: #44aa88; }
+</style></head><body>
+  <div class="col"><div class="box"></div><div class="box2"></div></div>
+</body></html>`,
+	},
+	{
 		// Web font: text rendered with an @font-face family served from memory. The
 		// Pacifico glyphs are visibly distinct from the base-14 substitutes, proving
 		// the downloaded face is used (not LoadStandard). The WOFF2 source exercises
