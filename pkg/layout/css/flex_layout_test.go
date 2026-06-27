@@ -419,6 +419,17 @@ func TestInlineFlexFlowsInline(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("want 2 inline-flex item fragments (30x20), got %d", len(items))
 	}
+	// Prove flex-ROW layout (not a coincidental block stack): the two items share a Y
+	// (same line) and sit at different X (side by side). Sort by X so walk order doesn't matter.
+	if items[0].X > items[1].X {
+		items[0], items[1] = items[1], items[0]
+	}
+	if items[0].Y != items[1].Y {
+		t.Errorf("inline-flex items should share a Y (flex row); got y%v and y%v", items[0].Y, items[1].Y)
+	}
+	if items[0].X == items[1].X {
+		t.Errorf("inline-flex items should sit at different X (side by side); both at x%v", items[0].X)
+	}
 }
 
 // TestInlineFlexClassification verifies that display:inline-flex is classified as

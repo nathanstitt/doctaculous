@@ -283,6 +283,8 @@ func classifyDisplay(b *cssbox.Box, display string) {
 	case "flex":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayFlex, cssbox.FlexFC
 	case "inline-flex":
+		// BoxBlock interior, inline-level outer: isBlockLevelOuter + gatherInlineRuns
+		// treat it as an atom like inline-block, but with FlexFC interior layout.
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayInlineFlex, cssbox.FlexFC
 	case "grid":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayGrid, cssbox.GridFC
