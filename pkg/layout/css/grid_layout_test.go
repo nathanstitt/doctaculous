@@ -626,3 +626,161 @@ func TestGridAlignContentStretch(t *testing.T) {
 	assertRect(t, frags[0], 0, 0, 100, 100)
 	assertRect(t, frags[1], 0, 100, 100, 100)
 }
+
+// --- Task 11: placement variety end-to-end geometry tests ---
+
+func TestGridAutoSparseRowFlow(t *testing.T) {
+	// 2-column 100px 100px grid, 1 explicit row of 50px, grid-auto-rows: 50px.
+	// Three auto items: auto row-flow places item0 at (col0,row0), item1 at (col1,row0),
+	// item2 wraps to an implicit row (sized by grid-auto-rows: 50px) at (col0,row1).
+	// Derivation:
+	//   colPos: [0, 100]; rowPos: [0, 50] (1 explicit) + implicit [50] => [0, 50].
+	//   item0: col[0,1) row[0,1) => x=0, y=0, w=100, h=50.
+	//   item1: col[1,2) row[0,1) => x=100, y=0, w=100, h=50.
+	//   item2: col[0,1) row[1,2) => x=0, y=50, w=100, h=50.
+	cols := mustTrackList(100, 100)
+	rowsTL := mustTrackList(50) // 1 explicit row
+	// grid-auto-rows: 50px — set as []TrackSize so the implicit row is deterministic.
+	autoRowTrack := gcss.TrackListOfPx(50).Expand(0)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	st := gcss.ComputedStyle{GridAutoRows: autoRowTrack}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 3 {
+		t.Fatalf("got %d frags want 3", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 50)
+	assertRect(t, frags[1], 100, 0, 100, 50)
+	assertRect(t, frags[2], 0, 50, 100, 50) // implicit row at y=50
+}
+
+func TestGridColumnFlow(t *testing.T) {
+	// grid-auto-flow: column, 1 explicit column (100px), 2 explicit rows (50px 50px).
+	// Three auto items with column flow:
+	//   item0 -> col[0,1) row[0,1) => x=0, y=0, w=100, h=50.
+	//   item1 -> col[0,1) row[1,2) => x=0, y=50, w=100, h=50.
+	//   item2 -> implicit col[1,2) row[0,1) => x=100, y=0, w=100, h=50.
+	// grid-auto-columns: 100px so the implicit column is deterministic.
+	cols := mustTrackList(100)
+	rowsTL := mustTrackList(50, 50)
+	autoColTrack := gcss.TrackListOfPx(100).Expand(0)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	st := gcss.ComputedStyle{
+		GridAutoFlow:    "column",
+		GridAutoColumns: autoColTrack,
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 3 {
+		t.Fatalf("got %d frags want 3", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 50)
+	assertRect(t, frags[1], 0, 50, 100, 50)
+	assertRect(t, frags[2], 100, 0, 100, 50) // implicit column: x=100, y=0
+}
+
+func TestGridDenseBackfill(t *testing.T) {
+	// 2-column 100px 100px grid, 1 explicit row of 50px.
+	// Item A: definite position at col-line 2/3, row-line 1/2 => col[1,2) row[0,1).
+	// Item B: auto with grid-auto-flow: row dense.
+	// With dense: cursor resets to (0,0) per auto item.
+	//   Item B: (0,0) is free => placed at col[0,1) row[0,1).
+	// Derivation:
+	//   colPos: [0, 100]; rowPos: [0].
+	//   item A: x=100, y=0, w=100, h=50 (col1, row0).
+	//   item B: x=0, y=0, w=100, h=50 (col0, row0 — backfilled).
+	cols := mustTrackList(100, 100)
+	rowsTL := mustTrackList(50)
+	// Item A: explicitly at col 2 (line 2→3), row 1 (line 1→2). Both axes definite.
+	pA := gcss.GridPlacement{
+		ColStart: numLine(2), ColEnd: numLine(3),
+		RowStart: numLine(1), RowEnd: numLine(2),
+	}
+	// Item B: fully auto, relies on dense backfill.
+	pB := gcss.GridPlacement{}
+	items := []*cssbox.Box{
+		gridItemBox(0, 50, pA), // fixed height so row sizes to 50
+		gridItemBox(0, 0, pB),
+	}
+	st := gcss.ComputedStyle{GridAutoFlow: "row dense"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	// Item A at col 1 (x=100).
+	assertRect(t, frags[0], 100, 0, 100, 50)
+	// Item B dense-backfilled to top-left (x=0).
+	assertRect(t, frags[1], 0, 0, 100, 50)
+}
+
+func TestGridNamedAreas(t *testing.T) {
+	// grid-template-areas: "hd hd" "main side"
+	// grid-template-columns: 100px 100px, grid-template-rows: 40px 60px.
+	// Items with grid-area: hd, main, side.
+	// GridRect is 1-based inclusive:
+	//   hd   => GridRect{RowStart:1, RowEnd:1, ColStart:1, ColEnd:2} => x=0, y=0, w=200, h=40.
+	//   main => GridRect{RowStart:2, RowEnd:2, ColStart:1, ColEnd:1} => x=0, y=40, w=100, h=60.
+	//   side => GridRect{RowStart:2, RowEnd:2, ColStart:2, ColEnd:2} => x=100, y=40, w=100, h=60.
+	cols := mustTrackList(100, 100)
+	rowsTL := mustTrackList(40, 60)
+	areas := gcss.GridAreas{
+		Named: map[string]gcss.GridRect{
+			"hd":   {RowStart: 1, RowEnd: 1, ColStart: 1, ColEnd: 2},
+			"main": {RowStart: 2, RowEnd: 2, ColStart: 1, ColEnd: 1},
+			"side": {RowStart: 2, RowEnd: 2, ColStart: 2, ColEnd: 2},
+		},
+		Rows: 2, Cols: 2,
+	}
+	pHD := gcss.GridPlacement{AreaName: "hd"}
+	pMain := gcss.GridPlacement{AreaName: "main"}
+	pSide := gcss.GridPlacement{AreaName: "side"}
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, pHD),
+		gridItemBox(0, 0, pMain),
+		gridItemBox(0, 0, pSide),
+	}
+	st := gcss.ComputedStyle{GridTemplateAreas: areas}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 3 {
+		t.Fatalf("got %d frags want 3", len(frags))
+	}
+	// hd spans both columns: x=0, y=0, w=200, h=40.
+	assertRect(t, frags[0], 0, 0, 200, 40)
+	// main: left column, second row: x=0, y=40, w=100, h=60.
+	assertRect(t, frags[1], 0, 40, 100, 60)
+	// side: right column, second row: x=100, y=40, w=100, h=60.
+	assertRect(t, frags[2], 100, 40, 100, 60)
+}
+
+func TestGridMissingAreaFallsToAutoPlacement(t *testing.T) {
+	// grid-area: name for a name NOT in grid-template-areas => falls through to
+	// auto-placement (not dropped, not panicking). The item lands in the first free cell.
+	// 2-column 100px 100px grid, 1 explicit row of 50px; one item with a missing area name.
+	// Auto-placement (row flow): first cell is col[0,1) row[0,1) => x=0, y=0, w=100, h=50.
+	cols := mustTrackList(100, 100)
+	rowsTL := mustTrackList(50)
+	areas := gcss.GridAreas{
+		Named: map[string]gcss.GridRect{
+			"known": {RowStart: 1, RowEnd: 1, ColStart: 1, ColEnd: 1},
+		},
+		Rows: 1, Cols: 2,
+	}
+	// "unknown" is not in the areas map — should degrade to auto-placement.
+	pUnknown := gcss.GridPlacement{AreaName: "unknown"}
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, pUnknown),
+	}
+	st := gcss.ComputedStyle{GridTemplateAreas: areas}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// Auto-placed at the first free cell: col[0,1) row[0,1) => x=0, y=0, w=100, h=50.
+	assertRect(t, frags[0], 0, 0, 100, 50)
+}
