@@ -445,11 +445,12 @@ func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis
 }
 
 // layoutFlexItem lays out one flex item's contents at its used main size and returns its
-// fragment and its outer cross size. For row, used main = content width and the fragment
-// height is the cross size. (Column axis handling: Task 7.)
+// fragment and its outer cross size. For a vertical (column) axis it delegates to
+// layoutFlexItemColumn; for a horizontal (row) axis, used main = content width and the
+// fragment height is the cross size.
 func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis, usedMain float64) (*Fragment, float64) {
 	if ax.vertical {
-		return e.layoutFlexItemColumn(ctx, it, usedMain) // Task 7
+		return e.layoutFlexItemColumn(ctx, it, usedMain) // column axis: cross = width, main = height
 	}
 	pos := &positionedContext{}
 	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
@@ -472,6 +473,8 @@ func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedM
 	// Cross (width) basis: a definite width, else max-content.
 	crossW := e.measureMaxContent(ctx, it)
 	if it.Style.Width.Unit != gcss.UnitAuto && it.Style.Width.Unit != gcss.UnitPercent {
+		// v > 0: a width:0 column item is pathological; fall back to max-content rather
+		// than laying it out at zero width (graceful degradation).
 		if v, _ := resolveLen(it.Style.Width, it.Style.FontSizePt, 0); v > 0 {
 			crossW = v
 		}
