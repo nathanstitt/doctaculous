@@ -81,6 +81,57 @@ func TrackListOfPx(px ...float64) TrackList {
 	return tl
 }
 
+// TrackListOfFr builds a TrackList of flexible (fr) tracks, one per value. Each track
+// is a bare flex value: Min is the auto sizing function (CSS Grid §7.2.3: a flexible
+// track's min sizing function is auto), Max is the flex value with the given factor.
+// Use this in out-of-package tests to exercise fr track sizing.
+func TrackListOfFr(fr ...float64) TrackList {
+	var tl TrackList
+	for _, f := range fr {
+		minFn := SizingFn{Kind: TrackAuto}
+		maxFn := SizingFn{Kind: TrackFlex, Fr: f}
+		tl.entries = append(tl.entries, trackEntry{single: TrackSize{Min: minFn, Max: maxFn}})
+	}
+	return tl
+}
+
+// TrackListOfPercent builds a TrackList of percentage tracks, one per value. Each track's
+// min and max sizing function is the same percentage length (resolved against the
+// container's available size at layout time). pct values are percentages (e.g. 50 = 50%).
+func TrackListOfPercent(pct ...float64) TrackList {
+	var tl TrackList
+	for _, p := range pct {
+		fn := SizingFn{Kind: TrackLength, Len: Length{Value: p, Unit: UnitPercent}}
+		tl.entries = append(tl.entries, trackEntry{single: TrackSize{Min: fn, Max: fn}})
+	}
+	return tl
+}
+
+// TrackListOfAuto builds a TrackList of n auto tracks. Each track has both min and max
+// sizing functions set to auto (sizes to its content contribution, fills leftover space
+// in the maximize step). Use this in out-of-package tests to exercise auto track sizing.
+func TrackListOfAuto(n int) TrackList {
+	var tl TrackList
+	fn := SizingFn{Kind: TrackAuto}
+	for i := 0; i < n; i++ {
+		tl.entries = append(tl.entries, trackEntry{single: TrackSize{Min: fn, Max: fn}})
+	}
+	return tl
+}
+
+// TrackListOf builds a TrackList from an explicit slice of TrackSize values. It exists
+// for out-of-package tests that need mixed or minmax tracks (e.g. combining a fixed
+// track with an fr track, or using a minmax() track) where the per-type constructors
+// do not compose. TrackSize and SizingFn are exported, so the caller can build any
+// combination directly.
+func TrackListOf(tracks ...TrackSize) TrackList {
+	var tl TrackList
+	for _, t := range tracks {
+		tl.entries = append(tl.entries, trackEntry{single: t})
+	}
+	return tl
+}
+
 // Expand returns the concrete explicit tracks. containerSize is the container's
 // definite content size on this axis (px) for resolving auto-fill/auto-fit; pass 0
 // when indefinite (auto-repeat then yields 1 repetition, the spec fallback). gap is

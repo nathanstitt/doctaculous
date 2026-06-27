@@ -144,3 +144,161 @@ func TestGridFixedNestedUnderPadding(t *testing.T) {
 	assertRect(t, frags[0], 40, 40, 100, 50)
 	assertRect(t, frags[1], 140, 40, 100, 50)
 }
+
+func TestGridFrColumns(t *testing.T) {
+	// 1fr 1fr at viewport 200 => two equal columns of 100px each.
+	cols := gcss.TrackListOfFr(1, 1)
+	rowsTL := gcss.TrackListOfPx(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 200, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 40)
+	assertRect(t, frags[1], 100, 0, 100, 40)
+}
+
+// pxTrackSize builds a fixed-length (minmax(px,px)) track for composing mixed track
+// lists via gcss.TrackListOf in tests. frTrackSize builds a bare-flex (min auto / max
+// Nfr) track. minmaxTrackSize builds a minmax(<px>, <fr>) track.
+func pxTrackSize(px float64) gcss.TrackSize {
+	fn := gcss.SizingFn{Kind: gcss.TrackLength, Len: gcss.Length{Value: px, Unit: gcss.UnitPx}}
+	return gcss.TrackSize{Min: fn, Max: fn}
+}
+
+func frTrackSize(fr float64) gcss.TrackSize {
+	return gcss.TrackSize{Min: gcss.SizingFn{Kind: gcss.TrackAuto}, Max: gcss.SizingFn{Kind: gcss.TrackFlex, Fr: fr}}
+}
+
+func minmaxTrackSize(minPx, fr float64) gcss.TrackSize {
+	return gcss.TrackSize{
+		Min: gcss.SizingFn{Kind: gcss.TrackLength, Len: gcss.Length{Value: minPx, Unit: gcss.UnitPx}},
+		Max: gcss.SizingFn{Kind: gcss.TrackFlex, Fr: fr},
+	}
+}
+
+func TestGridMixedFixedAndFr(t *testing.T) {
+	// 100px 1fr at viewport 300 => col0=100, col1=200.
+	cols := gcss.TrackListOf(pxTrackSize(100), frTrackSize(1))
+	rowsTL := gcss.TrackListOfPx(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 300, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 40)
+	assertRect(t, frags[1], 100, 0, 200, 40)
+}
+
+func TestGridColumnGap(t *testing.T) {
+	// 1fr 1fr with column-gap:20px at viewport 220 =>
+	// available for fr = 220-20 = 200 => each fr track = 100.
+	// Col positions: 0, 100+20=120.
+	cols := gcss.TrackListOfFr(1, 1)
+	rowsTL := gcss.TrackListOfPx(40)
+	st := gcss.ComputedStyle{
+		ColumnGap: gcss.Length{Value: 20, Unit: gcss.UnitPx},
+	}
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 220, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 40)
+	assertRect(t, frags[1], 120, 0, 100, 40)
+}
+
+func TestGridMinmax(t *testing.T) {
+	// minmax(50px, 1fr) single column at viewport 200 => width 200
+	// (min=50px fixed floor, max=1fr grows to fill).
+	cols := gcss.TrackListOf(minmaxTrackSize(50, 1))
+	rowsTL := gcss.TrackListOfPx(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 200, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 200, 40)
+}
+
+func TestGridPercentColumns(t *testing.T) {
+	// 50% 50% at viewport 200 => each column 100px.
+	cols := gcss.TrackListOfPercent(50, 50)
+	rowsTL := gcss.TrackListOfPx(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 200, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 40)
+	assertRect(t, frags[1], 100, 0, 100, 40)
+}
+
+func TestGridSpanningItem(t *testing.T) {
+	// 3-column 100px 100px 100px grid; an item with grid-column: 1/3 (span 2 columns).
+	// Width = 100+100 = 200 at x=0 (no gap).
+	cols := gcss.TrackListOfPx(100, 100, 100)
+	rowsTL := gcss.TrackListOfPx(40)
+	p := gcss.GridPlacement{
+		ColStart: numLine(1), ColEnd: numLine(3),
+	}
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, p),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 200, 40)
+}
+
+func TestGridSpanningItemWithGap(t *testing.T) {
+	// 3-column 100px 100px 100px grid with column-gap:10px; span 2 item.
+	// Width = 100+10+100 = 210 at x=0.
+	cols := gcss.TrackListOfPx(100, 100, 100)
+	rowsTL := gcss.TrackListOfPx(40)
+	p := gcss.GridPlacement{
+		ColStart: numLine(1), ColEnd: numLine(3),
+	}
+	st := gcss.ComputedStyle{
+		ColumnGap: gcss.Length{Value: 10, Unit: gcss.UnitPx},
+	}
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, p),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 210, 40)
+}
+
+func TestGridAutoRowSizedToContent(t *testing.T) {
+	// 1-column grid, grid-template-rows: auto, item with height:50px.
+	// The auto row should size to the item's content height (50px).
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfAuto(1)
+	items := []*cssbox.Box{
+		gridItemBox(0, 50, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 200, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// Item should be 100px wide (column track) and 50px tall (auto row sized to content).
+	assertRect(t, frags[0], 0, 0, 100, 50)
+}
