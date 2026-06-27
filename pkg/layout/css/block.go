@@ -501,11 +501,11 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	case cssbox.TableFC:
 		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
+	case cssbox.FlexFC:
+		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC)
 	default:
-		// FlexFC / GridFC: their real layout algorithms are later sub-projects.
-		// Degrade to block normal flow so the children still position and paint
-		// (per the degradation contract: the box arrives with its true Formatting;
-		// the fallback is at this layout stage).
+		// GridFC and other unimplemented formatting contexts: degrade to block normal
+		// flow so children still position and paint.
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	}
@@ -940,15 +940,22 @@ func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
 		return true // a table and a table cell each establish a BFC
 	}
+	if b.Display == cssbox.DisplayFlex || b.Display == cssbox.DisplayInlineFlex {
+		return true // a flex container establishes a BFC (CSS Flexbox 2)
+	}
 	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
 }
 
 // establishesStackingContext reports whether b establishes a CSS stacking context.
-// In the supported subset: any positioned box (relative/absolute/fixed). The page
-// root is treated as a stacking context by layoutTree directly. (Full CSS also
-// includes opacity<1, transforms, etc. — none modeled yet.)
+// In the supported subset: any positioned box (relative/absolute/fixed) and any
+// flex container (CSS Flexbox 2). The page root is treated as a stacking context by
+// layoutTree directly. (Full CSS also includes opacity<1, transforms, etc. — none
+// modeled yet.)
 func establishesStackingContext(b *cssbox.Box) bool {
-	return b.Position != cssbox.PosStatic
+	if b.Position != cssbox.PosStatic {
+		return true
+	}
+	return b.Display == cssbox.DisplayFlex || b.Display == cssbox.DisplayInlineFlex
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous
