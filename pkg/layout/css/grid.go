@@ -2,6 +2,7 @@ package css
 
 import (
 	"context"
+	"math"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -12,8 +13,7 @@ import (
 // layoutTable. bandOriginY/fc are unused (a grid container is a BFC; item floats are
 // self-contained within each item's own block layout).
 //
-// Phases (the §11 driver, alignment deferred to Task 9 — items size to and sit at the
-// start of their area, i.e. the `stretch`/`start` defaults):
+// Phases (the §11 driver):
 //
 //  1. expand explicit tracks (columns vs contentW, rows vs a definite height else 0);
 //  2. place items (grows the implicit-track counts) and append implicit tracks;
@@ -21,7 +21,7 @@ import (
 //     5a. lay out each item at its column-span width, capturing its natural height;
 //     3b. size rows from those natural heights;
 //  4. compute each track's content-box-relative edge position (gaps folded in);
-//     5b/6. place each item into its area (start/start) and emit fragments.
+//     5b/6. resolve per-item alignment (justify-*/align-*), relayout as needed, emit.
 func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
 	_ = bandOriginY
 	_ = fc
@@ -67,6 +67,8 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 	colSizes := resolveTrackSizes(colSpecs, colItems, contentW, colGap*float64(maxi(0, nCols-1)))
 
 	// Phase 5a: lay out each item at its column-span width; capture its natural height.
+	// Items are initially laid out at the full area width (which is correct for stretch
+	// alignment, and will be relaid out at max-content for non-stretch auto-width items).
 	itemW := make([]float64, len(items))
 	for i := range items {
 		itemW[i] = spanSize(colSizes, areas[i].colStart, areas[i].colSpan(), colGap)
@@ -89,23 +91,94 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 	}
 	rowSizes := resolveTrackSizes(rowSpecs, rowItems, rowAvailForSize, rowGap*float64(maxi(0, nRows-1)))
 
-	// Phase 4: positions of each track edge (content-box-relative), with gaps. (Content-
-	// distribution alignment is applied in Task 9; here tracks start at 0 with gaps.)
+	// Phase 4: positions of each track edge (content-box-relative), with gaps.
 	colPos := trackPositions(colSizes, colGap)
 	rowPos := trackPositions(rowSizes, rowGap)
 
-	// Phase 5b/6: place each item into its area at start/start (alignment in Task 9) and
-	// emit. Page-space origin: x is absolute (contentX); y is local content-top-0 frame
-	// (layoutBlock shifts the interior down afterward) — exactly like layoutFlex. A fixed
-	// (contentX,0) is correct here because grid axes map directly to x/y (unlike a flex
-	// column, whose main axis is y): the column position is the x offset (+contentX) and
-	// the row position is the local y offset (no contentX).
-	for i := range items {
-		ax := colPos[areas[i].colStart] + contentX
-		ay := rowPos[areas[i].rowStart] // local frame (no contentX on y)
-		aw := itemW[i]
+	// Phase 5b/6: resolve per-item alignment on both axes and emit fragments.
+	// Page-space origin: x is absolute (contentX); y is local content-top-0 frame
+	// (layoutBlock shifts the interior down afterward) — exactly like layoutFlex.
+	for i, it := range items {
+		areaLeft := colPos[areas[i].colStart] + contentX
+		areaTop := rowPos[areas[i].rowStart] // local frame
+		aw := spanSize(colSizes, areas[i].colStart, areas[i].colSpan(), colGap)
 		ah := spanSize(rowSizes, areas[i].rowStart, areas[i].rowSpan(), rowGap)
-		placeGridFragment(frags[i], ax, ay, aw, ah) // size to the area (the stretch default)
+
+		// Resolve per-item alignment on each axis.
+		ji := resolveGridAlign(b.Style.JustifyItems, it.Style.JustifySelf)
+		ai := resolveGridAlign(b.Style.AlignItems, it.Style.AlignSelf)
+
+		// --- Inline axis (justify) ---
+		// The initial layout was at aw (the area width). For non-stretch alignment on an
+		// auto-width item, relayout at max-content to get the shrink-to-fit width.
+		itemUsedW := itemW[i]
+		if ji != "stretch" && gridItemHasAutoWidth(it) {
+			mc := e.measureMaxContent(ctx, it)
+			if mc < aw {
+				itemUsedW = mc
+			} else {
+				itemUsedW = aw
+			}
+			// Relayout at the shrink-to-fit width if it changed.
+			if math.Abs(itemUsedW-itemW[i]) > 0.01 {
+				frags[i], itemNatH[i] = e.layoutGridItem(ctx, it, itemUsedW)
+			}
+		} else if ji == "stretch" {
+			// stretch: item fills the area width (already laid out at aw).
+			itemUsedW = aw
+		}
+		// Definite width overrides: if item has a definite width smaller than aw,
+		// the actual rendered width is itemNatH[i]'s sibling — we read frag.W.
+		if frags[i] != nil && !gridItemHasAutoWidth(it) {
+			itemUsedW = frags[i].W
+		}
+
+		// inline axis offset within the area.
+		var itemX float64
+		switch ji {
+		case "end":
+			itemX = areaLeft + aw - itemUsedW
+		case "center":
+			itemX = areaLeft + (aw-itemUsedW)/2
+		default: // start, stretch, baseline (baseline→start per Task 13)
+			itemX = areaLeft
+		}
+
+		// --- Block axis (align) ---
+		itemUsedH := itemNatH[i]
+		if frags[i] != nil {
+			itemUsedH = frags[i].H
+		}
+
+		if ai == "stretch" && gridItemHasAutoHeight(it) {
+			// stretch on auto-height: relayout at the area width, then pin height to ah.
+			if math.Abs(itemUsedW-itemW[i]) > 0.01 {
+				// Already relaid out above at itemUsedW; just pin the height.
+				if frags[i] != nil {
+					frags[i].H = ah
+				}
+			} else {
+				// Relayout at itemUsedW (= aw for stretch-inline) and pin height.
+				frags[i], _ = e.layoutGridItem(ctx, it, itemUsedW)
+				if frags[i] != nil {
+					frags[i].H = ah
+				}
+			}
+			itemUsedH = ah
+		}
+
+		// block axis offset within the area.
+		var itemY float64
+		switch ai {
+		case "end":
+			itemY = areaTop + ah - itemUsedH
+		case "center":
+			itemY = areaTop + (ah-itemUsedH)/2
+		default: // start, stretch, baseline (baseline→start per Task 13)
+			itemY = areaTop
+		}
+
+		placeGridFragment(frags[i], itemX, itemY, itemUsedW, itemUsedH)
 	}
 
 	// Content height = last row edge + last row size.
@@ -114,6 +187,46 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 		contentHeight = rowPos[len(rowPos)-1] + lastSize(rowSizes)
 	}
 	return interior{children: frags, contentHeight: contentHeight}
+}
+
+// resolveGridAlign resolves the effective alignment for a grid item on one axis:
+// the item's *-self value if not "auto"/empty/"normal", otherwise the container's
+// *-items value. Normalizes CSS Grid spellings to the canonical set:
+//   - ""/"auto"/"normal" → "stretch"
+//   - "flex-start" → "start"
+//   - "flex-end" → "end"
+//
+// The returned string is one of: "stretch", "start", "end", "center", "baseline".
+func resolveGridAlign(containerValue, selfValue string) string {
+	a := selfValue
+	if a == "" || a == "auto" || a == "normal" {
+		a = containerValue
+	}
+	if a == "" || a == "auto" || a == "normal" {
+		a = "stretch"
+	}
+	// Accept flex-* spellings that may appear when the cascade is shared with flexbox.
+	switch a {
+	case "flex-start":
+		return "start"
+	case "flex-end":
+		return "end"
+	}
+	return a
+}
+
+// gridItemHasAutoWidth reports whether the item's inline (width) size is auto or
+// percentage-based (not a definite length), so stretch/shrink-to-fit applies.
+func gridItemHasAutoWidth(it *cssbox.Box) bool {
+	u := it.Style.Width.Unit
+	return u == gcss.UnitAuto || u == gcss.UnitPercent
+}
+
+// gridItemHasAutoHeight reports whether the item's block (height) size is auto or
+// percentage-based (not a definite length), so stretch applies on the block axis.
+func gridItemHasAutoHeight(it *cssbox.Box) bool {
+	u := it.Style.Height.Unit
+	return u == gcss.UnitAuto || u == gcss.UnitPercent
 }
 
 // gridItemBoxes returns the grid container's in-flow item boxes. The fixup already

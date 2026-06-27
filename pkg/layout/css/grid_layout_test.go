@@ -302,3 +302,187 @@ func TestGridAutoRowSizedToContent(t *testing.T) {
 	// Item should be 100px wide (column track) and 50px tall (auto row sized to content).
 	assertRect(t, frags[0], 0, 0, 100, 50)
 }
+
+// --- Task 9: item-level alignment tests ---
+
+// gridItemBoxWithStyle builds a grid item with a full ComputedStyle (useful for setting
+// alignment self-values and other per-item properties).
+func gridItemBoxWithStyle(st gcss.ComputedStyle) *cssbox.Box {
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	if st.MaxWidth == (gcss.Length{}) {
+		st.MaxWidth = auto
+	}
+	if st.MaxHeight == (gcss.Length{}) {
+		st.MaxHeight = auto
+	}
+	if st.AlignSelf == "" {
+		st.AlignSelf = "auto"
+	}
+	if st.JustifySelf == "" {
+		st.JustifySelf = "auto"
+	}
+	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Formatting: cssbox.BlockFC, Style: st}
+}
+
+func TestGridJustifyItemsCenter(t *testing.T) {
+	// 200px column, item with width:50px, justify-items:center.
+	// Area width = 200. Item width = 50. x = (200-50)/2 = 75.
+	cols := gcss.TrackListOfPx(200)
+	rowsTL := gcss.TrackListOfPx(80)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	item := gridItemBoxWithStyle(gcss.ComputedStyle{
+		Width:    gcss.Length{Value: 50, Unit: gcss.UnitPx},
+		Height:   auto,
+		MinWidth: gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+	})
+	st := gcss.ComputedStyle{JustifyItems: "center"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// x=75, w=50; y=0, h=80 (stretch default on block axis, item has no definite height)
+	assertRect(t, frags[0], 75, 0, 50, 80)
+}
+
+func TestGridJustifyItemsEnd(t *testing.T) {
+	// 200px column, item with width:50px, justify-items:end.
+	// Area width = 200. Item width = 50. x = 200-50 = 150.
+	cols := gcss.TrackListOfPx(200)
+	rowsTL := gcss.TrackListOfPx(80)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	item := gridItemBoxWithStyle(gcss.ComputedStyle{
+		Width:    gcss.Length{Value: 50, Unit: gcss.UnitPx},
+		Height:   auto,
+		MinWidth: gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+	})
+	st := gcss.ComputedStyle{JustifyItems: "end"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// x=150, w=50; y=0, h=80 (block axis stretch)
+	assertRect(t, frags[0], 150, 0, 50, 80)
+}
+
+func TestGridAlignItemsCenter(t *testing.T) {
+	// 100px row, item with height:40px, align-items:center.
+	// Area height = 100. Item height = 40. y = (100-40)/2 = 30.
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfPx(100)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	item := gridItemBoxWithStyle(gcss.ComputedStyle{
+		Width:    auto,
+		Height:   gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		MinWidth: gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+	})
+	st := gcss.ComputedStyle{AlignItems: "center"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// x=0, w=100 (inline stretch); y=30, h=40
+	assertRect(t, frags[0], 0, 30, 100, 40)
+}
+
+func TestGridAlignItemsEnd(t *testing.T) {
+	// 100px row, item with height:40px, align-items:end.
+	// Area height = 100. Item height = 40. y = 100-40 = 60.
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfPx(100)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	item := gridItemBoxWithStyle(gcss.ComputedStyle{
+		Width:    auto,
+		Height:   gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		MinWidth: gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+	})
+	st := gcss.ComputedStyle{AlignItems: "end"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// x=0, w=100 (inline stretch); y=60, h=40
+	assertRect(t, frags[0], 0, 60, 100, 40)
+}
+
+func TestGridAlignSelfOverridesAlignItems(t *testing.T) {
+	// container align-items:start, item align-self:end, 100px row, item h:40 => y=60.
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfPx(100)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	item := gridItemBoxWithStyle(gcss.ComputedStyle{
+		Width:     auto,
+		Height:    gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		AlignSelf: "end",
+		MinWidth:  gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+	})
+	// container align-items: start
+	st := gcss.ComputedStyle{AlignItems: "start"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	// align-self:end overrides align-items:start => y=60, h=40
+	assertRect(t, frags[0], 0, 60, 100, 40)
+}
+
+func TestGridStretchDefault(t *testing.T) {
+	// Auto item in a 100×50 cell with default stretch on both axes => fills it.
+	// Already covered by TestGridTwoByTwoFixed (2x2, stretch default) — mirror it here
+	// explicitly to anchor the regression guard.
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfPx(50)
+	item := gridItemBox(0, 0, gcss.GridPlacement{}) // auto w/h, no placement
+	st := gcss.ComputedStyle{}                      // defaults to stretch/stretch
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 100, 50)
+}
+
+func TestGridJustifyItemsStartShrinkToFit(t *testing.T) {
+	// 200px column, auto-width item containing an inline-block child with width:30px.
+	// justify-items:start => item shrinks to its max-content (30px), positioned at x=0.
+	// Derivation: area width=200, max-content=30 => relayout at 30 => x=0, w=30.
+	cols := gcss.TrackListOfPx(200)
+	rowsTL := gcss.TrackListOfPx(60)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	// An inline-block child with an explicit width:30px gives the item a deterministic
+	// max-content of 30px (the inline-block atom is the widest thing in the item).
+	ibStyle := gcss.ComputedStyle{
+		Width: gcss.Length{Value: 30, Unit: gcss.UnitPx}, Height: auto,
+		MaxWidth: auto, MaxHeight: auto,
+		MinWidth: gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+	}
+	ib := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayInlineBlock,
+		Formatting: cssbox.BlockFC, Style: ibStyle}
+	// The item itself: auto width, contains the inline-block as a child.
+	itemStyle := gcss.ComputedStyle{
+		Width: auto, Height: auto,
+		MaxWidth: auto, MaxHeight: auto,
+		MinWidth: gcss.Length{Unit: gcss.UnitPx}, MinHeight: gcss.Length{Unit: gcss.UnitPx},
+		AlignSelf: "auto", JustifySelf: "auto",
+	}
+	// Item has BlockFC containing an inline-block: it needs InlineFC to measure the
+	// inline-block's width as max-content. Use an IFC paragraph containing the inline-block.
+	itemPara := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC, Style: itemStyle, Children: []*cssbox.Box{ib}}
+	// The grid item wraps the paragraph.
+	item := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Formatting: cssbox.BlockFC, Style: itemStyle, Children: []*cssbox.Box{itemPara}}
+
+	st := gcss.ComputedStyle{JustifyItems: "start"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, item), 400, 0)
+	if len(frags) != 1 {
+		t.Fatalf("got %d frags want 1", len(frags))
+	}
+	f := frags[0]
+	// x=0 (start alignment); w should be the max-content width (~30px), NOT 200.
+	if f.X > 0.01 {
+		t.Errorf("x=%v want 0 (start alignment)", f.X)
+	}
+	if f.W > 100 {
+		t.Errorf("w=%v want ~30 (shrink-to-fit, not 200)", f.W)
+	}
+}
