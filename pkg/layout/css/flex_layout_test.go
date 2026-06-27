@@ -516,3 +516,66 @@ func TestInlineFlexClassification(t *testing.T) {
 		t.Fatalf("HTML-path: want 2 inline-flex item fragments (30x20), got %d", len(items))
 	}
 }
+
+func TestFlexWrapDegradesToNowrap(t *testing.T) {
+	// flex-wrap:wrap with three wide items that don't fit: they must stay on one line and
+	// overflow (no second row). Assert all three share the same Y and the last overflows.
+	mk := func() *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 100, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap"}, mk(), mk(), mk()), 150)
+	if len(frags) != 3 {
+		t.Fatalf("want 3 frags on one line, got %d", len(frags))
+	}
+	if frags[0].Y != frags[1].Y || frags[1].Y != frags[2].Y {
+		t.Errorf("wrap should degrade to nowrap (one line, same Y); got %v %v %v", frags[0].Y, frags[1].Y, frags[2].Y)
+	}
+	if frags[2].X != 200 { // 0,100,200 — overflows the 150 viewport (nowrap)
+		t.Errorf("third item should overflow at x200; got %v", frags[2].X)
+	}
+}
+
+func TestFlexEmptyContainerNoPanic(t *testing.T) {
+	fc := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayFlex, Formatting: cssbox.FlexFC,
+		Style: gcss.ComputedStyle{FlexDirection: "row"}}
+	e := New(nil, nil, nil)
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{fc}}
+	// Must not panic; produce a (zero-ish height) fragment.
+	root := e.layoutTree(context.Background(), body, 300)
+	if root == nil {
+		t.Fatal("nil root")
+	}
+}
+
+func TestFlexShrinkZeroOverflows(t *testing.T) {
+	// Two 100px items, flex-shrink 0, in a 150 container: they cannot shrink, so they
+	// overflow (x0,x100). No panic, no clamp below their size.
+	mk := func() *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 100, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, mk(), mk()), 150)
+	if frags[0].W != 100 || frags[1].W != 100 || frags[1].X != 100 {
+		t.Errorf("shrink:0 items keep 100 and overflow; got w%v/w%v x%v", frags[0].W, frags[1].W, frags[1].X)
+	}
+}
+
+func TestFlexBaselineApproximatesFlexStart(t *testing.T) {
+	// align-items:baseline (deferred) must not panic; approximate to flex-start (y0).
+	f := alignFrags(t, "baseline", "auto")
+	if f[0].Y != 0 {
+		t.Errorf("baseline approximates flex-start (y0); got %v", f[0].Y)
+	}
+}
