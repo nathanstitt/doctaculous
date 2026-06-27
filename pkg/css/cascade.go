@@ -125,9 +125,9 @@ type ComputedStyle struct {
 	GridAutoColumns     []TrackSize   // implicit column tracks (nil = one auto track)
 	GridAutoRows        []TrackSize   // implicit row tracks (nil = one auto track)
 	GridAutoFlow        string        // "row" | "column" | "row dense" | "column dense"
-	JustifyItems        string        // start|end|center|stretch|baseline
-	JustifySelf         string        // auto|start|end|center|stretch|baseline
-	AlignContent        string        // start|end|center|space-between|space-around|space-evenly|stretch
+	JustifyItems        string        // start|end|center|stretch|baseline|flex-start|flex-end|normal
+	JustifySelf         string        // auto|start|end|center|stretch|baseline|flex-start|flex-end|normal
+	AlignContent        string        // start|end|center|space-between|space-around|space-evenly|stretch|flex-start|flex-end|normal
 	GridPlacement       GridPlacement // an item's resolved col+row endpoints + optional area name
 
 	// Table properties (CSS 2.1 §17).

@@ -432,6 +432,8 @@ func applyGridTemplate(cs *ComputedStyle, val string) {
 		}
 		return
 	}
+	// Non-areas form: reset grid-template-areas to none (CSS Grid §7.4).
+	cs.GridTemplateAreas = GridAreas{}
 	if tl, ok := parseTrackList(rowPart); ok {
 		cs.GridTemplateRows = tl
 	}
@@ -490,7 +492,7 @@ func applyGridShorthand(cs *ComputedStyle, val string) {
 			if tl, ok := parseTrackList(right); ok {
 				cs.GridTemplateColumns = tl
 			}
-		} else if strings.HasSuffix(rightLower, "auto-flow") || strings.HasPrefix(rightLower, "auto-flow") {
+		} else if strings.HasPrefix(rightLower, "auto-flow") {
 			// <rows> / auto-flow [dense] [<track-size>]
 			rest := strings.TrimSpace(right[strings.Index(rightLower, "auto-flow")+len("auto-flow"):])
 			hasDense := strings.HasPrefix(strings.ToLower(rest), "dense")

@@ -521,3 +521,61 @@ func TestGridShorthandDelegatesToTemplate(t *testing.T) {
 		t.Fatalf("grid: 100px / 1fr 2fr => %d col tracks, want 2", len(colTracks))
 	}
 }
+
+func TestGridShorthandAutoFlowLeftRow(t *testing.T) {
+	// grid: auto-flow / 1fr 2fr
+	// Left side starts with "auto-flow" => row direction; right side => template columns.
+	cs := initialStyle()
+	applyOne(&cs, "grid", "auto-flow / 1fr 2fr")
+	if cs.GridAutoFlow != "row" {
+		t.Errorf("grid: auto-flow / 1fr 2fr => GridAutoFlow=%q, want \"row\"", cs.GridAutoFlow)
+	}
+	colTracks := cs.GridTemplateColumns.Expand(0)
+	if len(colTracks) != 2 {
+		t.Fatalf("grid: auto-flow / 1fr 2fr => %d col tracks, want 2", len(colTracks))
+	}
+	if colTracks[0].Max.Fr != 1 {
+		t.Errorf("col track[0].fr = %v, want 1", colTracks[0].Max.Fr)
+	}
+	if colTracks[1].Max.Fr != 2 {
+		t.Errorf("col track[1].fr = %v, want 2", colTracks[1].Max.Fr)
+	}
+}
+
+func TestGridShorthandAutoFlowRightColumnDense(t *testing.T) {
+	// grid: 100px / auto-flow dense 50px
+	// Right side starts with "auto-flow dense" => column direction + dense; left side => template rows.
+	cs := initialStyle()
+	applyOne(&cs, "grid", "100px / auto-flow dense 50px")
+	if cs.GridAutoFlow != "column dense" {
+		t.Errorf("grid: 100px / auto-flow dense 50px => GridAutoFlow=%q, want \"column dense\"", cs.GridAutoFlow)
+	}
+	rowTracks := cs.GridTemplateRows.Expand(0)
+	if len(rowTracks) != 1 {
+		t.Fatalf("grid: 100px / auto-flow dense 50px => %d row tracks, want 1", len(rowTracks))
+	}
+	if rowTracks[0].Min.Kind != trackLength || rowTracks[0].Min.Len.Value != 100 {
+		t.Errorf("row track[0] = %+v, want 100px", rowTracks[0].Min)
+	}
+	if len(cs.GridAutoColumns) != 1 {
+		t.Fatalf("grid: 100px / auto-flow dense 50px => %d auto-col tracks, want 1", len(cs.GridAutoColumns))
+	}
+	if cs.GridAutoColumns[0].Min.Kind != trackLength || cs.GridAutoColumns[0].Min.Len.Value != 50 {
+		t.Errorf("auto-col track[0] = %+v, want 50px", cs.GridAutoColumns[0].Min)
+	}
+}
+
+func TestGridShorthandAutoFlowMalformedSuffix(t *testing.T) {
+	// "1fr dense auto-flow" on the right — the old HasSuffix branch (removed by Fix 1)
+	// would have misfired here. After Fix 1 (HasPrefix only), neither branch fires:
+	// the right side starts with "1fr", not "auto-flow", and the left side is "100px".
+	// applyGridShorthand resets all grid properties to initial then returns without
+	// mutation, so GridAutoFlow stays "row" (the initial value).
+	cs := initialStyle()
+	cs.GridAutoFlow = "column" // set a non-initial value to prove no mutation
+	applyOne(&cs, "grid", "100px / 1fr dense auto-flow")
+	// Reset to initial values happened; neither auto-flow branch fired; GridAutoFlow = "row".
+	if cs.GridAutoFlow != "row" {
+		t.Errorf("malformed suffix auto-flow: GridAutoFlow=%q, want \"row\" (reset to initial, no branch fired)", cs.GridAutoFlow)
+	}
+}
