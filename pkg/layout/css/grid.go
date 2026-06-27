@@ -91,9 +91,50 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 	}
 	rowSizes := resolveTrackSizes(rowSpecs, rowItems, rowAvailForSize, rowGap*float64(maxi(0, nRows-1)))
 
-	// Phase 4: positions of each track edge (content-box-relative), with gaps.
-	colPos := trackPositions(colSizes, colGap)
-	rowPos := trackPositions(rowSizes, rowGap)
+	// Phase 4: content-distribution alignment + track positioning.
+	// Compute leftover on each axis and apply justify-content / align-content.
+	colTotalGap := colGap * float64(maxi(0, nCols-1))
+	rowTotalGap := rowGap * float64(maxi(0, nRows-1))
+	// Leftover is clamped to 0 when the tracks overflow: per CSS Grid §12.1 a
+	// content-distribution property has no effect when the tracks plus free space
+	// exceed the available space (so center/end do NOT pull tracks negative the way
+	// flex's justifyOffsets would — overflow spills off the end only).
+	colLeftover := contentW - sumF(colSizes) - colTotalGap
+	if colLeftover < 0 {
+		colLeftover = 0
+	}
+	// Row leftover is only meaningful when the container has a definite height.
+	rowLeftover := 0.0
+	if rowAvail > 0 {
+		rowLeftover = rowAvail - sumF(rowSizes) - rowTotalGap
+		if rowLeftover < 0 {
+			rowLeftover = 0
+		}
+	}
+	// stretch: grow auto-max tracks to absorb the leftover before positioning. Only
+	// applies when the content-distribution value is "stretch". NOTE: this is NOT
+	// redundant with resolveTrackSizes's maximize step — §11.5 clamps every infinite
+	// growth limit to the track's base (content) size before maximize runs, so the
+	// resolver cannot grow an auto track past its content; stretchTracks is the SOLE
+	// mechanism that expands auto tracks to fill a definite-size container here.
+	if b.Style.JustifyContent == "stretch" {
+		colSizes = stretchTracks(colSizes, colSpecs, colLeftover)
+		colLeftover = contentW - sumF(colSizes) - colTotalGap
+		if colLeftover < 0 {
+			colLeftover = 0
+		}
+	}
+	if b.Style.AlignContent == "stretch" && rowAvail > 0 {
+		rowSizes = stretchTracks(rowSizes, rowSpecs, rowLeftover)
+		rowLeftover = rowAvail - sumF(rowSizes) - rowTotalGap
+		if rowLeftover < 0 {
+			rowLeftover = 0
+		}
+	}
+	colLead, colBetween := contentOffsets(b.Style.JustifyContent, colLeftover, nCols)
+	rowLead, rowBetween := contentOffsets(b.Style.AlignContent, rowLeftover, nRows)
+	colPos := trackPositionsDist(colSizes, colGap, colLead, colBetween)
+	rowPos := trackPositionsDist(rowSizes, rowGap, rowLead, rowBetween)
 
 	// Phase 5b/6: resolve per-item alignment on both axes and emit fragments.
 	// Page-space origin: x is absolute (contentX); y is local content-top-0 frame
@@ -342,17 +383,73 @@ func spanSize(sizes []float64, start, span int, gap float64) float64 {
 	return total
 }
 
-// trackPositions returns each track's content-box-relative leading edge offset (left for
-// columns, top for rows): position[i] = Σ(sizes[0..i-1]) + i*gap. The returned slice has
-// one entry per track (len(sizes)), so position[i] is the start of track i.
-func trackPositions(sizes []float64, gap float64) []float64 {
+// trackPositionsDist returns each track's content-box-relative leading edge offset (left
+// for columns, top for rows) with content-distribution offsets applied:
+// pos[0] = lead; pos[i] = pos[i-1] + sizes[i-1] + gap + between.
+// lead is the space before the first track; between is extra space between adjacent tracks.
+func trackPositionsDist(sizes []float64, gap, lead, between float64) []float64 {
 	pos := make([]float64, len(sizes))
-	acc := 0.0
+	acc := lead
 	for i := range sizes {
 		pos[i] = acc
-		acc += sizes[i] + gap
+		acc += sizes[i] + gap + between
 	}
 	return pos
+}
+
+// contentOffsets returns the leading offset before the first track and the extra spacing
+// between adjacent tracks for a given CSS content-distribution value (justify-content or
+// align-content). It handles both the CSS Grid spellings (start/end) and the flex
+// spellings (flex-start/flex-end) by normalizing before delegating to justifyOffsets.
+// "stretch" is handled separately (by stretchTracks before this is called); if it reaches
+// here (no growable tracks), it behaves as "start" (leading=0, between=0).
+// leftover is the remaining space after track sizes and gaps; n is the track count.
+func contentOffsets(value string, leftover float64, n int) (leading, between float64) {
+	// Normalize grid start/end spellings to the flex spellings justifyOffsets expects.
+	switch value {
+	case "start", "normal":
+		value = "flex-start"
+	case "end":
+		value = "flex-end"
+	case "stretch":
+		// stretch was handled by stretchTracks; if we reach here, no growable tracks
+		// remain and leftover is 0. Behave as start.
+		return 0, 0
+	}
+	return justifyOffsets(value, leftover, n)
+}
+
+// stretchTracks grows auto-max tracks to absorb the leftover space for
+// align-content/justify-content: stretch. Only tracks whose max sizing function is
+// content-based (auto/min-content/max-content) are growable; fr tracks absorb leftover
+// via the flex step and are not grown here. If there are no growable tracks, the sizes
+// are returned unchanged (the caller will then treat the leftover as start distribution).
+func stretchTracks(sizes []float64, specs []trackSpec, leftover float64) []float64 {
+	if leftover <= 0 || len(sizes) == 0 {
+		return sizes
+	}
+	// Count growable tracks (auto-max but not flex).
+	nGrow := 0
+	for i, s := range specs {
+		if i >= len(sizes) {
+			break
+		}
+		if s.maxIsContent && !s.isFlex {
+			nGrow++
+		}
+	}
+	if nGrow == 0 {
+		return sizes
+	}
+	share := leftover / float64(nGrow)
+	out := make([]float64, len(sizes))
+	for i := range sizes {
+		out[i] = sizes[i]
+		if i < len(specs) && specs[i].maxIsContent && !specs[i].isFlex {
+			out[i] += share
+		}
+	}
+	return out
 }
 
 // placeGridFragment positions a laid-out item fragment at (x,y) and resizes it to (w,h),

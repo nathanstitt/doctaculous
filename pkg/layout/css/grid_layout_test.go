@@ -532,3 +532,97 @@ func TestGridDefiniteWidthAutoHeightStretchAlign(t *testing.T) {
 	// height=100 (block axis stretched to row), y=0.
 	assertRect(t, frags[0], 75, 0, 50, 100)
 }
+
+// --- Task 10: content-distribution alignment tests ---
+
+func TestGridJustifyContentCenter(t *testing.T) {
+	// 3 columns 50px 50px 50px (total 150px) in a 300px container.
+	// justify-content: center => leftover=150, leading=75, between=0.
+	// colPos: 75, 125, 175.
+	// Each item: width=50, height=40 (row track).
+	// x offsets (no padding): 75, 125, 175.
+	cols := gcss.TrackListOfPx(50, 50, 50)
+	rowsTL := gcss.TrackListOfPx(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	st := gcss.ComputedStyle{JustifyContent: "center"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 300, 0)
+	if len(frags) != 3 {
+		t.Fatalf("got %d frags want 3", len(frags))
+	}
+	assertRect(t, frags[0], 75, 0, 50, 40)
+	assertRect(t, frags[1], 125, 0, 50, 40)
+	assertRect(t, frags[2], 175, 0, 50, 40)
+}
+
+func TestGridJustifyContentSpaceBetween(t *testing.T) {
+	// 3 columns 50px 50px 50px (total 150px) in a 300px container.
+	// justify-content: space-between => leftover=150, leading=0, between=75.
+	// colPos: 0, 0+50+75=125, 125+50+75=250.
+	cols := gcss.TrackListOfPx(50, 50, 50)
+	rowsTL := gcss.TrackListOfPx(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	st := gcss.ComputedStyle{JustifyContent: "space-between"}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 300, 0)
+	if len(frags) != 3 {
+		t.Fatalf("got %d frags want 3", len(frags))
+	}
+	assertRect(t, frags[0], 0, 0, 50, 40)
+	assertRect(t, frags[1], 125, 0, 50, 40)
+	assertRect(t, frags[2], 250, 0, 50, 40)
+}
+
+func TestGridAlignContentEnd(t *testing.T) {
+	// 2 rows 40px 40px (total 80px) in a 200px-tall container.
+	// align-content: end => leftover=120, leading=120, between=0.
+	// rowPos: 120, 160.
+	// Two items (one per row), each width=100 (column), height=40.
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfPx(40, 40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	st := gcss.ComputedStyle{
+		AlignContent: "end",
+		Height:       gcss.Length{Value: 200, Unit: gcss.UnitPx},
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	assertRect(t, frags[0], 0, 120, 100, 40)
+	assertRect(t, frags[1], 0, 160, 100, 40)
+}
+
+func TestGridAlignContentStretch(t *testing.T) {
+	// 2 auto rows in a 200px-tall container; items have auto height (no content).
+	// resolveTrackSizes: each auto row sizes to 0 (no content) => total 0px.
+	// align-content: stretch => leftover=200, 2 auto-max rows, each gets +100 => row 100px.
+	// rowPos: 0, 100.
+	// Items: auto height => align-items:stretch (default) fills the 100px row => h=100.
+	cols := gcss.TrackListOfPx(100)
+	rowsTL := gcss.TrackListOfAuto(2)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}), // auto height, no content
+		gridItemBox(0, 0, gcss.GridPlacement{}), // auto height, no content
+	}
+	st := gcss.ComputedStyle{
+		AlignContent: "stretch",
+		Height:       gcss.Length{Value: 200, Unit: gcss.UnitPx},
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, items...), 400, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	// Each row is stretched to 100px; auto-height items fill the row.
+	assertRect(t, frags[0], 0, 0, 100, 100)
+	assertRect(t, frags[1], 0, 100, 100, 100)
+}
