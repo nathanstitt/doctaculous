@@ -64,6 +64,10 @@ var wptReftests = []struct {
 	{"table-colspan", 200, "a colspan-2 header row == a full-width block over two half-width cells", nil},
 	{"table-auto-width", 200, "an auto table with specified column widths == inline-blocks of those widths", nil},
 	{"webfont", 240, "an @font-face family applied via a class == the same family applied via the inherited body default (same downloaded face, identical pixels)", webfontReftestLoader()},
+	{"flex-justify", 200, "justify-content:space-between of three 50px items == abs boxes at 0/75/150", nil},
+	{"flex-grow", 200, "a flex-grow 1:3 row == abs boxes of the grown widths (50/150)", nil},
+	{"flex-align-center", 200, "align-items:center == abs boxes at the centered cross offsets", nil},
+	{"flex-column", 200, "a flex-direction:column == stacked blocks", nil},
 }
 
 // webfontReftestLoader serves the committed Pacifico WOFF2 as web.woff2 for the
