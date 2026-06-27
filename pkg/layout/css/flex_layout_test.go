@@ -572,11 +572,45 @@ func TestFlexShrinkZeroOverflows(t *testing.T) {
 	}
 }
 
-func TestFlexBaselineApproximatesFlexStart(t *testing.T) {
-	// align-items:baseline (deferred) must not panic; approximate to flex-start (y0).
-	f := alignFrags(t, "baseline", "auto")
-	if f[0].Y != 0 {
-		t.Errorf("baseline approximates flex-start (y0); got %v", f[0].Y)
+func TestFlexBaselineAlignmentCoincidesFirstBaseline(t *testing.T) {
+	// align-items:baseline on a row flex container: two items with DIFFERENT font sizes
+	// have different first-baseline offsets from the top of their fragments. Real baseline
+	// alignment must shift the smaller-font item down so both items' first baselines land
+	// at the same page-space Y.
+	mkText := func(text string, fontSizePt float64) *cssbox.Box {
+		auto := gcss.Length{Unit: gcss.UnitAuto}
+		px0 := gcss.Length{Unit: gcss.UnitPx}
+		st := gcss.ComputedStyle{
+			Width: auto, Height: auto, MaxWidth: auto, MaxHeight: auto,
+			MinWidth: px0, MinHeight: px0,
+			FontFamily: "serif", FontSizePt: fontSizePt,
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: auto, AlignSelf: "auto",
+		}
+		textSt := gcss.ComputedStyle{FontFamily: "serif", FontSizePt: fontSizePt}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+			Formatting: cssbox.InlineFC, Style: st,
+			Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: text, Style: textSt}}}
+	}
+	itemSmall := mkText("Hi", 10)
+	itemLarge := mkText("Hi", 24)
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{AlignItems: "baseline"}, itemSmall, itemLarge), 300)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	linesSmall := firstFragLines(frags[0])
+	linesLarge := firstFragLines(frags[1])
+	if len(linesSmall) == 0 {
+		t.Fatal("small item fragment has no lines (no text baseline produced)")
+	}
+	if len(linesLarge) == 0 {
+		t.Fatal("large item fragment has no lines (no text baseline produced)")
+	}
+	baselineSmall := linesSmall[0].BaselineY
+	baselineLarge := linesLarge[0].BaselineY
+	const eps = 0.01
+	if absf(baselineSmall-baselineLarge) > eps {
+		t.Errorf("flex baseline alignment: small item baseline=%v, large item baseline=%v; want equal (within %.2f)",
+			baselineSmall, baselineLarge, eps)
 	}
 }
 
