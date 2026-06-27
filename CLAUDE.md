@@ -412,7 +412,7 @@ what is done vs. pending.
   shared inline core (`pkg/layout/inline`) are **untouched**. **Byte-identical:** every page with no flex
   container is unchanged (the existing corpus uses block/inline/table). Degrades gracefully (no panic, logged):
   **`flex-wrap: wrap`/`wrap-reverse`** → single-line (`nowrap`, items overflow); **RTL/`direction`** on a row →
-  LTR; **`align-items: baseline`**/**`align-self: baseline`** → `flex-start`; the **line cross size is the max
+  LTR; the **line cross size is the max
   item's cross size, NOT clamped to a definite container cross size** (CSS Flexbox §9.4 — so `align-items:
   center`/`flex-end` align within the tallest item's extent, not the container's definite `height`/`width` when
   one is set; the `flex-align-center` reftest reflects this); and for a **`flex-direction: column` item,
@@ -420,6 +420,47 @@ what is done vs. pending.
   approximation — `measureMaxContent` returns a width; exact column content height is a 9b refinement). The
   cross-axis gap (`row-gap` for `row*`) is a no-op on a single line (correct per spec). An empty/degenerate flex
   container is a zero-size fragment. See `docs/superpowers/specs/2026-06-26-html-flexbox-design.md`.
+  **(Updated by sub-project 10:)** `align-items: baseline`/`align-self: baseline` on a **row** container is now
+  **real** first-baseline alignment (the grid slice's shared `baseline.go` backport), no longer approximated to
+  `flex-start`; a **column** container still falls back to `flex-start` (no horizontal baseline).
+- **HTML rendering — CSS Grid (explicit grid, `display: grid`/`inline-grid`)** (`pkg/layout/css/grid.go` +
+  `grid_track.go` + `grid_place.go` + `gridfix.go` + `baseline.go` (new), `pkg/layout/css/block.go`/`anon.go`/
+  `inline.go` wiring, `pkg/layout/cssbox` `BoxAnonGridItem` + `DisplayInlineGrid`, `pkg/css/grid_value.go` (new:
+  track-list + template-areas + placement parsers) + cascade grid properties + `grid`/`grid-template`/`place-*`
+  shorthands; covered by track-list/template-areas/placement parse tests, a pure §11 track-sizing unit suite, a
+  pure §8 placement suite, fragment-geometry tests, anonymous-grid-item fixup tests, degradation tests, the
+  `grid-*` goldens, and the `grid-*` WPT reftests): a `display:grid` box now lays out as a **real CSS Grid Level
+  1 explicit grid**, replacing the prior block fallback. Pieces: the grid properties on the cascade
+  (`grid-template-columns`/`-rows` with a real **track-list parser** — lengths/%/`fr`/`minmax()`/`auto`/
+  `min-content`/`max-content`/`repeat(N)`/`repeat(auto-fill|auto-fit)`; `grid-template-areas`; `grid-column`/
+  `grid-row`/`grid-area`; `grid-auto-flow`/`grid-auto-columns`/`-rows`; `justify-items`/`align-items`/
+  `justify-self`/`align-self`/`justify-content`/`align-content`; the `grid`/`grid-template`/`place-*` shorthands);
+  the **anonymous-grid-item fixup** (`gridfix.go`, CSS Grid §6 — wrap inline runs, blockify inline-level items,
+  drop inter-item whitespace); the **pure track-sizing algorithm** (`grid_track.go` `resolveTrackSizes`, CSS Grid
+  §11 — init base/growth-limit → resolve intrinsic from min/max-content contributions → maximize → expand `fr`
+  tracks, with the §11.5 infinite-growth-limit clamp and fixed-max cap; carved out as a pure, unit-tested
+  function like flexbox's §9.7 resolver); the **pure placement algorithm** (`grid_place.go` `placeItems`, CSS Grid
+  §8 — explicit line numbers (incl. negative) + spans + named-area placement, then §8.5 auto-placement with
+  **sparse AND dense** packing and **row AND column** flow, growing implicit tracks sized by `grid-auto-*`); the
+  **six-phase `layoutGrid`** (expand tracks → place → size columns → lay each item at its column-span width
+  capturing height → size rows from those heights → position tracks + emit); **item-level alignment**
+  (`justify-items`/`align-items` + `*-self`, `start`/`end`/`center`/`stretch`/`baseline`, with shrink-to-fit for
+  non-stretch auto-size items); **content-distribution alignment** (`justify-content`/`align-content`, all six
+  distribution values + `stretch` growing auto tracks); **gaps** on both axes; and **`inline-grid`** (an
+  inline-level grid container flowing as an inline atom with shrink-to-fit width = its track sum, reusing the
+  table `intrinsicWidth` shrink-to-fit path). Each grid item establishes a **BFC** and lays its contents out
+  through the existing block/inline path (`e.layoutBlock`). This slice also lands a **cross-cutting baseline
+  backport**: a shared `baseline.go` (`firstBaselineOffset` + `alignBaselineGroup`) drives `align-items: baseline`
+  in grid **and** retrofits flexbox (row containers) and table cells (`vertical-align: baseline`, the initial
+  value), replacing the `flex-start`/top approximations those two shipped. The `render.Device` seam, the PDF/DOCX
+  pipelines, and the shared inline core (`pkg/layout/inline`) are **untouched**. **Byte-identical:** every page
+  with no grid container is unchanged; the only existing golden touched is `html-table-collapse` (+3px, the
+  baseline backport correctly aligning a thick-bordered cell's sibling — eyeballed). Degrades gracefully (no
+  panic, logged where applicable): **subgrid** → `none` (implicit `auto` tracks); **RTL/`direction`** → LTR;
+  **line names in a track list** (`[name]`) → parsed-and-ignored (sizes honored; named-line *placement* falls to
+  auto-placement); **`repeat(auto-fill/auto-fit)` with an indefinite container size** → 1 repetition; **malformed
+  `grid-template-areas`** → ignored (auto-place); **`baseline` on a text-free item** → start; an empty/degenerate
+  grid → zero-size fragment. See `docs/superpowers/specs/2026-06-26-html-grid-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -453,10 +494,10 @@ that skip into real output.
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**,
    **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
    **clip-escape sub-cases** (sub-project 6b), **CSS 2.1 §17 table layout** (sub-project 7), and
-   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), and **single-line flexbox** (sub-project 9) are done
-   — see the Done section). Roughly in order, each a
+   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9), and
+   **CSS Grid (explicit grid)** (sub-project 10) are done — see the Done section). Roughly in order, each a
    parse/layout slice with its own fixtures + golden/WPT tests:
-   **grid** (today grid falls back to block normal flow; flexbox and tables are now real layout modes); **`OpenURL` + the HTTP `ResourceLoader`** (network
+   **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
    **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Positioning fidelity
@@ -472,8 +513,10 @@ that skip into real output.
    mechanics landed), `margin:auto` centering, and the deferred margin-collapse edge cases (empty-block
    collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
    engine: **RTL/`direction`** (the sole table deferral — parsed but not acted on, LTR column order
-   always, logged; needs the general bidi/`direction` support the engine lacks entirely); the
-   **table-cell `vertical-align: baseline`** shared-row baseline (today treated as top); the
+   always, logged; needs the general bidi/`direction` support the engine lacks entirely);
+   (**table-cell `vertical-align: baseline`** shared-row baseline is now **real** — resolved by the grid
+   slice's baseline backport, was treated as top; one localized approximation remains — a rowspan cell
+   whose spanned-into row grows from baseline does not re-grow); the
    **six table background layers** (table → column-groups → columns → row-groups → rows → cells — today
    cell + table backgrounds paint, but `<col>`/row-group background layering is not modeled); the
    **`empty-cells` property** (always rendered as `show`); a **percentage `<col>` width with no cells in
@@ -499,12 +542,29 @@ that skip into real output.
    the **line cross size clamped to a definite container cross size** (today the line cross size is the
    max item's cross size — so `align-items: center`/`flex-end` align within the tallest item's extent,
    not the container's definite `height`/`width` when one is set; the `flex-align-center` reftest
-   reflects this); **full `align-items: baseline`** cross-baseline participation (today collapses to
-   `flex-start`); the **column `flex-basis: auto`/`content` height** (today uses the item's
+   reflects this); the **column `flex-basis: auto`/`content` height** (today uses the item's
    max-content width as the main-axis proxy — a documented approximation; exact column content height
    is the 9b refinement); and the **`flex-grow`/`shrink` scale factors for cross-axis gaps** (`row-gap`
    for `row*` is a no-op on a single line — correct per spec, but worth revisiting when multi-line
-   lands).
+   lands). (**`align-items: baseline` on a row is now real** — see the grid slice's baseline backport;
+   a **column** container still collapses baseline to `flex-start`.)
+   Grid fidelity follow-ups within the existing engine: **`grid-template-areas`** is supported, but
+   **named-LINE placement** (`grid-column: start / end` referencing `[name]`s in the track list) is not —
+   `[name]` tokens are parsed-and-ignored and named-line placement falls through to auto-placement; the
+   **flow-axis-locked auto-placement** case (an item with a definite line on the *flow* axis but auto on
+   the *cross* axis) honors the span but ignores the start line, placing by span from flow position 0 (a
+   graceful, non-overlapping approximation in the same family as named-line placement); **RTL/`direction`**
+   (LTR only — logged; needs the general bidi support the engine lacks); the **row-track content-height
+   width-proxy** (an `auto`/min/max-content ROW track sizes to content via `measureMaxContent`, which
+   returns a WIDTH — the same documented approximation flexbox and tables carry for vertical content
+   sizing); the **conservative baseline-group extra** (`alignBaselineGroup` grows a row/line by the
+   largest downward shift, a safe upper bound that can slightly over-expand when a shifted item is shorter
+   than its baseline distance); a **rowspan cell whose *spanned-into* (not origin) row grows from baseline**
+   does not re-grow (a localized approximation — the cross-row re-solve is out of scope); **`subgrid`**
+   (parsed-and-ignored → `none`); and **`repeat(auto-fill/auto-fit)`** is supported but the
+   auto-fit empty-track *collapse* is approximate. Multi-line/masonry are not in scope.
+   Table fidelity follow-up resolved by the grid slice: **`vertical-align: baseline`** on table cells is
+   now real first-baseline alignment (was treated as top).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.

@@ -884,13 +884,16 @@ func TestGridMissingAreaFallsToAutoPlacement(t *testing.T) {
 func gridTextItem(text string, fontSizePt float64) *cssbox.Box {
 	auto := gcss.Length{Unit: gcss.UnitAuto}
 	px0 := gcss.Length{Unit: gcss.UnitPx}
+	// LineHeight: auto matches the real cascade (initialStyle sets UnitAuto and it
+	// inherits); the zero-value {0,UnitPx} would resolve to line-height 0 → item H 0,
+	// collapsing auto rows. Set it on both the item and the text leaf.
 	st := gcss.ComputedStyle{
 		Width: auto, Height: auto, MaxWidth: auto, MaxHeight: auto,
 		MinWidth: px0, MinHeight: px0,
-		FontFamily: "serif", FontSizePt: fontSizePt,
+		FontFamily: "serif", FontSizePt: fontSizePt, LineHeight: auto,
 		AlignSelf: "auto", JustifySelf: "auto",
 	}
-	textSt := gcss.ComputedStyle{FontFamily: "serif", FontSizePt: fontSizePt}
+	textSt := gcss.ComputedStyle{FontFamily: "serif", FontSizePt: fontSizePt, LineHeight: auto}
 	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
 		Formatting: cssbox.InlineFC, Style: st,
 		Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: text, Style: textSt}}}
@@ -944,5 +947,33 @@ func TestGridBaselineAlignmentCoincidesFirstBaseline(t *testing.T) {
 	if absf(baselineSmall-baselineLarge) > eps {
 		t.Errorf("baseline alignment: small item baseline=%v, large item baseline=%v; want equal (within %.2f)",
 			baselineSmall, baselineLarge, eps)
+	}
+}
+
+// TestGridMultiRowTextStacksByContentHeight exercises real-font row stacking: a
+// single-column grid with two auto rows of TEXT items (no explicit row sizes) must size
+// each row to its text's content height and stack the second row strictly below the
+// first. (Guards the gridTextItem LineHeight:auto fix — with line-height 0 both rows
+// would collapse to the same Y.)
+func TestGridMultiRowTextStacksByContentHeight(t *testing.T) {
+	cols := mustTrackList(200)
+	rowsTL := gcss.TrackListOfAuto(2) // two auto rows, each sized to its item's content
+	top := gridTextItem("Top", 16)
+	bottom := gridTextItem("Bottom", 16)
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, top, bottom), 400, 0)
+	if len(frags) != 2 {
+		t.Fatalf("got %d frags want 2", len(frags))
+	}
+	// Each row sizes to the 16pt line height (> 0), so the items have real height and the
+	// second row sits strictly below the first.
+	if frags[0].H <= 0 {
+		t.Fatalf("row-0 item H = %v, want > 0 (line-height should be non-zero)", frags[0].H)
+	}
+	if frags[1].Y < frags[0].Y+frags[0].H-0.01 {
+		t.Errorf("row-1 item Y = %v, want >= row-0 bottom (%v); rows must stack, not overlap",
+			frags[1].Y, frags[0].Y+frags[0].H)
+	}
+	if frags[0].Y != 0 {
+		t.Errorf("row-0 item Y = %v, want 0 (top of grid)", frags[0].Y)
 	}
 }
