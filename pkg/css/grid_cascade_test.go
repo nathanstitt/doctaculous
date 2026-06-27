@@ -26,10 +26,10 @@ func TestGridTemplateRows(t *testing.T) {
 	if len(tracks) != 2 {
 		t.Fatalf("grid-template-rows: 100px auto => %d tracks, want 2", len(tracks))
 	}
-	if tracks[0].Min.Kind != trackLength || tracks[0].Min.Len.Value != 100 {
+	if tracks[0].Min.Kind != TrackLength || tracks[0].Min.Len.Value != 100 {
 		t.Errorf("track0 = %+v, want 100px", tracks[0].Min)
 	}
-	if tracks[1].Min.Kind != trackAuto {
+	if tracks[1].Min.Kind != TrackAuto {
 		t.Errorf("track1 = %+v, want auto", tracks[1].Min)
 	}
 }

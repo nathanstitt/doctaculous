@@ -554,13 +554,13 @@ func TestGridShorthandAutoFlowRightColumnDense(t *testing.T) {
 	if len(rowTracks) != 1 {
 		t.Fatalf("grid: 100px / auto-flow dense 50px => %d row tracks, want 1", len(rowTracks))
 	}
-	if rowTracks[0].Min.Kind != trackLength || rowTracks[0].Min.Len.Value != 100 {
+	if rowTracks[0].Min.Kind != TrackLength || rowTracks[0].Min.Len.Value != 100 {
 		t.Errorf("row track[0] = %+v, want 100px", rowTracks[0].Min)
 	}
 	if len(cs.GridAutoColumns) != 1 {
 		t.Fatalf("grid: 100px / auto-flow dense 50px => %d auto-col tracks, want 1", len(cs.GridAutoColumns))
 	}
-	if cs.GridAutoColumns[0].Min.Kind != trackLength || cs.GridAutoColumns[0].Min.Len.Value != 50 {
+	if cs.GridAutoColumns[0].Min.Kind != TrackLength || cs.GridAutoColumns[0].Min.Len.Value != 50 {
 		t.Errorf("auto-col track[0] = %+v, want 50px", cs.GridAutoColumns[0].Min)
 	}
 }

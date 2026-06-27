@@ -11,13 +11,13 @@ func TestParseTrackListFixed(t *testing.T) {
 	if len(tracks) != 3 {
 		t.Fatalf("len(tracks)=%d want 3", len(tracks))
 	}
-	if tracks[0].Min.Kind != trackLength || tracks[0].Min.Len.Value != 100 || tracks[0].Min.Len.Unit != UnitPx {
+	if tracks[0].Min.Kind != TrackLength || tracks[0].Min.Len.Value != 100 || tracks[0].Min.Len.Unit != UnitPx {
 		t.Errorf("track0 = %+v want 100px", tracks[0].Min)
 	}
-	if tracks[1].Max.Kind != trackFlex || tracks[1].Max.Fr != 1 {
+	if tracks[1].Max.Kind != TrackFlex || tracks[1].Max.Fr != 1 {
 		t.Errorf("track1 = %+v want 1fr", tracks[1].Max)
 	}
-	if tracks[2].Min.Kind != trackAuto || tracks[2].Max.Kind != trackAuto {
+	if tracks[2].Min.Kind != TrackAuto || tracks[2].Max.Kind != TrackAuto {
 		t.Errorf("track2 = %+v want auto/auto", tracks[2])
 	}
 }
@@ -31,10 +31,10 @@ func TestParseTrackListMinmax(t *testing.T) {
 	if len(tracks) != 1 {
 		t.Fatalf("len=%d want 1", len(tracks))
 	}
-	if tracks[0].Min.Kind != trackLength || tracks[0].Min.Len.Value != 100 {
+	if tracks[0].Min.Kind != TrackLength || tracks[0].Min.Len.Value != 100 {
 		t.Errorf("min = %+v want 100px", tracks[0].Min)
 	}
-	if tracks[0].Max.Kind != trackFlex || tracks[0].Max.Fr != 1 {
+	if tracks[0].Max.Kind != TrackFlex || tracks[0].Max.Fr != 1 {
 		t.Errorf("max = %+v want 1fr", tracks[0].Max)
 	}
 }

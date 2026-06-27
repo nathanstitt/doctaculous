@@ -2,22 +2,27 @@ package css
 
 import "strings"
 
-// trackKind is the kind of a single track sizing function component.
-type trackKind int
+// TrackKind is the kind of a single track sizing function component.
+type TrackKind int
 
 const (
-	trackLength     trackKind = iota // a fixed <length>/<percentage> (Len holds it)
-	trackFlex                        // a <flex> value (Fr holds the factor), e.g. 1fr
-	trackAuto                        // the `auto` keyword
-	trackMinContent                  // the `min-content` keyword
-	trackMaxContent                  // the `max-content` keyword
+	// TrackLength is a fixed <length>/<percentage> sizing function (Len holds it).
+	TrackLength TrackKind = iota
+	// TrackFlex is a <flex> value sizing function (Fr holds the factor), e.g. 1fr.
+	TrackFlex
+	// TrackAuto is the `auto` keyword sizing function.
+	TrackAuto
+	// TrackMinContent is the `min-content` keyword sizing function.
+	TrackMinContent
+	// TrackMaxContent is the `max-content` keyword sizing function.
+	TrackMaxContent
 )
 
 // SizingFn is one side (min or max) of a track sizing function.
 type SizingFn struct {
-	Kind trackKind
-	Len  Length  // for trackLength
-	Fr   float64 // for trackFlex
+	Kind TrackKind
+	Len  Length  // for TrackLength
+	Fr   float64 // for TrackFlex
 }
 
 // TrackSize is a resolved single track: minmax(Min, Max). A bare function f sets
@@ -133,7 +138,7 @@ func autoRepeatCount(inner []TrackSize, containerSize, gap float64) int {
 // sizing function in px/pt), else 0. Percentages and intrinsic functions are not
 // fixed for the auto-repeat count (return 0 => the list degrades to 1 repetition).
 func fixedBase(t TrackSize) float64 {
-	if t.Min.Kind == trackLength && (t.Min.Len.Unit == UnitPx || t.Min.Len.Unit == UnitPt) {
+	if t.Min.Kind == TrackLength && (t.Min.Len.Unit == UnitPx || t.Min.Len.Unit == UnitPt) {
 		return t.Min.Len.Value
 	}
 	return 0
@@ -192,8 +197,8 @@ func parseTrackSize(tz *tokenizer, first Token) (TrackSize, bool) {
 		return TrackSize{}, false
 	}
 	// A bare flex value: min = auto, max = the flex (CSS Grid §7.2.3).
-	if fn.Kind == trackFlex {
-		return TrackSize{Min: SizingFn{Kind: trackAuto}, Max: fn}, true
+	if fn.Kind == TrackFlex {
+		return TrackSize{Min: SizingFn{Kind: TrackAuto}, Max: fn}, true
 	}
 	return TrackSize{Min: fn, Max: fn}, true
 }
@@ -206,28 +211,28 @@ func parseSizingFn(t Token) (SizingFn, bool) {
 			if t.Num < 0 {
 				return SizingFn{}, false
 			}
-			return SizingFn{Kind: trackFlex, Fr: t.Num}, true
+			return SizingFn{Kind: TrackFlex, Fr: t.Num}, true
 		}
 		l, ok := parseLength(t)
 		if !ok {
 			return SizingFn{}, false
 		}
-		return SizingFn{Kind: trackLength, Len: l}, true
+		return SizingFn{Kind: TrackLength, Len: l}, true
 	case TokenPercent:
-		return SizingFn{Kind: trackLength, Len: Length{t.Num, UnitPercent}}, true
+		return SizingFn{Kind: TrackLength, Len: Length{t.Num, UnitPercent}}, true
 	case TokenNumber:
 		if t.Num == 0 {
-			return SizingFn{Kind: trackLength, Len: Length{0, UnitPx}}, true
+			return SizingFn{Kind: TrackLength, Len: Length{0, UnitPx}}, true
 		}
 		return SizingFn{}, false
 	case TokenIdent:
 		switch strings.ToLower(t.Text) {
 		case "auto":
-			return SizingFn{Kind: trackAuto}, true
+			return SizingFn{Kind: TrackAuto}, true
 		case "min-content":
-			return SizingFn{Kind: trackMinContent}, true
+			return SizingFn{Kind: TrackMinContent}, true
 		case "max-content":
-			return SizingFn{Kind: trackMaxContent}, true
+			return SizingFn{Kind: TrackMaxContent}, true
 		}
 	}
 	return SizingFn{}, false
@@ -255,8 +260,8 @@ func parseMinmax(tz *tokenizer) (TrackSize, bool) {
 	}
 	// A flex min sizing function is invalid in minmax() (CSS Grid §7.2.3); coerce to
 	// auto rather than rejecting the whole declaration (graceful).
-	if minFn.Kind == trackFlex {
-		minFn = SizingFn{Kind: trackAuto}
+	if minFn.Kind == TrackFlex {
+		minFn = SizingFn{Kind: TrackAuto}
 	}
 	return TrackSize{Min: minFn, Max: maxFn}, true
 }
