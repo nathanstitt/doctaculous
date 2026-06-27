@@ -579,3 +579,30 @@ func TestFlexBaselineApproximatesFlexStart(t *testing.T) {
 		t.Errorf("baseline approximates flex-start (y0); got %v", f[0].Y)
 	}
 }
+
+func TestFlexRTLDegradesToLTR(t *testing.T) {
+	// direction:rtl on a flex row is a documented deferral: the engine lays out LTR
+	// (logged) rather than reversing the main axis. Two distinct-width items (w60, w40)
+	// with no grow/shrink must be placed LEFT-to-right: first item at x0, second to its
+	// right — NOT RTL-reversed (which would put the first item at the right edge).
+	mk := func(w float64) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{Direction: "rtl"}, mk(60), mk(40)), 300)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	// LTR fallback: first item (w60) at x0, second (w40) at x60 — packed left, not reversed.
+	if frags[0].X != 0 || frags[0].W != 60 {
+		t.Errorf("RTL row should fall back to LTR: first item at x0 w60; got x%v w%v", frags[0].X, frags[0].W)
+	}
+	if frags[1].X != 60 || frags[1].W != 40 {
+		t.Errorf("RTL row should fall back to LTR: second item at x60 w40; got x%v w%v", frags[1].X, frags[1].W)
+	}
+}
