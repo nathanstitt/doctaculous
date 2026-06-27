@@ -34,6 +34,10 @@ const (
 	// run of inline-level content / text inside a flex container (CSS Flexbox 4).
 	// Like BoxAnonBlock it carries a zero-value ComputedStyle and establishes a BFC.
 	BoxAnonFlexItem
+	// BoxAnonGridItem is an anonymous block-level grid item wrapping a contiguous
+	// run of inline-level content / text inside a grid container (CSS Grid §6).
+	// Like BoxAnonFlexItem it carries a zero-value ComputedStyle and establishes a BFC.
+	BoxAnonGridItem
 	// BoxReplaced is a replaced element (e.g. <img>): a leaf sized by intrinsics
 	// in a later sub-project.
 	BoxReplaced
@@ -44,7 +48,7 @@ const (
 // IsBlockLevel reports whether the kind participates in a block formatting
 // context as a block-level box.
 func (k BoxKind) IsBlockLevel() bool {
-	return k == BoxBlock || k == BoxAnonBlock || k == BoxAnonTablePart || k == BoxAnonFlexItem
+	return k == BoxBlock || k == BoxAnonBlock || k == BoxAnonTablePart || k == BoxAnonFlexItem || k == BoxAnonGridItem
 }
 
 // IsInlineLevel reports whether the kind participates in an inline formatting
@@ -72,12 +76,18 @@ const (
 	DisplayTableColumnGroup
 	DisplayTableCaption
 	DisplayTableCell
+	// DisplayFlex is a block-level flex container (display:flex).
 	DisplayFlex
 	// DisplayInlineFlex is an inline-level flex container (display:inline-flex).
 	// Box generation wiring arrives in a later task; the constant is defined here
 	// because fixupFlex reads it.
 	DisplayInlineFlex
+	// DisplayGrid is a block-level grid container (display:grid).
 	DisplayGrid
+	// DisplayInlineGrid is an inline-level grid container (display:inline-grid).
+	// Box generation wiring arrives in a later task; the constant is defined here
+	// because fixupGrid reads it.
+	DisplayInlineGrid
 	// DisplayNone is never emitted as a box (display:none subtrees are pruned);
 	// it exists so a DisplayKind can round-trip the value if needed.
 	DisplayNone
