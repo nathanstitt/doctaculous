@@ -314,9 +314,12 @@ func TestFlexFCRowLaysOutItemsSideBySide(t *testing.T) {
 	}
 }
 
-// TestGridFCFallsBackToBlock verifies the GridFC degradation contract: display:grid
-// is not yet implemented and falls back to block normal flow (with a logged message),
-// so its children stack vertically rather than laying out side by side.
+// TestGridFCFallsBackToBlock predates real grid layout. GridFC is now wired to
+// layoutGrid (Task 7), so this no longer exercises a fallback path: a 2-item grid with
+// no explicit template auto-places into a single implicit column, which stacks the
+// children vertically — the SAME geometry block normal flow produced, so the assertion
+// still holds by coincidence. Task 11 (grid placement variety) rewrites this to assert
+// grid-specific geometry (explicit columns side by side) and retires the "fallback" name.
 func TestGridFCFallsBackToBlock(t *testing.T) {
 	body := layoutBody(t, reset+`<div style="display:grid">
 		<div style="height:10px"></div>

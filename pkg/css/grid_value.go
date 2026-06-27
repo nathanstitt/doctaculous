@@ -67,6 +67,20 @@ type TrackList struct {
 // IsEmpty reports whether the track list defines no explicit tracks.
 func (tl TrackList) IsEmpty() bool { return len(tl.entries) == 0 }
 
+// TrackListOfPx builds a TrackList of fixed-pixel tracks, one per value. It exists so
+// out-of-package tests (the layout-engine grid tests) can construct a concrete track
+// list without reaching the unexported entries field; production code builds track
+// lists via parseTrackList. Each track's min and max sizing function is the same fixed
+// length (a non-flexible, content-independent track).
+func TrackListOfPx(px ...float64) TrackList {
+	var tl TrackList
+	for _, p := range px {
+		fn := SizingFn{Kind: TrackLength, Len: Length{Value: p, Unit: UnitPx}}
+		tl.entries = append(tl.entries, trackEntry{single: TrackSize{Min: fn, Max: fn}})
+	}
+	return tl
+}
+
 // Expand returns the concrete explicit tracks. containerSize is the container's
 // definite content size on this axis (px) for resolving auto-fill/auto-fit; pass 0
 // when indefinite (auto-repeat then yields 1 repetition, the spec fallback). gap is

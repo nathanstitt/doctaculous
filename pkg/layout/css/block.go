@@ -503,9 +503,11 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
 	case cssbox.FlexFC:
 		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC)
+	case cssbox.GridFC:
+		in = e.layoutGrid(ctx, b, contentW, contentX, childBand, childFC)
 	default:
-		// GridFC and other unimplemented formatting contexts: degrade to block normal
-		// flow so children still position and paint.
+		// Any remaining unimplemented formatting context: degrade to block normal flow
+		// so children still position and paint.
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	}
@@ -938,8 +940,9 @@ func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
 		return true // a table and a table cell each establish a BFC
 	}
-	if b.Display == cssbox.DisplayFlex || b.Display == cssbox.DisplayInlineFlex {
-		return true // a flex container establishes a BFC (CSS Flexbox 2)
+	if b.Display == cssbox.DisplayFlex || b.Display == cssbox.DisplayInlineFlex ||
+		b.Display == cssbox.DisplayGrid || b.Display == cssbox.DisplayInlineGrid {
+		return true // a flex/grid container establishes a BFC (CSS Flexbox 2 / Grid 2)
 	}
 	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
 }
