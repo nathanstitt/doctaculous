@@ -226,11 +226,12 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	deferredBefore := len(posCtx.deferred)
 	in := e.layoutInterior(ctx, b, contentW, contentX, childBandOrigin, fc, posCtx, childPosCB)
 
-	// CSS tables are shrink-to-fit: a width:auto table's box wraps its grid, not the
-	// containing block. layoutTable reports the grid width as in.intrinsicWidth; adopt
-	// it (recomputing the border-box width) when the table's width is auto and the grid
-	// is narrower than the resolved (container-fill) content width.
-	if b.Formatting == cssbox.TableFC && in.intrinsicWidth > 0 {
+	// CSS tables and inline-grid containers are shrink-to-fit: a width:auto box wraps its
+	// content width rather than filling the containing block. layoutTable reports the grid
+	// width as in.intrinsicWidth; layoutGrid does the same for display:inline-grid. Adopt
+	// the reported width (recomputing the border-box width) when the width is auto and the
+	// natural content width is narrower than the resolved (container-fill) content width.
+	if in.intrinsicWidth > 0 && (b.Formatting == cssbox.TableFC || b.Display == cssbox.DisplayInlineGrid) {
 		if _, isAuto := resolveLen(b.Style.Width, b.Style.FontSizePt, cbWidth); isAuto && in.intrinsicWidth < contentW {
 			contentW = in.intrinsicWidth
 			borderW = contentW + ed.pL + ed.pR + ed.bL + ed.bR

@@ -225,7 +225,16 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 	if len(rowPos) > 0 {
 		contentHeight = rowPos[len(rowPos)-1] + lastSize(rowSizes)
 	}
-	return interior{children: frags, contentHeight: contentHeight}
+
+	// For inline-grid (display:inline-grid) the container is an inline atom: report the
+	// natural column-track width (Σ column sizes + total gap) as intrinsicWidth so
+	// layoutBlock shrinks the border box to the track sum instead of filling the
+	// containing-block width (mirrors how layoutTable reports its grid width).
+	var intrinsicW float64
+	if b.Display == cssbox.DisplayInlineGrid {
+		intrinsicW = sumF(colSizes) + colTotalGap
+	}
+	return interior{children: frags, contentHeight: contentHeight, intrinsicWidth: intrinsicW}
 }
 
 // resolveGridAlign resolves the effective alignment for a grid item on one axis:

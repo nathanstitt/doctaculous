@@ -758,6 +758,100 @@ func TestGridNamedAreas(t *testing.T) {
 	assertRect(t, frags[2], 100, 40, 100, 60)
 }
 
+// inlineGridContainerTL builds a display:inline-grid box with the given column/row
+// track lists. Mirrors gridContainerTL but sets DisplayInlineGrid so the box is an
+// inline-level atom in its parent's inline formatting context.
+func inlineGridContainerTL(cols, rowsTL gcss.TrackList, items ...*cssbox.Box) *cssbox.Box {
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	st := gcss.ComputedStyle{
+		Width: auto, Height: auto, MaxWidth: auto, MaxHeight: auto,
+		GridTemplateColumns: cols,
+		GridTemplateRows:    rowsTL,
+		GridAutoFlow:        "row",
+		JustifyItems:        "stretch",
+		AlignItems:          "stretch",
+		AlignContent:        "start",
+		JustifyContent:      "start",
+	}
+	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayInlineGrid,
+		Formatting: cssbox.GridFC, Style: st, Children: items}
+}
+
+// TestInlineGridSideBySide proves that two display:inline-grid containers
+// flow side by side on the same line (not stacked) and that each container's
+// border-box width equals the sum of its column tracks (shrink-to-fit = 100, not the
+// containing-block fill of 300). Grid: 2 columns × 50px = 100px per container.
+//
+//	Container 1: x=0, w=100
+//	Container 2: x=100, w=100
+//
+// If anon.go or inline.go did not handle DisplayInlineGrid, the containers would stack
+// (both y=0 but x would be undefined / both at 0). If shrink-to-fit were missing,
+// each container's border-box would be 300px (the viewport) and the second would
+// overflow the line.
+func TestInlineGridSideBySide(t *testing.T) {
+	cols := mustTrackList(50, 50) // 2 columns × 50px = 100px track sum
+	rowsTL := mustTrackList(30)   // 1 explicit row of 30px
+	mk := func() *cssbox.Box {    // auto-placed item (fills stretch)
+		return gridItemBox(0, 0, gcss.GridPlacement{})
+	}
+	igA := inlineGridContainerTL(cols, rowsTL, mk())
+	igB := inlineGridContainerTL(cols, rowsTL, mk())
+
+	e := New(nil, nil, nil)
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	bodySt := gcss.ComputedStyle{Width: auto, Height: auto, MaxWidth: auto, MaxHeight: auto}
+	// body is a block container whose children are all inline-level (two inline-grid boxes);
+	// set Formatting: InlineFC so layoutInterior runs gatherInlineRuns → the containers flow
+	// as inline atoms side by side. (In the full HTML path normalize/reconcileFormatting would
+	// derive InlineFC from the children; here we build the box tree directly.)
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC, Style: bodySt, Children: []*cssbox.Box{igA, igB}}
+	root := e.layoutTree(context.Background(), body, 300)
+
+	// Collect the two inline-grid container fragments.
+	var grids []*Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.Box != nil && f.Box.Display == cssbox.DisplayInlineGrid {
+			grids = append(grids, f)
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+
+	if len(grids) != 2 {
+		t.Fatalf("want 2 inline-grid container fragments, got %d", len(grids))
+	}
+	// Sort by X so walk order doesn't matter.
+	if grids[0].X > grids[1].X {
+		grids[0], grids[1] = grids[1], grids[0]
+	}
+	// Both containers must share the same Y (same line).
+	if absf(grids[0].Y-grids[1].Y) > 0.01 {
+		t.Errorf("inline-grid containers should share Y (same line); got y=%v and y=%v", grids[0].Y, grids[1].Y)
+	}
+	// Containers must be side by side: X of second == width of first.
+	if absf(grids[0].X-0) > 0.01 {
+		t.Errorf("first inline-grid X = %v, want 0", grids[0].X)
+	}
+	// Shrink-to-fit: width = track sum = 2×50 = 100, NOT the 300px viewport.
+	if absf(grids[0].W-100) > 0.01 {
+		t.Errorf("first inline-grid W = %v, want 100 (track sum, not container fill)", grids[0].W)
+	}
+	if absf(grids[1].X-100) > 0.01 {
+		t.Errorf("second inline-grid X = %v, want 100 (== first container width)", grids[1].X)
+	}
+	if absf(grids[1].W-100) > 0.01 {
+		t.Errorf("second inline-grid W = %v, want 100", grids[1].W)
+	}
+}
+
 func TestGridMissingAreaFallsToAutoPlacement(t *testing.T) {
 	// grid-area: name for a name NOT in grid-template-areas => falls through to
 	// auto-placement (not dropped, not panicking). The item lands in the first free cell.
