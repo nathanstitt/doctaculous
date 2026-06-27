@@ -681,3 +681,70 @@ func TestFlexColumnAtNonZeroX(t *testing.T) {
 		t.Errorf("column item b = x%v y%v, want x60 y50", b.X, b.Y)
 	}
 }
+
+func TestAlignStretchColumnGrowsAutoWidth(t *testing.T) {
+	// flex-direction:column, align-items:stretch (default). A narrow auto-WIDTH item and
+	// a definite 80px-wide item: the line cross size (width) is 80, so the auto-width item
+	// stretches to width 80. Exercises the column branch of stretchFlexItem.
+	narrow := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 30, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx}, MinHeight: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto"}}
+	wide := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 80, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx}, MinHeight: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto"}}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexDirection: "column", AlignItems: "stretch"}, narrow, wide), 300)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	// frags[0] is the narrow auto-width item; it should have stretched to the line cross width 80.
+	if frags[0].W != 80 {
+		t.Errorf("column stretch: auto-width item should grow to line cross width 80; got %v", frags[0].W)
+	}
+}
+
+func TestFlexOrderTieStability(t *testing.T) {
+	// Ties in `order` must preserve document order (stable sort). Items: w30 order1,
+	// w50 order0, w70 order1. Visual order: the order-0 item (w50) first, then the two
+	// order-1 items in DOCUMENT order (w30 before w70). No grow => packed at x 0,50,80.
+	mk := func(w float64, order int) *cssbox.Box {
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+			Style: gcss.ComputedStyle{Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+				MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+				MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+				FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto", Order: order}}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, mk(30, 1), mk(50, 0), mk(70, 1)), 300)
+	if len(frags) != 3 {
+		t.Fatalf("want 3 frags, got %d", len(frags))
+	}
+	wantW := []float64{50, 30, 70} // order-0 first, then order-1 ties in document order
+	for i, w := range wantW {
+		if frags[i].W != w {
+			t.Errorf("tie stability: position %d width = %v, want %v (widths %v %v %v)", i, frags[i].W, w, frags[0].W, frags[1].W, frags[2].W)
+		}
+	}
+}
+
+func TestFlexGapAndSpaceBetween(t *testing.T) {
+	// column-gap AND justify-content:space-between compose: the `between` spacing adds on
+	// top of the gap. Two 50px items, 300px container, gap 20: free = 300-100-20 = 180,
+	// between = 180/(2-1) = 180. Second item at x = 50 + 20 + 180 = 250 (the right end).
+	mk := func() *cssbox.Box {
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+			Style: gcss.ComputedStyle{Width: gcss.Length{Value: 50, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+				MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+				MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+				FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto"}}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{ColumnGap: gcss.Length{Value: 20, Unit: gcss.UnitPx}, JustifyContent: "space-between"}, mk(), mk()), 300)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	if frags[0].X != 0 || frags[1].X != 250 {
+		t.Errorf("gap+space-between: want x0 and x250; got x%v and x%v", frags[0].X, frags[1].X)
+	}
+}
