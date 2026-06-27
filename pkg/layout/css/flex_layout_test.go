@@ -102,3 +102,62 @@ func TestFlexRowGrowDistributesWidth(t *testing.T) {
 		t.Errorf("item b = x%v w%v, want x75 w225", frags[1].X, frags[1].W)
 	}
 }
+
+func TestFlexBasisAutoUsesWidth(t *testing.T) {
+	// basis auto, width 120 => base 120; no grow/shrink => stays 120 at x0.
+	st := gcss.ComputedStyle{
+		Width: gcss.Length{Value: 120, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+		FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+	}
+	item := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, item), 300)
+	if frags[0].W != 120 {
+		t.Errorf("basis:auto width:120 => w%v, want 120", frags[0].W)
+	}
+}
+
+func TestFlexAutoMinimumFloorsShrink(t *testing.T) {
+	// Two text items, basis auto (=> content size), flex-shrink 1, no explicit min.
+	// The container is narrow enough that naive shrink would crush them below their
+	// min-content; the automatic minimum must floor each at its min-content width.
+	mk := func(text string) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Unit: gcss.UnitAuto}, FontFamily: "serif", FontSizePt: 16,
+			MinWidth: gcss.Length{Unit: gcss.UnitAuto}, // auto => automatic minimum applies
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			FlexGrow: 0, FlexShrink: 1, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC,
+			Style: st, Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: text, Style: st}}}
+	}
+	a := mk("Wonderful")
+	b := mk("Magnificent")
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, a, b), 80) // intentionally too narrow
+	// Each item must be at least its min-content width (the longest word), so the two
+	// together overflow 80 rather than shrinking to fit. Assert neither is crushed to ~0.
+	if frags[0].W < 10 || frags[1].W < 10 {
+		t.Errorf("auto-minimum should floor items at min-content; got w %v and %v", frags[0].W, frags[1].W)
+	}
+}
+
+func TestFlexExplicitMinZeroAllowsFullShrink(t *testing.T) {
+	// Same as above but min-width:0 explicitly => items MAY shrink below content.
+	mk := func(text string) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Unit: gcss.UnitAuto}, FontFamily: "serif", FontSizePt: 16,
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx}, // explicit 0 => no automatic minimum
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			FlexGrow: 0, FlexShrink: 1, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.InlineFC,
+			Style: st, Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: text, Style: st}}}
+	}
+	a := mk("Wonderful")
+	b := mk("Magnificent")
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, a, b), 80)
+	total := frags[0].W + frags[1].W
+	if total > 81 {
+		t.Errorf("with min-width:0 items should shrink to fit ~80; total w = %v", total)
+	}
+}

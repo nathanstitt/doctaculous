@@ -359,14 +359,28 @@ func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, in
 	}
 }
 
-// flexBaseSize resolves flex-basis to the item's flex base size (Task 6 adds
-// auto=>main-size-property and content=>max-content; here: length/% else 0).
+// flexBaseSize resolves flex-basis to the item's flex base size.
+// auto: use the main-size property (width for row, height for column) if it is a
+// definite length; otherwise fall through to content (max-content).
+// content: measureMaxContent.
+// NOTE: for a column container, measureMaxContent returns a width, not a height —
+// using it as the column main-axis content base is a documented approximation for
+// slice 1; refine in 9b.
 func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain float64) float64 {
-	_ = ctx
 	fb := it.Style.FlexBasis
 	switch fb.Unit {
-	case gcss.UnitAuto, gcss.UnitContent:
-		return 0 // refined in Task 6
+	case gcss.UnitAuto:
+		mainLen := it.Style.Width
+		if ax.vertical {
+			mainLen = it.Style.Height
+		}
+		if mainLen.Unit != gcss.UnitAuto && mainLen.Unit != gcss.UnitPercent {
+			v, _ := resolveLen(mainLen, it.Style.FontSizePt, 0)
+			return v
+		}
+		return e.measureMaxContent(ctx, it)
+	case gcss.UnitContent:
+		return e.measureMaxContent(ctx, it)
 	case gcss.UnitPercent:
 		return innerMain * fb.Value / 100
 	default:
@@ -375,19 +389,42 @@ func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, 
 	}
 }
 
-// usedMinMaxMain returns the item's used min/max main size from explicit min-/max-*
-// (Task 6 adds the automatic minimum). maxMain < 0 = none.
+// usedMinMaxMain returns the item's used min/max main size. maxMain < 0 = none.
+// When min-(width|height) is auto, the automatic minimum size (CSS Flexbox §4.5)
+// applies: the item's min-content size, capped by a definite main-size property if
+// smaller, and capped by maxMain if maxMain >= 0.
 func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis) (minMain, maxMain float64) {
-	_ = ctx
 	minL, maxL := it.Style.MinWidth, it.Style.MaxWidth
 	if ax.vertical {
 		minL, maxL = it.Style.MinHeight, it.Style.MaxHeight
 	}
-	minMain, _ = resolveLen(minL, it.Style.FontSizePt, 0)
+	// Maximum.
 	if maxL.Unit == gcss.UnitAuto {
 		maxMain = -1
 	} else {
 		maxMain, _ = resolveLen(maxL, it.Style.FontSizePt, 0)
+	}
+	// Minimum: an explicit min resolves directly. min:auto triggers the automatic
+	// minimum size (CSS Flexbox 4.5): the min-content size, capped by an explicit main
+	// size or max (the spec's min()). For row, the content min size is measureMinContent.
+	if minL.Unit == gcss.UnitAuto {
+		autoMin := e.measureMinContent(ctx, it)
+		// Cap by a definite main size if smaller (a fixed-size item's auto-min is its size).
+		mainLen := it.Style.Width
+		if ax.vertical {
+			mainLen = it.Style.Height
+		}
+		if mainLen.Unit != gcss.UnitAuto && mainLen.Unit != gcss.UnitPercent {
+			if v, _ := resolveLen(mainLen, it.Style.FontSizePt, 0); v < autoMin {
+				autoMin = v
+			}
+		}
+		if maxMain >= 0 && maxMain < autoMin {
+			autoMin = maxMain
+		}
+		minMain = autoMin
+	} else {
+		minMain, _ = resolveLen(minL, it.Style.FontSizePt, 0)
 	}
 	return minMain, maxMain
 }
