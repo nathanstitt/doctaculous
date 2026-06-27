@@ -606,3 +606,78 @@ func TestFlexRTLDegradesToLTR(t *testing.T) {
 		t.Errorf("RTL row should fall back to LTR: second item at x60 w40; got x%v w%v", frags[1].X, frags[1].W)
 	}
 }
+
+// flexItemsAt builds an HTML page placing a flex container inside a left/top-padded
+// outer block (so the container's content box is NOT at the page origin), lays it out,
+// and returns the two flex item fragments (the .a and .b boxes) found anywhere in the
+// tree. dir is the flex-direction. This exercises the page-space origin mapping in
+// placeFlexFragment for a container at a non-zero content-box X.
+func flexItemsAt(t *testing.T, dir string) (a, b *Fragment) {
+	t.Helper()
+	src := `<!DOCTYPE html><html><head><style>
+		body { margin: 0; }
+		.outer { padding-left: 60px; padding-top: 10px; }
+		.fc { display: flex; flex-direction: ` + dir + `; }
+		.a { width: 100px; height: 40px; background: #553399; }
+		.b { width: 80px; height: 60px; background: #339977; }
+	</style></head><body>
+		<div class="outer"><div class="fc"><div class="a"></div><div class="b"></div></div></div>
+	</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), root, 600)
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.W == 100 && f.H == 40 {
+			a = f
+		}
+		if f.W == 80 && f.H == 60 {
+			b = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if a == nil || b == nil {
+		t.Fatalf("flex items not found: a=%v b=%v", a, b)
+	}
+	return a, b
+}
+
+func TestFlexRowAtNonZeroX(t *testing.T) {
+	// A row flex container whose content box starts at x=60 (outer padding-left) and y=10
+	// (padding-top). Items flow horizontally from that origin: a at (60,10), b at (160,10).
+	a, b := flexItemsAt(t, "row")
+	if a.X != 60 || a.Y != 10 {
+		t.Errorf("row item a = x%v y%v, want x60 y10", a.X, a.Y)
+	}
+	if b.X != 160 || b.Y != 10 {
+		t.Errorf("row item b = x%v y%v, want x160 y10", b.X, b.Y)
+	}
+}
+
+func TestFlexColumnAtNonZeroX(t *testing.T) {
+	// A column flex container at the same non-zero content-box origin. Items stack
+	// vertically AT that x: a at (60,10), b at (60,50). Regression for the page-space
+	// origin mapping (rect maps cross→x for a column, so the contentX origin must ride
+	// the CROSS axis, not the main axis — otherwise items collapse to x0 and shift down
+	// by contentX).
+	a, b := flexItemsAt(t, "column")
+	if a.X != 60 || a.Y != 10 {
+		t.Errorf("column item a = x%v y%v, want x60 y10", a.X, a.Y)
+	}
+	if b.X != 60 || b.Y != 50 {
+		t.Errorf("column item b = x%v y%v, want x60 y50", b.X, b.Y)
+	}
+}

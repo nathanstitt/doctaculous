@@ -306,6 +306,19 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	freeMain := innerMain - consumed
 	leading, between := justifyOffsets(b.Style.JustifyContent, freeMain, len(items))
 
+	// Origins for rect(): the horizontal (x) position must be absolute page space (the
+	// content-box left = contentX), while the vertical (y) position must be in the local
+	// content-top-0 frame (layoutBlock shifts the interior down by contentTopY afterward).
+	// rect maps main→x / cross→y for a row and cross→x / main→y for a column, so the
+	// contentX origin belongs to the MAIN axis for a row but the CROSS axis for a column;
+	// the other axis (the local-Y one) takes origin 0. Passing a fixed (contentX, 0) would
+	// be correct only for rows — for a column it would drop contentX off x and add it to y,
+	// misplacing items whenever the container's content box is not at x=0.
+	originMain, originCross := contentX, 0.0
+	if ax.vertical {
+		originMain, originCross = 0, contentX
+	}
+
 	// Position items along the main axis, applying cross-axis alignment per item.
 	// For reverse directions, item i sits at (innerMain - mainPos - usedMain[i]) so it
 	// packs from the main-end. The leading and between offsets accumulate in mainPos
@@ -327,7 +340,7 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		if ax.reverseMain {
 			pos = innerMain - mainPos - usedMain[i]
 		}
-		placeFlexFragment(frags[i], ax, contentX, 0, pos, crossPos, usedMain[i], itemCross)
+		placeFlexFragment(frags[i], ax, originMain, originCross, pos, crossPos, usedMain[i], itemCross)
 		mainPos += usedMain[i] + mainGap + between
 	}
 
@@ -446,7 +459,8 @@ func justifyOffsets(jc string, freeSpace float64, n int) (leading, between float
 // inline runs + blockified inline-level boxes), sorted by `order` (stable for ties).
 func flexItemBoxes(b *cssbox.Box) []*cssbox.Box {
 	items := append([]*cssbox.Box(nil), b.Children...)
-	// order: stable sort by Style.Order (Task 10 adds the test; the sort is harmless now).
+	// Stable insertion sort by Style.Order: it swaps only on a strict >, so items with
+	// equal order keep their document order (CSS Flexbox §5.4 order is stable for ties).
 	for i := 1; i < len(items); i++ {
 		for j := i; j > 0 && items[j-1].Style.Order > items[j].Style.Order; j-- {
 			items[j-1], items[j] = items[j], items[j-1]
