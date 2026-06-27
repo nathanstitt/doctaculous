@@ -313,6 +313,7 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		Lines:      in.lines,
 		DebugTag:   debugTag(b),
 	}
+	frag.Box = b
 	if len(in.collapsedBorders) > 0 {
 		frag.Collapsed = in.collapsedBorders
 	}
@@ -357,7 +358,6 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	bubble := in.pendingPositioned
 	if establishesStackingContext(b) {
 		frag.IsStackingContext = true
-		frag.Box = b
 		for _, pp := range in.pendingPositioned {
 			// Sub-case B: when b CLIPS (overflow≠visible), every relative descendant it
 			// consumes is clipped to b's padding box — it paints INSIDE the box's own
@@ -947,15 +947,11 @@ func establishesNewBFC(b *cssbox.Box) bool {
 }
 
 // establishesStackingContext reports whether b establishes a CSS stacking context.
-// In the supported subset: any positioned box (relative/absolute/fixed) and any
-// flex container (CSS Flexbox 2). The page root is treated as a stacking context by
-// layoutTree directly. (Full CSS also includes opacity<1, transforms, etc. — none
-// modeled yet.)
+// In the supported subset: any positioned box (relative/absolute/fixed). The page
+// root is treated as a stacking context by layoutTree directly. (Full CSS also
+// includes opacity<1, transforms, etc. — none modeled yet.)
 func establishesStackingContext(b *cssbox.Box) bool {
-	if b.Position != cssbox.PosStatic {
-		return true
-	}
-	return b.Display == cssbox.DisplayFlex || b.Display == cssbox.DisplayInlineFlex
+	return b.Position != cssbox.PosStatic
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous

@@ -421,6 +421,7 @@ func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedM
 	cross := 0.0
 	if frag != nil {
 		cross = frag.W
+		e.resolveAbsolute(ctx, pos, frag, cross, usedMain)
 	}
 	return frag, cross
 }
