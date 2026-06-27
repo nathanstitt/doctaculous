@@ -139,39 +139,39 @@ func TestParseGridColumnNum(t *testing.T) {
 	if !ok {
 		t.Fatal("parseGridColumnRow ok=false")
 	}
-	if start.Kind != lineNum || start.N != 1 {
-		t.Errorf("start=%+v want lineNum{1}", start)
+	if start.Kind != LineNum || start.N != 1 {
+		t.Errorf("start=%+v want LineNum{1}", start)
 	}
-	if end.Kind != lineNum || end.N != 3 {
-		t.Errorf("end=%+v want lineNum{3}", end)
+	if end.Kind != LineNum || end.N != 3 {
+		t.Errorf("end=%+v want LineNum{3}", end)
 	}
 }
 
 func TestParseGridColumnSpan(t *testing.T) {
-	// grid-column: span 2 => start lineSpan{2}, end auto
+	// grid-column: span 2 => start LineSpan{2}, end auto
 	start, end, ok := parseGridColumnRow("span 2")
 	if !ok {
 		t.Fatal("parseGridColumnRow ok=false")
 	}
-	if start.Kind != lineSpan || start.N != 2 {
-		t.Errorf("start=%+v want lineSpan{2}", start)
+	if start.Kind != LineSpan || start.N != 2 {
+		t.Errorf("start=%+v want LineSpan{2}", start)
 	}
-	if end.Kind != lineAuto {
-		t.Errorf("end=%+v want lineAuto", end)
+	if end.Kind != LineAuto {
+		t.Errorf("end=%+v want LineAuto", end)
 	}
 }
 
 func TestParseGridColumnNegative(t *testing.T) {
-	// grid-column: 1 / -1 => start lineNum{1}, end lineNum{-1}
+	// grid-column: 1 / -1 => start LineNum{1}, end LineNum{-1}
 	start, end, ok := parseGridColumnRow("1 / -1")
 	if !ok {
 		t.Fatal("parseGridColumnRow ok=false")
 	}
-	if start.Kind != lineNum || start.N != 1 {
-		t.Errorf("start=%+v want lineNum{1}", start)
+	if start.Kind != LineNum || start.N != 1 {
+		t.Errorf("start=%+v want LineNum{1}", start)
 	}
-	if end.Kind != lineNum || end.N != -1 {
-		t.Errorf("end=%+v want lineNum{-1}", end)
+	if end.Kind != LineNum || end.N != -1 {
+		t.Errorf("end=%+v want LineNum{-1}", end)
 	}
 }
 
@@ -185,8 +185,8 @@ func TestParseGridAreaName(t *testing.T) {
 		t.Errorf("AreaName=%q want %q", p.AreaName, "foo")
 	}
 	// All endpoints should be auto.
-	if p.RowStart.Kind != lineAuto || p.RowEnd.Kind != lineAuto ||
-		p.ColStart.Kind != lineAuto || p.ColEnd.Kind != lineAuto {
+	if p.RowStart.Kind != LineAuto || p.RowEnd.Kind != LineAuto ||
+		p.ColStart.Kind != LineAuto || p.ColEnd.Kind != LineAuto {
 		t.Errorf("expected all auto endpoints for area name, got %+v", p)
 	}
 }
@@ -197,17 +197,17 @@ func TestParseGridAreaFourValues(t *testing.T) {
 	if !ok {
 		t.Fatal("parseGridArea ok=false")
 	}
-	if p.RowStart.Kind != lineNum || p.RowStart.N != 1 {
-		t.Errorf("RowStart=%+v want lineNum{1}", p.RowStart)
+	if p.RowStart.Kind != LineNum || p.RowStart.N != 1 {
+		t.Errorf("RowStart=%+v want LineNum{1}", p.RowStart)
 	}
-	if p.ColStart.Kind != lineNum || p.ColStart.N != 1 {
-		t.Errorf("ColStart=%+v want lineNum{1}", p.ColStart)
+	if p.ColStart.Kind != LineNum || p.ColStart.N != 1 {
+		t.Errorf("ColStart=%+v want LineNum{1}", p.ColStart)
 	}
-	if p.RowEnd.Kind != lineNum || p.RowEnd.N != 3 {
-		t.Errorf("RowEnd=%+v want lineNum{3}", p.RowEnd)
+	if p.RowEnd.Kind != LineNum || p.RowEnd.N != 3 {
+		t.Errorf("RowEnd=%+v want LineNum{3}", p.RowEnd)
 	}
-	if p.ColEnd.Kind != lineNum || p.ColEnd.N != 2 {
-		t.Errorf("ColEnd=%+v want lineNum{2}", p.ColEnd)
+	if p.ColEnd.Kind != LineNum || p.ColEnd.N != 2 {
+		t.Errorf("ColEnd=%+v want LineNum{2}", p.ColEnd)
 	}
 	if p.AreaName != "" {
 		t.Errorf("AreaName=%q want empty", p.AreaName)
@@ -215,63 +215,63 @@ func TestParseGridAreaFourValues(t *testing.T) {
 }
 
 func TestParseGridAreaThreeValues(t *testing.T) {
-	// grid-area: 1 / 2 / 3 (3 values) => RowStart=lineNum{1}, ColStart=lineNum{2},
-	// RowEnd=lineNum{3}; ColEnd omitted: col-start is lineNum (not lineName) so ColEnd=lineAuto.
+	// grid-area: 1 / 2 / 3 (3 values) => RowStart=LineNum{1}, ColStart=LineNum{2},
+	// RowEnd=LineNum{3}; ColEnd omitted: col-start is LineNum (not LineName) so ColEnd=LineAuto.
 	p, ok := parseGridArea("1 / 2 / 3")
 	if !ok {
 		t.Fatal("parseGridArea ok=false")
 	}
-	if p.RowStart.Kind != lineNum || p.RowStart.N != 1 {
-		t.Errorf("RowStart=%+v want lineNum{1}", p.RowStart)
+	if p.RowStart.Kind != LineNum || p.RowStart.N != 1 {
+		t.Errorf("RowStart=%+v want LineNum{1}", p.RowStart)
 	}
-	if p.ColStart.Kind != lineNum || p.ColStart.N != 2 {
-		t.Errorf("ColStart=%+v want lineNum{2}", p.ColStart)
+	if p.ColStart.Kind != LineNum || p.ColStart.N != 2 {
+		t.Errorf("ColStart=%+v want LineNum{2}", p.ColStart)
 	}
-	if p.RowEnd.Kind != lineNum || p.RowEnd.N != 3 {
-		t.Errorf("RowEnd=%+v want lineNum{3}", p.RowEnd)
+	if p.RowEnd.Kind != LineNum || p.RowEnd.N != 3 {
+		t.Errorf("RowEnd=%+v want LineNum{3}", p.RowEnd)
 	}
 	// col-start is numeric, not an ident, so col-end defaults to auto.
-	if p.ColEnd.Kind != lineAuto {
-		t.Errorf("ColEnd=%+v want lineAuto (col-start was numeric, not ident)", p.ColEnd)
+	if p.ColEnd.Kind != LineAuto {
+		t.Errorf("ColEnd=%+v want LineAuto (col-start was numeric, not ident)", p.ColEnd)
 	}
 }
 
 func TestParseGridAreaTwoIdents(t *testing.T) {
 	// grid-area: header / main (2 values, both idents) =>
-	// RowStart=lineName{"header"}, ColStart=lineName{"main"},
-	// RowEnd copies RowStart (ident) = lineName{"header"},
-	// ColEnd copies ColStart (ident) = lineName{"main"}.
+	// RowStart=LineName{"header"}, ColStart=LineName{"main"},
+	// RowEnd copies RowStart (ident) = LineName{"header"},
+	// ColEnd copies ColStart (ident) = LineName{"main"}.
 	p, ok := parseGridArea("header / main")
 	if !ok {
 		t.Fatal("parseGridArea ok=false")
 	}
-	if p.RowStart.Kind != lineName || p.RowStart.Name != "header" {
-		t.Errorf("RowStart=%+v want lineName{header}", p.RowStart)
+	if p.RowStart.Kind != LineName || p.RowStart.Name != "header" {
+		t.Errorf("RowStart=%+v want LineName{header}", p.RowStart)
 	}
-	if p.ColStart.Kind != lineName || p.ColStart.Name != "main" {
-		t.Errorf("ColStart=%+v want lineName{main}", p.ColStart)
+	if p.ColStart.Kind != LineName || p.ColStart.Name != "main" {
+		t.Errorf("ColStart=%+v want LineName{main}", p.ColStart)
 	}
 	// Omitted row-end: row-start is ident, so row-end copies row-start.
-	if p.RowEnd.Kind != lineName || p.RowEnd.Name != "header" {
-		t.Errorf("RowEnd=%+v want lineName{header} (copied from row-start)", p.RowEnd)
+	if p.RowEnd.Kind != LineName || p.RowEnd.Name != "header" {
+		t.Errorf("RowEnd=%+v want LineName{header} (copied from row-start)", p.RowEnd)
 	}
 	// Omitted col-end: col-start is ident, so col-end copies col-start.
-	if p.ColEnd.Kind != lineName || p.ColEnd.Name != "main" {
-		t.Errorf("ColEnd=%+v want lineName{main} (copied from col-start)", p.ColEnd)
+	if p.ColEnd.Kind != LineName || p.ColEnd.Name != "main" {
+		t.Errorf("ColEnd=%+v want LineName{main} (copied from col-start)", p.ColEnd)
 	}
 }
 
 func TestParseGridColumnRowBareIdent(t *testing.T) {
-	// grid-column: foo (single ident) => both start and end are lineName{"foo"}.
+	// grid-column: foo (single ident) => both start and end are LineName{"foo"}.
 	start, end, ok := parseGridColumnRow("foo")
 	if !ok {
 		t.Fatal("parseGridColumnRow ok=false")
 	}
-	if start.Kind != lineName || start.Name != "foo" {
-		t.Errorf("start=%+v want lineName{foo}", start)
+	if start.Kind != LineName || start.Name != "foo" {
+		t.Errorf("start=%+v want LineName{foo}", start)
 	}
-	if end.Kind != lineName || end.Name != "foo" {
-		t.Errorf("end=%+v want lineName{foo} (copied from start for bare ident)", end)
+	if end.Kind != LineName || end.Name != "foo" {
+		t.Errorf("end=%+v want LineName{foo} (copied from start for bare ident)", end)
 	}
 }
 

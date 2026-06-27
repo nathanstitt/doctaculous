@@ -163,11 +163,11 @@ func TestAlignContent(t *testing.T) {
 func TestGridPlacementColumn(t *testing.T) {
 	cs := initialStyle()
 	applyOne(&cs, "grid-column", "1 / 3")
-	if cs.GridPlacement.ColStart.Kind != lineNum || cs.GridPlacement.ColStart.N != 1 {
-		t.Errorf("ColStart = %+v, want lineNum{1}", cs.GridPlacement.ColStart)
+	if cs.GridPlacement.ColStart.Kind != LineNum || cs.GridPlacement.ColStart.N != 1 {
+		t.Errorf("ColStart = %+v, want LineNum{1}", cs.GridPlacement.ColStart)
 	}
-	if cs.GridPlacement.ColEnd.Kind != lineNum || cs.GridPlacement.ColEnd.N != 3 {
-		t.Errorf("ColEnd = %+v, want lineNum{3}", cs.GridPlacement.ColEnd)
+	if cs.GridPlacement.ColEnd.Kind != LineNum || cs.GridPlacement.ColEnd.N != 3 {
+		t.Errorf("ColEnd = %+v, want LineNum{3}", cs.GridPlacement.ColEnd)
 	}
 }
 
@@ -175,11 +175,11 @@ func TestGridPlacementColumn(t *testing.T) {
 func TestGridPlacementRow(t *testing.T) {
 	cs := initialStyle()
 	applyOne(&cs, "grid-row", "2 / 4")
-	if cs.GridPlacement.RowStart.Kind != lineNum || cs.GridPlacement.RowStart.N != 2 {
-		t.Errorf("RowStart = %+v, want lineNum{2}", cs.GridPlacement.RowStart)
+	if cs.GridPlacement.RowStart.Kind != LineNum || cs.GridPlacement.RowStart.N != 2 {
+		t.Errorf("RowStart = %+v, want LineNum{2}", cs.GridPlacement.RowStart)
 	}
-	if cs.GridPlacement.RowEnd.Kind != lineNum || cs.GridPlacement.RowEnd.N != 4 {
-		t.Errorf("RowEnd = %+v, want lineNum{4}", cs.GridPlacement.RowEnd)
+	if cs.GridPlacement.RowEnd.Kind != LineNum || cs.GridPlacement.RowEnd.N != 4 {
+		t.Errorf("RowEnd = %+v, want LineNum{4}", cs.GridPlacement.RowEnd)
 	}
 }
 
@@ -197,16 +197,16 @@ func TestGridPlacementAreaFourValues(t *testing.T) {
 	cs := initialStyle()
 	applyOne(&cs, "grid-area", "1 / 1 / 3 / 2")
 	if cs.GridPlacement.RowStart.N != 1 {
-		t.Errorf("RowStart = %+v, want lineNum{1}", cs.GridPlacement.RowStart)
+		t.Errorf("RowStart = %+v, want LineNum{1}", cs.GridPlacement.RowStart)
 	}
 	if cs.GridPlacement.ColStart.N != 1 {
-		t.Errorf("ColStart = %+v, want lineNum{1}", cs.GridPlacement.ColStart)
+		t.Errorf("ColStart = %+v, want LineNum{1}", cs.GridPlacement.ColStart)
 	}
 	if cs.GridPlacement.RowEnd.N != 3 {
-		t.Errorf("RowEnd = %+v, want lineNum{3}", cs.GridPlacement.RowEnd)
+		t.Errorf("RowEnd = %+v, want LineNum{3}", cs.GridPlacement.RowEnd)
 	}
 	if cs.GridPlacement.ColEnd.N != 2 {
-		t.Errorf("ColEnd = %+v, want lineNum{2}", cs.GridPlacement.ColEnd)
+		t.Errorf("ColEnd = %+v, want LineNum{2}", cs.GridPlacement.ColEnd)
 	}
 }
 

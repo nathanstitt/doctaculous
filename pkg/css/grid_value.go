@@ -279,21 +279,25 @@ type GridAreas struct {
 // RowStart..RowEnd and ColStart..ColEnd are the first and last cells (inclusive).
 type GridRect struct{ RowStart, RowEnd, ColStart, ColEnd int }
 
-// lineKind classifies a grid placement endpoint.
-type lineKind int
+// LineKind classifies a grid placement endpoint (one side of grid-column/grid-row).
+type LineKind int
 
 const (
-	lineAuto lineKind = iota // `auto`
-	lineNum                  // an explicit (possibly negative) line number
-	lineSpan                 // `span <n>`
-	lineName                 // a named line / area-name endpoint (resolved at layout)
+	// LineAuto is the `auto` keyword endpoint (position decided by auto-placement).
+	LineAuto LineKind = iota
+	// LineNum is an explicit (possibly negative) grid line number.
+	LineNum
+	// LineSpan is a `span <n>` endpoint (a track count, not a line position).
+	LineSpan
+	// LineName is a named line / area-name endpoint (resolved at placement time).
+	LineName
 )
 
 // GridLine is one endpoint of grid-column/grid-row (start or end).
 type GridLine struct {
-	Kind lineKind
-	N    int    // line number (lineNum) or span count (lineSpan)
-	Name string // lineName (area name or named line — area names resolve in placement)
+	Kind LineKind
+	N    int    // line number (LineNum) or span count (LineSpan)
+	Name string // LineName (area name or named line — area names resolve in placement)
 }
 
 // GridPlacement is an item's full placement: the four resolved endpoints plus an
@@ -408,8 +412,8 @@ func parseTemplateAreas(s string) (GridAreas, bool) {
 }
 
 // parseGridLine parses one grid-line endpoint value. The recognized forms are:
-// `auto` → lineAuto; `span N` / `span` → lineSpan; a non-zero integer → lineNum;
-// an identifier → lineName. ok is false only for truly unrecognizable input.
+// `auto` → LineAuto; `span N` / `span` → LineSpan; a non-zero integer → LineNum;
+// an identifier → LineName. ok is false only for truly unrecognizable input.
 // Invalid span counts (zero or negative) are clamped to 1 rather than failing,
 // per the project's graceful-degradation policy.
 func parseGridLine(s string) (GridLine, bool) {
@@ -422,7 +426,7 @@ func parseGridLine(s string) (GridLine, bool) {
 	switch tok.Kind {
 	case TokenIdent:
 		if strings.EqualFold(tok.Text, "auto") {
-			return GridLine{Kind: lineAuto}, true
+			return GridLine{Kind: LineAuto}, true
 		}
 		if strings.EqualFold(tok.Text, "span") {
 			// Look for an optional integer after "span".
@@ -432,18 +436,18 @@ func parseGridLine(s string) (GridLine, bool) {
 				if n < 1 {
 					n = 1
 				}
-				return GridLine{Kind: lineSpan, N: n}, true
+				return GridLine{Kind: LineSpan, N: n}, true
 			}
 			// span with no number → span 1
-			return GridLine{Kind: lineSpan, N: 1}, true
+			return GridLine{Kind: LineSpan, N: 1}, true
 		}
-		return GridLine{Kind: lineName, Name: tok.Text}, true
+		return GridLine{Kind: LineName, Name: tok.Text}, true
 	case TokenNumber:
 		n := int(tok.Num)
 		if n == 0 {
 			return GridLine{}, false // line 0 is invalid
 		}
-		return GridLine{Kind: lineNum, N: n}, true
+		return GridLine{Kind: LineNum, N: n}, true
 	}
 	return GridLine{}, false
 }
@@ -485,11 +489,11 @@ func parseGridColumnRow(s string) (start, end GridLine, ok bool) {
 		if !gok {
 			return GridLine{}, GridLine{}, false
 		}
-		if gl.Kind == lineName {
+		if gl.Kind == LineName {
 			// CSS: a bare ident sets both start and end to that name.
 			return gl, gl, true
 		}
-		return gl, GridLine{Kind: lineAuto}, true
+		return gl, GridLine{Kind: LineAuto}, true
 	}
 	if len(parts) != 2 {
 		return GridLine{}, GridLine{}, false
@@ -555,19 +559,19 @@ func parseGridArea(s string) (GridPlacement, bool) {
 		p.RowEnd = lines[2]
 	} else {
 		// Omitted row-end: copy row-start if ident, else auto.
-		if p.RowStart.Kind == lineName {
+		if p.RowStart.Kind == LineName {
 			p.RowEnd = p.RowStart
 		}
-		// else lineAuto (zero value)
+		// else LineAuto (zero value)
 	}
 	if len(lines) >= 4 {
 		p.ColEnd = lines[3]
 	} else {
 		// Omitted col-end: copy col-start if ident, else auto.
-		if p.ColStart.Kind == lineName {
+		if p.ColStart.Kind == LineName {
 			p.ColEnd = p.ColStart
 		}
-		// else lineAuto (zero value)
+		// else LineAuto (zero value)
 	}
 	return p, true
 }
