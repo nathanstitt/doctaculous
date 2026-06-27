@@ -343,9 +343,11 @@ func (e *Engine) flexMainGap(b *cssbox.Box, ax flexAxis) float64 {
 	return v
 }
 
-// itemSizing computes a flex item's base size, hypothetical main size, and used min/max
-// main size (Task 6 fills basis=auto/content + the automatic minimum; for now: basis
-// length/percentage, or 0 when auto/content, with explicit min/max only).
+// itemSizing computes a flex item's flex base size, hypothetical main size, and used
+// min/max main size: the numeric inputs to resolveFlexibleLengths. The base size comes
+// from flexBaseSize (flex-basis: auto/content/percentage/length, CSS Flexbox §9.2); the
+// used min/max come from usedMinMaxMain (explicit min/max plus the §4.5 automatic
+// minimum); the hypothetical main size is the base clamped to [minMain, maxMain].
 func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain float64) flexItemSizing {
 	base := e.flexBaseSize(ctx, it, ax, innerMain)
 	minMain, maxMain := e.usedMinMaxMain(ctx, it, ax)
@@ -405,7 +407,7 @@ func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis
 		maxMain, _ = resolveLen(maxL, it.Style.FontSizePt, 0)
 	}
 	// Minimum: an explicit min resolves directly. min:auto triggers the automatic
-	// minimum size (CSS Flexbox 4.5): the min-content size, capped by an explicit main
+	// minimum size (CSS Flexbox §4.5): the min-content size, capped by an explicit main
 	// size or max (the spec's min()). For row, the content min size is measureMinContent.
 	if minL.Unit == gcss.UnitAuto {
 		autoMin := e.measureMinContent(ctx, it)

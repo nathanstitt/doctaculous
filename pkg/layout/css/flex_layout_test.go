@@ -136,8 +136,8 @@ func TestFlexAutoMinimumFloorsShrink(t *testing.T) {
 	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, a, b), 80) // intentionally too narrow
 	// Each item must be at least its min-content width (the longest word), so the two
 	// together overflow 80 rather than shrinking to fit. Assert neither is crushed to ~0.
-	if frags[0].W < 10 || frags[1].W < 10 {
-		t.Errorf("auto-minimum should floor items at min-content; got w %v and %v", frags[0].W, frags[1].W)
+	if frags[0].W < 40 || frags[1].W < 40 {
+		t.Errorf("auto-minimum should floor items at min-content (~70/78pt); got w %v and %v", frags[0].W, frags[1].W)
 	}
 }
 
