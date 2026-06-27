@@ -147,10 +147,17 @@ func anyFlex(specs []trackSpec) bool {
 // distributes the item's content size (beyond the spanned tracks' current bases) across
 // the spanned tracks that have an intrinsic (content-based) min sizing function, equally
 // (the spec distributes to "tracks with an intrinsic min sizing function"; if none, to
-// all spanned tracks). Fixed-base tracks in the span absorb their fixed base first.
+// the spanned tracks that are not fixed on that axis — see distributeExtra). Fixed-base
+// tracks in the span absorb their fixed base first.
 func resolveIntrinsicForSpan(specs []trackSpec, base, lim []float64, items []trackItem, targetSpan int) {
 	for _, it := range items {
 		if it.span != targetSpan {
+			continue
+		}
+		// Guard against malformed placement (bug C2): an item whose track range falls
+		// outside the track count would index out of range. Skip it (the resolver's
+		// contract is that it never panics on degenerate input).
+		if it.start < 0 || it.span < 1 || it.start+it.span > len(base) {
 			continue
 		}
 		// --- raise for min-content (base) ---
@@ -162,13 +169,19 @@ func resolveIntrinsicForSpan(specs []trackSpec, base, lim []float64, items []tra
 			distributeExtra(specs, base, it.start, it.span, it.minContent-spanBase, false)
 		}
 		// --- raise for max-content (growth limit) ---
+		// Seed any infinite growth limit in the span to its track's current base BEFORE
+		// summing/distributing (bug C1): otherwise distributeExtra resets the +inf
+		// sentinel to 0 and only adds the delta, leaving the limit at maxContent-base
+		// instead of maxContent. Seeding to the base means the distributed delta
+		// (maxContent - Σbase) lands on top of the base, so the limit reaches maxContent.
+		for k := 0; k < it.span; k++ {
+			if lim[it.start+k] == math.MaxFloat64 {
+				lim[it.start+k] = base[it.start+k]
+			}
+		}
 		spanLim := 0.0
 		for k := 0; k < it.span; k++ {
-			l := lim[it.start+k]
-			if l == math.MaxFloat64 {
-				l = base[it.start+k]
-			}
-			spanLim += l
+			spanLim += lim[it.start+k]
 		}
 		if it.maxContent > spanLim {
 			distributeExtra(specs, lim, it.start, it.span, it.maxContent-spanLim, true)
@@ -177,11 +190,16 @@ func resolveIntrinsicForSpan(specs []trackSpec, base, lim []float64, items []tra
 }
 
 // distributeExtra adds `extra` to a span's tracks (base or limit array `dst`),
-// preferring tracks whose relevant sizing function is intrinsic/content-based; if none
-// qualify, it distributes to all spanned tracks equally. toLimit selects which sizing
-// function decides "intrinsic" (max sizing fn for limits, min sizing fn for bases).
+// preferring tracks whose relevant sizing function is intrinsic/content-based. toLimit
+// selects which sizing function decides "intrinsic" (max sizing fn for limits, min
+// sizing fn for bases). If no track has an intrinsic sizing function, it falls back to
+// the spanned tracks that are NOT fixed on the relevant axis (bug I1): a fixed-max
+// track's growth limit is its fixed max by definition and must never be raised by
+// content, and a fixed-length-min track's base must not be raised past its fixed min by
+// the fallback. If that leaves no recipients, the extra is simply not distributed (the
+// content genuinely cannot raise any track in the span).
 func distributeExtra(specs []trackSpec, dst []float64, start, span int, extra float64, toLimit bool) {
-	// Find recipient tracks.
+	// Find recipient tracks whose relevant sizing function is content-based.
 	var recip []int
 	for k := 0; k < span; k++ {
 		i := start + k
@@ -194,9 +212,20 @@ func distributeExtra(specs []trackSpec, dst []float64, start, span int, extra fl
 		}
 	}
 	if len(recip) == 0 {
+		// Fallback: distribute to spanned tracks that are not fixed on this axis.
 		for k := 0; k < span; k++ {
-			recip = append(recip, start+k)
+			i := start + k
+			fixed := !specs[i].minIsContent // fixed-length (or zero) min sizing function
+			if toLimit {
+				fixed = specs[i].maxFixed >= 0 // fixed-length max sizing function
+			}
+			if !fixed {
+				recip = append(recip, i)
+			}
 		}
+	}
+	if len(recip) == 0 {
+		return // nothing in the span can absorb the content; leave sizes unchanged
 	}
 	share := extra / float64(len(recip))
 	for _, i := range recip {
@@ -244,20 +273,26 @@ func distributeToLimits(base, lim []float64, specs []trackSpec, freeSpace float6
 
 // findFrUnit computes the fr unit for the expand-flexible step (CSS Grid §11.7.1): the
 // leftover space after non-flex track bases and gaps, divided by the sum of flex
-// factors (floored at 1 for the division). The fr unit must be at least the largest
-// (base / fr) among flex tracks so no flex track shrinks below its base.
+// factors with EACH factor floored at 1 for the division (a track with factor < 1 uses
+// 1 in the divisor but still sizes as frUnit × its actual factor, so sub-1 factors do
+// not fill the container). The fr unit must be at least the largest (base / fr) among
+// flex tracks so no flex track shrinks below its base.
 func findFrUnit(specs []trackSpec, base []float64, available, gap float64) float64 {
 	leftover := available - gap
 	sumFr := 0.0
 	for i, s := range specs {
 		if s.isFlex {
-			sumFr += s.fr
+			factor := s.fr
+			if factor < 1 {
+				factor = 1 // spec §11.7.1: floor EACH flex factor at 1 for the divisor
+			}
+			sumFr += factor
 		} else {
 			leftover -= base[i]
 		}
 	}
 	if sumFr < 1 {
-		sumFr = 1 // spec: hypothetical fr size uses a flex-factor-sum floor of 1
+		sumFr = 1 // no flex tracks (or all-zero factors): avoid divide-by-zero
 	}
 	if leftover < 0 {
 		leftover = 0

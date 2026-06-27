@@ -100,6 +100,72 @@ func TestTrackSpanDistributesToIntrinsic(t *testing.T) {
 	}
 }
 
+// TestTrackAutoMinLessThanMax locks the growth-limit-collapse fix (bug C1): a single
+// auto track with an item whose min-content (25) < max-content (70) must size to the
+// max-content (70), not to maxContent-minContent (45). The growth limit is raised off
+// the +inf sentinel by seeding it to the track's base BEFORE distributing the delta, so
+// the limit lands at max-content rather than double-subtracting the base.
+func TestTrackAutoMinLessThanMax(t *testing.T) {
+	items := []trackItem{{start: 0, span: 1, minContent: 25, maxContent: 70}}
+	got := resolveTrackSizes([]trackSpec{autoTrack()}, items, 1000, 0)
+	if !approxT(got[0], 70) {
+		t.Fatalf("got %v want [70] (growth limit must be max-content, not max-min)", got)
+	}
+}
+
+// TestTrackTwoAutoMinLessThanMax is the two-track form of C1: each auto track sizes to
+// its own item's max-content (40 and 90) when min-content (30, 80) is smaller, with
+// plenty of free space. Hand-derived: base raises to min-content (30, 80), limits to
+// max-content (40, 90); maximize fills each base up to its limit => [40 90].
+func TestTrackTwoAutoMinLessThanMax(t *testing.T) {
+	items := []trackItem{
+		{start: 0, span: 1, minContent: 30, maxContent: 40},
+		{start: 1, span: 1, minContent: 80, maxContent: 90},
+	}
+	got := resolveTrackSizes([]trackSpec{autoTrack(), autoTrack()}, items, 1000, 0)
+	if !approxT(got[0], 40) || !approxT(got[1], 90) {
+		t.Fatalf("got %v want [40 90]", got)
+	}
+}
+
+// TestTrackFixedMaxNotExceeded locks bug I1: a minmax(0,50px) track's growth limit is
+// fixed at 50 by definition and must never be raised past it by content. An item with
+// min/max-content 80 must not push the track to 80 — the base-raise fallback must not
+// dump content onto a fixed-min track, and the limit-raise fallback must not dump onto a
+// fixed-max track. With free space, the track fills to its 50px limit => [50].
+func TestTrackFixedMaxNotExceeded(t *testing.T) {
+	tr := trackSpec{baseFloor: 0, maxFixed: 50}
+	items := []trackItem{{start: 0, span: 1, minContent: 80, maxContent: 80}}
+	got := resolveTrackSizes([]trackSpec{tr}, items, 1000, 0)
+	if !approxT(got[0], 50) {
+		t.Fatalf("got %v want [50] (fixed max must cap the growth limit)", got)
+	}
+}
+
+// TestTrackOutOfRangeItemNoPanic locks bug C2: an item whose track range exceeds the
+// track count must be skipped, not panic (the resolver's doc promises it never panics,
+// and the project forbids panicking on malformed input). The two real tracks stay at
+// their fixed base sizes.
+func TestTrackOutOfRangeItemNoPanic(t *testing.T) {
+	items := []trackItem{{start: 1, span: 5, minContent: 10, maxContent: 10}}
+	got := resolveTrackSizes([]trackSpec{fixedTrack(30), fixedTrack(40)}, items, 200, 0)
+	if len(got) != 2 || !approxT(got[0], 30) || !approxT(got[1], 40) {
+		t.Fatalf("got %v want [30 40] (out-of-range item must be skipped, no panic)", got)
+	}
+}
+
+// TestTrackSubOneFlexPerFactorFloor locks bug I2: each flex factor is floored at 1 for
+// the fr-unit division (not the SUM floored at 1). Two 0.5fr tracks with leftover 300:
+// divisor = max(1,0.5)+max(1,0.5) = 2, frUnit = 150, each track = 150*0.5 = 75 => the
+// sub-1 factors do NOT fill the container (150 of 300 used). The old SUM-floor gave
+// frUnit = 300/1 = 300 => 150 each (wrongly filling the container).
+func TestTrackSubOneFlexPerFactorFloor(t *testing.T) {
+	got := resolveTrackSizes([]trackSpec{flexTrack(0.5), flexTrack(0.5)}, nil, 300, 0)
+	if !approxT(got[0], 75) || !approxT(got[1], 75) {
+		t.Fatalf("got %v want [75 75] (each flex factor floored at 1, not the sum)", got)
+	}
+}
+
 // TestMakeTrackSpec covers the cascade->resolver bridge: % resolves against available,
 // em against the font size, a bare flex marks isFlex, and the content-kind flags map
 // from the sizing functions. This is the contract Task 7 calls into.
