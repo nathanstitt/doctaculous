@@ -253,3 +253,81 @@ func TestJustifyContent(t *testing.T) {
 		}
 	}
 }
+
+// alignFrags lays out two items of heights 40 and 80 in a row with the given align-items
+// and returns their Y positions and heights. The line cross size is 80 (the taller item).
+func alignFrags(t *testing.T, alignItems, alignSelf0 string) []*Fragment {
+	mk := func(h float64, self string) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 50, Unit: gcss.UnitPx}, Height: gcss.Length{Value: h, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: self,
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	return flexFrags(t, flexRow(gcss.ComputedStyle{AlignItems: alignItems}, mk(40, alignSelf0), mk(80, "auto")), 300)
+}
+
+func TestAlignItemsFlexStart(t *testing.T) {
+	f := alignFrags(t, "flex-start", "auto")
+	if f[0].Y != 0 || f[1].Y != 0 {
+		t.Errorf("flex-start: both items at cross-start y0; got y%v, y%v", f[0].Y, f[1].Y)
+	}
+	if f[0].H != 40 {
+		t.Errorf("flex-start short item keeps its height 40; got %v", f[0].H)
+	}
+}
+
+func TestAlignItemsFlexEnd(t *testing.T) {
+	f := alignFrags(t, "flex-end", "auto")
+	// line cross 80; short item (40) sits at y = 80-40 = 40.
+	if f[0].Y != 40 || f[0].H != 40 {
+		t.Errorf("flex-end short item = y%v h%v, want y40 h40", f[0].Y, f[0].H)
+	}
+	if f[1].Y != 0 {
+		t.Errorf("flex-end tall item at y0; got %v", f[1].Y)
+	}
+}
+
+func TestAlignItemsCenter(t *testing.T) {
+	f := alignFrags(t, "center", "auto")
+	// short item centered in 80: y = (80-40)/2 = 20.
+	if f[0].Y != 20 || f[0].H != 40 {
+		t.Errorf("center short item = y%v h%v, want y20 h40", f[0].Y, f[0].H)
+	}
+}
+
+func TestAlignItemsStretch(t *testing.T) {
+	f := alignFrags(t, "stretch", "auto")
+	// short item (no definite... it HAS height 40, so stretch does NOT override a definite
+	// cross size). Per spec, stretch only applies when cross size is auto. Item0 has a
+	// definite height 40 => stays 40 at y0.
+	if f[0].H != 40 {
+		t.Errorf("stretch with definite height keeps 40; got %v", f[0].H)
+	}
+}
+
+func TestAlignStretchGrowsAutoHeight(t *testing.T) {
+	// An item with auto height stretches to the line cross size.
+	short := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 50, Unit: gcss.UnitPx}, Height: gcss.Length{Unit: gcss.UnitAuto},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx}, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto"}}
+	tall := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Style: gcss.ComputedStyle{Width: gcss.Length{Value: 50, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 80, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx}, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto"}}
+	f := flexFrags(t, flexRow(gcss.ComputedStyle{AlignItems: "stretch"}, short, tall), 300)
+	if f[0].H != 80 {
+		t.Errorf("stretch auto-height item should grow to line cross 80; got %v", f[0].H)
+	}
+}
+
+func TestAlignSelfOverridesAlignItems(t *testing.T) {
+	f := alignFrags(t, "flex-start", "center")
+	// align-items flex-start but item0 align-self center => y = (80-40)/2 = 20.
+	if f[0].Y != 20 {
+		t.Errorf("align-self:center overrides align-items:flex-start; y = %v, want 20", f[0].Y)
+	}
+}

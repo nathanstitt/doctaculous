@@ -300,16 +300,31 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	freeMain := innerMain - consumed
 	leading, between := justifyOffsets(b.Style.JustifyContent, freeMain, len(items))
 
-	// Position items along the main axis. For reverse directions, item i sits at
-	// (innerMain - mainPos - usedMain[i]) so it packs from the main-end.
-	// The leading and between offsets accumulate in mainPos identically in both cases.
+	// Position items along the main axis, applying cross-axis alignment per item.
+	// For reverse directions, item i sits at (innerMain - mainPos - usedMain[i]) so it
+	// packs from the main-end. The leading and between offsets accumulate in mainPos
+	// identically in both cases.
 	mainPos := leading
 	for i := range items {
+		align := resolvedAlign(b, items[i])
+		itemCross := crossSizes[i]
+
+		// stretch: grow an auto-cross item to the line cross size and relayout its
+		// contents at that cross measure (a row item's width is its main size, which is
+		// fixed; stretch grows its HEIGHT — pin the fragment height to lineCross).
+		if align == "stretch" && !itemHasDefiniteCross(items[i], ax) {
+			frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, usedMain[i], lineCross)
+		}
+		if align == "baseline" {
+			e.logf("css layout: align-items/align-self baseline not supported; using flex-start")
+		}
+
+		crossPos := crossOffset(align, lineCross, itemCross)
 		pos := mainPos
 		if ax.reverseMain {
 			pos = innerMain - mainPos - usedMain[i]
 		}
-		placeFlexFragment(frags[i], ax, contentX, 0, pos, 0, usedMain[i], crossSizes[i])
+		placeFlexFragment(frags[i], ax, contentX, 0, pos, crossPos, usedMain[i], itemCross)
 		mainPos += usedMain[i] + mainGap + between
 	}
 
@@ -320,6 +335,72 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	// NB: do NOT set interior.intrinsicWidth — that field shrink-to-fits a TABLE box;
 	// a flex container fills its containing-block width like a normal block.
 	return interior{children: frags, contentHeight: contentHeight}
+}
+
+// resolvedAlign returns the effective cross-axis alignment for an item: align-self if it
+// is not auto, else the container's align-items. baseline is approximated to flex-start.
+func resolvedAlign(container, item *cssbox.Box) string {
+	a := item.Style.AlignSelf
+	if a == "" || a == "auto" {
+		a = container.Style.AlignItems
+	}
+	if a == "" {
+		a = "stretch"
+	}
+	return a
+}
+
+// crossOffset returns the item's cross-axis position within a line of size lineCross for
+// an item of outer cross size itemCross under alignment a (stretch is handled separately
+// before this is called, by which point itemCross == lineCross).
+func crossOffset(a string, lineCross, itemCross float64) float64 {
+	switch a {
+	case "flex-end":
+		return lineCross - itemCross
+	case "center":
+		return (lineCross - itemCross) / 2
+	default: // flex-start, stretch, baseline(approx)
+		return 0
+	}
+}
+
+// itemHasDefiniteCross reports whether the item has a definite cross size (so stretch
+// does not apply). For a row the cross axis is height; for a column it is width.
+func itemHasDefiniteCross(it *cssbox.Box, ax flexAxis) bool {
+	l := it.Style.Height
+	if ax.vertical {
+		l = it.Style.Width
+	}
+	return l.Unit != gcss.UnitAuto && l.Unit != gcss.UnitPercent
+}
+
+// stretchFlexItem re-lays an auto-cross item out to the line cross size and returns its
+// new fragment + outer cross size (== lineCross). For a row the main size (width) is
+// fixed at usedMain and the height is pinned to lineCross. For a column the main size
+// (height) is usedMain and the width (cross) becomes lineCross.
+func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis, usedMain, lineCross float64) (*Fragment, float64) {
+	if ax.vertical {
+		// column: relayout at width = lineCross, height pinned to usedMain.
+		pos := &positionedContext{}
+		res := e.layoutBlock(ctx, it, lineCross, 0, 0, 0,
+			&floatContext{cbLeft: 0, cbRight: lineCross}, pos, posCBOwner{isPage: true})
+		frag := res.frag
+		if frag != nil {
+			frag.H = usedMain
+			e.resolveAbsolute(ctx, pos, frag, lineCross, usedMain)
+		}
+		return frag, lineCross
+	}
+	// row: width = usedMain (the main size); pin height to lineCross.
+	pos := &positionedContext{}
+	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
+		&floatContext{cbLeft: 0, cbRight: usedMain}, pos, posCBOwner{isPage: true})
+	frag := res.frag
+	if frag != nil {
+		frag.H = lineCross
+		e.resolveAbsolute(ctx, pos, frag, usedMain, lineCross)
+	}
+	return frag, lineCross
 }
 
 // justifyOffsets returns the leading main offset (before the first item) and the extra
