@@ -261,9 +261,14 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	var usedMain []float64
 	if !mainDefinite {
 		usedMain = make([]float64, len(items))
+		sum := totalGap
 		for i := range sizings {
 			usedMain[i] = sizings[i].hypothetical
+			sum += usedMain[i]
 		}
+		// For column-reverse, innerMain must equal the content extent so the reverse
+		// formula (innerMain - mainPos - usedMain[i]) flips within the content bounds.
+		innerMain = sum
 	} else {
 		usedMain = resolveFlexibleLengths(sizings, innerMain, totalGap)
 	}
@@ -284,20 +289,28 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		}
 	}
 
-	// Position items along the main axis, packed at main-start (justify-content:flex-start
-	// for now; full justify in Task 8, cross alignment in Task 9, reverse in Task 7). The
-	// origin is main=contentX (the container's content-left in page space) and cross=0 in
-	// the local content-top frame (block layout shifts Y into place). placeFlexFragment
-	// maps (main,cross)->(x,y) via the axis and sizes the fragment.
+	// Total main extent consumed by items + gaps (used for reverse placement and the
+	// column content height).
+	consumed := totalGap
+	for i := range items {
+		consumed += usedMain[i]
+	}
+
+	// Position items along the main axis, packed at main-start. For reverse directions,
+	// pack from the main-end: item i sits at (innerMain - mainPos - usedMain[i]).
 	mainPos := 0.0
 	for i := range items {
-		placeFlexFragment(frags[i], ax, contentX, 0, mainPos, 0, usedMain[i], crossSizes[i])
+		pos := mainPos
+		if ax.reverseMain {
+			pos = innerMain - mainPos - usedMain[i]
+		}
+		placeFlexFragment(frags[i], ax, contentX, 0, pos, 0, usedMain[i], crossSizes[i])
 		mainPos += usedMain[i] + mainGap
 	}
 
 	contentHeight := lineCross
 	if ax.vertical {
-		contentHeight = mainPos - mainGap // total main extent (sum of items + gaps)
+		contentHeight = consumed
 	}
 	// NB: do NOT set interior.intrinsicWidth — that field shrink-to-fits a TABLE box;
 	// a flex container fills its containing-block width like a normal block.
@@ -450,19 +463,29 @@ func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis
 	return frag, cross
 }
 
-// layoutFlexItemColumn is the column-axis item layout (Task 7 implements it; stubbed to
-// the row path for now so the package compiles).
+// layoutFlexItemColumn lays out a column-axis flex item: the used main size is the
+// item's HEIGHT, and its width comes from the cross axis (its definite width, else the
+// container will stretch/shrink it — for now lay out at the item's own width if definite,
+// otherwise at its max-content width as the natural cross size). Returns the fragment and
+// its outer cross size (the width). The fragment's height is pinned to usedMain.
 func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedMain float64) (*Fragment, float64) {
-	pos := &positionedContext{}
-	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
-		&floatContext{cbLeft: 0, cbRight: usedMain}, pos, posCBOwner{isPage: true})
-	frag := res.frag
-	cross := 0.0
-	if frag != nil {
-		cross = frag.W
-		e.resolveAbsolute(ctx, pos, frag, cross, usedMain)
+	// Cross (width) basis: a definite width, else max-content.
+	crossW := e.measureMaxContent(ctx, it)
+	if it.Style.Width.Unit != gcss.UnitAuto && it.Style.Width.Unit != gcss.UnitPercent {
+		if v, _ := resolveLen(it.Style.Width, it.Style.FontSizePt, 0); v > 0 {
+			crossW = v
+		}
 	}
-	return frag, cross
+	pos := &positionedContext{}
+	res := e.layoutBlock(ctx, it, crossW, 0, 0, 0,
+		&floatContext{cbLeft: 0, cbRight: crossW}, pos, posCBOwner{isPage: true})
+	frag := res.frag
+	if frag != nil {
+		// Pin the fragment height to the used main size (the flexed height).
+		frag.H = usedMain
+		e.resolveAbsolute(ctx, pos, frag, crossW, usedMain)
+	}
+	return frag, crossW
 }
 
 // placeFlexFragment positions a laid-out item fragment at the given main/cross offsets,

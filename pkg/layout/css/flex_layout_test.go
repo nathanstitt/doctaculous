@@ -161,3 +161,49 @@ func TestFlexExplicitMinZeroAllowsFullShrink(t *testing.T) {
 		t.Errorf("with min-width:0 items should shrink to fit ~80; total w = %v", total)
 	}
 }
+
+func TestFlexColumnStacksVertically(t *testing.T) {
+	// column, two items width 100 height 40 and 60, basis auto, no grow/shrink.
+	// They stack vertically: item0 at y0 h40, item1 at y40 h60. Both x0.
+	mk := func(w, h float64) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: h, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinHeight: gcss.Length{Value: 0, Unit: gcss.UnitPx}, MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexDirection: "column"}, mk(100, 40), mk(100, 60)), 300)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	if frags[0].Y != 0 || frags[0].H != 40 {
+		t.Errorf("col item0 = y%v h%v, want y0 h40", frags[0].Y, frags[0].H)
+	}
+	if frags[1].Y != 40 || frags[1].H != 60 {
+		t.Errorf("col item1 = y%v h%v, want y40 h60", frags[1].Y, frags[1].H)
+	}
+}
+
+func TestFlexRowReversePlacesFromEnd(t *testing.T) {
+	// row-reverse, viewport 300, two fixed-width items 100 and 50, no grow/shrink.
+	// Reverse packs from the main-end: first item's main-start edge is at the right.
+	// item0 (100) occupies x[200..300]; item1 (50) occupies x[150..200].
+	mk := func(w float64) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexDirection: "row-reverse"}, mk(100), mk(50)), 300)
+	if frags[0].X != 200 || frags[0].W != 100 {
+		t.Errorf("row-reverse item0 = x%v w%v, want x200 w100", frags[0].X, frags[0].W)
+	}
+	if frags[1].X != 150 || frags[1].W != 50 {
+		t.Errorf("row-reverse item1 = x%v w%v, want x150 w50", frags[1].X, frags[1].W)
+	}
+}
