@@ -221,6 +221,9 @@ func justifyFrags(t *testing.T, jc string) []float64 {
 		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
 	}
 	frags := flexFrags(t, flexRow(gcss.ComputedStyle{JustifyContent: jc}, mk(), mk(), mk()), 300)
+	if len(frags) != 3 {
+		t.Fatalf("justify-content:%s want 3 item fragments, got %d", jc, len(frags))
+	}
 	xs := make([]float64, len(frags))
 	for i, f := range frags {
 		xs[i] = f.X
