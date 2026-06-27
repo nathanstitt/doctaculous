@@ -330,3 +330,50 @@ func TestAlignSelfOverridesAlignItems(t *testing.T) {
 		t.Errorf("align-self:center overrides align-items:flex-start; y = %v, want 20", f[0].Y)
 	}
 }
+
+func TestFlexOrderReorders(t *testing.T) {
+	// Three items given DISTINCT widths so position is identifiable by width: in document
+	// order width 30 (order 2), 50 (order 0), 70 (order 1). After ordering, visual order
+	// is the order-0 item (w50), order-1 (w70), order-2 (w30). With no grow, packed at
+	// start: x 0, 50, 120. The returned frags are in visual order, so their widths must be
+	// 50, 70, 30 — proving the reorder.
+	mk := func(w float64, order int) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto", Order: order,
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{}, mk(30, 2), mk(50, 0), mk(70, 1)), 300)
+	if len(frags) != 3 {
+		t.Fatalf("want 3 frags, got %d", len(frags))
+	}
+	wantW := []float64{50, 70, 30} // visual order after sorting by `order`
+	for i, w := range wantW {
+		if frags[i].W != w {
+			t.Errorf("order position %d width = %v, want %v (widths: %v %v %v)", i, frags[i].W, w, frags[0].W, frags[1].W, frags[2].W)
+		}
+	}
+	if frags[0].X != 0 || frags[1].X != 50 || frags[2].X != 120 {
+		t.Errorf("ordered items packed at 0/50/120; got %v/%v/%v", frags[0].X, frags[1].X, frags[2].X)
+	}
+}
+
+func TestFlexMainGapSpacesItems(t *testing.T) {
+	// Two fixed 50px items, column-gap 20 => x0 and x70 (50 + 20 gap).
+	mk := func() *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 50, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+	}
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{ColumnGap: gcss.Length{Value: 20, Unit: gcss.UnitPx}}, mk(), mk()), 300)
+	if frags[0].X != 0 || frags[1].X != 70 {
+		t.Errorf("column-gap:20 => x0,x70; got x%v,x%v", frags[0].X, frags[1].X)
+	}
+}
