@@ -333,6 +333,189 @@ func applyGapShorthand(cs *ComputedStyle, val string) {
 	cs.RowGap, cs.ColumnGap = row, col
 }
 
+// applyPlaceItems expands `place-items: <align-items> [<justify-items>]`.
+// One value sets both. Two values set align-items then justify-items.
+func applyPlaceItems(cs *ComputedStyle, val string) {
+	fields := splitComponents(val)
+	if len(fields) == 0 || len(fields) > 2 {
+		return
+	}
+	applyDeclaration(cs, Declaration{Property: "align-items", Value: fields[0]})
+	ji := fields[0]
+	if len(fields) == 2 {
+		ji = fields[1]
+	}
+	applyDeclaration(cs, Declaration{Property: "justify-items", Value: ji})
+}
+
+// applyPlaceContent expands `place-content: <align-content> [<justify-content>]`.
+// One value sets both. Two values set align-content then justify-content.
+func applyPlaceContent(cs *ComputedStyle, val string) {
+	fields := splitComponents(val)
+	if len(fields) == 0 || len(fields) > 2 {
+		return
+	}
+	applyDeclaration(cs, Declaration{Property: "align-content", Value: fields[0]})
+	jc := fields[0]
+	if len(fields) == 2 {
+		jc = fields[1]
+	}
+	applyDeclaration(cs, Declaration{Property: "justify-content", Value: jc})
+}
+
+// applyPlaceSelf expands `place-self: <align-self> [<justify-self>]`.
+// One value sets both. Two values set align-self then justify-self.
+func applyPlaceSelf(cs *ComputedStyle, val string) {
+	fields := splitComponents(val)
+	if len(fields) == 0 || len(fields) > 2 {
+		return
+	}
+	applyDeclaration(cs, Declaration{Property: "align-self", Value: fields[0]})
+	js := fields[0]
+	if len(fields) == 2 {
+		js = fields[1]
+	}
+	applyDeclaration(cs, Declaration{Property: "justify-self", Value: js})
+}
+
+// applyGridTemplate expands `grid-template: <rows> / <columns>`. It locates the
+// slash delimiter and parses each side as a track list. The areas-bearing form
+// (`"name" 1fr / auto`) is a best-effort parse: quoted strings are consumed as
+// grid-template-areas (the leading rows) and the trailing track list after the
+// slash becomes grid-template-columns; the track portion before the slash becomes
+// grid-template-rows. If the slash is absent or the track lists are invalid, the
+// shorthand is silently dropped (graceful degradation per project policy).
+func applyGridTemplate(cs *ComputedStyle, val string) {
+	parts := splitSlashParts(val)
+	if parts == nil || len(parts) != 2 {
+		return
+	}
+	rowPart := strings.TrimSpace(parts[0])
+	colPart := strings.TrimSpace(parts[1])
+	// Parse columns (the part after the slash) — always a track list.
+	if tl, ok := parseTrackList(colPart); ok {
+		cs.GridTemplateColumns = tl
+	}
+	// Parse rows. Check for quoted-string rows (template-areas form):
+	// if the row part contains a quoted string, extract track sizes interleaved
+	// with the strings. Best-effort: collect just the track-list tokens (non-strings).
+	if strings.ContainsRune(rowPart, '"') || strings.ContainsRune(rowPart, '\'') {
+		// Areas-bearing form: parse quoted strings for grid-template-areas,
+		// and the non-string portions as the row track list.
+		tz := newTokenizer(rowPart)
+		var areaStr strings.Builder
+		var trackStr strings.Builder
+		for {
+			tok := tz.next()
+			if tok.Kind == TokenEOF {
+				break
+			}
+			if tok.Kind == TokenWhitespace {
+				areaStr.WriteByte(' ')
+				trackStr.WriteByte(' ')
+				continue
+			}
+			if tok.Kind == TokenString {
+				areaStr.WriteString(`"`)
+				areaStr.WriteString(tok.Text)
+				areaStr.WriteString(`" `)
+			} else {
+				trackStr.WriteString(tokenText(tok))
+				trackStr.WriteByte(' ')
+			}
+		}
+		if ga, ok := parseTemplateAreas(areaStr.String()); ok {
+			cs.GridTemplateAreas = ga
+		}
+		if tl, ok := parseTrackList(trackStr.String()); ok {
+			cs.GridTemplateRows = tl
+		}
+		return
+	}
+	if tl, ok := parseTrackList(rowPart); ok {
+		cs.GridTemplateRows = tl
+	}
+}
+
+// applyGridShorthand expands the `grid` shorthand. For the explicit-grid subset
+// (a track list / track list), it delegates to applyGridTemplate. For the
+// `auto-flow` forms, it sets grid-auto-flow plus the auto-track dimension
+// (best-effort; logged via graceful-degradation — if parsing fails, the field
+// keeps its prior value). The shorthand also resets grid-template-areas,
+// grid-template-rows/columns, grid-auto-rows/columns, and grid-auto-flow to
+// their initial values before applying the new value, per CSS Grid §8.
+func applyGridShorthand(cs *ComputedStyle, val string) {
+	v := strings.TrimSpace(val)
+	if v == "" {
+		return
+	}
+	// Reset all grid properties to initial before applying (CSS shorthand reset).
+	init := initialStyle()
+	cs.GridTemplateColumns = init.GridTemplateColumns
+	cs.GridTemplateRows = init.GridTemplateRows
+	cs.GridTemplateAreas = init.GridTemplateAreas
+	cs.GridAutoColumns = init.GridAutoColumns
+	cs.GridAutoRows = init.GridAutoRows
+	cs.GridAutoFlow = init.GridAutoFlow
+
+	// Check for the auto-flow keyword forms:
+	//   grid: auto-flow [dense] [<track-size>] / <template-columns>
+	//   grid: <template-rows> / auto-flow [dense] [<track-size>]
+	// Detect by presence of "auto-flow" in the value.
+	lower := strings.ToLower(v)
+	if strings.Contains(lower, "auto-flow") {
+		parts := splitSlashParts(v)
+		if parts == nil || len(parts) != 2 {
+			return // malformed; already reset, leave initial
+		}
+		left := strings.TrimSpace(parts[0])
+		right := strings.TrimSpace(parts[1])
+		leftLower := strings.ToLower(left)
+		rightLower := strings.ToLower(right)
+		if strings.HasPrefix(leftLower, "auto-flow") {
+			// auto-flow [dense] [<track-size>] / <columns>
+			rest := strings.TrimSpace(left[len("auto-flow"):])
+			hasDense := strings.HasPrefix(strings.ToLower(rest), "dense")
+			if hasDense {
+				cs.GridAutoFlow = "row dense"
+				rest = strings.TrimSpace(rest[len("dense"):])
+			} else {
+				cs.GridAutoFlow = "row"
+			}
+			if rest != "" {
+				if tl, ok := parseTrackList(rest); ok {
+					cs.GridAutoRows = tl.Expand(0)
+				}
+			}
+			if tl, ok := parseTrackList(right); ok {
+				cs.GridTemplateColumns = tl
+			}
+		} else if strings.HasSuffix(rightLower, "auto-flow") || strings.HasPrefix(rightLower, "auto-flow") {
+			// <rows> / auto-flow [dense] [<track-size>]
+			rest := strings.TrimSpace(right[strings.Index(rightLower, "auto-flow")+len("auto-flow"):])
+			hasDense := strings.HasPrefix(strings.ToLower(rest), "dense")
+			if hasDense {
+				cs.GridAutoFlow = "column dense"
+				rest = strings.TrimSpace(rest[len("dense"):])
+			} else {
+				cs.GridAutoFlow = "column"
+			}
+			if rest != "" {
+				if tl, ok := parseTrackList(rest); ok {
+					cs.GridAutoColumns = tl.Expand(0)
+				}
+			}
+			if tl, ok := parseTrackList(left); ok {
+				cs.GridTemplateRows = tl
+			}
+		}
+		return
+	}
+
+	// Explicit-grid subset: delegate to grid-template.
+	applyGridTemplate(cs, v)
+}
+
 // applyBackground expands the (currently color-only) `background` shorthand. The
 // full background shorthand (image/position/repeat/size/attachment) is future
 // work; ComputedStyle only carries BackgroundColor today. Behavior: scan the

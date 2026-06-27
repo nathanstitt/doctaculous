@@ -199,11 +199,26 @@ func TestSizingNotInherited(t *testing.T) {
 }
 
 func TestApplyUnknownPropertyIgnored(t *testing.T) {
+	// Verify that applying an unknown property leaves all fields at their initial
+	// values. We check a representative sample of comparable fields; the full
+	// struct is not directly comparable because ComputedStyle contains slices and
+	// maps (TrackList.entries, GridAreas.Named).
 	cs := initialStyle()
-	before := cs
 	applyDeclaration(&cs, Declaration{Property: "transform", Value: "rotate(5deg)"})
-	if cs != before {
-		t.Fatalf("unknown property changed the computed style")
+	if cs.Display != "inline" {
+		t.Errorf("Display changed after unknown property: %q", cs.Display)
+	}
+	if cs.FlexDirection != "row" {
+		t.Errorf("FlexDirection changed after unknown property: %q", cs.FlexDirection)
+	}
+	if cs.GridAutoFlow != "row" {
+		t.Errorf("GridAutoFlow changed after unknown property: %q", cs.GridAutoFlow)
+	}
+	if cs.JustifyItems != "stretch" {
+		t.Errorf("JustifyItems changed after unknown property: %q", cs.JustifyItems)
+	}
+	if !cs.GridTemplateColumns.IsEmpty() {
+		t.Error("GridTemplateColumns changed after unknown property")
 	}
 }
 

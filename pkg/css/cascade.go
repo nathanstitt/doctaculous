@@ -117,6 +117,19 @@ type ComputedStyle struct {
 	FlexBasis      Length // length | percentage | UnitAuto ("auto") | UnitContent ("content")
 	Order          int
 
+	// Grid (CSS Grid L1). Container properties read on a display:grid box; item
+	// properties read on each grid item. Defaults set in initialStyle.
+	GridTemplateColumns TrackList
+	GridTemplateRows    TrackList
+	GridTemplateAreas   GridAreas
+	GridAutoColumns     []TrackSize   // implicit column tracks (nil = one auto track)
+	GridAutoRows        []TrackSize   // implicit row tracks (nil = one auto track)
+	GridAutoFlow        string        // "row" | "column" | "row dense" | "column dense"
+	JustifyItems        string        // start|end|center|stretch|baseline
+	JustifySelf         string        // auto|start|end|center|stretch|baseline
+	AlignContent        string        // start|end|center|space-between|space-around|space-evenly|stretch
+	GridPlacement       GridPlacement // an item's resolved col+row endpoints + optional area name
+
 	// Table properties (CSS 2.1 §17).
 	// BorderCollapse: "separate" (initial) | "collapse". Inherited.
 	BorderCollapse string
@@ -342,6 +355,12 @@ func initialStyle() ComputedStyle {
 		FlexBasis:      Length{Unit: UnitAuto},
 		Order:          0,
 		// ColumnGap, RowGap default to the zero Length ({0, UnitPx}) = no gap.
+		GridAutoFlow: "row",
+		JustifyItems: "stretch",
+		JustifySelf:  "auto",
+		AlignContent: "start",
+		// GridAutoColumns/GridAutoRows default to nil: layout treats nil as one auto track.
+		// GridTemplateColumns/Rows/Areas default to zero value (empty = no explicit template).
 		BorderCollapse: "separate",
 		TableLayout:    "auto",
 		VerticalAlign:  "baseline",
@@ -563,17 +582,20 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		}
 	case "justify-content":
 		switch d.Value {
-		case "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly":
+		case "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly",
+			"start", "end", "stretch", "normal":
 			cs.JustifyContent = d.Value
 		}
 	case "align-items":
 		switch d.Value {
-		case "stretch", "flex-start", "flex-end", "center", "baseline":
+		case "stretch", "flex-start", "flex-end", "center", "baseline",
+			"start", "end", "normal":
 			cs.AlignItems = d.Value
 		}
 	case "align-self":
 		switch d.Value {
-		case "auto", "stretch", "flex-start", "flex-end", "center", "baseline":
+		case "auto", "stretch", "flex-start", "flex-end", "center", "baseline",
+			"start", "end", "normal":
 			cs.AlignSelf = d.Value
 		}
 	case "column-gap":
@@ -604,8 +626,108 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		applyFlexShorthand(cs, d.Value)
 	case "gap":
 		applyGapShorthand(cs, d.Value)
+	case "grid-template-columns":
+		if tl, ok := parseTrackList(d.Value); ok {
+			cs.GridTemplateColumns = tl
+		}
+		// "none" or "subgrid" leave the zero value (empty list = no explicit tracks).
+	case "grid-template-rows":
+		if tl, ok := parseTrackList(d.Value); ok {
+			cs.GridTemplateRows = tl
+		}
+	case "grid-template-areas":
+		if ga, ok := parseTemplateAreas(d.Value); ok {
+			cs.GridTemplateAreas = ga
+		}
+	case "grid-auto-columns":
+		if tl, ok := parseTrackList(d.Value); ok {
+			cs.GridAutoColumns = tl.Expand(0)
+		}
+	case "grid-auto-rows":
+		if tl, ok := parseTrackList(d.Value); ok {
+			cs.GridAutoRows = tl.Expand(0)
+		}
+	case "grid-auto-flow":
+		if v := normalizeAutoFlow(d.Value); v != "" {
+			cs.GridAutoFlow = v
+		}
+	case "grid-column":
+		if s, e, ok := parseGridColumnRow(d.Value); ok {
+			cs.GridPlacement.ColStart, cs.GridPlacement.ColEnd = s, e
+		}
+	case "grid-row":
+		if s, e, ok := parseGridColumnRow(d.Value); ok {
+			cs.GridPlacement.RowStart, cs.GridPlacement.RowEnd = s, e
+		}
+	case "grid-area":
+		if p, ok := parseGridArea(d.Value); ok {
+			cs.GridPlacement = p
+		}
+	case "justify-items":
+		switch d.Value {
+		case "start", "end", "center", "stretch", "baseline", "flex-start", "flex-end", "normal":
+			cs.JustifyItems = d.Value
+		}
+	case "justify-self":
+		switch d.Value {
+		case "auto", "start", "end", "center", "stretch", "baseline", "flex-start", "flex-end", "normal":
+			cs.JustifySelf = d.Value
+		}
+	case "align-content":
+		switch d.Value {
+		case "start", "end", "center", "space-between", "space-around", "space-evenly", "stretch",
+			"flex-start", "flex-end", "normal":
+			cs.AlignContent = d.Value
+		}
+	case "place-items":
+		applyPlaceItems(cs, d.Value)
+	case "place-content":
+		applyPlaceContent(cs, d.Value)
+	case "place-self":
+		applyPlaceSelf(cs, d.Value)
+	case "grid-template":
+		applyGridTemplate(cs, d.Value)
+	case "grid":
+		applyGridShorthand(cs, d.Value)
 	}
 	// default: unsupported property — ignored on purpose.
+}
+
+// normalizeAutoFlow canonicalizes a grid-auto-flow value to one of the four valid
+// forms: "row", "column", "row dense", "column dense". It is order-insensitive:
+// "dense" alone → "row dense"; "dense column"/"column dense" → "column dense";
+// "dense row"/"row dense" → "row dense"; "row"/"column" → unchanged.
+// Returns "" for any unrecognized value so the caller can skip the assignment.
+func normalizeAutoFlow(val string) string {
+	fields := splitComponents(strings.TrimSpace(val))
+	if len(fields) == 0 || len(fields) > 2 {
+		return ""
+	}
+	hasRow, hasColumn, hasDense := false, false, false
+	for _, f := range fields {
+		switch strings.ToLower(f) {
+		case "row":
+			hasRow = true
+		case "column":
+			hasColumn = true
+		case "dense":
+			hasDense = true
+		default:
+			return "" // unrecognized keyword
+		}
+	}
+	// Ambiguous: both row and column not allowed.
+	if hasRow && hasColumn {
+		return ""
+	}
+	dir := "row"
+	if hasColumn {
+		dir = "column"
+	}
+	if hasDense {
+		return dir + " dense"
+	}
+	return dir
 }
 
 // setLength parses val as a length and writes it to dst when valid.
