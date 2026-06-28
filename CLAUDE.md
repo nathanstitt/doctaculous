@@ -485,11 +485,15 @@ what is done vs. pending.
   404s / times out / exceeds the cap / has an unsupported scheme / is a malformed `data:` returns
   `ErrNotFound` and the page degrades exactly as for a missing local ref (skipped stylesheet / placeholder
   image, no panic); the **document** fetch failing is a hard error (a non-`http(s)` scheme returns the
-  exported `ErrUnsupportedScheme`). Deferred (each degrades): **`<base href>`**, a **content-addressed fetch
+  exported `ErrUnsupportedScheme`). Deferred (each degrades): **`<base href>`**; a **content-addressed fetch
   cache** (the `FaceCache` is keyed `(family, style)` so one font file is fetched once per style — now worth
-  a shared fetch cache since HTTP fetches are real), **caller-controlled context** (`OpenURLContext` — the
-  document fetch uses a background context today), **cookies / richer auth** (beyond URL-userinfo Basic, via
-  an injected `Client`), **custom redirect/proxy/SSRF hardening**, and **non-`http(s)`/`data:` schemes**. This
+  a shared fetch cache since HTTP fetches are real); **caller-controlled context** (`OpenURLContext` — the
+  document fetch uses a background context today); **cookies / richer auth** (beyond URL-userinfo Basic, via
+  an injected `Client`); **custom redirect/proxy/SSRF hardening**; **non-`http(s)`/`data:` schemes**; and the
+  **redirected-document base URL** — when the *document* fetch follows a redirect, relative sub-resource refs
+  resolve against the *original* URL, not the final response URL a browser would use (the page still renders;
+  sub-refs that live only at the post-redirect path degrade to placeholder/skipped — a `<base href>`-class
+  follow-up: surface the loader's final `resp.Request.URL` and re-root `Base`). This
   is sub-project 11 of the HTML-rendering roadmap. See
   `docs/superpowers/specs/2026-06-28-html-openurl-design.md`.
 

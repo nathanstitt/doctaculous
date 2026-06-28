@@ -255,13 +255,25 @@ func TestHTTPLoaderBasicAuthFromUserinfo(t *testing.T) {
 }
 
 func TestRedactDropsUserinfo(t *testing.T) {
-	u := mustURL(t, "https://user:secret@host.example/path?q=1")
+	// Userinfo AND a token-bearing query must both be dropped; host+path kept.
+	u := mustURL(t, "https://user:secret@host.example/path?token=secrettoken")
 	got := redact(u)
 	if strings.Contains(got, "user") || strings.Contains(got, "secret") {
-		t.Errorf("redact() = %q, leaks credentials", got)
+		t.Errorf("redact() = %q, leaks credentials (userinfo or query token)", got)
+	}
+	if strings.Contains(got, "token") {
+		t.Errorf("redact() = %q, retained the query (a secret vector)", got)
 	}
 	if !strings.Contains(got, "host.example") || !strings.Contains(got, "/path") {
 		t.Errorf("redact() = %q, dropped host/path it should keep", got)
+	}
+}
+
+// A URL with no query redacts to a plain scheme://host/path (no trailing marker).
+func TestRedactNoQuery(t *testing.T) {
+	got := redact(mustURL(t, "https://user:pw@host.example/a/b"))
+	if got != "https://host.example/a/b" {
+		t.Errorf("redact() = %q, want https://host.example/a/b", got)
 	}
 }
 

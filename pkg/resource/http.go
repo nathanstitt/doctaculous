@@ -170,10 +170,19 @@ func (h HTTPLoader) fetch(ctx context.Context, u *url.URL) ([]byte, string, erro
 	return data, resp.Header.Get("Content-Type"), nil
 }
 
-// redact returns a URL string safe for logs/errors: scheme://host/path with any
-// userinfo (the only credential-bearing component) dropped.
+// redact returns a URL string safe for logs/errors: scheme://host/path with the
+// userinfo dropped and the query elided. Userinfo is the obvious credential; the
+// query is dropped too because it commonly carries secrets (?token=…), and the
+// host+path is what actually aids debugging. The path is kept verbatim.
 func redact(u *url.URL) string {
 	r := *u
 	r.User = nil
+	if r.RawQuery != "" || r.ForceQuery {
+		r.RawQuery = ""
+		r.ForceQuery = false
+		r.Fragment = ""
+		return r.String() + "?…"
+	}
+	r.Fragment = ""
 	return r.String()
 }
