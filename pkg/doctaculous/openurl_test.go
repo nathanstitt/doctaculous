@@ -1,10 +1,16 @@
 package doctaculous
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // A document served over (loopback) HTTP with a relative <link> stylesheet and a
@@ -87,4 +93,71 @@ func TestOpenURLDocument404Errors(t *testing.T) {
 	if _, err := OpenURL(srv.URL + "/nope.html"); err == nil {
 		t.Fatal("OpenURL of a 404 document returned nil error, want an error")
 	}
+}
+
+// Rendering a document via the HTTP loader must produce the identical raster to
+// rendering it via an in-memory MapLoader with the same bytes — proving the HTTP
+// path is a transparent byte source (no pixel difference), so the existing goldens
+// cover its output without a new golden.
+func TestOpenURLMatchesMapLoaderRender(t *testing.T) {
+	const doc = `<!DOCTYPE html><html><head>
+		<link rel="stylesheet" href="s.css">
+		</head><body><div class="card">Same</div><img src="q.png"></body></html>`
+	const css = `body{margin:0}.card{width:120px;height:40px;background:#cce5ff;border:3px solid #036}`
+	png40 := quadPNG(40)
+
+	// (a) Render over loopback HTTP via OpenURL.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(doc))
+	})
+	mux.HandleFunc("/s.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css")
+		_, _ = w.Write([]byte(css))
+	})
+	mux.HandleFunc("/q.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png40)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	httpDoc, err := OpenURL(srv.URL + "/index.html")
+	if err != nil {
+		t.Fatalf("OpenURL: %v", err)
+	}
+
+	// (b) Render the same bytes via an in-memory MapLoader.
+	loader := resource.MapLoader{
+		"s.css": {Data: []byte(css), ContentType: "text/css"},
+		"q.png": {Data: png40, ContentType: "image/png"},
+	}
+	memDoc, err := OpenHTMLBytes([]byte(doc), WithResourceLoader(loader))
+	if err != nil {
+		t.Fatalf("OpenHTMLBytes: %v", err)
+	}
+
+	httpPNG := rasterToPNG(t, httpDoc)
+	memPNG := rasterToPNG(t, memDoc)
+	if !bytes.Equal(httpPNG, memPNG) {
+		t.Errorf("HTTP-loader render differs from MapLoader render (%d vs %d bytes)", len(httpPNG), len(memPNG))
+	}
+}
+
+// rasterToPNG renders page 0 of doc at the golden DPI and returns its PNG bytes.
+func rasterToPNG(t *testing.T, doc *Document) []byte {
+	t.Helper()
+	img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI})
+	if err != nil {
+		t.Fatalf("RasterizePage: %v", err)
+	}
+	rgba, ok := img.(*image.RGBA)
+	if !ok {
+		t.Fatalf("image is %T, want *image.RGBA", img)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, rgba); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return buf.Bytes()
 }
