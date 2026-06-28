@@ -328,3 +328,23 @@ func TestHTTPLoaderAuthNotForwardedCrossOrigin(t *testing.T) {
 		t.Errorf("cross-origin request URL carried userinfo %v, want none", tr.req.URL.User)
 	}
 }
+
+func TestHTTPLoaderEmptyRefFetchesBase(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte("<html></html>"))
+	}))
+	defer srv.Close()
+	l := HTTPLoader{Base: mustURL(t, srv.URL+"/dir/index.html")}
+	data, _, err := l.Load(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Load(\"\"): %v", err)
+	}
+	if gotPath != "/dir/index.html" {
+		t.Errorf("empty ref fetched %q, want /dir/index.html (Base)", gotPath)
+	}
+	if string(data) != "<html></html>" {
+		t.Errorf("data = %q", data)
+	}
+}
