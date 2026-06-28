@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -208,5 +209,78 @@ func TestHTTPLoaderHonorsContextCancel(t *testing.T) {
 	// the underlying ctx error (errors.Is(err, context.DeadlineExceeded)).
 	if errors.Is(err, ErrNotFound) {
 		t.Error("ctx cancel error must not be mapped to ErrNotFound")
+	}
+}
+
+func TestHTTPLoaderBasicAuthFromUserinfo(t *testing.T) {
+	var gotAuth string
+	var gotRawURLHasCreds bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		// The request line / URL the server sees must not carry userinfo.
+		gotRawURLHasCreds = strings.Contains(r.RequestURI, "user:") || (r.URL.User != nil)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	// Inject credentials into the base URL's host. srv.URL is http://127.0.0.1:PORT.
+	base := mustURL(t, srv.URL+"/doc.html")
+	base.User = url.UserPassword("user", "pw")
+	l := HTTPLoader{Base: base}
+	if _, _, err := l.Load(context.Background(), "asset.css"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// "user:pw" base64 = dXNlcjpwdw==
+	if gotAuth != "Basic dXNlcjpwdw==" {
+		t.Errorf("Authorization = %q, want Basic dXNlcjpwdw==", gotAuth)
+	}
+	if gotRawURLHasCreds {
+		t.Error("request URL carried userinfo; it must be stripped")
+	}
+}
+
+func TestRedactDropsUserinfo(t *testing.T) {
+	u := mustURL(t, "https://user:secret@host.example/path?q=1")
+	got := redact(u)
+	if strings.Contains(got, "user") || strings.Contains(got, "secret") {
+		t.Errorf("redact() = %q, leaks credentials", got)
+	}
+	if !strings.Contains(got, "host.example") || !strings.Contains(got, "/path") {
+		t.Errorf("redact() = %q, dropped host/path it should keep", got)
+	}
+}
+
+func TestHTTPLoaderAuthErrorRedacted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	base := mustURL(t, srv.URL+"/doc.html")
+	base.User = url.UserPassword("user", "topsecret")
+	l := HTTPLoader{Base: base}
+	_, _, err := l.Load(context.Background(), "missing.css")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if strings.Contains(err.Error(), "topsecret") || strings.Contains(err.Error(), "user:") {
+		t.Errorf("error leaks credentials: %v", err)
+	}
+}
+
+func TestHTTPLoaderAuthInheritedByRelativeRef(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("x"))
+	}))
+	defer srv.Close()
+	base := mustURL(t, srv.URL+"/a/doc.html")
+	base.User = url.UserPassword("user", "pw")
+	l := HTTPLoader{Base: base}
+	// A relative ref resolves to the SAME origin and must inherit the base creds.
+	if _, _, err := l.Load(context.Background(), "sub/asset.css"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if gotAuth != "Basic dXNlcjpwdw==" {
+		t.Errorf("relative sub-ref Authorization = %q, want inherited Basic dXNlcjpwdw==", gotAuth)
 	}
 }

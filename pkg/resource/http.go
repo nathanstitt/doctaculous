@@ -112,12 +112,29 @@ func defaultHTTPClient() *http.Client {
 }
 
 // fetch performs the HTTP GET for an http(s) URL u, honoring ctx, capping the
-// body, and treating any non-2xx status as absent (ErrNotFound). u may carry
-// userinfo; auth handling is added in a later task.
+// body, and treating any non-2xx status as absent (ErrNotFound). When u carries
+// userinfo, the credentials are extracted into an Authorization: Basic header and
+// stripped from the outbound URL so they travel in the header (testable, never
+// echoed in the request line) rather than in the URL.
 func (h HTTPLoader) fetch(ctx context.Context, u *url.URL) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	// Extract URL userinfo into an explicit Authorization header and strip it from
+	// the outbound URL, so credentials are in the header (testable, never echoed in
+	// the request line) rather than in the URL.
+	outbound := *u
+	var user, pass string
+	haveAuth := false
+	if u.User != nil {
+		user = u.User.Username()
+		pass, _ = u.User.Password()
+		haveAuth = true
+		outbound.User = nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, outbound.String(), nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: %w", redact(u), ErrNotFound)
+	}
+	if haveAuth {
+		req.SetBasicAuth(user, pass)
 	}
 	client := h.Client
 	if client == nil {
