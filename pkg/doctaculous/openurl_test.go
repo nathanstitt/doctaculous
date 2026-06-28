@@ -81,17 +81,31 @@ func TestOpenURLSubResource404Degrades(t *testing.T) {
 	if doc == nil || doc.PageCount() != 1 {
 		t.Fatal("want a single-page document despite 404 sub-resources")
 	}
+	// "Still renders" must mean a real page, not a 0-area blank: the <p> text gives
+	// it height even with the stylesheet and image missing.
+	img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI})
+	if err != nil {
+		t.Fatalf("RasterizePage after 404 sub-resources: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() <= 0 || b.Dy() <= 0 {
+		t.Errorf("rendered page bounds = %v, want non-zero area", b)
+	}
 }
 
 // A failed DOCUMENT fetch (the URL itself 404s) is a hard error — the document is
-// mandatory, unlike a sub-resource.
+// mandatory, unlike a sub-resource. The loader's ErrNotFound propagates through
+// OpenURL's %w wrap, so callers can still distinguish "absent" from other failures.
 func TestOpenURLDocument404Errors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 	}))
 	defer srv.Close()
-	if _, err := OpenURL(srv.URL + "/nope.html"); err == nil {
+	_, err := OpenURL(srv.URL + "/nope.html")
+	if err == nil {
 		t.Fatal("OpenURL of a 404 document returned nil error, want an error")
+	}
+	if !errors.Is(err, resource.ErrNotFound) {
+		t.Errorf("err = %v, want it to wrap resource.ErrNotFound", err)
 	}
 }
 
