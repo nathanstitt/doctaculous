@@ -61,6 +61,21 @@ func TestHTTPLoaderDataURINoMediaType(t *testing.T) {
 	}
 }
 
+func TestHTTPLoaderDataURIEmptyPayload(t *testing.T) {
+	l := HTTPLoader{Base: mustURL(t, "http://example.com/doc.html")}
+	// A comma is present but the payload is empty: a valid data: URI for zero bytes.
+	data, ct, err := l.Load(context.Background(), "data:text/plain,")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("data = %q, want empty", data)
+	}
+	if ct != "text/plain" {
+		t.Errorf("contentType = %q, want text/plain", ct)
+	}
+}
+
 func TestHTTPLoaderDataURIMalformed(t *testing.T) {
 	l := HTTPLoader{Base: mustURL(t, "http://example.com/doc.html")}
 	// No comma → not a valid data: URI.
