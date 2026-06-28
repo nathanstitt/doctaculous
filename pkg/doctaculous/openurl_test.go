@@ -1,6 +1,7 @@
 package doctaculous
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,5 +39,17 @@ func TestOpenURLRendersRemoteResources(t *testing.T) {
 	}
 	if doc.PageCount() != 1 {
 		t.Errorf("PageCount = %d, want 1", doc.PageCount())
+	}
+}
+
+// OpenURL rejects a non-http(s) scheme with ErrUnsupportedScheme (so callers can
+// branch on it) and an empty URL with a clear error, both BEFORE any fetch.
+func TestOpenURLRejectsBadInput(t *testing.T) {
+	_, err := OpenURL("file:///etc/passwd")
+	if !errors.Is(err, ErrUnsupportedScheme) {
+		t.Errorf("file: scheme err = %v, want ErrUnsupportedScheme", err)
+	}
+	if _, err := OpenURL(""); err == nil {
+		t.Error("OpenURL(\"\") returned nil error, want an error")
 	}
 }
