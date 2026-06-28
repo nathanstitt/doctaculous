@@ -54,6 +54,17 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 
 	buckets := bucketBlocks(body.Children, pageH, e.logf)
 
+	// A top-level position:relative block is in flow (so it is in body.Children and
+	// gets bucketed) but is ALSO lifted into the root's positioned layer for painting
+	// — the SAME *Fragment pointer appears in both root.Positioned and a bucket. The
+	// in-flow Children pass skips it (IsPositioned), so it paints only from the
+	// positioned layer; if that layer stayed on page 0 the block would vanish from its
+	// real page. Route each such entry to the page its block landed on (the entry IS
+	// the block pointer, so shifting the bucket already moves it). Other positioned
+	// entries — absolute/fixed boxes (incl. descendants of a relative block) — are not
+	// distributed in this slice and ride the first page (a documented deferral).
+	perPagePos := splitPositionedByPage(root, buckets)
+
 	pages := make([]layout.Page, 0, len(buckets))
 	for i, bk := range buckets {
 		// Shallow-clone the root/body wrapper so each page can carry its own block
@@ -63,21 +74,20 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 		pageRoot := *root
 		pageBody := *body
 		pageBody.Children = bk.blocks
-		// The out-of-flow layers (positioned descendants and the BFC's floats) live on
-		// the root/body wrapper, not in the per-page block list, so a plain copy would
-		// re-flatten them onto every page at their original (unshifted) Y. This slice
-		// does not yet distribute out-of-flow content across pages (see the design
-		// doc's deferrals); it keeps it on the FIRST page only. Null the layers on
-		// every later page's clone so an absolute/fixed box or a top-level float is not
-		// duplicated. The body's own background/border still paints per page (a
-		// documented approximation — a full per-page background model is a follow-up).
+		// Assign this page's share of the positioned layer (its top-level relative
+		// blocks; page 0 additionally keeps the undistributed abs/fixed residual). The
+		// out-of-flow float layer is not distributed and rides the first page only;
+		// null it on later pages so a top-level float is not duplicated. The body owns
+		// no positioned/float layer of its own (the root does), so its copies are
+		// cleared. The body's own background/border still paints per page (a documented
+		// approximation — a full per-page background model is a follow-up).
+		pageRoot.Positioned = perPagePos[i].frags
+		pageRoot.PositionedInfo = perPagePos[i].infos
+		pageBody.Positioned = nil
+		pageBody.PositionedInfo = nil
+		pageBody.Floats = nil
 		if i > 0 {
-			pageRoot.Positioned = nil
-			pageRoot.PositionedInfo = nil
 			pageRoot.Floats = nil
-			pageBody.Positioned = nil
-			pageBody.PositionedInfo = nil
-			pageBody.Floats = nil
 		}
 		// Replace the body entry (root.Children[last]) with the body clone, preserving
 		// any non-body children.
@@ -88,6 +98,9 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 
 		// Translate this page's blocks up so the page's first content sits at local
 		// Y 0. Must run BEFORE Page(...) flattens (the flatten reads the shifted Ys).
+		// Because a routed relative-block entry is the SAME pointer as a bucket block,
+		// this shift also moves that entry into its page's local space — no separate
+		// positioned shift is needed.
 		shiftFragments(bk.blocks, -bk.top)
 
 		pages = append(pages, pageRoot.Page(viewportW, pageH))
@@ -101,6 +114,50 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 type pageBucket struct {
 	top    float64
 	blocks []*Fragment
+}
+
+// pagePositioned is one page's slice of the positioned layer: the fragments painted
+// in that page's positioned band and the parallel PositionedInfo (same length).
+type pagePositioned struct {
+	frags []*Fragment
+	infos []PositionedInfo
+}
+
+// splitPositionedByPage partitions root.Positioned (and its parallel PositionedInfo)
+// across the buckets. A positioned entry whose *Fragment pointer is one of the
+// top-level blocks (a position:relative block — in flow, hence bucketed, but painted
+// from the positioned layer) is routed to the page that block landed on. Every other
+// entry (absolute/fixed, including descendants of a relative block) is undistributed
+// and assigned to the first page — the documented deferral. The result has one entry
+// per bucket; a parallel info slice is kept aligned so the flatten's z-index/clip
+// metadata stays correct.
+func splitPositionedByPage(root *Fragment, buckets []pageBucket) []pagePositioned {
+	out := make([]pagePositioned, len(buckets))
+	if root == nil || len(root.Positioned) == 0 || len(buckets) == 0 {
+		return out
+	}
+	// Map each top-level block pointer to its bucket index.
+	blockPage := make(map[*Fragment]int)
+	for bi := range buckets {
+		for _, b := range buckets[bi].blocks {
+			blockPage[b] = bi
+		}
+	}
+	for i, frag := range root.Positioned {
+		// PositionedInfo may be shorter than Positioned (a nil/short slice reads as the
+		// zero value); guard the parallel index.
+		var info PositionedInfo
+		if i < len(root.PositionedInfo) {
+			info = root.PositionedInfo[i]
+		}
+		page := 0 // default: undistributed (abs/fixed) → first page
+		if p, ok := blockPage[frag]; ok {
+			page = p // a top-level relative block → its own page
+		}
+		out[page].frags = append(out[page].frags, frag)
+		out[page].infos = append(out[page].infos, info)
+	}
+	return out
 }
 
 // bucketBlocks assigns top-level in-flow block fragments to pageH-tall pages,

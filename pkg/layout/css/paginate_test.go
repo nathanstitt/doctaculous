@@ -250,6 +250,36 @@ func TestPaginatePositionedFirstPageOnly(t *testing.T) {
 	}
 }
 
+// TestPaginateRelativeBlockPaginatesNormally pins the fix for the holistic-review
+// bug: a top-level position:relative block is in flow (so it is bucketed) but is also
+// lifted into the positioned layer for painting. Its positioned entry must be routed
+// to the page its block landed on — otherwise the block vanishes from its real page
+// and ghosts on page 0. Here the relative block lands on page 1 (the first block fills
+// page 0), so its background must appear on page 1 and NOT on page 0.
+func TestPaginateRelativeBlockPaginatesNormally(t *testing.T) {
+	const w = 400
+	relColor := color.RGBA{180, 40, 40, 255}
+	src := `<html><body>` +
+		`<div style="height:200px;margin:0;background-color:rgb(120,120,120)">a</div>` +
+		`<div style="height:60px;margin:0;position:relative;background-color:rgb(180,40,40)">rel</div>` +
+		`</body></html>`
+
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, 250)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Fatalf("expected 2 pages (block a fills page 0, rel block on page 1), got %d", len(pages.Pages))
+	}
+	if got := countBackgrounds(pages.Pages[0], relColor); got != 0 {
+		t.Errorf("page 0 must NOT ghost the relative block, got %d", got)
+	}
+	if got := countBackgrounds(pages.Pages[1], relColor); got != 1 {
+		t.Errorf("page 1 must paint the relative block once, got %d", got)
+	}
+}
+
 func TestLayoutPagedZeroHeightIsSingleTall(t *testing.T) {
 	const w = 400
 	src := threeBlocks(100)
