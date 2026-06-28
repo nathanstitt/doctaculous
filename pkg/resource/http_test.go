@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -212,29 +213,44 @@ func TestHTTPLoaderHonorsContextCancel(t *testing.T) {
 	}
 }
 
+// captureTransport records the outbound *http.Request and returns a canned 200.
+// It inspects the request CLIENT-side (before the stdlib sends it), which is the
+// only place HTTPLoader's userinfo-strip is observable: Go's http.Client always
+// hides userinfo from the wire/server, so a server-side check cannot distinguish
+// "stripped by our code" from "hidden by the client". Here req.URL.User is exactly
+// what our fetch built, so a missing strip is caught.
+type captureTransport struct {
+	req *http.Request
+}
+
+func (c *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.req = req
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("ok")),
+		Header:     make(http.Header),
+	}, nil
+}
+
 func TestHTTPLoaderBasicAuthFromUserinfo(t *testing.T) {
-	var gotAuth string
-	var gotRawURLHasCreds bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		// The request line / URL the server sees must not carry userinfo.
-		gotRawURLHasCreds = strings.Contains(r.RequestURI, "user:") || (r.URL.User != nil)
-		_, _ = w.Write([]byte("ok"))
-	}))
-	defer srv.Close()
-	// Inject credentials into the base URL's host. srv.URL is http://127.0.0.1:PORT.
-	base := mustURL(t, srv.URL+"/doc.html")
+	cap := &captureTransport{}
+	base := mustURL(t, "http://host.example/doc.html")
 	base.User = url.UserPassword("user", "pw")
-	l := HTTPLoader{Base: base}
+	l := HTTPLoader{Base: base, Client: &http.Client{Transport: cap}}
 	if _, _, err := l.Load(context.Background(), "asset.css"); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	// "user:pw" base64 = dXNlcjpwdw==
-	if gotAuth != "Basic dXNlcjpwdw==" {
-		t.Errorf("Authorization = %q, want Basic dXNlcjpwdw==", gotAuth)
+	if cap.req == nil {
+		t.Fatal("transport captured no request")
 	}
-	if gotRawURLHasCreds {
-		t.Error("request URL carried userinfo; it must be stripped")
+	// "user:pw" base64 = dXNlcjpwdw==
+	if got := cap.req.Header.Get("Authorization"); got != "Basic dXNlcjpwdw==" {
+		t.Errorf("Authorization = %q, want Basic dXNlcjpwdw==", got)
+	}
+	// The outbound request URL our fetch built must carry NO userinfo. This assertion
+	// genuinely fails if the strip (outbound.User = nil) is removed.
+	if cap.req.URL.User != nil {
+		t.Errorf("outbound request URL carried userinfo %v; it must be stripped", cap.req.URL.User)
 	}
 }
 
