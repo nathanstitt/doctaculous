@@ -780,3 +780,48 @@ func TestFlexUnknownValueIgnored(t *testing.T) {
 		t.Errorf("justify-content after bogus = %q, want flex-start (unchanged)", cs.JustifyContent)
 	}
 }
+
+func TestBreakProperties(t *testing.T) {
+	apply := func(prop, val string) ComputedStyle {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: prop, Value: val})
+		return cs
+	}
+
+	// Modern break-before / break-after.
+	if cs := apply("break-before", "page"); cs.BreakBefore != "page" {
+		t.Errorf("break-before:page => BreakBefore = %q, want page", cs.BreakBefore)
+	}
+	if cs := apply("break-after", "always"); cs.BreakAfter != "always" {
+		t.Errorf("break-after:always => BreakAfter = %q, want always", cs.BreakAfter)
+	}
+
+	// Legacy page-break-before / page-break-after aliases.
+	if cs := apply("page-break-before", "always"); cs.BreakBefore != "always" {
+		t.Errorf("page-break-before:always => BreakBefore = %q, want always", cs.BreakBefore)
+	}
+	if cs := apply("page-break-after", "avoid"); cs.BreakAfter != "avoid" {
+		t.Errorf("page-break-after:avoid => BreakAfter = %q, want avoid", cs.BreakAfter)
+	}
+
+	// Initial value: no declaration leaves both empty ("" == auto).
+	cs := initialStyle()
+	if cs.BreakBefore != "" || cs.BreakAfter != "" {
+		t.Errorf("initial break = %q/%q, want empty/empty", cs.BreakBefore, cs.BreakAfter)
+	}
+
+	// Unknown value is dropped, leaving the prior value intact (mirror overflow).
+	cs2 := apply("break-before", "page")
+	applyDeclaration(&cs2, Declaration{Property: "break-before", Value: "bogus"})
+	if cs2.BreakBefore != "page" {
+		t.Errorf("break-before:bogus after page => BreakBefore = %q, want page (unchanged)", cs2.BreakBefore)
+	}
+
+	// Modern-vs-legacy source order: same field, last declaration wins.
+	cs3 := initialStyle()
+	applyDeclaration(&cs3, Declaration{Property: "page-break-before", Value: "avoid"})
+	applyDeclaration(&cs3, Declaration{Property: "break-before", Value: "page"})
+	if cs3.BreakBefore != "page" {
+		t.Errorf("page-break-before:avoid then break-before:page => BreakBefore = %q, want page (last wins)", cs3.BreakBefore)
+	}
+}

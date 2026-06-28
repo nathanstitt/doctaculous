@@ -235,34 +235,53 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// 1. Bucket blocks into pages by accumulated height + forced breaks.
 	type pageBucket struct{ top float64; blocks []*Fragment }
 	var buckets []pageBucket
-	cur := pageBucket{top: blocks[0].Y}
+	var cur pageBucket
 	for _, b := range blocks {
 		forcedBefore := isForcedBreak(breakBefore(b))
 		overflow := len(cur.blocks) > 0 && (b.Y+b.H)-cur.top > pageH
-		if forcedBefore || overflow {
+		// Close the current page only if it has content (a forced-before on the first
+		// block is a no-op, not a leading empty page).
+		if (forcedBefore || overflow) && len(cur.blocks) > 0 {
 			buckets = append(buckets, cur)
-			cur = pageBucket{top: b.Y, blocks: nil}
+			cur = pageBucket{}
 		}
-		// too-tall-for-a-page block on an otherwise-empty page: keep it, it overflows.
-		if len(cur.blocks) == 0 && b.H > pageH {
-			e.logf("css pagination: block taller than page (%.0fpt > %.0fpt); overflowing, not splitting", b.H, pageH)
+		// The page top is the FIRST block's own page-space Y, captured when the block
+		// joins a fresh page — NOT a provisional previous-block bottom (which would
+		// leave the next page's content mis-shifted by any margin gap between blocks).
+		if len(cur.blocks) == 0 {
+			cur.top = b.Y
+			// too-tall-for-a-page block on an otherwise-empty page: keep it, it overflows.
+			if b.H > pageH {
+				e.logf("css pagination: block taller than page (%.0fpt > %.0fpt); overflowing, not splitting", b.H, pageH)
+			}
 		}
 		cur.blocks = append(cur.blocks, b)
 		if isForcedBreak(breakAfter(b)) {
 			buckets = append(buckets, cur)
-			cur = pageBucket{top: b.Y + b.H, blocks: nil} // provisional top; reset by next block's own Y
+			cur = pageBucket{} // next page's top is set from its own first block above
 		}
 	}
-	if len(cur.blocks) > 0 || len(buckets) == 0 {
+	if len(cur.blocks) > 0 {
 		buckets = append(buckets, cur)
+	}
+	if len(buckets) == 0 {
+		buckets = append(buckets, pageBucket{top: 0})
 	}
 
 	// 2. Build one layout.Page per bucket: shift its blocks to local Y 0, wrap in a
-	//    shallow-cloned root/body, flatten.
+	//    shallow-cloned root/body, flatten. On every page AFTER the first, null the
+	//    out-of-flow layers on the clone (Positioned/PositionedInfo/Floats) so an
+	//    absolute/fixed box or a top-level float — which rides the root/body wrapper,
+	//    not the per-page block list — is not duplicated onto every page (this slice
+	//    keeps out-of-flow content on the first page only; see Deferrals).
 	pages := make([]layout.Page, 0, len(buckets))
-	for _, bk := range buckets {
+	for i, bk := range buckets {
 		pageRoot := clonePageRoot(root, body, bk.blocks) // value-copies root+body, sets body.Children
-		shiftFragments(pageRoot.bodyChildren(), -bk.top)  // translate the page's blocks up
+		if i > 0 {
+			pageRoot.Positioned, pageRoot.PositionedInfo, pageRoot.Floats = nil, nil, nil
+			// (and likewise on the body clone, if body owns any)
+		}
+		shiftFragments(bk.blocks, -bk.top) // translate the page's blocks up
 		pages = append(pages, pageRoot.Page(viewportW, pageH))
 	}
 	return &layout.Pages{Pages: pages}

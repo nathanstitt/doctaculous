@@ -19,10 +19,11 @@ type HTMLOption func(*htmlConfig)
 
 // htmlConfig is the resolved HTML layout configuration.
 type htmlConfig struct {
-	viewportPt float64
-	loader     resource.ResourceLoader
-	sys        layoutfont.SystemFontProvider
-	logf       func(string, ...any)
+	viewportPt   float64
+	pageHeightPt float64
+	loader       resource.ResourceLoader
+	sys          layoutfont.SystemFontProvider
+	logf         func(string, ...any)
 }
 
 // defaultViewportPt is the default layout viewport width in points (px:pt 1:1).
@@ -43,6 +44,27 @@ func WithViewportWidth(px float64) HTMLOption {
 	return func(c *htmlConfig) {
 		if px > 0 {
 			c.viewportPt = px
+		}
+	}
+}
+
+// LetterWidthPt / LetterHeightPt are US-Letter (8.5in × 11in) at 96dpi (px:pt 1:1),
+// the conventional default page size for WithPageSize.
+const (
+	LetterWidthPt  = 816
+	LetterHeightPt = 1056
+)
+
+// WithPageSize paginates output into fixed widthPt × heightPt (points) pages: the
+// document lays out at widthPt and is sliced into heightPt-tall pages, breaking
+// between top-level blocks and at forced page breaks (CSS break-before/after: page).
+// Without WithPageSize the document renders as a single tall page (the default).
+// widthPt or heightPt <= 0 is ignored (no pagination).
+func WithPageSize(widthPt, heightPt float64) HTMLOption {
+	return func(c *htmlConfig) {
+		if widthPt > 0 && heightPt > 0 {
+			c.viewportPt = widthPt
+			c.pageHeightPt = heightPt
 		}
 	}
 }
@@ -143,7 +165,7 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 	}
 	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, cfg.sys, cfg.logf)
 	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
-	pages, err := engine.Layout(ctx, root, cfg.viewportPt)
+	pages, err := engine.LayoutPaged(ctx, root, cfg.viewportPt, cfg.pageHeightPt)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)
 	}

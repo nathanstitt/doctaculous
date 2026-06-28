@@ -80,6 +80,13 @@ type ComputedStyle struct {
 	// identically here).
 	Overflow string
 
+	// BreakBefore / BreakAfter are the CSS fragmentation break hints (break-before /
+	// break-after, plus the legacy page-break-before / page-break-after aliases). Read
+	// only by the pagination pass (never by layout); a forced value ("page"/"always"/
+	// named page sides) starts the box on a new page. Initial "" (auto). Not inherited.
+	BreakBefore string
+	BreakAfter  string
+
 	// Float is the CSS float value: "none" (default) | "left" | "right". Not
 	// inherited. The box generator maps it to cssbox.FloatKind.
 	Float string
@@ -458,6 +465,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "visible", "hidden", "scroll", "auto":
 			cs.Overflow = d.Value
+		}
+	case "break-before", "page-break-before":
+		switch d.Value {
+		case "auto", "avoid", "avoid-page", "page", "always", "left", "right", "recto", "verso":
+			cs.BreakBefore = d.Value
+		}
+	case "break-after", "page-break-after":
+		switch d.Value {
+		case "auto", "avoid", "avoid-page", "page", "always", "left", "right", "recto", "verso":
+			cs.BreakAfter = d.Value
 		}
 	case "border-collapse":
 		switch d.Value {
