@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // HTTPLoader is a ResourceLoader that fetches refs over HTTP(S), resolving
@@ -90,11 +92,55 @@ func decodeDataURL(u *url.URL) ([]byte, string, error) {
 	return data, mediatype, nil
 }
 
-// fetch performs the HTTP GET for an http(s) URL. Fleshed out in the next task;
-// the stub keeps the package compiling and every data:/scheme test meaningful.
-// (Go does not flag unused function parameters, so the ctx parameter is fine.)
+const (
+	// defaultMaxBytes caps a fetched response body (32 MiB) so a hostile or
+	// runaway resource cannot exhaust memory. Override per loader via MaxBytes.
+	defaultMaxBytes int64 = 32 << 20
+	// defaultRequestTimeout bounds a single fetch when the caller's context has
+	// no deadline, so a stalled connection cannot hang forever.
+	defaultRequestTimeout = 30 * time.Second
+)
+
+// defaultHTTPClient returns the client used when HTTPLoader.Client is nil: a
+// plain client with a request timeout. It follows redirects with the stdlib
+// default policy (up to 10 hops).
+func defaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: defaultRequestTimeout}
+}
+
+// fetch performs the HTTP GET for an http(s) URL u, honoring ctx, capping the
+// body, and treating any non-2xx status as absent (ErrNotFound). u may carry
+// userinfo; auth handling is added in a later task.
 func (h HTTPLoader) fetch(ctx context.Context, u *url.URL) ([]byte, string, error) {
-	return nil, "", fmt.Errorf("%s: %w", redact(u), ErrNotFound) // replaced in the next task
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %w", redact(u), ErrNotFound)
+	}
+	client := h.Client
+	if client == nil {
+		client = defaultHTTPClient()
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch %s: %w", redact(u), err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, "", fmt.Errorf("fetch %s: status %d: %w", redact(u), resp.StatusCode, ErrNotFound)
+	}
+	max := h.MaxBytes
+	if max <= 0 {
+		max = defaultMaxBytes
+	}
+	// Read up to max+1 so an over-limit body is detectable.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("read %s: %w", redact(u), err)
+	}
+	if int64(len(data)) > max {
+		return nil, "", fmt.Errorf("%s: response exceeds %d bytes: %w", redact(u), max, ErrNotFound)
+	}
+	return data, resp.Header.Get("Content-Type"), nil
 }
 
 // redact returns a URL string safe for logs/errors: scheme://host/path with any
