@@ -233,24 +233,24 @@ func (c *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func TestHTTPLoaderBasicAuthFromUserinfo(t *testing.T) {
-	cap := &captureTransport{}
+	tr := &captureTransport{}
 	base := mustURL(t, "http://host.example/doc.html")
 	base.User = url.UserPassword("user", "pw")
-	l := HTTPLoader{Base: base, Client: &http.Client{Transport: cap}}
+	l := HTTPLoader{Base: base, Client: &http.Client{Transport: tr}}
 	if _, _, err := l.Load(context.Background(), "asset.css"); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cap.req == nil {
+	if tr.req == nil {
 		t.Fatal("transport captured no request")
 	}
 	// "user:pw" base64 = dXNlcjpwdw==
-	if got := cap.req.Header.Get("Authorization"); got != "Basic dXNlcjpwdw==" {
+	if got := tr.req.Header.Get("Authorization"); got != "Basic dXNlcjpwdw==" {
 		t.Errorf("Authorization = %q, want Basic dXNlcjpwdw==", got)
 	}
 	// The outbound request URL our fetch built must carry NO userinfo. This assertion
 	// genuinely fails if the strip (outbound.User = nil) is removed.
-	if cap.req.URL.User != nil {
-		t.Errorf("outbound request URL carried userinfo %v; it must be stripped", cap.req.URL.User)
+	if tr.req.URL.User != nil {
+		t.Errorf("outbound request URL carried userinfo %v; it must be stripped", tr.req.URL.User)
 	}
 }
 
@@ -298,5 +298,33 @@ func TestHTTPLoaderAuthInheritedByRelativeRef(t *testing.T) {
 	}
 	if gotAuth != "Basic dXNlcjpwdw==" {
 		t.Errorf("relative sub-ref Authorization = %q, want inherited Basic dXNlcjpwdw==", gotAuth)
+	}
+}
+
+// A cross-origin absolute ref must NOT receive the base's credentials:
+// ResolveReference drops the base userinfo for a different authority, so no
+// Authorization header (and no userinfo) reaches the other origin. Verified on the
+// outbound request via the capture transport (the client hides userinfo from a
+// real server, so the strip/non-forward is only observable client-side).
+func TestHTTPLoaderAuthNotForwardedCrossOrigin(t *testing.T) {
+	tr := &captureTransport{}
+	base := mustURL(t, "http://creds.example/doc.html")
+	base.User = url.UserPassword("user", "pw")
+	l := HTTPLoader{Base: base, Client: &http.Client{Transport: tr}}
+	// An absolute ref to a DIFFERENT origin.
+	if _, _, err := l.Load(context.Background(), "http://other.example/asset.css"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if tr.req == nil {
+		t.Fatal("transport captured no request")
+	}
+	if tr.req.URL.Host != "other.example" {
+		t.Fatalf("fetched host = %q, want other.example", tr.req.URL.Host)
+	}
+	if got := tr.req.Header.Get("Authorization"); got != "" {
+		t.Errorf("cross-origin Authorization = %q, want none (creds must not be forwarded)", got)
+	}
+	if tr.req.URL.User != nil {
+		t.Errorf("cross-origin request URL carried userinfo %v, want none", tr.req.URL.User)
 	}
 }

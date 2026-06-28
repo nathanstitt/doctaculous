@@ -20,6 +20,9 @@ import (
 // never panicking. The zero value is not usable; Base is required.
 type HTTPLoader struct {
 	// Base is the document's URL; relative refs resolve against it. Required.
+	// Userinfo in Base (user:pw@host) is extracted into an Authorization: Basic
+	// header for every same-origin fetch; it is NOT forwarded to a cross-origin
+	// ref (ResolveReference drops the base's userinfo for a different authority).
 	Base *url.URL
 	// Client is the HTTP client used for fetches. nil selects a default client
 	// with a request timeout (defaultRequestTimeout), created per fetch — so for a
@@ -117,9 +120,8 @@ func defaultHTTPClient() *http.Client {
 // stripped from the outbound URL so they travel in the header (testable, never
 // echoed in the request line) rather than in the URL.
 func (h HTTPLoader) fetch(ctx context.Context, u *url.URL) ([]byte, string, error) {
-	// Extract URL userinfo into an explicit Authorization header and strip it from
-	// the outbound URL, so credentials are in the header (testable, never echoed in
-	// the request line) rather than in the URL.
+	// Strip userinfo before building the request URL (see the doc comment); the
+	// credentials go in the Authorization header below instead.
 	outbound := *u
 	var user, pass string
 	haveAuth := false
