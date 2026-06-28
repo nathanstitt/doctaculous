@@ -204,4 +204,9 @@ func TestHTTPLoaderHonorsContextCancel(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load returned nil error on a cancelled context, want non-nil")
 	}
+	// A transport error must NOT be flattened to ErrNotFound — callers branch on
+	// the underlying ctx error (errors.Is(err, context.DeadlineExceeded)).
+	if errors.Is(err, ErrNotFound) {
+		t.Error("ctx cancel error must not be mapped to ErrNotFound")
+	}
 }

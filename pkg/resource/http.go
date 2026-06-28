@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,8 +22,10 @@ type HTTPLoader struct {
 	// Base is the document's URL; relative refs resolve against it. Required.
 	Base *url.URL
 	// Client is the HTTP client used for fetches. nil selects a default client
-	// with a request timeout (defaultRequestTimeout). Inject a client to supply
-	// auth via a RoundTripper, a proxy, mTLS, or a test transport.
+	// with a request timeout (defaultRequestTimeout), created per fetch — so for a
+	// page with many sub-resources, inject a shared client to reuse connections.
+	// Injecting a client also lets you supply auth via a RoundTripper, a proxy,
+	// mTLS, or a test transport.
 	Client *http.Client
 	// MaxBytes caps a fetched response body; <= 0 selects defaultMaxBytes. A
 	// response exceeding the cap is treated as absent (ErrNotFound).
@@ -131,6 +134,11 @@ func (h HTTPLoader) fetch(ctx context.Context, u *url.URL) ([]byte, string, erro
 	max := h.MaxBytes
 	if max <= 0 {
 		max = defaultMaxBytes
+	}
+	// Clamp so max+1 below cannot overflow to a negative limit (io.LimitReader
+	// treats a negative n as zero, which would make every body look empty).
+	if max > math.MaxInt64-1 {
+		max = math.MaxInt64 - 1
 	}
 	// Read up to max+1 so an over-limit body is detectable.
 	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
