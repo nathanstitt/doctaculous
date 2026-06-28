@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -79,6 +80,31 @@ func OpenHTML(path string) (*Document, error) {
 		WithResourceLoader(resource.DirLoader{Base: dir}),
 		WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
 	)
+}
+
+// OpenURL fetches the HTML document at rawURL over HTTP(S), lays it out at the
+// default viewport width into a single tall page, and returns a Document ready to
+// rasterize. Relative <link>/<img>/@font-face refs resolve against rawURL and are
+// fetched over HTTP (data: refs are decoded inline) through an HTTPLoader rooted at
+// rawURL. Options (e.g. WithViewportWidth, WithLogf, WithSystemFontProvider) may be
+// supplied and take effect after the loader is set. Unlike OpenHTML, no system font
+// provider is configured by default (a URL has no local font directory), so
+// @font-face local() sources do not match unless one is supplied.
+func OpenURL(rawURL string, opts ...HTMLOption) (*Document, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("doctaculous: open url %q: %w", rawURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("doctaculous: open url %q: unsupported scheme %q", rawURL, u.Scheme)
+	}
+	loader := resource.HTTPLoader{Base: u}
+	data, _, err := loader.Load(context.Background(), "")
+	if err != nil {
+		return nil, fmt.Errorf("doctaculous: fetch url %q: %w", rawURL, err)
+	}
+	allOpts := append([]HTMLOption{WithResourceLoader(loader)}, opts...)
+	return OpenHTMLBytes(data, allOpts...)
 }
 
 // OpenHTMLBytes parses and renders in-memory HTML, applying any options, and
