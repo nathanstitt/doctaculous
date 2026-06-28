@@ -461,6 +461,37 @@ what is done vs. pending.
   auto-placement); **`repeat(auto-fill/auto-fit)` with an indefinite container size** → 1 repetition; **malformed
   `grid-template-areas`** → ignored (auto-place); **`baseline` on a text-free item** → start; an empty/degenerate
   grid → zero-size fragment. See `docs/superpowers/specs/2026-06-26-html-grid-design.md`.
+- **HTML rendering — `OpenURL` + the HTTP `ResourceLoader`** (`pkg/resource/http.go` (new) +
+  `pkg/doctaculous/html_backend.go` `OpenURL`; covered by `HTTPLoader` unit tests in
+  `pkg/resource/http_test.go` and `OpenURL` end-to-end + degradation + byte-equality tests in
+  `pkg/doctaculous/openurl_test.go`, all hermetic via `net/http/httptest` loopback): a document can now be
+  fetched **over the network** — `OpenURL(rawURL, opts...)` fetches the HTML over HTTP(S) and renders it,
+  resolving relative `<link>`/`<img>`/`@font-face` refs against the document URL. The new `HTTPLoader`
+  (third `ResourceLoader` alongside `MapLoader`/`DirLoader`, the one the package doc always promised) carries
+  the document's base URL and resolves refs via `*url.URL.ResolveReference`, then either **fetches `http(s):`**
+  — ctx-aware request (`http.NewRequestWithContext`, honors cancellation/timeout), non-2xx → `ErrNotFound`,
+  a 32 MiB response cap via `io.LimitReader` (overflow-clamped), a 30 s default client timeout, default
+  redirect following (≤10 hops) — or **decodes a `data:` URI inline** (RFC 2397, base64 + percent-encoded,
+  no network). **Auth:** URL userinfo (`user:pw@host`) becomes an `Authorization: Basic` header with the
+  userinfo stripped from the outbound request URL; same-origin relative sub-refs inherit the base's
+  credentials (via `ResolveReference`), cross-origin refs do **not**, and credentials are **never logged**
+  (a `redact` helper drops userinfo from every error/log). `OpenURL` mirrors `OpenHTML` but sets **no**
+  `SystemFontProvider` (a URL has no local font directory). The `render.Device` seam, the layout engine, the
+  PDF pipeline, the DOCX pipeline, and the shared inline core are **untouched** — this slice only feeds bytes
+  through the existing `ResourceLoader` seam, so it is **byte-identical**: a document rendered via `HTTPLoader`
+  rasterizes pixel-for-pixel identically to the same document via `MapLoader` (proven by an exact
+  `bytes.Equal` raster test — no new golden), and the whole existing corpus is unchanged. **No new
+  dependency** (stdlib `net/http`/`net/url`/`encoding/base64`). Degrades gracefully: a sub-resource that
+  404s / times out / exceeds the cap / has an unsupported scheme / is a malformed `data:` returns
+  `ErrNotFound` and the page degrades exactly as for a missing local ref (skipped stylesheet / placeholder
+  image, no panic); the **document** fetch failing is a hard error (a non-`http(s)` scheme returns the
+  exported `ErrUnsupportedScheme`). Deferred (each degrades): **`<base href>`**, a **content-addressed fetch
+  cache** (the `FaceCache` is keyed `(family, style)` so one font file is fetched once per style — now worth
+  a shared fetch cache since HTTP fetches are real), **caller-controlled context** (`OpenURLContext` — the
+  document fetch uses a background context today), **cookies / richer auth** (beyond URL-userinfo Basic, via
+  an injected `Client`), **custom redirect/proxy/SSRF hardening**, and **non-`http(s)`/`data:` schemes**. This
+  is sub-project 11 of the HTML-rendering roadmap. See
+  `docs/superpowers/specs/2026-06-28-html-openurl-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -494,12 +525,11 @@ that skip into real output.
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**,
    **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
    **clip-escape sub-cases** (sub-project 6b), **CSS 2.1 §17 table layout** (sub-project 7), and
-   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9), and
-   **CSS Grid (explicit grid)** (sub-project 10) are done — see the Done section). Roughly in order, each a
+   **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9),
+   **CSS Grid (explicit grid)** (sub-project 10), and **`OpenURL` + the HTTP `ResourceLoader`**
+   (sub-project 11) are done — see the Done section). Roughly in order, each a
    parse/layout slice with its own fixtures + golden/WPT tests:
-   **`OpenURL` + the HTTP `ResourceLoader`** (network
-   fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
-   `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
+   **pagination / CSS paged media** (the default stays a single tall image); and
    **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Positioning fidelity
    follow-ups within the existing engine: the **precise static-position solve** for an all-`auto`-offset
    abs box (today approximates to the containing block's top-left), abs `width:auto` **shrink-to-fit**
