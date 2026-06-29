@@ -350,6 +350,48 @@ func TestControlPaintShiftedToPosition(t *testing.T) {
 	}
 }
 
+// A form control as a flex item or grid item must lay out (not collapse the
+// container). Regression for the anonymous-item fixup coalescing replaced boxes
+// into one inline-run item (which then measured zero), plus measureMaxContent
+// returning 0 for a replaced box. Two controls in a flex/grid container must each
+// paint their own field background at DISTINCT x positions (side by side).
+func TestControlAsFlexAndGridItem(t *testing.T) {
+	cases := map[string]string{
+		"flex": `<body style="margin:0"><div style="display:flex">` +
+			`<input type=text value=a><input type=text value=b></div></body>`,
+		"grid": `<body style="margin:0"><div style="display:grid;grid-template-columns:1fr 1fr">` +
+			`<input type=text value=a><input type=text value=b></div></body>`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			items := renderControlItems(t, src)
+			// Each control field emits a BackgroundKind fill; two side-by-side controls
+			// must produce two fills at different X (the container did not collapse).
+			var xs []float64
+			for _, it := range items {
+				if it.Kind == layout.BackgroundKind {
+					xs = append(xs, it.Rule.XPt)
+				}
+			}
+			if len(xs) < 2 {
+				t.Fatalf("%s: expected >=2 control field fills, got %d (container collapsed — replaced item not sized)", name, len(xs))
+			}
+			minX, maxX := xs[0], xs[0]
+			for _, x := range xs {
+				if x < minX {
+					minX = x
+				}
+				if x > maxX {
+					maxX = x
+				}
+			}
+			if maxX-minX < 10 {
+				t.Errorf("%s: control fills span only %.1f pt in X (%v); the two controls did not lay out side by side", name, maxX-minX, xs)
+			}
+		})
+	}
+}
+
 // TestControlCellNotTreatedEmpty asserts that isEmptyCellFragment returns false for a
 // fragment that has only f.Control set (regression: the guard was missing f.Control == nil).
 // A cell whose only content is a form control would be misclassified as empty, causing
@@ -391,6 +433,25 @@ func TestButtonLabelSources(t *testing.T) {
 	}
 	if countKind(inEmpty, layout.GlyphKind) != 0 {
 		t.Errorf("<input type=button> with no label should emit 0 glyphs, got %d", countKind(inEmpty, layout.GlyphKind))
+	}
+}
+
+// A button is sized to its rendered label (buttonLabel), not just b.Replaced.Text:
+// an <input type=submit value="..."> whose label comes from the value attribute must
+// be wider than the minimum button width, so the label does not overflow the button.
+func TestButtonSizedToValueLabel(t *testing.T) {
+	eng := New(nil, nil, nil)
+	ctx := context.Background()
+	// A submit input with a long value label.
+	b := ctrlBox(cssbox.CtrlButton, map[string]string{"type": "submit", "value": "Submit Changes Now"})
+	w, _ := eng.controlIntrinsicSize(ctx, b)
+	if w <= ctrlMinButtonW {
+		t.Errorf("submit button width = %.1f, want > min %d (sized to its value label)", w, ctrlMinButtonW)
+	}
+	// Its width must cover the label text + padding: at least the measured label width.
+	labelW := eng.textWidth(b, "Submit Changes Now")
+	if w < labelW {
+		t.Errorf("submit button width %.1f is narrower than its label %.1f — label would overflow", w, labelW)
 	}
 }
 

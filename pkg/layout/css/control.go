@@ -140,7 +140,11 @@ func (e *Engine) controlIntrinsicSize(ctx context.Context, b *cssbox.Box) (w, h 
 
 	switch kind {
 	case cssbox.CtrlButton:
-		labelW := e.textWidth(b, b.Replaced.Text)
+		// Size to the SAME label the paint path renders (buttonLabel) — not just
+		// b.Replaced.Text — so an <input type=submit value="X"> (whose label comes from
+		// the value attribute or the submit/reset default, with Text empty) is wide
+		// enough for its text instead of collapsing to the min width and overflowing.
+		labelW := e.textWidth(b, buttonLabel(b))
 		w = labelW + 2*ctrlBtnPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
 		return max2(w, ctrlMinButtonW), max2(h, ctrlMinFieldH)
