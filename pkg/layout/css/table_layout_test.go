@@ -441,6 +441,68 @@ func TestVerticalAlignTopIsDefault(t *testing.T) {
 	}
 }
 
+// TestVerticalAlignBaselineCoincides exercises real vertical-align:baseline on table
+// cells (the backport of the shared baseline machinery). Two cells in one row carry
+// text at DIFFERENT font sizes, so their first-baseline offsets from the band top
+// differ. With vertical-align:baseline the engine must shift the smaller-font cell's
+// CONTENT down so both cells' first text baselines land at the same page-space Y. (The
+// pre-backport behavior treated baseline as top: the two baselines did NOT coincide.)
+func TestVerticalAlignBaselineCoincides(t *testing.T) {
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+	px0 := gcss.Length{Unit: gcss.UnitPx}
+	mkCell := func(text string, fontSizePt float64) *cssbox.Box {
+		st := gcss.ComputedStyle{
+			Width: auto, Height: auto, MaxWidth: auto, MaxHeight: auto, MinWidth: px0, MinHeight: px0,
+			FontFamily: "serif", FontSizePt: fontSizePt, LineHeight: auto, VerticalAlign: "baseline",
+		}
+		textSt := gcss.ComputedStyle{FontFamily: "serif", FontSizePt: fontSizePt, LineHeight: auto}
+		txt := &cssbox.Box{Kind: cssbox.BoxText, Text: text, Display: cssbox.DisplayInline, Style: textSt}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell,
+			Formatting: cssbox.InlineFC, Style: st, Children: []*cssbox.Box{txt}}
+	}
+	small := mkCell("Hi", 10)
+	large := mkCell("Hi", 24)
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{small, large}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "auto", Width: auto}, Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	e := New(nil, nil, nil)
+	frag := e.layoutTree(context.Background(), body, 300)
+
+	// Collect the two table-cell fragments (display:table-cell) and read each one's
+	// first line baseline (the cell directly carries Lines for an InlineFC cell).
+	var smallLine, largeLine *LineFragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.Box != nil && f.Box.Display == cssbox.DisplayTableCell && len(f.Lines) > 0 {
+			if f.W < 20 { // the narrow 10pt "Hi" cell
+				smallLine = &f.Lines[0]
+			} else { // the wider 24pt "Hi" cell
+				largeLine = &f.Lines[0]
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if smallLine == nil || largeLine == nil {
+		t.Fatalf("missing cell baselines: small=%v large=%v", smallLine, largeLine)
+	}
+	const eps = 0.01
+	if absf(smallLine.BaselineY-largeLine.BaselineY) > eps {
+		t.Errorf("vertical-align:baseline should make cell first baselines coincide; small=%v large=%v",
+			smallLine.BaselineY, largeLine.BaselineY)
+	}
+}
+
 func TestCaptionTopShiftsGridDown(t *testing.T) {
 	capSt := gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 24, Unit: gcss.UnitPx},
 		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},

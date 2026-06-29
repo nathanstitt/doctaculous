@@ -312,7 +312,8 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	}
 	tableContentH := y
 
-	// Position cells: a cell fills its column(s) × row(s) rectangle.
+	// Position cells: a cell fills its column(s) × row(s) rectangle. Stretch in g.cells
+	// order so paint order is stable; vertical-align runs in a separate per-row pass.
 	var children []*Fragment
 	for _, gc := range g.cells {
 		if gc.frag == nil {
@@ -323,11 +324,65 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		cw := g.cellWidth(gc)
 		ch := gc.rowBandHeight(g)
 		stretchCellFragment(gc.frag, cx, cy, cw, ch)
-		applyCellVAlign(gc.frag, gc.box, natH[gc], ch)
 		children = append(children, gc.frag)
 	}
 
-	gridBottom := tableContentH + gridDY
+	// Vertical-align pass, row by row top-to-bottom. top/middle/bottom shift a cell's
+	// content within its own band (per cell). vertical-align:baseline is a per-ROW
+	// decision: the row's baseline cells shift their content so their first text
+	// baselines coincide (alignBaselineCellContents, the shared baseline machinery). If
+	// a baseline group needs more height than the band, the row grows: every cell in the
+	// row grows its border box to the taller band and all LOWER rows shift down by the
+	// growth. This is a LOCALIZED grow (row positions were assigned after cell layout —
+	// no track/row-height re-solve), accumulated in rowShift. When no cell uses baseline
+	// (the common case — equal-font or empty cells), extra is 0 everywhere, rowShift
+	// stays 0, no cell moves, and the result is byte-identical to the prior per-cell
+	// applyCellVAlign behavior.
+	//
+	// KNOWN LIMITATION (rowspan + baseline): a rowspan cell appears only in its ORIGIN
+	// row's gr.cells, so it grows/shifts with that row correctly, but if a row it merely
+	// SPANS INTO later grows from its own baseline group, the rowspan cell is not in that
+	// row's gr.cells and so does not re-grow — its border box can under-cover the grown
+	// band. Re-growing it would need the cross-row re-solve the design avoids, so it is
+	// left as a localized approximation (no fixture stacks rowspan + baseline + differing
+	// spanned-row content); it degrades without panic and never affects a table that does
+	// not combine those three.
+	rowShift := 0.0
+	for _, gr := range g.rows {
+		// Carry the accumulated growth of earlier rows down onto this row's cells (the
+		// whole cell band moved down, so move border box + content together).
+		if rowShift > 0 {
+			for _, gc := range gr.cells {
+				if gc.frag != nil {
+					translateFragment(gc.frag, 0, rowShift)
+				}
+			}
+		}
+		// Baseline group first (it determines how much the band grows).
+		var baselineCells []*Fragment
+		for _, gc := range gr.cells {
+			if gc.frag != nil && gc.box.Style.VerticalAlign == "baseline" {
+				baselineCells = append(baselineCells, gc.frag)
+			}
+		}
+		bandExtra := alignBaselineCellContents(baselineCells)
+		// Grow every cell in the row to the (possibly taller) band, then place the
+		// non-baseline cells within it.
+		for _, gc := range gr.cells {
+			if gc.frag == nil {
+				continue
+			}
+			if bandExtra > 0 {
+				gc.frag.H += bandExtra
+			}
+			if gc.box.Style.VerticalAlign != "baseline" {
+				applyCellVAlign(gc.frag, gc.box, natH[gc], gc.rowBandHeight(g)+bandExtra)
+			}
+		}
+		rowShift += bandExtra
+	}
+
+	gridBottom := tableContentH + gridDY + rowShift
 	if captionFrag != nil {
 		if g.caption.Style.CaptionSide == "bottom" {
 			translateFragment(captionFrag, 0, gridBottom-captionFrag.Y) // just below the grid
@@ -725,9 +780,12 @@ func stretchCellFragment(f *Fragment, x, y, w, h float64) {
 // applyCellVAlign shifts a cell's content down within its row band per vertical-align.
 // b is the cell's cssbox.Box (used to read its VerticalAlign style).
 // natH is the content's natural (pre-stretch) height; bandH the row band height.
-// top (and baseline, treated as top for now) keep content at the band top; middle
-// centers it; bottom drops it to the band bottom. The shift moves the fragment's
-// children and inline lines, leaving the border box (which fills the band) in place.
+// top keeps content at the band top; middle centers it; bottom drops it to the band
+// bottom. The shift moves the fragment's children and inline lines, leaving the border
+// box (which fills the band) in place. vertical-align:baseline is NOT handled here — it
+// is a per-row decision applied by alignBaselineCellContents (so a row's baseline cells
+// share one baseline); a cell reaching the default arm has top/sub/super/text-* (or no
+// text baseline) and falls back to top.
 func applyCellVAlign(f *Fragment, b *cssbox.Box, natH, bandH float64) {
 	va := b.Style.VerticalAlign
 	var dy float64
@@ -737,12 +795,51 @@ func applyCellVAlign(f *Fragment, b *cssbox.Box, natH, bandH float64) {
 	case "middle":
 		dy = (bandH - natH) / 2
 	default:
-		dy = 0 // top, baseline (≈ top here), and sub/super/text-* fall back to top
+		dy = 0 // top, baseline-without-text, and sub/super/text-* fall back to top
 	}
-	if dy <= 0 { // top/baseline: no shift; content taller than band: no negative shift
+	if dy <= 0 { // top: no shift; content taller than band: no negative shift
 		return
 	}
 	shiftCellContent(f, dy)
+}
+
+// alignBaselineCellContents aligns the first text baselines of a row's
+// vertical-align:baseline cells: it shifts each cell's CONTENT down (via shiftCellContent,
+// the same mechanism applyCellVAlign uses) so every cell's first baseline coincides with
+// the group's deepest first baseline. It reuses the shared firstBaselineOffset to read
+// each cell's first-baseline offset from its band top (cells stretch to the band, so all
+// share the same top Y); a cell with no text baseline (firstBaselineOffset ok=false) is
+// skipped and stays top-aligned (CSS Box Alignment baseline→start fallback). Returns a
+// CONSERVATIVE extra band height — the largest downward content shift applied — which the
+// caller uses to grow the row band so the shifted content is contained (mirroring
+// alignBaselineGroup's contract, but shifting cell content rather than the cell box). When
+// the group is empty or all baselines already coincide (e.g. equal-font cells), the return
+// is 0 and nothing shifts (byte-identical to the prior per-cell top behavior).
+func alignBaselineCellContents(cells []*Fragment) float64 {
+	maxBaseline := 0.0
+	offs := make([]float64, len(cells))
+	oks := make([]bool, len(cells))
+	for i, f := range cells {
+		off, ok := firstBaselineOffset(f)
+		offs[i], oks[i] = off, ok
+		if ok && off > maxBaseline {
+			maxBaseline = off
+		}
+	}
+	extra := 0.0
+	for i, f := range cells {
+		if !oks[i] {
+			continue
+		}
+		dy := maxBaseline - offs[i]
+		if dy > 0 {
+			shiftCellContent(f, dy)
+			if dy > extra {
+				extra = dy
+			}
+		}
+	}
+	return extra
 }
 
 // shiftCellContent translates a cell fragment's content down by dy without moving the

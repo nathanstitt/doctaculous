@@ -415,3 +415,167 @@ func TestGapShorthandInvalidPreservesPrior(t *testing.T) {
 		t.Errorf("3-value gap should preserve prior values; got row %v col %v", cs.RowGap, cs.ColumnGap)
 	}
 }
+
+// --- Grid shorthand tests ---
+
+func TestPlaceItemsTwoValues(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "place-items", "center start")
+	if cs.AlignItems != "center" {
+		t.Errorf("place-items: center start => AlignItems=%q, want \"center\"", cs.AlignItems)
+	}
+	if cs.JustifyItems != "start" {
+		t.Errorf("place-items: center start => JustifyItems=%q, want \"start\"", cs.JustifyItems)
+	}
+}
+
+func TestPlaceItemsOneValue(t *testing.T) {
+	// One value sets both align-items and justify-items.
+	cs := initialStyle()
+	applyOne(&cs, "place-items", "end")
+	if cs.AlignItems != "end" {
+		t.Errorf("place-items: end => AlignItems=%q, want \"end\"", cs.AlignItems)
+	}
+	if cs.JustifyItems != "end" {
+		t.Errorf("place-items: end => JustifyItems=%q, want \"end\"", cs.JustifyItems)
+	}
+}
+
+func TestPlaceContentTwoValues(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "place-content", "space-between center")
+	if cs.AlignContent != "space-between" {
+		t.Errorf("place-content: space-between center => AlignContent=%q, want \"space-between\"", cs.AlignContent)
+	}
+	if cs.JustifyContent != "center" {
+		t.Errorf("place-content: space-between center => JustifyContent=%q, want \"center\"", cs.JustifyContent)
+	}
+}
+
+func TestPlaceContentOneValue(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "place-content", "stretch")
+	if cs.AlignContent != "stretch" {
+		t.Errorf("place-content: stretch => AlignContent=%q, want \"stretch\"", cs.AlignContent)
+	}
+	if cs.JustifyContent != "stretch" {
+		t.Errorf("place-content: stretch => JustifyContent=%q, want \"stretch\"", cs.JustifyContent)
+	}
+}
+
+func TestPlaceSelfTwoValues(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "place-self", "end center")
+	if cs.AlignSelf != "end" {
+		t.Errorf("place-self: end center => AlignSelf=%q, want \"end\"", cs.AlignSelf)
+	}
+	if cs.JustifySelf != "center" {
+		t.Errorf("place-self: end center => JustifySelf=%q, want \"center\"", cs.JustifySelf)
+	}
+}
+
+func TestPlaceSelfOneValue(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "place-self", "start")
+	if cs.AlignSelf != "start" {
+		t.Errorf("place-self: start => AlignSelf=%q, want \"start\"", cs.AlignSelf)
+	}
+	if cs.JustifySelf != "start" {
+		t.Errorf("place-self: start => JustifySelf=%q, want \"start\"", cs.JustifySelf)
+	}
+}
+
+func TestGridTemplateShorthandRowsSlashCols(t *testing.T) {
+	// grid-template: <rows> / <columns>
+	cs := initialStyle()
+	applyOne(&cs, "grid-template", "1fr / 2fr 3fr")
+	rowTracks := cs.GridTemplateRows.Expand(0)
+	if len(rowTracks) != 1 {
+		t.Fatalf("grid-template: 1fr / 2fr 3fr => %d row tracks, want 1", len(rowTracks))
+	}
+	if rowTracks[0].Max.Fr != 1 {
+		t.Errorf("row track[0].fr = %v, want 1", rowTracks[0].Max.Fr)
+	}
+	colTracks := cs.GridTemplateColumns.Expand(0)
+	if len(colTracks) != 2 {
+		t.Fatalf("grid-template: 1fr / 2fr 3fr => %d col tracks, want 2", len(colTracks))
+	}
+	if colTracks[0].Max.Fr != 2 {
+		t.Errorf("col track[0].fr = %v, want 2", colTracks[0].Max.Fr)
+	}
+	if colTracks[1].Max.Fr != 3 {
+		t.Errorf("col track[1].fr = %v, want 3", colTracks[1].Max.Fr)
+	}
+}
+
+func TestGridShorthandDelegatesToTemplate(t *testing.T) {
+	// grid: <grid-template> — the explicit-grid subset delegates to grid-template.
+	cs := initialStyle()
+	applyOne(&cs, "grid", "100px / 1fr 2fr")
+	rowTracks := cs.GridTemplateRows.Expand(0)
+	if len(rowTracks) != 1 {
+		t.Fatalf("grid: 100px / 1fr 2fr => %d row tracks, want 1", len(rowTracks))
+	}
+	colTracks := cs.GridTemplateColumns.Expand(0)
+	if len(colTracks) != 2 {
+		t.Fatalf("grid: 100px / 1fr 2fr => %d col tracks, want 2", len(colTracks))
+	}
+}
+
+func TestGridShorthandAutoFlowLeftRow(t *testing.T) {
+	// grid: auto-flow / 1fr 2fr
+	// Left side starts with "auto-flow" => row direction; right side => template columns.
+	cs := initialStyle()
+	applyOne(&cs, "grid", "auto-flow / 1fr 2fr")
+	if cs.GridAutoFlow != "row" {
+		t.Errorf("grid: auto-flow / 1fr 2fr => GridAutoFlow=%q, want \"row\"", cs.GridAutoFlow)
+	}
+	colTracks := cs.GridTemplateColumns.Expand(0)
+	if len(colTracks) != 2 {
+		t.Fatalf("grid: auto-flow / 1fr 2fr => %d col tracks, want 2", len(colTracks))
+	}
+	if colTracks[0].Max.Fr != 1 {
+		t.Errorf("col track[0].fr = %v, want 1", colTracks[0].Max.Fr)
+	}
+	if colTracks[1].Max.Fr != 2 {
+		t.Errorf("col track[1].fr = %v, want 2", colTracks[1].Max.Fr)
+	}
+}
+
+func TestGridShorthandAutoFlowRightColumnDense(t *testing.T) {
+	// grid: 100px / auto-flow dense 50px
+	// Right side starts with "auto-flow dense" => column direction + dense; left side => template rows.
+	cs := initialStyle()
+	applyOne(&cs, "grid", "100px / auto-flow dense 50px")
+	if cs.GridAutoFlow != "column dense" {
+		t.Errorf("grid: 100px / auto-flow dense 50px => GridAutoFlow=%q, want \"column dense\"", cs.GridAutoFlow)
+	}
+	rowTracks := cs.GridTemplateRows.Expand(0)
+	if len(rowTracks) != 1 {
+		t.Fatalf("grid: 100px / auto-flow dense 50px => %d row tracks, want 1", len(rowTracks))
+	}
+	if rowTracks[0].Min.Kind != TrackLength || rowTracks[0].Min.Len.Value != 100 {
+		t.Errorf("row track[0] = %+v, want 100px", rowTracks[0].Min)
+	}
+	if len(cs.GridAutoColumns) != 1 {
+		t.Fatalf("grid: 100px / auto-flow dense 50px => %d auto-col tracks, want 1", len(cs.GridAutoColumns))
+	}
+	if cs.GridAutoColumns[0].Min.Kind != TrackLength || cs.GridAutoColumns[0].Min.Len.Value != 50 {
+		t.Errorf("auto-col track[0] = %+v, want 50px", cs.GridAutoColumns[0].Min)
+	}
+}
+
+func TestGridShorthandAutoFlowMalformedSuffix(t *testing.T) {
+	// "1fr dense auto-flow" on the right — the old HasSuffix branch (removed by Fix 1)
+	// would have misfired here. After Fix 1 (HasPrefix only), neither branch fires:
+	// the right side starts with "1fr", not "auto-flow", and the left side is "100px".
+	// applyGridShorthand resets all grid properties to initial then returns without
+	// mutation, so GridAutoFlow stays "row" (the initial value).
+	cs := initialStyle()
+	cs.GridAutoFlow = "column" // set a non-initial value to prove no mutation
+	applyOne(&cs, "grid", "100px / 1fr dense auto-flow")
+	// Reset to initial values happened; neither auto-flow branch fired; GridAutoFlow = "row".
+	if cs.GridAutoFlow != "row" {
+		t.Errorf("malformed suffix auto-flow: GridAutoFlow=%q, want \"row\" (reset to initial, no branch fired)", cs.GridAutoFlow)
+	}
+}

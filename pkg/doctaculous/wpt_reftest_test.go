@@ -68,6 +68,10 @@ var wptReftests = []struct {
 	{"flex-grow", 200, "a flex-grow 1:3 row == abs boxes of the grown widths (50/150)", nil},
 	{"flex-align-center", 200, "align-items:center == abs boxes at the centered cross offsets", nil},
 	{"flex-column", 200, "a flex-direction:column == stacked blocks", nil},
+	{"grid-2x2", 300, "a 2x2 fixed grid == abs boxes at the track offsets", nil},
+	{"grid-fr", 300, "an fr grid (1fr 2fr) == abs boxes at the distributed widths (100/200)", nil},
+	{"grid-span", 300, "a grid-column span-2 item == an abs box of the spanned width", nil},
+	{"grid-areas", 200, "a grid-template-areas layout == abs boxes at the named-area rects", nil},
 }
 
 // webfontReftestLoader serves the committed Pacifico WOFF2 as web.woff2 for the

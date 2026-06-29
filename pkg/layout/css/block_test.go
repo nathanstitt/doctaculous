@@ -314,23 +314,33 @@ func TestFlexFCRowLaysOutItemsSideBySide(t *testing.T) {
 	}
 }
 
-// TestGridFCFallsBackToBlock verifies the GridFC degradation contract: display:grid
-// is not yet implemented and falls back to block normal flow (with a logged message),
-// so its children stack vertically rather than laying out side by side.
-func TestGridFCFallsBackToBlock(t *testing.T) {
-	body := layoutBody(t, reset+`<div style="display:grid">
+// TestGridExplicitColumnsPlaceSideBySide asserts real grid layout (not a block fallback):
+// a display:grid container with two explicit 100px columns places its two children
+// SIDE BY SIDE (child2.X = child1.X + 100), which block normal flow would NOT do
+// (block flow stacks them vertically). This proves GridFC drives the real layoutGrid path.
+func TestGridExplicitColumnsPlaceSideBySide(t *testing.T) {
+	body := layoutBody(t, reset+`<div style="display:grid;grid-template-columns:100px 100px">
 		<div style="height:10px"></div>
-		<div style="height:15px"></div>
+		<div style="height:10px"></div>
 	</div>`, 1000)
 	grid := body.Children[0]
 	if len(grid.Children) != 2 {
 		t.Fatalf("grid children = %d, want 2", len(grid.Children))
 	}
 	child1, child2 := grid.Children[0], grid.Children[1]
-	// Block fallback: children stack vertically, so the second child starts below
-	// the first (not side by side as flex/grid would place them).
-	if child2.Y <= child1.Y {
-		t.Errorf("grid fallback: child2.Y=%v should be below child1.Y=%v (block stacking)", child2.Y, child1.Y)
+	// Grid places children side by side in the two explicit columns.
+	// child1 is in col 0: x=0, w=100. child2 is in col 1: x=100, w=100.
+	if child2.X <= child1.X {
+		t.Errorf("grid: child2.X=%v should be right of child1.X=%v (side-by-side columns)", child2.X, child1.X)
+	}
+	if child2.Y != child1.Y {
+		t.Errorf("grid: child2.Y=%v should equal child1.Y=%v (same row)", child2.Y, child1.Y)
+	}
+	if child1.W != 100 {
+		t.Errorf("child1.W = %v, want 100 (first explicit column)", child1.W)
+	}
+	if child2.W != 100 {
+		t.Errorf("child2.W = %v, want 100 (second explicit column)", child2.W)
 	}
 }
 

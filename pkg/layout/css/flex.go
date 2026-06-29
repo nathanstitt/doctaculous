@@ -238,12 +238,6 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	}
 
 	items := flexItemBoxes(b)
-	for i := range items {
-		if resolvedAlign(b, items[i]) == "baseline" {
-			e.logf("css layout: align-items/align-self baseline not supported; using flex-start")
-			break
-		}
-	}
 	if len(items) == 0 {
 		return interior{contentHeight: 0}
 	}
@@ -344,6 +338,33 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		mainPos += usedMain[i] + mainGap + between
 	}
 
+	// Baseline alignment post-pass: for a ROW container, items with baseline alignment
+	// form one group. alignBaselineGroup shifts each participating item DOWN so its first
+	// baseline coincides with the group maximum, returning the largest downward shift as a
+	// conservative extra cross extent. Grow lineCross by extra so the line encloses the
+	// shifted items. For a COLUMN container, the cross axis is horizontal and there is no
+	// meaningful text baseline — baseline falls back to flex-start (crossOffset already
+	// returns 0 for baseline, which is correct for column). When no item is baseline-aligned,
+	// alignBaselineGroup returns 0 and nothing shifts (byte-identical for non-baseline flex).
+	if !ax.vertical {
+		var group []baselineItem
+		for i := range items {
+			group = append(group, baselineItem{frag: frags[i], baseline: resolvedAlign(b, items[i]) == "baseline"})
+		}
+		extra := alignBaselineGroup(group)
+		if extra > 0 {
+			lineCross += extra
+		}
+	} else {
+		// column: log once if any item requests baseline (fallback to flex-start).
+		for i := range items {
+			if resolvedAlign(b, items[i]) == "baseline" {
+				e.logf("css layout: align-items/align-self baseline not supported on column flex; using flex-start")
+				break
+			}
+		}
+	}
+
 	contentHeight := lineCross
 	if ax.vertical {
 		contentHeight = consumed
@@ -354,7 +375,10 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 }
 
 // resolvedAlign returns the effective cross-axis alignment for an item: align-self if it
-// is not auto, else the container's align-items. baseline is approximated to flex-start.
+// is not auto, else the container's align-items. For a row container, baseline triggers
+// real first-baseline alignment via alignBaselineGroup (applied as a post-pass in
+// layoutFlex after cross-positioning); for a column container baseline falls back to
+// flex-start (no meaningful horizontal baseline).
 func resolvedAlign(container, item *cssbox.Box) string {
 	a := item.Style.AlignSelf
 	if a == "" || a == "auto" {
@@ -375,7 +399,7 @@ func crossOffset(a string, lineCross, itemCross float64) float64 {
 		return lineCross - itemCross
 	case "center":
 		return (lineCross - itemCross) / 2
-	default: // flex-start, stretch, baseline(approx)
+	default: // flex-start, stretch; baseline items start here (shifted by the post-pass for rows)
 		return 0
 	}
 }

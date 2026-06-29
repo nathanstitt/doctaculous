@@ -1,0 +1,18 @@
+<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: 100px 100px;
+    grid-template-rows: 40px 60px;
+    grid-template-areas: "hd hd" "main side";
+  }
+  .hd   { grid-area: hd;   background: #553399; }
+  .main { grid-area: main; background: #cc3333; }
+  .side { grid-area: side; background: #3366cc; }
+</style></head><body>
+  <div class="grid">
+    <div class="hd"></div>
+    <div class="main"></div>
+    <div class="side"></div>
+  </div>
+</body></html>
