@@ -496,6 +496,35 @@ what is done vs. pending.
   follow-up: surface the loader's final `resp.Request.URL` and re-root `Base`). This
   is sub-project 11 of the HTML-rendering roadmap. See
   `docs/superpowers/specs/2026-06-28-html-openurl-design.md`.
+- **HTML rendering — pagination (fixed-height page fragmentation)** (`pkg/layout/css/paginate.go` (new) +
+  `pkg/css` `break-before`/`break-after` on `ComputedStyle`, `pkg/doctaculous` `WithPageSize` +
+  `LetterWidthPt`/`LetterHeightPt`; covered by `paginate_test.go` bucketing + page-count + degradation +
+  positioned-distribution unit tests, `pagination_test.go` end-to-end, and the `html-paginate-p{0,1}`
+  multi-page goldens): a document can now be **split into fixed-height pages**. `WithPageSize(w, h)` on
+  `OpenHTML`/`OpenHTMLBytes`/`OpenURL` opts in — the document lays out at width `w` and is sliced into
+  `h`-tall `layout.Page`s; **without it the output is a single tall page (byte-identical to before** — the
+  whole existing golden/reftest corpus is unchanged, since no existing call passes the option and `pageH<=0`
+  is a verbatim passthrough to `Layout`). The engine grows a sibling `LayoutPaged` and a **post-pass**
+  (`paginate`) over the finished fragment tree — the fragment-tree builder, the flatten (`AppendItems`), the
+  `render.Device` seam, the PDF pipeline, the DOCX pipeline, and the shared inline core (`pkg/layout/inline`)
+  are **untouched**. Pieces: the **break cascade** (`break-before`/`break-after` + the legacy
+  `page-break-before`/`page-break-after` aliases on `ComputedStyle`, read only by the pass, never by layout);
+  the pure **`bucketBlocks`** (assigns the document's top-level in-flow block fragments — `body.Children` — to
+  pages, breaking **between blocks** on height overflow (strict `>`, so an exact-fit block stays) and at
+  **forced** `break-before`/`break-after: page|always`, with no leading/trailing empty page for a forced break
+  on the first/last block); per-page **shift** to local Y 0 via the existing `shiftFragments`; and a shallow
+  **clone of the root/body wrapper** per page. **`position:relative` blocks paginate normally** — a relative
+  top-level block is in flow (bucketed) but also lifted into the positioned layer for painting, so
+  `splitPositionedByPage` routes its positioned entry to the page its block landed on (the entry is the same
+  `*Fragment` pointer, so the shift comes for free). Degrades gracefully (no panic, logged where applicable):
+  a **block taller than a page overflows** its page rather than splitting (clipped by the page bitmap); the
+  page bitmap is `pageH` tall, so over-tall content is cut at the page bottom; **absolute/fixed** boxes (and
+  abs/fixed descendants of a relative block) are **not** distributed across pages — they ride the first page
+  at their original Y; and **mid-line / mid-table-row / mid-flex-or-grid-item splits, widows/orphans,
+  `break-inside`, `@page` size/margins, and running headers/footers** are deferred (each a no-op, never a
+  crash). **No new dependency** (stdlib). This is sub-project 12 of the HTML-rendering roadmap — the last
+  engine-shaped feature (EPUB depends on it). See
+  `docs/superpowers/specs/2026-06-28-html-pagination-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -530,11 +559,13 @@ that skip into real output.
    **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
    **clip-escape sub-cases** (sub-project 6b), **CSS 2.1 §17 table layout** (sub-project 7), and
    **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9),
-   **CSS Grid (explicit grid)** (sub-project 10), and **`OpenURL` + the HTTP `ResourceLoader`**
-   (sub-project 11) are done — see the Done section). Roughly in order, each a
-   parse/layout slice with its own fixtures + golden/WPT tests:
-   **pagination / CSS paged media** (the default stays a single tall image); and
-   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Positioning fidelity
+   **CSS Grid (explicit grid)** (sub-project 10), **`OpenURL` + the HTTP `ResourceLoader`**
+   (sub-project 11), and **pagination (fixed-height page fragmentation)** (sub-project 12) are done — see the
+   Done section). Roughly in order, each a parse/layout slice with its own fixtures + golden/WPT tests:
+   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter — wants pagination, now done,
+   first); and **CSS paged media** (`@page` size/margins/named pages, `break-inside`, widows/orphans, running
+   headers/footers — the bounded pagination slice ships `WithPageSize` + between-block breaks + forced
+   `break-before`/`break-after`, deferring these). Positioning fidelity
    follow-ups within the existing engine: the **precise static-position solve** for an all-`auto`-offset
    abs box (today approximates to the containing block's top-left), abs `width:auto` **shrink-to-fit**
    (today fills the containing block), abs `margin:auto` centering, a percentage `top`/`bottom` against
@@ -599,6 +630,16 @@ that skip into real output.
    auto-fit empty-track *collapse* is approximate. Multi-line/masonry are not in scope.
    Table fidelity follow-up resolved by the grid slice: **`vertical-align: baseline`** on table cells is
    now real first-baseline alignment (was treated as top).
+   Pagination fidelity follow-ups within the existing engine (the bounded slice breaks **between top-level
+   blocks only**, post-pass): **mid-box fragmentation** (a block taller than a page overflows rather than
+   splitting); **mid-line / mid-table-row / mid-flex-or-grid-item splits**; **widows/orphans**;
+   **`break-inside: avoid`** and **`break-*: avoid`** (parsed onto `ComputedStyle` but not acted on);
+   **per-page distribution of absolute/fixed content** (today abs/fixed — incl. an abs descendant of a
+   relative block — ride the first page; only `position:relative` top-level blocks paginate, and `fixed`
+   does not yet repeat on every page); **`@page`** size/margins/named pages (page size comes only from
+   `WithPageSize`; margins are zero); and **running headers/footers**. Note `WithPageSize(w,h)` sets the
+   layout **width** to `w` (not a pure "slice what's already laid out"), so switching a default render to a
+   different page width reflows the document.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
