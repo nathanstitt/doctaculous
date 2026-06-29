@@ -63,6 +63,32 @@ func TestRenderFormXObject(t *testing.T) {
 	}
 }
 
+// TestRenderMalformedImageColorSpaceNoPanic renders a page whose image XObject has a
+// malformed single-element array color space ("[/ICCBased]"). Before the fix this
+// indexed arr[1] out of range and panicked; in a render-worker goroutine (no recover)
+// that was process-fatal. The page must now render (degrade) without panicking. This
+// exercises BOTH the resolveImageCSArray length guard and the RenderPage page-boundary
+// recover end to end (removing either keeps this from crashing only because the other
+// still holds).
+func TestRenderMalformedImageColorSpaceNoPanic(t *testing.T) {
+	doc, err := pdf.Parse(gen.MalformedImageColorSpacePDF())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	pg, err := doc.Page(0)
+	if err != nil {
+		t.Fatalf("page: %v", err)
+	}
+	// Must not panic; a degraded render returns a non-nil image.
+	img, err := RenderPage(context.Background(), pg, Options{DPI: 72, Background: color.White})
+	if err != nil {
+		t.Fatalf("RenderPage returned error (want graceful render): %v", err)
+	}
+	if img == nil {
+		t.Fatal("RenderPage returned nil image for a malformed-color-space page")
+	}
+}
+
 // decodeFixtureImage parses an image-fixture PDF and decodes its /Im0 image
 // XObject through decodeImageXObject, returning the decoded image.
 func decodeFixtureImage(t *testing.T, pdfBytes []byte) image.Image {

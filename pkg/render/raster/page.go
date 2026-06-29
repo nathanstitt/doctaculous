@@ -34,7 +34,7 @@ type Options struct {
 //
 // The context is checked before the (potentially expensive) interpretation
 // begins so batch callers can cancel promptly.
-func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (*image.RGBA, error) {
+func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (out *image.RGBA, err error) {
 	if pg == nil {
 		return nil, fmt.Errorf("raster: nil page")
 	}
@@ -80,6 +80,22 @@ func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (*image.RGBA, e
 		bg = color.White
 	}
 	fillBackground(img, bg)
+
+	// Recover at the page boundary (CLAUDE.md: "one bad page can't kill a batch").
+	// The interpreter is written never to panic on malformed input, but a defect (or a
+	// malformed construct that slips a bounds check) must not crash the whole render
+	// fan-out — RasterizePages runs this in worker goroutines, where an unrecovered panic
+	// is process-fatal. On panic, return the page painted so far (the background plus
+	// whatever drew before the fault) and log, rather than propagating the panic.
+	defer func() {
+		if r := recover(); r != nil {
+			if opts.Logf != nil {
+				opts.Logf("raster: recovered from panic rendering page: %v", r)
+			}
+			out = img
+			err = nil
+		}
+	}()
 
 	dev := New(img)
 	dev.SetLogf(opts.Logf)

@@ -18,7 +18,7 @@ type stitchFunc struct {
 	encode    []float64 // 2k values
 }
 
-func parseStitching(doc *pdf.Document, dict pdf.Dict) (Func, error) {
+func parseStitching(doc *pdf.Document, dict pdf.Dict, depth int) (Func, error) {
 	domain, err := requireFloatArray(doc, dict, "Domain")
 	if err != nil {
 		return nil, err
@@ -34,7 +34,9 @@ func parseStitching(doc *pdf.Document, dict pdf.Dict) (Func, error) {
 	k := len(fnArr)
 	funcs := make([]Func, k)
 	for i, fo := range fnArr {
-		sub, perr := Parse(doc, fo)
+		// depth+1 guards against a /Functions entry that references this stitching function
+		// (directly or via a cycle), which would otherwise recurse until the stack overflows.
+		sub, perr := parseDepth(doc, fo, depth+1)
 		if perr != nil {
 			return nil, fmt.Errorf("function: Type 3 subfunction %d: %w", i, perr)
 		}
