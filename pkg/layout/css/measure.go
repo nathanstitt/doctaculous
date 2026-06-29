@@ -27,11 +27,38 @@ func (e *Engine) measureMinContent(ctx context.Context, b *cssbox.Box) float64 {
 }
 
 // measureContent is the shared core; wantMax selects max-content (no wrap) vs
-// min-content (everything wraps to its smallest unit). It honors a specified, fixed
-// (non-auto, non-percentage) width on the box (which pins the contribution), and
-// recurses block children (a block container's contribution is its widest child's,
-// plus that child's own horizontal border+padding). Allocates no committed layout.
+// min-content (everything wraps to its smallest unit). It memoizes per box (see
+// Engine.measures): the result is a pure function of the box subtree and the fixed face
+// cache, so a cached value equals a fresh computation (byte-identical), and the cache
+// collapses the repeated min+max measurement of every table cell / grid item / flex item.
 func (e *Engine) measureContent(ctx context.Context, b *cssbox.Box, wantMax bool) float64 {
+	mm := e.measures[b]
+	if mm == nil {
+		mm = &minMaxContent{}
+		e.measures[b] = mm
+	}
+	if wantMax && mm.maxSet {
+		return mm.max
+	}
+	if !wantMax && mm.minSet {
+		return mm.min
+	}
+	w := e.measureContentUncached(ctx, b, wantMax)
+	if wantMax {
+		mm.max, mm.maxSet = w, true
+	} else {
+		mm.min, mm.minSet = w, true
+	}
+	return w
+}
+
+// measureContentUncached computes the intrinsic width without consulting the cache. It
+// honors a specified, fixed (non-auto, non-percentage) width on the box (which pins the
+// contribution), and recurses block children (a block container's contribution is its
+// widest child's, plus that child's own horizontal border+padding). The child recursion
+// goes back through measureContent, so descendants are memoized too. Allocates no
+// committed layout.
+func (e *Engine) measureContentUncached(ctx context.Context, b *cssbox.Box, wantMax bool) float64 {
 	if w, ok := specifiedFixedWidth(b); ok {
 		return w
 	}

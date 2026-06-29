@@ -59,3 +59,49 @@ func TestMeasureMinIsLongestWord(t *testing.T) {
 		t.Fatalf("min-content should reflect the longest word: %v vs %v", wide, b)
 	}
 }
+
+// TestMeasureContentCacheHit proves the per-box memo is consulted (not recomputed each
+// call): after measuring a box, mutating its content and re-measuring on the SAME engine
+// returns the CACHED (pre-mutation) width, while a FRESH engine sees the new width. The
+// box tree is immutable during a real layout, so this stale read can't occur in practice
+// — it is purely a probe that the cache fires. (If the cache were a no-op, the same-engine
+// re-measure would pick up the mutation and the two values would match.)
+func TestMeasureContentCacheHit(t *testing.T) {
+	e := New(nil, nil, nil)
+	c := cellWithText("ab")
+	first := e.measureMaxContent(context.Background(), c)
+
+	// Mutate the cell's text to something much wider.
+	c.Children[0].Text = "ab ab ab ab ab ab ab ab"
+	cachedAgain := e.measureMaxContent(context.Background(), c) // same engine → cache hit
+	if cachedAgain != first {
+		t.Errorf("same-engine re-measure = %v, want the cached %v (cache not consulted)", cachedAgain, first)
+	}
+
+	// A fresh engine has no cache entry and must see the wider, post-mutation width.
+	fresh := New(nil, nil, nil).measureMaxContent(context.Background(), c)
+	if fresh <= first {
+		t.Errorf("fresh-engine measure = %v, want > %v (the mutated, wider content)", fresh, first)
+	}
+}
+
+// TestMeasureContentCachePopulatesBothSizes confirms a box's cache entry records min and
+// max independently (each guarded by its own set flag) and that both are returned
+// consistently across repeated calls.
+func TestMeasureContentCachePopulatesBothSizes(t *testing.T) {
+	e := New(nil, nil, nil)
+	c := cellWithText("alpha beta")
+	mn1 := e.measureMinContent(context.Background(), c)
+	mx1 := e.measureMaxContent(context.Background(), c)
+	entry := e.measures[c]
+	if entry == nil || !entry.minSet || !entry.maxSet {
+		t.Fatalf("cache entry should have both min and max set, got %+v", entry)
+	}
+	// Repeated calls return the same cached values.
+	if mn2 := e.measureMinContent(context.Background(), c); mn2 != mn1 {
+		t.Errorf("cached min drifted: %v vs %v", mn2, mn1)
+	}
+	if mx2 := e.measureMaxContent(context.Background(), c); mx2 != mx1 {
+		t.Errorf("cached max drifted: %v vs %v", mx2, mx1)
+	}
+}

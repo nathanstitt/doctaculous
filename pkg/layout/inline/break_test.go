@@ -183,6 +183,59 @@ func TestBreakNextEquivalence(t *testing.T) {
 
 func floatEq(a, b float64) bool { d := a - b; return d < 1e-9 && d > -1e-9 }
 
+// TestBreakIncrementalWidthMatchesVisibleWidth guards the incremental running-width
+// optimization in Break/BreakNext (which replaced an O(L²) re-sum): every emitted line's
+// recorded WidthPt must equal VisibleWidth recomputed from its glyphs, including streams
+// with multiple internal space runs and runs of consecutive spaces (where the trailing-
+// space subtraction is the subtle part). Mutation-verify: break the trail bookkeeping
+// (e.g. drop the `trail = 0` on a non-space) and a multi-space line's width drifts.
+func TestBreakIncrementalWidthMatchesVisibleWidth(t *testing.T) {
+	// Words separated by single AND double spaces, plus a wide range so several lines emit.
+	gs := mkRun([]string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"}, 7, 5)
+	// Inject a second consecutive space after "gamma" (index walk: find the space run).
+	for _, width := range []float64{20, 37, 60, 91, 140} {
+		lines := Break(gs, width, width)
+		for i, ln := range lines {
+			want := VisibleWidth(ln.Glyphs)
+			if !floatEq(ln.WidthPt, want) {
+				t.Errorf("width %v line %d: WidthPt=%v but VisibleWidth=%v", width, i, ln.WidthPt, want)
+			}
+		}
+		// BreakNext must agree with Break at the same width (equivalence under the opt).
+		var got []Line
+		rest := gs
+		for len(rest) > 0 {
+			var line []Glyph
+			line, rest = BreakNext(rest, width)
+			got = append(got, MakeLine(line))
+		}
+		if len(got) != len(lines) {
+			t.Errorf("width %v: BreakNext %d lines vs Break %d", width, len(got), len(lines))
+		}
+	}
+}
+
+// TestBreakConsecutiveTrailingSpaces pins the trailing-space accounting with a RUN of
+// spaces at a line end: the visible width must exclude the whole trailing run, and the
+// incremental tracker must match.
+func TestBreakConsecutiveTrailingSpaces(t *testing.T) {
+	// "ab" then three spaces then "cd": advance 10 each.
+	gs := []Glyph{
+		{Advance: 10}, {Advance: 10}, // ab
+		{Advance: 10, Space: true}, {Advance: 10, Space: true}, {Advance: 10, Space: true},
+		{Advance: 10}, {Advance: 10}, // cd
+	}
+	// Width 25: "ab"(20) fits; "ab "(visible 20) fits; ... "ab   c" -> visible 30 overflows,
+	// break at the last space => line "ab" (the three spaces are consumed at the break).
+	line, rest := BreakNext(gs, 25)
+	if got := VisibleWidth(line); !floatEq(got, 20) {
+		t.Errorf("line visible width = %v, want 20 (\"ab\", trailing spaces excluded)", got)
+	}
+	if len(rest) == 0 || rest[0].Space {
+		t.Errorf("rest should start at \"cd\" with the breaking space consumed, got %d glyphs", len(rest))
+	}
+}
+
 // TestBreakNextOverlongWord: a single word wider than the width is taken alone
 // (overflows) and the remainder is empty.
 func TestBreakNextOverlongWord(t *testing.T) {

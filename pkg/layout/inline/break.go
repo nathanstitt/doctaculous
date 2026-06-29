@@ -10,11 +10,34 @@ func Break(glyphs []Glyph, maxWidthPt, firstWidthPt float64) []Line {
 	avail := firstWidthPt
 
 	var cur []Glyph // glyphs accumulated for the current line
+	// vw tracks VisibleWidth(cur) incrementally so filling a line of L glyphs is O(L),
+	// not O(L²) (VisibleWidth re-sums every advance on each call). total is the sum of
+	// ALL advances in cur; trail is the sum of cur's trailing run of spaces; the visible
+	// width (trailing spaces excluded, matching VisibleWidth) is total-trail.
+	var total, trail float64
+	vw := func() float64 { return total - trail }
+	addAdvance := func(g Glyph) {
+		total += g.Advance
+		if g.Space {
+			trail += g.Advance
+		} else {
+			trail = 0
+		}
+	}
+	// recount resets the running width for a freshly-assigned cur (used after a split,
+	// where cur becomes a short carried tail). O(len(cur)); the tail is small.
+	recount := func() {
+		total, trail = 0, 0
+		for i := range cur {
+			addAdvance(cur[i])
+		}
+	}
 
 	// emit finalizes the current line and resets for the next.
 	emit := func() {
 		lines = append(lines, MakeLine(cur))
 		cur = nil
+		total, trail = 0, 0
 		avail = maxWidthPt
 	}
 
@@ -24,7 +47,8 @@ func Break(glyphs []Glyph, maxWidthPt, firstWidthPt float64) []Line {
 			continue
 		}
 		cur = append(cur, g)
-		if VisibleWidth(cur) <= avail {
+		addAdvance(g)
+		if vw() <= avail {
 			continue
 		}
 		// The line now overflows. Break at the last space before the overflow; if
@@ -40,6 +64,7 @@ func Break(glyphs []Glyph, maxWidthPt, firstWidthPt float64) []Line {
 		rest := cur[brk+1:]
 		lines = append(lines, MakeLine(append([]Glyph(nil), keep...)))
 		cur = append([]Glyph(nil), rest...)
+		recount()
 		avail = maxWidthPt
 	}
 	if len(cur) > 0 {
@@ -67,6 +92,10 @@ func BreakNext(glyphs []Glyph, widthPt float64) (line, rest []Glyph) {
 	if len(glyphs) == 0 {
 		return nil, nil
 	}
+	// Track VisibleWidth(glyphs[:i+1]) incrementally (O(1) per glyph) instead of
+	// re-summing each iteration, which made filling one line O(L²): total is the sum of
+	// all advances in glyphs[:i+1], trail the trailing run of spaces; visible = total-trail.
+	var total, trail float64
 	for i := 0; i < len(glyphs); i++ {
 		g := glyphs[i]
 		if g.Break {
@@ -74,12 +103,17 @@ func BreakNext(glyphs []Glyph, widthPt float64) (line, rest []Glyph) {
 			// itself is consumed (not carried to the next line).
 			return glyphs[:i], glyphs[i+1:]
 		}
-		cur := glyphs[:i+1]
-		if VisibleWidth(cur) <= widthPt {
+		total += g.Advance
+		if g.Space {
+			trail += g.Advance
+		} else {
+			trail = 0
+		}
+		if total-trail <= widthPt {
 			continue
 		}
 		// cur now overflows. Break at the last space before the overflow.
-		brk := lastSpaceBefore(cur, len(cur)-1)
+		brk := lastSpaceBefore(glyphs[:i+1], i)
 		if brk < 0 {
 			// One long word in progress with no break opportunity yet: keep filling
 			// until a space appears or the run ends.
