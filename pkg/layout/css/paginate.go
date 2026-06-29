@@ -100,6 +100,10 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// is cloned onto every page (each clone shifted), so it repeats. (An abs box whose CB
 	// is a positioned ancestor is not in root.Positioned — it follows that ancestor.)
 	perPagePos := splitPositionedByPage(root, buckets)
+	// Distribute the out-of-flow float layer per page by each float's Y band (mirroring
+	// the page-CB-absolute distribution above), so a float inside a section forced onto a
+	// later page paints on that page rather than riding page 0.
+	perPageFloats := splitFloatsByPage(root, buckets)
 
 	pages := make([]layout.Page, 0, len(buckets))
 	for i, bk := range buckets {
@@ -111,19 +115,16 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 		pageBody := *body
 		pageBody.Children = bk.blocks
 		// Assign this page's share of the positioned layer (its relative blocks, the
-		// page-CB abs boxes whose band is this page, and a clone of every fixed box). The
-		// out-of-flow float layer is not distributed and rides the first page only;
-		// null it on later pages so a top-level float is not duplicated. The body owns
-		// no positioned/float layer of its own (the root does), so its copies are
-		// cleared.
+		// page-CB abs boxes whose band is this page, and a clone of every fixed box) and
+		// its share of the out-of-flow float layer (each float routed to the page whose
+		// band holds its top). The body owns no positioned/float layer of its own (the
+		// root does), so its copies are cleared.
 		pageRoot.Positioned = perPagePos[i].frags
 		pageRoot.PositionedInfo = perPagePos[i].infos
+		pageRoot.Floats = perPageFloats[i]
 		pageBody.Positioned = nil
 		pageBody.PositionedInfo = nil
 		pageBody.Floats = nil
-		if i > 0 {
-			pageRoot.Floats = nil
-		}
 		// Fragment the html/body wrapper's own border + background across pages. The
 		// wrapper clones are NOT in bk.blocks, so shiftFragments below does not move them;
 		// position each wrapper's OWN box (not its children) into the same block-shifted
@@ -281,6 +282,29 @@ func pageForY(y float64, buckets []pageBucket) int {
 // viewport, so it repeats on every page). A nil fragment or nil Box reads as not-fixed.
 func isFixedFragment(f *Fragment) bool {
 	return f.Box != nil && f.Box.Position == cssbox.PosFixed
+}
+
+// splitFloatsByPage partitions root.Floats across pages by each float's vertical band,
+// mirroring the page-CB-absolute case of splitPositionedByPage: a float is out of flow
+// (its pointer is in root.Floats, never in a bucket's Children), so it is routed to the
+// page whose band contains its margin-box top (pageForY) and shifted into that page's
+// local frame here. Each float belongs to exactly one page, so shifting the original
+// pointer in place is safe (no cross-page aliasing). A float's own subtree — including
+// any abs/relative descendant on its Positioned layer and its clip rect — rides along,
+// because shiftFragment moves every page-space field the fragment owns. Returns one
+// slice per bucket (nil where a page has no floats). Without this a top-level float rode
+// page 0 only; this distributes it to the page its containing block fragments onto.
+func splitFloatsByPage(root *Fragment, buckets []pageBucket) [][]*Fragment {
+	out := make([][]*Fragment, len(buckets))
+	if root == nil || len(root.Floats) == 0 || len(buckets) == 0 {
+		return out
+	}
+	for _, fl := range root.Floats {
+		page := pageForY(fl.Y, buckets)
+		shiftFragment(fl, -buckets[page].top)
+		out[page] = append(out[page], fl)
+	}
+	return out
 }
 
 // bucketBlocks assigns top-level in-flow block fragments to pageH-tall pages,
