@@ -58,3 +58,15 @@ func TestSpanFieldsDefaultZero(t *testing.T) {
 		t.Errorf("spans default to zero; got col=%d row=%d", b.ColSpan, b.RowSpan)
 	}
 }
+
+func TestReplacedContentCarriesControl(t *testing.T) {
+	rc := &ReplacedContent{Tag: "input", Control: CtrlCheckbox, Text: ""}
+	if rc.Control != CtrlCheckbox {
+		t.Errorf("Control = %v, want CtrlCheckbox", rc.Control)
+	}
+	// The zero value is CtrlNone (an <img>), so existing replaced content is unchanged.
+	img := &ReplacedContent{Tag: "img"}
+	if img.Control != CtrlNone {
+		t.Errorf("default Control = %v, want CtrlNone", img.Control)
+	}
+}
