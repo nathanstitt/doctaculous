@@ -101,6 +101,23 @@ type ComputedStyle struct {
 	// boxes paint in document order) — full z-index ordering is a later slice.
 	ZIndex     int
 	ZIndexAuto bool
+
+	// Table properties (CSS 2.1 §17).
+	// BorderCollapse: "separate" (initial) | "collapse". Inherited.
+	BorderCollapse string
+	// BorderSpacingH/V: the two axes of border-spacing in points (initial 0,0).
+	// Inherited; used only in border-collapse:separate.
+	BorderSpacingH, BorderSpacingV float64
+	// TableLayout: "auto" (initial) | "fixed". On the table box.
+	TableLayout string
+	// VerticalAlign: "baseline" (initial) | "top" | "middle" | "bottom" (+ sub/
+	// super/text-top/text-bottom parsed, mapped to baseline for table-cell purposes).
+	VerticalAlign string
+	// CaptionSide: "top" (initial) | "bottom". Inherited.
+	CaptionSide string
+	// Direction: "ltr" (initial) | "rtl". Inherited. Parsed but NOT acted on (RTL
+	// deferred); a non-ltr value on a table is logged by the layout engine.
+	Direction string
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -260,6 +277,12 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Italic = parent.Italic
 	cs.LineHeight = parent.LineHeight
 	cs.TextAlign = parent.TextAlign
+	cs.BorderCollapse = parent.BorderCollapse
+	cs.BorderSpacingH = parent.BorderSpacingH
+	cs.BorderSpacingV = parent.BorderSpacingV
+	cs.CaptionSide = parent.CaptionSide
+	cs.Direction = parent.Direction
+	// table-layout and vertical-align are NOT inherited (per CSS).
 	return cs
 }
 
@@ -294,6 +317,12 @@ func initialStyle() ComputedStyle {
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
+		BorderCollapse: "separate",
+		TableLayout:    "auto",
+		VerticalAlign:  "baseline",
+		CaptionSide:    "top",
+		Direction:      "ltr",
+		// BorderSpacingH/V default to 0 (zero value).
 	}
 }
 
@@ -385,6 +414,34 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "visible", "hidden", "scroll", "auto":
 			cs.Overflow = d.Value
+		}
+	case "border-collapse":
+		switch d.Value {
+		case "separate", "collapse":
+			cs.BorderCollapse = d.Value
+		}
+	case "border-spacing":
+		applyBorderSpacing(cs, d.Value)
+	case "table-layout":
+		switch d.Value {
+		case "auto", "fixed":
+			cs.TableLayout = d.Value
+		}
+	case "vertical-align":
+		switch d.Value {
+		case "baseline", "top", "middle", "bottom",
+			"sub", "super", "text-top", "text-bottom":
+			cs.VerticalAlign = d.Value
+		}
+	case "caption-side":
+		switch d.Value {
+		case "top", "bottom":
+			cs.CaptionSide = d.Value
+		}
+	case "direction":
+		switch d.Value {
+		case "ltr", "rtl":
+			cs.Direction = d.Value
 		}
 	case "float":
 		switch d.Value {
@@ -505,6 +562,36 @@ func applyZIndex(cs *ComputedStyle, val string) {
 		return
 	}
 	cs.ZIndex, cs.ZIndexAuto = n, false
+}
+
+// applyBorderSpacing parses border-spacing: one length sets both axes, two lengths
+// set horizontal then vertical. Percentages/auto are invalid here and dropped. A
+// malformed value leaves the prior spacing intact.
+func applyBorderSpacing(cs *ComputedStyle, value string) {
+	tz := newTokenizer(value)
+	var lens []Length
+	for {
+		tok := tz.next()
+		if tok.Kind == TokenEOF {
+			break
+		}
+		if tok.Kind == TokenWhitespace {
+			continue
+		}
+		l, ok := parseLength(tok)
+		if !ok || l.Unit == UnitAuto || l.Unit == UnitPercent {
+			return // invalid component: drop the whole declaration
+		}
+		lens = append(lens, l)
+	}
+	switch len(lens) {
+	case 1:
+		cs.BorderSpacingH = lens[0].Value
+		cs.BorderSpacingV = lens[0].Value
+	case 2:
+		cs.BorderSpacingH = lens[0].Value
+		cs.BorderSpacingV = lens[1].Value
+	}
 }
 
 // parseInt parses an optionally-signed base-10 integer, returning ok=false for any

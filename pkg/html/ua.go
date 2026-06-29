@@ -9,12 +9,19 @@ import "github.com/nathanstitt/doctaculous/pkg/css"
 // later sub-projects need more defaults.
 const uaSource = `
 html, body, div, p, section, article, header, footer, nav, main, aside,
-ul, ol, blockquote, pre, table, form, figure, figcaption, hr, h1, h2, h3, h4, h5, h6 {
+ul, ol, blockquote, pre, form, figure, figcaption, hr, h1, h2, h3, h4, h5, h6 {
 	display: block;
 }
 li { display: list-item; }
 tr { display: table-row; }
 td, th { display: table-cell; }
+table { display: table; }
+thead { display: table-header-group; }
+tbody { display: table-row-group; }
+tfoot { display: table-footer-group; }
+col { display: table-column; }
+colgroup { display: table-column-group; }
+caption { display: table-caption; }
 head, title, meta, link, style, script { display: none; }
 
 /* Heading margins follow the W3C CSS2.1 sample UA sheet (~0.67em of the

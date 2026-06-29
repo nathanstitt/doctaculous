@@ -226,6 +226,17 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	deferredBefore := len(posCtx.deferred)
 	in := e.layoutInterior(ctx, b, contentW, contentX, childBandOrigin, fc, posCtx, childPosCB)
 
+	// CSS tables are shrink-to-fit: a width:auto table's box wraps its grid, not the
+	// containing block. layoutTable reports the grid width as in.intrinsicWidth; adopt
+	// it (recomputing the border-box width) when the table's width is auto and the grid
+	// is narrower than the resolved (container-fill) content width.
+	if b.Formatting == cssbox.TableFC && in.intrinsicWidth > 0 {
+		if _, isAuto := resolveLen(b.Style.Width, b.Style.FontSizePt, cbWidth); isAuto && in.intrinsicWidth < contentW {
+			contentW = in.intrinsicWidth
+			borderW = contentW + ed.pL + ed.pR + ed.bL + ed.bR
+		}
+	}
+
 	// Resolve the box's own collapse-resolved top/bottom margins and the offset of
 	// the content-box top from the border-box top's "natural" position.
 	//
@@ -301,6 +312,9 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		Children:   in.children,
 		Lines:      in.lines,
 		DebugTag:   debugTag(b),
+	}
+	if len(in.collapsedBorders) > 0 {
+		frag.Collapsed = in.collapsedBorders
 	}
 	frag.Border[layout.EdgeTop] = BorderEdge{Width: ed.bT, Color: b.Style.BorderTopColor, Style: mapBorderStyle(b.Style.BorderTopStyle)}
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}
@@ -438,6 +452,15 @@ type interior struct {
 	// interior that have not yet found their stacking-context owner (bubbles up like
 	// bfcFloats, but for the positioned layer). layoutBlock consumes or re-bubbles it.
 	pendingPositioned []pendingPos
+	// collapsedBorders holds the resolved border-collapse:collapse edge strips for a
+	// table interior, to be copied onto the table fragment. Nil for every non-table
+	// interior so non-collapse pages are byte-identical.
+	collapsedBorders []layout.BorderItem
+	// intrinsicWidth is a table's grid-content width (Σ column widths + border-spacing),
+	// reported by layoutTable so layoutBlock can shrink a width:auto table box to wrap
+	// its grid (CSS tables are shrink-to-fit, §17.5.2). Zero for non-table interiors
+	// (which keep the resolved block content width).
+	intrinsicWidth float64
 }
 
 // layoutInterior lays out b's children into a local frame (content-box top at 0)
@@ -476,11 +499,13 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		in = interior{lines: lines, children: atomics, contentHeight: h}
 	case cssbox.BlockFC:
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
+	case cssbox.TableFC:
+		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
 	default:
-		// TableFC / FlexFC / GridFC: their real layout algorithms are later
-		// sub-projects. Degrade to block normal flow so the children still position
-		// and paint (per the degradation contract: the box arrives with its true
-		// Formatting; the fallback is at this layout stage).
+		// FlexFC / GridFC: their real layout algorithms are later sub-projects.
+		// Degrade to block normal flow so the children still position and paint
+		// (per the degradation contract: the box arrives with its true Formatting;
+		// the fallback is at this layout stage).
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	}
@@ -911,6 +936,9 @@ func clips(b *cssbox.Box) bool {
 func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
 		return true
+	}
+	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
+		return true // a table and a table cell each establish a BFC
 	}
 	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
 }

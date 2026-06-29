@@ -82,6 +82,13 @@ type Fragment struct {
 	// after in-flow content, positives last); see sortedPositioned and AppendItems.
 	Positioned []*Fragment
 
+	// Collapsed holds the resolved border-collapse:collapse edge strips for a table
+	// fragment (nil for every other fragment — so non-collapse pages are byte-identical).
+	// Painted via the normal border path (BorderKind items) after the cell backgrounds
+	// and cell content are emitted, so the grid lines paint on top of cell fills.
+	// In the same page space as the fragment's border box.
+	Collapsed []layout.BorderItem
+
 	// Clips marks a fragment whose box has overflow ≠ visible: the stacking pass
 	// brackets its contents (descendant decorations, floats, in-flow content, and the
 	// CB-owned subset of its positioned layer) with a ClipPush(ClipRect)/ClipPop pair,
@@ -208,6 +215,12 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			dst = f.appendChildDecorations(dst)
 			dst = f.appendFloatLayer(dst)
 			dst = f.appendContent(dst)
+			// Collapsed border-collapse grid lines paint after all cell backgrounds and
+			// content so they are visible on top of cell fills (inside the clip bracket,
+			// so they are clipped with the rest of the table's content), but BEFORE the
+			// positioned layer — so a z-indexed positioned descendant of a cell stays
+			// above the grid lines (it paints in a later band).
+			dst = f.appendCollapsedBorders(dst)
 			dst = f.appendBand(dst, ord.middle, true, true)    // CB-owned middle, clipped
 			dst = f.appendBand(dst, ord.positives, true, true) // CB-owned positives, clipped
 			dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
@@ -221,6 +234,12 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 		dst = f.appendDecorations(dst)
 		dst = f.appendFloatLayer(dst)
 		dst = f.appendContent(dst)
+		// Collapsed border-collapse grid lines paint after all cell backgrounds and
+		// content so they are visible on top of cell fills (table is a BFC, so this
+		// non-clipping path is the common case for a non-overflow table), but BEFORE
+		// the positioned layer — so a z-indexed positioned descendant of a cell
+		// remains above the grid lines (it paints in a later band).
+		dst = f.appendCollapsedBorders(dst)
 		dst = f.appendBand(dst, ord.middle, false, false)
 		dst = f.appendBand(dst, ord.positives, false, false)
 		return dst
@@ -233,6 +252,17 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			continue
 		}
 		dst = c.AppendItems(dst)
+	}
+	return dst
+}
+
+// appendCollapsedBorders emits the resolved border-collapse:collapse grid edge strips
+// stored on f.Collapsed, if any. Called after appendContent so the collapsed grid lines
+// paint on top of cell backgrounds and cell content — making the borders visible over
+// any cell fill color. A no-op for every non-collapse fragment (f.Collapsed is nil).
+func (f *Fragment) appendCollapsedBorders(dst []layout.Item) []layout.Item {
+	for i := range f.Collapsed {
+		dst = append(dst, layout.Item{Kind: layout.BorderKind, Border: f.Collapsed[i]})
 	}
 	return dst
 }

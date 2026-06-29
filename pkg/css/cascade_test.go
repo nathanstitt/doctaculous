@@ -592,3 +592,101 @@ func TestOverflowNotInherited(t *testing.T) {
 		t.Errorf("child overflow = %q, want visible (not inherited)", child.Overflow)
 	}
 }
+
+func TestTableProperties(t *testing.T) {
+	sheet := Parse(`
+		table { border-collapse: collapse; border-spacing: 4px 8px; table-layout: fixed;
+		        caption-side: bottom; direction: rtl; }
+		td { vertical-align: middle; }
+	`)
+	r := NewResolver([]OriginSheet{{Origin: OriginAuthor, Sheet: sheet}}, nil)
+
+	tbl := r.ComputeRoot(&fakeNode{tag: "table"})
+	if tbl.BorderCollapse != "collapse" {
+		t.Errorf("border-collapse = %q, want collapse", tbl.BorderCollapse)
+	}
+	if tbl.BorderSpacingH != 4 || tbl.BorderSpacingV != 8 {
+		t.Errorf("border-spacing = %v,%v want 4,8", tbl.BorderSpacingH, tbl.BorderSpacingV)
+	}
+	if tbl.TableLayout != "fixed" {
+		t.Errorf("table-layout = %q, want fixed", tbl.TableLayout)
+	}
+	if tbl.CaptionSide != "bottom" {
+		t.Errorf("caption-side = %q, want bottom", tbl.CaptionSide)
+	}
+	if tbl.Direction != "rtl" {
+		t.Errorf("direction = %q, want rtl", tbl.Direction)
+	}
+	td := r.ComputeRoot(&fakeNode{tag: "td"})
+	if td.VerticalAlign != "middle" {
+		t.Errorf("vertical-align = %q, want middle", td.VerticalAlign)
+	}
+}
+
+func TestTablePropertyDefaults(t *testing.T) {
+	cs := initialStyle()
+	if cs.BorderCollapse != "separate" {
+		t.Errorf("default border-collapse = %q, want separate", cs.BorderCollapse)
+	}
+	if cs.TableLayout != "auto" {
+		t.Errorf("default table-layout = %q, want auto", cs.TableLayout)
+	}
+	if cs.VerticalAlign != "baseline" {
+		t.Errorf("default vertical-align = %q, want baseline", cs.VerticalAlign)
+	}
+	if cs.CaptionSide != "top" {
+		t.Errorf("default caption-side = %q, want top", cs.CaptionSide)
+	}
+	if cs.Direction != "ltr" {
+		t.Errorf("default direction = %q, want ltr", cs.Direction)
+	}
+}
+
+func TestBorderSpacingSingleValue(t *testing.T) {
+	sheet := Parse(`table { border-spacing: 6px; }`)
+	r := NewResolver([]OriginSheet{{Origin: OriginAuthor, Sheet: sheet}}, nil)
+	tbl := r.ComputeRoot(&fakeNode{tag: "table"})
+	if tbl.BorderSpacingH != 6 || tbl.BorderSpacingV != 6 {
+		t.Errorf("single border-spacing = %v,%v want 6,6", tbl.BorderSpacingH, tbl.BorderSpacingV)
+	}
+}
+
+func TestTableLayoutAndVerticalAlignNotInherited(t *testing.T) {
+	parent := initialStyle()
+	parent.TableLayout = "fixed"
+	parent.VerticalAlign = "middle"
+	child := inheritFrom(parent)
+	if child.TableLayout != "auto" {
+		t.Errorf("child table-layout = %q, want auto (not inherited)", child.TableLayout)
+	}
+	if child.VerticalAlign != "baseline" {
+		t.Errorf("child vertical-align = %q, want baseline (not inherited)", child.VerticalAlign)
+	}
+}
+
+func TestTablePropertiesInheritToChild(t *testing.T) {
+	// border-collapse, border-spacing, caption-side, and direction are inherited:
+	// a non-initial value on a parent must propagate to a child element.
+	src := `table { border-collapse: collapse; border-spacing: 5px; caption-side: bottom; direction: rtl; }`
+	sheet := Parse(src)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+
+	tbl := &fakeNode{tag: "table"}
+	child := &fakeNode{tag: "td", parent: tbl}
+
+	tblStyle := r.ComputeRoot(tbl)
+	childStyle := r.Compute(child, tblStyle)
+
+	if childStyle.BorderCollapse != "collapse" {
+		t.Errorf("child border-collapse = %q, want inherited collapse", childStyle.BorderCollapse)
+	}
+	if childStyle.BorderSpacingH != 5 || childStyle.BorderSpacingV != 5 {
+		t.Errorf("child border-spacing = %v,%v, want inherited 5,5", childStyle.BorderSpacingH, childStyle.BorderSpacingV)
+	}
+	if childStyle.CaptionSide != "bottom" {
+		t.Errorf("child caption-side = %q, want inherited bottom", childStyle.CaptionSide)
+	}
+	if childStyle.Direction != "rtl" {
+		t.Errorf("child direction = %q, want inherited rtl", childStyle.Direction)
+	}
+}

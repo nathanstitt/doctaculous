@@ -325,6 +325,35 @@ what is done vs. pending.
   clip-ancestor threading was needed). Covered by `clipescape_layout_test.go`, the `html-clip-relative-escape`
   golden, and the `positioned-clip-relative` WPT reftest. See
   `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
+- **HTML rendering — CSS 2.1 §17 table layout** (`pkg/layout/css/table.go` + `tableborder.go` (new),
+  `pkg/layout/css/tablefix.go` + `measure.go` (new), extended `pkg/layout/css/build.go`/`block.go`/
+  `fragment.go`/`anon.go`, `pkg/layout/cssbox` display kinds + `BoxAnonTablePart`, `pkg/html/ua.go` table
+  UA rules, `pkg/css` table properties; covered by box-gen/fixup + grid + width-solve + span +
+  vertical-align + caption + border-collapse unit tests, the `html-table-*` goldens, and the `table-*`
+  WPT reftests): a `<table>` (or any `display:table`/`table-row`/`table-cell`/row-group/column/caption
+  content) now **lays out and paints as a real table**, replacing the prior block fallback. Pieces: the
+  **table box tree + anonymous-table-box fixup** (CSS 17.2.1 — anonymous table/row-group/row/cell
+  insertion to repair a malformed tree, `tablefix.go` called from `normalize`); the **grid model**
+  (`tableGrid`/`buildGrid`: visual-order row flattening — header-group, body, footer-group — and an
+  occupancy scan assigning cells to slots honoring `colspan`/`rowspan`); the **column-width solve**, both
+  **fixed** (17.5.2.1) and **auto** (17.5.2.2 — per-column min/max-content widths distributed
+  conservatively, built on a new **min/max-content measurement** `measure.go` that reuses the real
+  inline layout), incl. **percentage column widths** against a fixed or auto table width; **full colspan
+  + rowspan** (colspan width distribution to spanned columns; rowspan height distribution across spanned
+  rows); **row heights** = tallest cell with cell content laid out at the resolved column width (a cell
+  establishes a **BFC**); **`vertical-align`** (top/middle/bottom; baseline≈top — shifts cell content,
+  incl. cell floats, within the row band); **captions** (`<caption>`, `caption-side: top|bottom` read
+  from the caption box so it is honored whether set on the table or the caption); **`<col>`/`<colgroup>`**
+  width hints; and **both `border-collapse` models** — `separate` (per-cell borders + `border-spacing`,
+  via the existing fragment border path) and **`collapse`** (the full CSS 17.6.2.1 conflict-resolution —
+  hidden > wider > style-rank > closer-to-cell — producing resolved edge strips centered on the grid
+  lines, painted via the existing `BorderKind` item path after cell content; per-cell borders cleared in
+  collapse mode). The `render.Device` seam, the PDF pipeline, and the shared inline core
+  (`pkg/layout/inline`) are **untouched**. Degrades gracefully: **RTL/`direction` is the sole deferral**
+  (parsed but not acted on — LTR always — and logged); an empty/malformed table is a zero-size fragment
+  (no panic); abs/fixed descendants inside a cell or caption resolve against that box (not silently
+  dropped). Non-table pages stay byte-identical (the `Fragment.Collapsed` edge list is nil for every
+  non-collapse fragment). See `docs/superpowers/specs/2026-06-25-html-tables-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -355,12 +384,13 @@ that skip into real output.
    content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
    fixes bold/italic fidelity).
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
-   normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**, and
-   **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, and the
-   **clip-escape sub-cases** (sub-project 6b) are done — see the Done section). Roughly in order, each a
-   parse/layout slice with its own fixtures + golden/WPT tests: **tables**; **web fonts**
+   normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**,
+   **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
+   **clip-escape sub-cases** (sub-project 6b), and **CSS 2.1 §17 table layout** (sub-project 7) are done
+   — see the Done section). Roughly in order, each a
+   parse/layout slice with its own fixtures + golden/WPT tests: **web fonts**
    (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
-   flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
+   flex/grid fall back to block normal flow; tables are now a real layout mode); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and
    **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter). Positioning fidelity
@@ -374,7 +404,19 @@ that skip into real output.
    basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
    inline/flow follow-ups still open: full `vertical-align` keyword set (only the atom baseline
    mechanics landed), `margin:auto` centering, and the deferred margin-collapse edge cases (empty-block
-   collapse-through, clearance, `min-height` interaction).
+   collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
+   engine: **RTL/`direction`** (the sole table deferral — parsed but not acted on, LTR column order
+   always, logged; needs the general bidi/`direction` support the engine lacks entirely); the
+   **table-cell `vertical-align: baseline`** shared-row baseline (today treated as top); the
+   **six table background layers** (table → column-groups → columns → row-groups → rows → cells — today
+   cell + table backgrounds paint, but `<col>`/row-group background layering is not modeled); the
+   **`empty-cells` property** (always rendered as `show`); a **percentage `<col>` width with no cells in
+   its column**; higher-fidelity 3D border styles in collapse (`ridge`/`groove`/`outset`/`inset`
+   render as `solid`); the **percentage-column basis is computed slightly differently in fixed
+   (border-spacing included) vs auto (excluded)** layout — only observable with `border-spacing > 0`
+   plus percentage columns, and off by the spacing amount; and **`buildCollapsedBorders` is O(cells²)**
+   (a per-neighbor linear scan — fine for normal tables, a perf cliff for very large collapsed grids;
+   retain `buildGrid`'s occupancy map to make it O(1)).
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
