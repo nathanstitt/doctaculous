@@ -584,10 +584,15 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			// here to keep partial output renderable).
 			break
 		}
-		if !child.Kind.IsBlockLevel() {
+		if !child.Kind.IsBlockLevel() && !isBlockLevelReplaced(child) {
 			// The box-gen invariant guarantees a block container's children are all
 			// block-level or all inline-level, so a stray inline here is unexpected;
-			// skip it defensively rather than misplacing it.
+			// skip it defensively rather than misplacing it. The replaced exception:
+			// a block-level replaced box — e.g. <img style="display:block"> — has Kind
+			// BoxReplaced (inline by kind) yet participates as a block here, and
+			// layoutBlock dispatches it to layoutBlockReplaced. (Kind.IsBlockLevel
+			// already accepts an inline-block child's BoxBlock kind for callers that
+			// lay an inline-block's own children out via this path.)
 			e.logf("css layout: unexpected inline-level child in block formatting context; skipping")
 			continue
 		}

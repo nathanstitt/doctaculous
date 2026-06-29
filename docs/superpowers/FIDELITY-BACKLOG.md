@@ -23,11 +23,13 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## B. HTML/CSS — visible bugs (have repros; fix first within HTML)
 
-- ☐ **B1. `display:block` on `<img>`/replaced ignored (F-E)** — *Medium.* `anon.go isBlockLevelOuter` never
-  special-cases a `display:block` replaced box → treated inline-level; `layoutBlockReplaced` unreachable for the
-  plain `display:block` case. Repro: `<div>A<img style="display:block;width:40px;height:40px" src=x>B</div>` —
-  browser stacks 3 blocks; engine lays them on one line. (F-D already set `frag.Box` on replaced fragments, a
-  prerequisite.)
+- ☑ **B1. `display:block` on `<img>`/replaced ignored (F-E)** — *DONE.* `isBlockLevelOuter` now returns the
+  replaced box's outer level from its display (`isBlockLevelOuterDisplay`), and the block stacker's child guard
+  accepts a block-level replaced box (`isBlockLevelReplaced`) — so a `display:block <img>` stacks as a block
+  (dispatched to `layoutBlockReplaced`). Tests: `TestReplacedBlockStacksAsBlock` (3 stacked children,
+  mutation-verified on both fix sites) + `block-img` WPT reftest (discriminating: inline-block then a block img
+  == authored stacked, fails when reverted). Goldens `html-image-basic`/`html-image-object-fit` regenerated +
+  eyeballed (the block imgs now stack with their vertical margins, which they did not before).
 - ☐ **B2. inline-block with text bottom-aligned, not baseline (F-F)** — *Medium.* `inline.go atomicRunFor` sets
   `BaselinePt: frag.H`, resting the atom's bottom margin edge on the line baseline. CSS 2.1 §10.8.1: a
   `vertical-align:baseline` inline-block with in-flow line boxes aligns its **last line box's baseline**. Repro:

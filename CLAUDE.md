@@ -228,7 +228,12 @@ what is done vs. pending.
   drops the baseline below it without the line-height leading multiplier scaling the atom). An
   undecodable/404/missing-`src`/unsupported-format image degrades to a sized placeholder (reserves its
   box, paints nothing) + debug log, never panicking; recovery is at the page boundary. See
-  `docs/superpowers/specs/2026-06-24-html-replaced-images-design.md`.
+  `docs/superpowers/specs/2026-06-24-html-replaced-images-design.md`. **(Fidelity fix B1:)** a
+  `display:block` replaced box now genuinely **stacks as a block** — previously `isBlockLevelOuter` and the
+  block stacker's child guard read `Kind.IsBlockLevel()` (always false for `BoxReplaced`), so a `display:block
+  <img>` was treated inline-level and flowed on the text line (or was skipped). `isBlockLevelOuter` now reads a
+  replaced box's outer level from its display, and the stacker accepts a block-level replaced child
+  (`isBlockLevelReplaced`); covered by `TestReplacedBlockStacksAsBlock` + the `block-img` reftest.
 - **HTML rendering — floats + clear** (`pkg/layout/css/floats.go`, extended `block.go`/`inline.go`/
   `fragment.go`, `pkg/layout/inline` `BreakNext`, `pkg/css` `float`/`clear`; covered by float-context
   geometry unit tests, fragment-geometry assertions, the `html-float-figure` golden, and the

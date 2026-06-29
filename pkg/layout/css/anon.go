@@ -29,7 +29,40 @@ func isBlockLevelOuter(b *cssbox.Box) bool {
 	if b.Display == cssbox.DisplayInlineBlock || b.Display == cssbox.DisplayInlineFlex || b.Display == cssbox.DisplayInlineGrid {
 		return false
 	}
+	// A replaced box (e.g. <img>) keeps Kind == BoxReplaced regardless of its display
+	// (the replacedTags override in generate runs AFTER classifyDisplay), so
+	// Kind.IsBlockLevel() is always false for it and a display:block <img> would
+	// wrongly flow inline. Its OUTER level is its display: display:block (or any
+	// block-level display) makes it block-level-outer so it stacks as a block (the
+	// block stacker dispatches BoxReplaced to layoutBlockReplaced); the default/inline
+	// and inline-block cases stay inline-level-outer (handled above + the fallthrough).
+	if b.Kind == cssbox.BoxReplaced {
+		return isBlockLevelOuterDisplay(b.Display)
+	}
 	return b.Kind.IsBlockLevel()
+}
+
+// isBlockLevelOuterDisplay reports whether a display value makes a box participate
+// in its parent's formatting context as block-level. Used for a replaced box, whose
+// Kind does not encode its outer level. The inline-level displays (inline,
+// inline-block, inline-flex, inline-grid) are NOT block-level-outer; every other
+// recognized display (block, list-item, the table display roles) is.
+func isBlockLevelOuterDisplay(d cssbox.DisplayKind) bool {
+	switch d {
+	case cssbox.DisplayInline, cssbox.DisplayInlineBlock, cssbox.DisplayInlineFlex, cssbox.DisplayInlineGrid:
+		return false
+	default:
+		return true
+	}
+}
+
+// isBlockLevelReplaced reports whether b is a replaced box (Kind BoxReplaced) that
+// participates as a block-level box in its parent's formatting context (its display
+// is block-level-outer, e.g. <img style="display:block">). The block stacker uses
+// this as the replaced exception to its Kind.IsBlockLevel() child guard, since a
+// replaced box's Kind is inline-level regardless of its display.
+func isBlockLevelReplaced(b *cssbox.Box) bool {
+	return b.Kind == cssbox.BoxReplaced && isBlockLevelOuterDisplay(b.Display)
 }
 
 // normalize rewrites the tree so every box satisfies the layout invariant: a

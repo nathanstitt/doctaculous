@@ -248,6 +248,46 @@ func TestReplacedBlockSizing(t *testing.T) {
 	}
 }
 
+// TestReplacedBlockStacksAsBlock pins B1 (the F-E bug): a display:block <img> between
+// two text runs must STACK as a block — the browser produces three stacked blocks
+// (anonymous "AAA", the img block, anonymous "BBB"), NOT one inline line. The bug was
+// that isBlockLevelOuter/the block-stacker child guard read Kind.IsBlockLevel(), which
+// is false for BoxReplaced regardless of display, so the block img was treated
+// inline-level and either flowed on the text line or was skipped. Mutation-verify:
+// revert isBlockLevelReplaced (or the anon.go BoxReplaced branch) and the img no longer
+// stacks (the div's child count / vertical order changes).
+func TestReplacedBlockStacksAsBlock(t *testing.T) {
+	src := `<div>AAA<img src="img.png" style="display:block;width:40px;height:40px">BBB</div>`
+	root := layoutWithLoader(t, src, 800, pngLoader(t, 40, 40), nil)
+	// root -> body -> div; the div must hold three stacked block children.
+	body := root.Children[len(root.Children)-1]
+	if len(body.Children) != 1 {
+		t.Fatalf("want 1 body child (the div), got %d", len(body.Children))
+	}
+	div := body.Children[0]
+	if len(div.Children) != 3 {
+		t.Fatalf("div should hold 3 stacked blocks (anon AAA, img, anon BBB), got %d", len(div.Children))
+	}
+	// The img is the middle child and carries the image.
+	imgChild := div.Children[1]
+	if imgChild.Image == nil {
+		t.Errorf("middle child should be the block img (has Image), got Image=nil")
+	}
+	if imgChild.W != 40 || imgChild.H != 40 {
+		t.Errorf("block img size = %vx%v, want 40x40", imgChild.W, imgChild.H)
+	}
+	// Vertical stacking: AAA above the img, BBB below it.
+	aaa, bbb := div.Children[0], div.Children[2]
+	if !(aaa.Y < imgChild.Y && imgChild.Y < bbb.Y) {
+		t.Errorf("blocks must stack vertically: AAA.Y=%.1f img.Y=%.1f BBB.Y=%.1f", aaa.Y, imgChild.Y, bbb.Y)
+	}
+	// And they do NOT share a baseline/line (the img is not an inline atom): each block's
+	// Y strictly increases by at least the prior block's height.
+	if imgChild.Y < aaa.Y+aaa.H-1e-6 {
+		t.Errorf("img must start at/below AAA's bottom (block flow), img.Y=%.1f AAA bottom=%.1f", imgChild.Y, aaa.Y+aaa.H)
+	}
+}
+
 // TestReplacedInlineBlockSizing: a display:inline-block <img> sizes via the replaced
 // algorithm (a replaced box is replaced regardless of inline-block display).
 func TestReplacedInlineBlockSizing(t *testing.T) {
