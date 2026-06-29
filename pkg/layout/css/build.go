@@ -62,6 +62,7 @@ func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.Res
 	}
 	normalize(root)   // anonymous-box fixups + whitespace handling (anon.go)
 	fixupTables(root) // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
+	fixupFlex(root)   // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
 	return root, faces, nil
 }
 
@@ -281,6 +282,10 @@ func classifyDisplay(b *cssbox.Box, display string) {
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayTableCell, cssbox.BlockFC
 	case "flex":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayFlex, cssbox.FlexFC
+	case "inline-flex":
+		// BoxBlock interior, inline-level outer: isBlockLevelOuter + gatherInlineRuns
+		// treat it as an atom like inline-block, but with FlexFC interior layout.
+		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayInlineFlex, cssbox.FlexFC
 	case "grid":
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayGrid, cssbox.GridFC
 	case "block":

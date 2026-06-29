@@ -254,6 +254,85 @@ func applyBorderSide(cs *ComputedStyle, value string, sides ...borderSide) {
 	}
 }
 
+// applyFlexShorthand expands the `flex` shorthand into flex-grow/flex-shrink/flex-basis
+// (CSS Flexbox 7.2). Keyword forms: none=>0 0 auto, auto=>1 1 auto, initial=>0 1 auto.
+// Numeric forms: <g> => g 1 0%; <g> <s> => g s 0%; <length> => 1 1 <length>;
+// <g> <basis> => g 1 basis; <g> <s> <basis> => as written. A token is a "basis" if it
+// is a length/percentage/auto/content; otherwise it is a number (grow then shrink).
+func applyFlexShorthand(cs *ComputedStyle, val string) {
+	v := strings.TrimSpace(val)
+	switch v {
+	case "none":
+		cs.FlexGrow, cs.FlexShrink, cs.FlexBasis = 0, 0, Length{Unit: UnitAuto}
+		return
+	case "auto":
+		cs.FlexGrow, cs.FlexShrink, cs.FlexBasis = 1, 1, Length{Unit: UnitAuto}
+		return
+	case "initial":
+		cs.FlexGrow, cs.FlexShrink, cs.FlexBasis = 0, 1, Length{Unit: UnitAuto}
+		return
+	}
+	fields := splitComponents(v)
+	if len(fields) == 0 || len(fields) > 3 {
+		return // malformed: leave prior values
+	}
+	// Defaults per the spec when a component is omitted from a non-keyword flex value:
+	// grow 1, shrink 1, basis 0%.
+	grow, shrink := 1.0, 1.0
+	basis := Length{0, UnitPercent}
+	var nums []float64
+	for _, f := range fields {
+		if b, ok := parseFlexBasis(f); ok && isBasisToken(f) {
+			basis = b
+			continue
+		}
+		n, ok := parseNonNegNumber(f)
+		if !ok {
+			return // unrecognized token: leave prior values
+		}
+		nums = append(nums, n)
+	}
+	if len(nums) >= 1 {
+		grow = nums[0]
+	}
+	if len(nums) >= 2 {
+		shrink = nums[1]
+	}
+	cs.FlexGrow, cs.FlexShrink, cs.FlexBasis = grow, shrink, basis
+}
+
+// isBasisToken reports whether a `flex` shorthand token should be read as the basis
+// (a length, percentage, or the auto/content keyword) rather than a grow/shrink number.
+func isBasisToken(f string) bool {
+	switch strings.TrimSpace(f) {
+	case "auto", "content":
+		return true
+	}
+	t := newTokenizer(f).next()
+	return t.Kind == TokenDimension || t.Kind == TokenPercent
+}
+
+// applyGapShorthand expands `gap: <row> [<column>]` (a single value sets both).
+func applyGapShorthand(cs *ComputedStyle, val string) {
+	fields := splitComponents(val)
+	if len(fields) == 0 || len(fields) > 2 {
+		return
+	}
+	row, ok := parseGapLength(fields[0])
+	if !ok {
+		return
+	}
+	col := row
+	if len(fields) == 2 {
+		c, ok := parseGapLength(fields[1])
+		if !ok {
+			return
+		}
+		col = c
+	}
+	cs.RowGap, cs.ColumnGap = row, col
+}
+
 // applyBackground expands the (currently color-only) `background` shorthand. The
 // full background shorthand (image/position/repeat/size/attachment) is future
 // work; ComputedStyle only carries BackgroundColor today. Behavior: scan the

@@ -690,3 +690,78 @@ func TestTablePropertiesInheritToChild(t *testing.T) {
 		t.Errorf("child direction = %q, want inherited rtl", childStyle.Direction)
 	}
 }
+
+func TestFlexContainerProperties(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "flex-direction", "column")
+	applyOne(&cs, "flex-wrap", "wrap")
+	applyOne(&cs, "justify-content", "space-between")
+	applyOne(&cs, "align-items", "center")
+	applyOne(&cs, "column-gap", "12px")
+	applyOne(&cs, "row-gap", "8px")
+	if cs.FlexDirection != "column" {
+		t.Errorf("flex-direction = %q, want column", cs.FlexDirection)
+	}
+	if cs.FlexWrap != "wrap" {
+		t.Errorf("flex-wrap = %q, want wrap", cs.FlexWrap)
+	}
+	if cs.JustifyContent != "space-between" {
+		t.Errorf("justify-content = %q, want space-between", cs.JustifyContent)
+	}
+	if cs.AlignItems != "center" {
+		t.Errorf("align-items = %q, want center", cs.AlignItems)
+	}
+	if cs.ColumnGap != (Length{12, UnitPx}) {
+		t.Errorf("column-gap = %v, want 12px", cs.ColumnGap)
+	}
+	if cs.RowGap != (Length{8, UnitPx}) {
+		t.Errorf("row-gap = %v, want 8px", cs.RowGap)
+	}
+}
+
+func TestFlexItemProperties(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "flex-grow", "2")
+	applyOne(&cs, "flex-shrink", "0")
+	applyOne(&cs, "flex-basis", "100px")
+	applyOne(&cs, "align-self", "flex-end")
+	applyOne(&cs, "order", "-1")
+	if cs.FlexGrow != 2 {
+		t.Errorf("flex-grow = %v, want 2", cs.FlexGrow)
+	}
+	if cs.FlexShrink != 0 {
+		t.Errorf("flex-shrink = %v, want 0", cs.FlexShrink)
+	}
+	if cs.FlexBasis != (Length{100, UnitPx}) {
+		t.Errorf("flex-basis = %v, want 100px", cs.FlexBasis)
+	}
+	if cs.AlignSelf != "flex-end" {
+		t.Errorf("align-self = %q, want flex-end", cs.AlignSelf)
+	}
+	if cs.Order != -1 {
+		t.Errorf("order = %v, want -1", cs.Order)
+	}
+}
+
+func TestFlexBasisContentAndAuto(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "flex-basis", "content")
+	if cs.FlexBasis.Unit != UnitContent {
+		t.Errorf("flex-basis:content unit = %v, want UnitContent", cs.FlexBasis.Unit)
+	}
+	cs2 := initialStyle()
+	if cs2.FlexBasis.Unit != UnitAuto {
+		t.Errorf("default flex-basis unit = %v, want UnitAuto", cs2.FlexBasis.Unit)
+	}
+	if cs2.FlexShrink != 1 {
+		t.Errorf("default flex-shrink = %v, want 1", cs2.FlexShrink)
+	}
+}
+
+func TestFlexUnknownValueIgnored(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "justify-content", "bogus")
+	if cs.JustifyContent != "flex-start" {
+		t.Errorf("justify-content after bogus = %q, want flex-start (unchanged)", cs.JustifyContent)
+	}
+}

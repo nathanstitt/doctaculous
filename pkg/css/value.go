@@ -14,7 +14,8 @@ const (
 	UnitPt
 	UnitEm
 	UnitPercent
-	UnitAuto // the "auto" keyword, modeled as a length so width/margin can carry it
+	UnitAuto    // the "auto" keyword, modeled as a length so width/margin can carry it
+	UnitContent // the flex-basis "content" keyword (only produced/read by flex-basis)
 )
 
 // Length is a CSS length value: a magnitude plus its unit. Percentages and the

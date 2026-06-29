@@ -4,8 +4,6 @@ import (
 	"context"
 	"image/color"
 	"strconv"
-	"strings"
-	"sync"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
@@ -287,37 +285,52 @@ func TestBordersAndBackgroundOnFragment(t *testing.T) {
 	}
 }
 
-// Fixture 10: flex/grid/table fall back to block normal flow (with a logged
-// message), still stacking children vertically.
-func TestUnsupportedFCFallsBackToBlock(t *testing.T) {
-	var mu sync.Mutex
-	var logs []string
-	logf := func(format string, args ...any) {
-		mu.Lock()
-		logs = append(logs, format)
-		mu.Unlock()
-	}
-	body := layoutBodyWithLog(t, reset+`<div style="display:flex"><div style="height:10px"></div><div style="height:15px"></div></div>`, 1000, logf)
+// FlexFC is wired to layoutFlex: a row flex container lays its items out side by
+// side (not the old block fallback). The exact width split is covered by
+// TestFlexRowGrowDistributesWidth in flex_layout_test.go.
+func TestFlexFCRowLaysOutItemsSideBySide(t *testing.T) {
+	// FlexFC is now wired to layoutFlex (not a block fallback). Two flex items with
+	// explicit basis 0px and grow 1 and 3 each are placed side by side (row direction);
+	// the exact 1:3 width split is asserted in TestFlexRowGrowDistributesWidth.
+	body := layoutBody(t, reset+`<div style="display:flex">
+		<div style="flex:1 1 0px;height:10px"></div>
+		<div style="flex:3 1 0px;height:15px"></div>
+	</div>`, 1000)
 	flex := body.Children[0]
 	if len(flex.Children) != 2 {
-		t.Fatalf("flex fallback children = %d, want 2", len(flex.Children))
+		t.Fatalf("flex children = %d, want 2", len(flex.Children))
 	}
 	a, b := flex.Children[0], flex.Children[1]
-	// Stacked vertically: second begins at first's bottom (margins are zero).
+	// Row layout: both items at the flex container's Y, side by side on X.
 	if a.Y != flex.Y {
-		t.Errorf("first child Y = %v, want flex content top %v", a.Y, flex.Y)
+		t.Errorf("first child Y = %v, want flex top %v", a.Y, flex.Y)
 	}
-	if b.Y != a.Y+a.H {
-		t.Errorf("second child Y = %v, want stacked below first (%v)", b.Y, a.Y+a.H)
+	if b.Y != flex.Y {
+		t.Errorf("second child Y = %v, want flex top %v", b.Y, flex.Y)
 	}
-	found := false
-	for _, l := range logs {
-		if strings.Contains(l, "not yet implemented; falling back to block normal flow") {
-			found = true
-		}
+	// Second item is to the right of the first.
+	if b.X <= a.X {
+		t.Errorf("second item x=%v should be right of first x=%v", b.X, a.X)
 	}
-	if !found {
-		t.Errorf("expected a fallback log message, got %v", logs)
+}
+
+// TestGridFCFallsBackToBlock verifies the GridFC degradation contract: display:grid
+// is not yet implemented and falls back to block normal flow (with a logged message),
+// so its children stack vertically rather than laying out side by side.
+func TestGridFCFallsBackToBlock(t *testing.T) {
+	body := layoutBody(t, reset+`<div style="display:grid">
+		<div style="height:10px"></div>
+		<div style="height:15px"></div>
+	</div>`, 1000)
+	grid := body.Children[0]
+	if len(grid.Children) != 2 {
+		t.Fatalf("grid children = %d, want 2", len(grid.Children))
+	}
+	child1, child2 := grid.Children[0], grid.Children[1]
+	// Block fallback: children stack vertically, so the second child starts below
+	// the first (not side by side as flex/grid would place them).
+	if child2.Y <= child1.Y {
+		t.Errorf("grid fallback: child2.Y=%v should be below child1.Y=%v (block stacking)", child2.Y, child1.Y)
 	}
 }
 
@@ -458,12 +471,6 @@ func layoutTreeFor(t *testing.T, src string, viewportW float64, logf func(string
 func layoutBody(t *testing.T, src string, viewportW float64) *Fragment {
 	t.Helper()
 	return bodyOf(t, layoutTreeFor(t, src, viewportW, nil))
-}
-
-// layoutBodyWithLog is layoutBody with a capturing logf.
-func layoutBodyWithLog(t *testing.T, src string, viewportW float64, logf func(string, ...any)) *Fragment {
-	t.Helper()
-	return bodyOf(t, layoutTreeFor(t, src, viewportW, logf))
 }
 
 // layoutOne returns the first block fragment inside <body> — the single <div> the

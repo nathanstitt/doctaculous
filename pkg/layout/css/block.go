@@ -313,6 +313,7 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		Lines:      in.lines,
 		DebugTag:   debugTag(b),
 	}
+	frag.Box = b
 	if len(in.collapsedBorders) > 0 {
 		frag.Collapsed = in.collapsedBorders
 	}
@@ -357,7 +358,6 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	bubble := in.pendingPositioned
 	if establishesStackingContext(b) {
 		frag.IsStackingContext = true
-		frag.Box = b
 		for _, pp := range in.pendingPositioned {
 			// Sub-case B: when b CLIPS (overflow≠visible), every relative descendant it
 			// consumes is clipped to b's padding box — it paints INSIDE the box's own
@@ -501,11 +501,11 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	case cssbox.TableFC:
 		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
+	case cssbox.FlexFC:
+		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC)
 	default:
-		// FlexFC / GridFC: their real layout algorithms are later sub-projects.
-		// Degrade to block normal flow so the children still position and paint
-		// (per the degradation contract: the box arrives with its true Formatting;
-		// the fallback is at this layout stage).
+		// GridFC and other unimplemented formatting contexts: degrade to block normal
+		// flow so children still position and paint.
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
 		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	}
@@ -714,7 +714,6 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	dy := (fb.y + res.marginTop) - res.frag.Y
 	translateFragment(res.frag, dx, dy)
 	res.frag.IsFloat = true
-	res.frag.Box = child
 
 	// A relatively-positioned descendant of the float is IN FLOW (a normal entry in
 	// res.frag.Children), so translateFragment(res.frag, …) above ALREADY moved it by
@@ -821,7 +820,6 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		}
 		frag.IsPositioned = true
 		frag.IsStackingContext = true
-		frag.Box = d.box
 		frag.RelOffsetX, frag.RelOffsetY = 0, 0 // abs/fixed bake position into coords
 
 		// Attach to the owning stacking context's Positioned layer: the root for a page
@@ -939,6 +937,9 @@ func establishesNewBFC(b *cssbox.Box) bool {
 	}
 	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
 		return true // a table and a table cell each establish a BFC
+	}
+	if b.Display == cssbox.DisplayFlex || b.Display == cssbox.DisplayInlineFlex {
+		return true // a flex container establishes a BFC (CSS Flexbox 2)
 	}
 	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
 }

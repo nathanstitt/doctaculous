@@ -3,6 +3,7 @@ package css
 import (
 	"image/color"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -101,6 +102,20 @@ type ComputedStyle struct {
 	// boxes paint in document order) — full z-index ordering is a later slice.
 	ZIndex     int
 	ZIndexAuto bool
+
+	// Flexbox (CSS Flexbox L1). Container properties read on a display:flex box;
+	// item properties read on each flex item. Defaults set in initialStyle.
+	FlexDirection  string // row | row-reverse | column | column-reverse
+	FlexWrap       string // nowrap | wrap | wrap-reverse (only nowrap acted on today)
+	JustifyContent string // flex-start | flex-end | center | space-between | space-around | space-evenly
+	AlignItems     string // stretch | flex-start | flex-end | center | baseline
+	AlignSelf      string // auto | stretch | flex-start | flex-end | center | baseline
+	ColumnGap      Length // main-axis gap for row, cross-axis gap for column
+	RowGap         Length // cross-axis gap for row, main-axis gap for column
+	FlexGrow       float64
+	FlexShrink     float64
+	FlexBasis      Length // length | percentage | UnitAuto ("auto") | UnitContent ("content")
+	Order          int
 
 	// Table properties (CSS 2.1 §17).
 	// BorderCollapse: "separate" (initial) | "collapse". Inherited.
@@ -317,6 +332,16 @@ func initialStyle() ComputedStyle {
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
+		FlexDirection:  "row",
+		FlexWrap:       "nowrap",
+		JustifyContent: "flex-start",
+		AlignItems:     "stretch",
+		AlignSelf:      "auto",
+		FlexGrow:       0,
+		FlexShrink:     1,
+		FlexBasis:      Length{Unit: UnitAuto},
+		Order:          0,
+		// ColumnGap, RowGap default to the zero Length ({0, UnitPx}) = no gap.
 		BorderCollapse: "separate",
 		TableLayout:    "auto",
 		VerticalAlign:  "baseline",
@@ -526,6 +551,59 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "border-left":
 		applyBorderSide(cs, d.Value,
 			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
+	case "flex-direction":
+		switch d.Value {
+		case "row", "row-reverse", "column", "column-reverse":
+			cs.FlexDirection = d.Value
+		}
+	case "flex-wrap":
+		switch d.Value {
+		case "nowrap", "wrap", "wrap-reverse":
+			cs.FlexWrap = d.Value
+		}
+	case "justify-content":
+		switch d.Value {
+		case "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly":
+			cs.JustifyContent = d.Value
+		}
+	case "align-items":
+		switch d.Value {
+		case "stretch", "flex-start", "flex-end", "center", "baseline":
+			cs.AlignItems = d.Value
+		}
+	case "align-self":
+		switch d.Value {
+		case "auto", "stretch", "flex-start", "flex-end", "center", "baseline":
+			cs.AlignSelf = d.Value
+		}
+	case "column-gap":
+		if l, ok := parseGapLength(d.Value); ok {
+			cs.ColumnGap = l
+		}
+	case "row-gap":
+		if l, ok := parseGapLength(d.Value); ok {
+			cs.RowGap = l
+		}
+	case "flex-grow":
+		if v, ok := parseNonNegNumber(d.Value); ok {
+			cs.FlexGrow = v
+		}
+	case "flex-shrink":
+		if v, ok := parseNonNegNumber(d.Value); ok {
+			cs.FlexShrink = v
+		}
+	case "flex-basis":
+		if l, ok := parseFlexBasis(d.Value); ok {
+			cs.FlexBasis = l
+		}
+	case "order":
+		if n, ok := parseInt(d.Value); ok {
+			cs.Order = n
+		}
+	case "flex":
+		applyFlexShorthand(cs, d.Value)
+	case "gap":
+		applyGapShorthand(cs, d.Value)
 	}
 	// default: unsupported property — ignored on purpose.
 }
@@ -643,4 +721,42 @@ func trimQuotes(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// parseNonNegNumber parses a unitless non-negative number (flex-grow/flex-shrink).
+// A negative or non-numeric value yields ok=false (the property keeps its prior value).
+func parseNonNegNumber(s string) (float64, bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || v < 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// parseGapLength parses a row-gap/column-gap value. "normal" is the initial value
+// and means zero gap. Lengths/percentages parse normally; "auto" is invalid for gap.
+func parseGapLength(s string) (Length, bool) {
+	if strings.TrimSpace(s) == "normal" {
+		return Length{0, UnitPx}, true
+	}
+	l, ok := parseLength(newTokenizer(s).next())
+	if !ok || l.Unit == UnitAuto {
+		return Length{}, false
+	}
+	return l, true
+}
+
+// parseFlexBasis parses a flex-basis value: "auto", "content", or a length/percentage.
+func parseFlexBasis(s string) (Length, bool) {
+	switch strings.TrimSpace(s) {
+	case "auto":
+		return Length{Unit: UnitAuto}, true
+	case "content":
+		return Length{Unit: UnitContent}, true
+	}
+	l, ok := parseLength(newTokenizer(s).next())
+	if !ok || l.Unit == UnitAuto {
+		return Length{}, false
+	}
+	return l, true
 }

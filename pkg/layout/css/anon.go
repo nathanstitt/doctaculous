@@ -15,6 +15,10 @@ import (
 // inline-block is NOT block-level-outer despite its BoxBlock kind. Every other
 // box's outer level matches its kind.
 //
+// The same applies to inline-flex (Display == DisplayInlineFlex): it too has Kind
+// BoxBlock (a flex container for its own children) but participates outwardly as an
+// inline-level atom in its parent's IFC, so it is not block-level-outer either.
+//
 // Box generation uses this (not Kind.IsBlockLevel) wherever it classifies a box
 // AS A CHILD for its parent's FC partitioning: which children stack as blocks vs
 // flow inline, whether an inline box must split around a block descendant,
@@ -22,7 +26,7 @@ import (
 // predicate is reserved for a box's OWN interior role (see normalize and
 // handleWhitespace, which ask whether a box is itself a block CONTAINER).
 func isBlockLevelOuter(b *cssbox.Box) bool {
-	if b.Display == cssbox.DisplayInlineBlock {
+	if b.Display == cssbox.DisplayInlineBlock || b.Display == cssbox.DisplayInlineFlex {
 		return false
 	}
 	return b.Kind.IsBlockLevel()

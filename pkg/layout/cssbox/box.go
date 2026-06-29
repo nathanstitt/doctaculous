@@ -30,6 +30,10 @@ const (
 	// BoxAnonInline it carries a zero-value ComputedStyle; its Display/Formatting
 	// say which table part it stands in for. isAnonymous() treats it as anonymous.
 	BoxAnonTablePart
+	// BoxAnonFlexItem is an anonymous block-level flex item wrapping a contiguous
+	// run of inline-level content / text inside a flex container (CSS Flexbox 4).
+	// Like BoxAnonBlock it carries a zero-value ComputedStyle and establishes a BFC.
+	BoxAnonFlexItem
 	// BoxReplaced is a replaced element (e.g. <img>): a leaf sized by intrinsics
 	// in a later sub-project.
 	BoxReplaced
@@ -40,7 +44,7 @@ const (
 // IsBlockLevel reports whether the kind participates in a block formatting
 // context as a block-level box.
 func (k BoxKind) IsBlockLevel() bool {
-	return k == BoxBlock || k == BoxAnonBlock || k == BoxAnonTablePart
+	return k == BoxBlock || k == BoxAnonBlock || k == BoxAnonTablePart || k == BoxAnonFlexItem
 }
 
 // IsInlineLevel reports whether the kind participates in an inline formatting
@@ -69,6 +73,10 @@ const (
 	DisplayTableCaption
 	DisplayTableCell
 	DisplayFlex
+	// DisplayInlineFlex is an inline-level flex container (display:inline-flex).
+	// Box generation wiring arrives in a later task; the constant is defined here
+	// because fixupFlex reads it.
+	DisplayInlineFlex
 	DisplayGrid
 	// DisplayNone is never emitted as a box (display:none subtrees are pruned);
 	// it exists so a DisplayKind can round-trip the value if needed.
