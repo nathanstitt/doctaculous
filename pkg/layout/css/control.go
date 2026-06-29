@@ -106,17 +106,17 @@ func textOf(e *html.Element) string {
 
 // Control chrome metrics, in points (browser-typical defaults).
 const (
-	ctrlPadX         = 2  // text field internal horizontal padding (each side)
-	ctrlPadY         = 1  // text field internal vertical padding (each side)
-	ctrlBtnPadX      = 6  // button internal horizontal padding (each side)
-	ctrlBorder       = 1  // chrome border thickness (each side)
-	ctrlCheckSize    = 13 // checkbox/radio fixed square side
-	ctrlSelectTri    = 16 // select dropdown-triangle box width
-	ctrlMinTextW     = 120
-	ctrlMinTextareaW = 150
-	ctrlMinTextareaH = 40
-	ctrlMinButtonW   = 24
-	ctrlMinFieldH    = 16 // minimum field/button height (one line + chrome), points
+	ctrlPadX         = 2   // text field internal horizontal padding (each side)
+	ctrlPadY         = 1   // text field internal vertical padding (each side)
+	ctrlBtnPadX      = 6   // button internal horizontal padding (each side)
+	ctrlBorder       = 1   // chrome border thickness (each side)
+	ctrlCheckSize    = 13  // checkbox/radio fixed square side
+	ctrlSelectTri    = 16  // select dropdown-triangle box width
+	ctrlMinTextW     = 120 // minimum text-field / select width, points
+	ctrlMinTextareaW = 150 // minimum textarea width, points
+	ctrlMinTextareaH = 40  // minimum textarea height, points
+	ctrlMinButtonW   = 24  // minimum button width, points
+	ctrlMinFieldH    = 16  // minimum field/button height (one line + chrome), points
 )
 
 // controlIntrinsicSize returns the intrinsic content-box size (points) of a form
@@ -130,12 +130,13 @@ func (e *Engine) controlIntrinsicSize(ctx context.Context, b *cssbox.Box) (w, h 
 	if b.Replaced != nil {
 		kind = b.Replaced.Control
 	}
+	if kind == cssbox.CtrlCheckbox || kind == cssbox.CtrlRadio {
+		return ctrlCheckSize, ctrlCheckSize
+	}
 	ch := e.charWidth(b)           // one '0' advance in points
 	line := e.controlLineHeight(b) // one line box height in points
 
 	switch kind {
-	case cssbox.CtrlCheckbox, cssbox.CtrlRadio:
-		return ctrlCheckSize, ctrlCheckSize
 	case cssbox.CtrlButton:
 		labelW := e.textWidth(b, b.Replaced.Text)
 		w = labelW + 2*ctrlBtnPadX + 2*ctrlBorder
@@ -187,6 +188,9 @@ func (e *Engine) controlLineHeight(b *cssbox.Box) float64 {
 }
 
 // textWidth measures the width (points) of s in the control's resolved font.
+// Sum per-rune advances, silently skipping runes the face has no glyph for
+// (matching the shaper's glyph-skip behavior). A string of all-missing glyphs
+// yields 0; callers floor the result so a control never collapses to zero width.
 func (e *Engine) textWidth(b *cssbox.Box, s string) float64 {
 	fs := b.Style.FontSizePt
 	face, ok := e.faces.Resolve(b.Style.FontFamily, styleFor(b))
