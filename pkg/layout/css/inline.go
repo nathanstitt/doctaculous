@@ -223,19 +223,58 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 // atomicRunFor builds the inline.Run for an atomic inline-level box (inline-block
 // or replaced) whose border-box fragment is frag, resolving its horizontal margins
 // against basis. The atom's advance is marginL + borderWidth + marginR, with the
-// left margin recorded so the IFC offsets the fragment's border box past it; the
-// atom is bottom-aligned (baseline at its margin-box bottom) for now — full inline
-// vertical-align is deferred. Negative margins are honored (they may pull the atom
-// or following content leftward), matching the block flow's margin treatment.
+// left margin recorded so the IFC offsets the fragment's border box past it. Negative
+// margins are honored (they may pull the atom or following content leftward), matching
+// the block flow's margin treatment.
+//
+// The atom's baseline (BaselinePt, measured from its border-box top) follows CSS 2.1
+// §10.8.1 for vertical-align:baseline: it is the baseline of the atom's LAST in-flow
+// line box, UNLESS the atom has no in-flow line boxes or its overflow is not visible —
+// in which case it is the bottom margin edge (frag.H). So a replaced atom (an <img>: no
+// line boxes) and an overflow:hidden inline-block stay bottom-aligned, while a plain
+// inline-block with text aligns its text baseline with the surrounding line's baseline
+// (rather than resting its whole box on the baseline, which dropped the box too low and
+// inflated the line box). Full vertical-align keyword handling (sub/super/top/middle/…)
+// is still deferred — this fixes only the default-baseline case.
 func atomicRunFor(b *cssbox.Box, frag *Fragment, basis float64) inline.Run {
 	ed := usedEdges(b, basis)
+	baseline := frag.H // default: bottom margin edge (replaced, overflow≠visible, empty)
+	if !clips(b) {
+		if by, ok := lastInFlowLineBaseline(frag); ok {
+			baseline = by - frag.Y // distance from the border-box top to that baseline
+		}
+	}
 	return inline.Run{Atomic: &inline.AtomicItem{
 		WidthPt:      ed.mL + frag.W + ed.mR,
 		HeightPt:     frag.H,
 		MarginLeftPt: ed.mL,
-		BaselinePt:   frag.H, // bottom-aligned baseline for now
+		BaselinePt:   baseline,
 		Ref:          frag,
 	}}
+}
+
+// lastInFlowLineBaseline returns the page-frame Y of the baseline of the LAST in-flow
+// line box in frag's subtree (CSS 2.1 §10.8.1 "the baseline of its last line box in the
+// normal flow"), and whether one exists. A fragment that establishes an inline formatting
+// context carries its line boxes in Lines; a block-container fragment carries block
+// children, so the last line box is found by recursing into its last IN-FLOW child
+// (skipping out-of-flow positioned/floated children, which do not contribute a normal-flow
+// line box). Returns ok=false for an atom with no in-flow line box (e.g. a replaced image,
+// or an empty inline-block), so the caller falls back to the bottom margin edge.
+func lastInFlowLineBaseline(frag *Fragment) (float64, bool) {
+	if n := len(frag.Lines); n > 0 {
+		return frag.Lines[n-1].BaselineY, true
+	}
+	for i := len(frag.Children) - 1; i >= 0; i-- {
+		c := frag.Children[i]
+		if c.IsPositioned || c.IsFloat {
+			continue
+		}
+		if by, ok := lastInFlowLineBaseline(c); ok {
+			return by, true
+		}
+	}
+	return 0, false
 }
 
 // attrPx parses a width/height presentation attribute as a non-negative integer

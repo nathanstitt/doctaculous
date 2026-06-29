@@ -30,10 +30,14 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   mutation-verified on both fix sites) + `block-img` WPT reftest (discriminating: inline-block then a block img
   == authored stacked, fails when reverted). Goldens `html-image-basic`/`html-image-object-fit` regenerated +
   eyeballed (the block imgs now stack with their vertical margins, which they did not before).
-- ☐ **B2. inline-block with text bottom-aligned, not baseline (F-F)** — *Medium.* `inline.go atomicRunFor` sets
-  `BaselinePt: frag.H`, resting the atom's bottom margin edge on the line baseline. CSS 2.1 §10.8.1: a
-  `vertical-align:baseline` inline-block with in-flow line boxes aligns its **last line box's baseline**. Repro:
-  `<p>text <span style="display:inline-block">box</span> text</p>` — "box" sits too low.
+- ☑ **B2. inline-block with text bottom-aligned, not baseline (F-F)** — *DONE.* `atomicRunFor` now sets
+  `BaselinePt` to the distance from the atom's border-box top to its **last in-flow line box's baseline**
+  (`lastInFlowLineBaseline`), per CSS 2.1 §10.8.1 — falling back to the bottom margin edge (`frag.H`) for a
+  replaced atom (no line box), an `overflow≠visible` inline-block, or an empty one. Tests:
+  `TestInlineBlockTextBaseline` (mutation-verified — the bug misaligns by ~32pt) + the `html-inline-block-baseline`
+  golden (eyeballed: "BOX" aligns with "before"/"after" on one line). Empty inline-blocks keep bottom alignment
+  (`TestInlineBlockAtomics` unchanged). NOTE: surfaced two orthogonal pre-existing bugs (E4 shrink-to-fit, E5
+  line-gap inflation) — filed below; B2 itself is correct and the existing corpus is byte-identical.
 
 ## C. HTML/CSS — positioning fidelity
 
@@ -59,6 +63,19 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   `middle`/`bottom`/`text-top`/`text-bottom`/`%`/length). *Medium–large.* (Overlaps B2.)
 - ☐ **E2. `margin:auto` horizontal centering** (block-level). *Small–medium.*
 - ☐ **E3. Margin-collapse edge cases** — empty-block collapse-through, clearance, `min-height` interaction. *Medium.*
+- ☐ **E4. inline-block (auto width) shrink-to-fit** — an `width:auto` inline-block fills its containing block
+  (`resolveContentWidth` returns `cbWidth`) instead of shrinking to its content (CSS 10.3.9). Tables and
+  inline-grid already shrink-to-fit (`intrinsicWidth`); inline-block does not. *Medium.* (Discovered while
+  building the B2 golden — an auto-width inline-block with text spanned the full line.)
+- ☐ **E5. line-gap metric inflated (→ inline-block height inflation)** — a single 16px line reports
+  `LineGapPt ≈ 21pt` (ascent 16.9, descent 4.5, gap 21.4), so `autoLineHeight = (asc+desc+gap)×1.15 ≈ 49pt` —
+  ~2× the expected ~24pt. Root cause: the font line-gap metric in `inline.Shape`/`MakeLine` is too large (likely
+  a units-per-em scaling or hhea lineGap vs OS/2 typo-gap mixup in the bundled face). Affects EVERY auto
+  line-height line, not just inline-block — the inline-block just makes it visible (its border box is the
+  inflated line). *Medium.* (Diagnosed while building the B2 golden; the B2 baseline fix is correct and
+  orthogonal — the box's text baseline aligns; only its descent extent is too tall.)
+- ☐ **E6. `font` shorthand size not applied** — `font: 20px monospace` leaves `FontSizePt` at the 16px default
+  (the shorthand's size component is not parsed onto `font-size`). *Small.* (Discovered via the B2 probe.)
 
 ## F. HTML/CSS — tables
 

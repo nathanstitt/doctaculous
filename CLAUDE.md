@@ -610,7 +610,13 @@ that skip into real output.
    sizing step (CSS 10.4; today min/max clamps per-axis after ratio derivation), a percentage `height`
    basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
    inline/flow follow-ups still open: full `vertical-align` keyword set (only the atom baseline
-   mechanics landed), `margin:auto` centering, and the deferred margin-collapse edge cases (empty-block
+   mechanics landed — and, **fidelity fix B2**, a `vertical-align:baseline` inline-block WITH text now aligns
+   its last in-flow line box's baseline per CSS 2.1 §10.8.1 via `atomicRunFor`/`lastInFlowLineBaseline`, instead
+   of resting its whole border box on the baseline; a replaced/empty/`overflow≠visible` atom stays
+   bottom-aligned), `margin:auto` centering, **auto-width inline-block shrink-to-fit** (an `width:auto`
+   inline-block fills its container — separate from B2), an **inflated font line-gap metric** (a 16px line
+   reports a ~21pt gap → ~2× line height, visible as a tall inline-block box), the **`font` shorthand size**
+   (`font:20px …` keeps the default size), and the deferred margin-collapse edge cases (empty-block
    collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
    engine: **RTL/`direction`** (the sole table deferral — parsed but not acted on, LTR column order
    always, logged; needs the general bidi/`direction` support the engine lacks entirely);

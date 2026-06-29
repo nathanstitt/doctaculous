@@ -346,10 +346,71 @@ func TestInlineBlockAtomics(t *testing.T) {
 	if frag.H < 30 {
 		t.Errorf("IFC border-box H = %v, want >= 30 (atomic line height)", frag.H)
 	}
-	// Bottom-aligned baseline: each atomic's bottom rests on the line baseline.
+	// EMPTY inline-blocks (no in-flow line box) keep the bottom-margin-edge baseline
+	// (CSS 2.1 §10.8.1): each atomic's bottom rests on the line baseline. (A text-bearing
+	// inline-block aligns its own text baseline instead — see TestInlineBlockTextBaseline.)
 	if got := a.Y + a.H; got != frag.Lines[0].BaselineY {
 		t.Errorf("atomic bottom = %v, want on baseline %v", got, frag.Lines[0].BaselineY)
 	}
+}
+
+// TestInlineBlockTextBaseline pins B2 (the F-F bug): a vertical-align:baseline
+// inline-block WITH text aligns its last line box's baseline with the surrounding line's
+// baseline (CSS 2.1 §10.8.1), instead of resting its whole border box on the baseline
+// (which dropped the box too low and inflated the line). With matching fonts the
+// inline-block's interior text baseline must coincide with the parent paragraph's line
+// baseline. Mutation-verify: restore BaselinePt: frag.H and the inline-block's text drops
+// far below the surrounding baseline (its top sits on the baseline instead).
+func TestInlineBlockTextBaseline(t *testing.T) {
+	// "X" then an inline-block containing "y", same font/size, on one line.
+	src := `<p style="margin:0;font:16px monospace">X<span style="display:inline-block">y</span></p>`
+	root := layoutTreeFor(t, src, 400, nil)
+	// root -> body -> p. The p is an IFC with one line; the inline-block is an atomic child.
+	p := descendToIFC(t, root)
+	if len(p.Lines) == 0 {
+		t.Fatalf("paragraph has no line box")
+	}
+	lineBaseline := p.Lines[0].BaselineY
+	if len(p.Children) != 1 {
+		t.Fatalf("want 1 atomic child (the inline-block), got %d", len(p.Children))
+	}
+	ib := p.Children[0]
+	by, ok := lastInFlowLineBaseline(ib)
+	if !ok {
+		t.Fatalf("inline-block should have an in-flow line box (its text 'y')")
+	}
+	// The inline-block's own text baseline must align with the paragraph's line baseline.
+	if d := absf(by - lineBaseline); d > 0.5 {
+		t.Errorf("inline-block text baseline %.2f vs line baseline %.2f (delta %.2f); want aligned (~0)", by, lineBaseline, d)
+	}
+	// And the bug's signature must be ABSENT: the inline-block's TOP must NOT sit on the
+	// baseline (that is the bottom-aligned bug — the whole box above the baseline).
+	if absf(ib.Y-lineBaseline) < 0.5 {
+		t.Errorf("inline-block top sits on the baseline (Y=%.2f ≈ baseline %.2f): the F-F bottom-aligned bug", ib.Y, lineBaseline)
+	}
+}
+
+// descendToIFC returns the first fragment in root's subtree that has line boxes (an
+// inline formatting context), for tests that assert on a paragraph's lines.
+func descendToIFC(t *testing.T, root *Fragment) *Fragment {
+	t.Helper()
+	var find func(f *Fragment) *Fragment
+	find = func(f *Fragment) *Fragment {
+		if len(f.Lines) > 0 {
+			return f
+		}
+		for _, c := range f.Children {
+			if got := find(c); got != nil {
+				return got
+			}
+		}
+		return nil
+	}
+	f := find(root)
+	if f == nil {
+		t.Fatalf("no IFC fragment (with line boxes) found")
+	}
+	return f
 }
 
 // TestInlineBlockFlowsInlineEndToEnd drives two inline-blocks through the PUBLIC

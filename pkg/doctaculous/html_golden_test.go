@@ -615,6 +615,23 @@ var htmlGoldens = []struct {
   </div>
 </body></html>`,
 	},
+	{
+		// An inline-block WITH text inside a line of text (CSS 2.1 §10.8.1 baseline
+		// alignment, the B2 fix). Eyeball: the highlighted inline-block ("BOX") sits on
+		// the SAME baseline as the surrounding words — its text aligns with "before" and
+		// "after", on ONE line, not dropped below. (Before the fix the box rested its whole
+		// border box on the baseline, dropping its text far below and inflating the line.)
+		// The inline-block has an explicit width so its box is a fixed size (auto-width
+		// inline-block shrink-to-fit is a separate, still-open fidelity item).
+		name:       "inline-block-baseline",
+		viewportPx: 300,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; font: 20px monospace; }
+  .ib { display: inline-block; width: 56px; background: #ffdd55; }
+</style></head><body>
+  <p>before <span class="ib">BOX</span> after</p>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for
