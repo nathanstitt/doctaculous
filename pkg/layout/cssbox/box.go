@@ -129,14 +129,32 @@ const (
 	PosFixed
 )
 
+// ControlKind identifies a form control rendered as a static replaced widget.
+// CtrlNone (the zero value) means the replaced box is not a control (e.g. an
+// <img>), so existing replaced content is unaffected.
+type ControlKind int
+
+const (
+	CtrlNone     ControlKind = iota // not a control
+	CtrlText                        // text + text-like input types, and bare <input>
+	CtrlPassword                    // <input type=password>
+	CtrlCheckbox                    // <input type=checkbox>
+	CtrlRadio                       // <input type=radio>
+	CtrlButton                      // <button>, <input type=submit|button|reset>
+	CtrlTextarea                    // <textarea>
+	CtrlSelect                      // <select>
+)
+
 // ReplacedContent holds the facts about a replaced element. It carries only the
 // source facts (tag + attributes), never a decoded image: decoding is done at
 // layout time by the engine (which holds the resource loader and context), so the
 // box tree stays pure and read-only. The decoded image and intrinsic size live on
 // the layout output (the engine's fragment), not here.
 type ReplacedContent struct {
-	Tag   string            // e.g. "img"
-	Attrs map[string]string // src, width, height, alt, ...
+	Tag     string            // e.g. "img"
+	Attrs   map[string]string // src, width, height, alt, ...
+	Control ControlKind       // form-control kind; CtrlNone for <img>
+	Text    string            // control's display text; empty for <img>
 }
 
 // Box is a node of the recursive box tree. It is read-only after construction.

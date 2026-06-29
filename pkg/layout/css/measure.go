@@ -62,6 +62,15 @@ func (e *Engine) measureContentUncached(ctx context.Context, b *cssbox.Box, want
 	if w, ok := specifiedFixedWidth(b); ok {
 		return w
 	}
+	// A replaced box (an <img> or a form control) has no child/inline content to
+	// measure; its intrinsic contribution is its used replaced width (which already
+	// honors a CSS width override, the intrinsic image/control size, and min/max).
+	// Without this a width:auto replaced box measures 0, collapsing a flex/grid
+	// container that holds it (its flex base size / grid track would be zero).
+	if b.Kind == cssbox.BoxReplaced {
+		w, _ := e.replacedUsedSize(ctx, b, 0)
+		return w
+	}
 	if b.Formatting == cssbox.InlineFC {
 		return e.measureInline(ctx, b, wantMax)
 	}

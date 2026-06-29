@@ -520,6 +520,10 @@ func translateFragment(f *Fragment, dx, dy float64) {
 		f.Image.CX += dx
 		f.Image.CY += dy
 	}
+	if f.Control != nil {
+		f.Control.CX += dx
+		f.Control.CY += dy
+	}
 	for _, c := range f.Children {
 		translateFragment(c, dx, dy)
 	}

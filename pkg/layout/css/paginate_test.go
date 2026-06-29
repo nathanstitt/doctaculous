@@ -145,6 +145,67 @@ func TestPaginateForcedBreakAfter(t *testing.T) {
 	}
 }
 
+// hasBackgroundColor reports whether any item on the page is a BackgroundKind fill of
+// color c (used to locate a float's painted background on a given page).
+func hasBackgroundColor(p layout.Page, c color.RGBA) bool {
+	for _, it := range p.Items {
+		if it.Kind == layout.BackgroundKind && it.Rule.Color == c {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPaginateDistributesFloatToItsPage is a regression test for the float-pagination
+// fix: a float inside a section forced onto a later page must paint on THAT page, not
+// ride page 0 (the prior deferral). A tall block fills page 0; a second block, forced
+// onto page 1 by break-before, contains a left float with a unique background color.
+// The float's background must appear on page 1 — and NOT on page 0 — and at a small
+// page-LOCAL Y (it is shifted into page 1's frame, not left at its full-document Y).
+func TestPaginateDistributesFloatToItsPage(t *testing.T) {
+	const w = 400
+	floatColor := color.RGBA{0xcc, 0x33, 0x33, 0xff}
+	src := `<html><body>` +
+		`<div style="height:60px;margin:0">page zero</div>` +
+		`<div style="margin:0;break-before:page">` +
+		`<div style="float:left;width:50px;height:50px;margin:0;background:#cc3333"></div>` +
+		`<p style="margin:0">beside the float</p>` +
+		`</div></body></html>`
+
+	blocks := measuredBlockHeights(t, src, w)
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 top-level blocks, got %d", len(blocks))
+	}
+	pageH := blocks[0].H + blocks[1].H + 100 // fits both; only the forced break splits
+
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, pageH)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Fatalf("expected 2 pages, got %d", len(pages.Pages))
+	}
+	if hasBackgroundColor(pages.Pages[0], floatColor) {
+		t.Error("float background painted on page 0; it must be distributed to its section's page")
+	}
+	if !hasBackgroundColor(pages.Pages[1], floatColor) {
+		t.Fatal("float background missing from page 1 (the float was dropped or stranded on page 0)")
+	}
+	// The float must be shifted into page 1's local frame: its Y is near the page top,
+	// not at its full-document Y (which is past the first page's height).
+	var floatY float64 = -1
+	for _, it := range pages.Pages[1].Items {
+		if it.Kind == layout.BackgroundKind && it.Rule.Color == floatColor {
+			floatY = it.Rule.YPt
+			break
+		}
+	}
+	if floatY < 0 || floatY > pageH/2 {
+		t.Errorf("float page-local Y = %.2f, want a small value near the page top (shifted into page 1's frame)", floatY)
+	}
+}
+
 func TestPaginateSingleBlockFits(t *testing.T) {
 	const w = 400
 	src := `<html><body><div style="height:50px;margin:0">x</div></body></html>`

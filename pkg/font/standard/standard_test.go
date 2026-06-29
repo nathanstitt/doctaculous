@@ -26,6 +26,11 @@ func TestLookup(t *testing.T) {
 		{"sans-serif", "TeXGyreHeros-Regular", true},
 		{"monospace", "Inconsolata-Regular", true},
 		{"cursive", "TeXGyreTermes-Regular", true},
+		// The bundled substitutes named directly (canonical() strips spaces).
+		{"TeX Gyre Termes", "TeXGyreTermes-Regular", true},
+		{"TeX Gyre Heros", "TeXGyreHeros-Regular", true},
+		{"TeXGyreHeros-Regular", "TeXGyreHeros-Regular", true},
+		{"Inconsolata", "Inconsolata-Regular", true},
 		{"Symbol", "", false},
 		{"ZapfDingbats", "", false},
 		{"SomeRandomFont", "", false},

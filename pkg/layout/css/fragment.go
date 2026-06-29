@@ -24,13 +24,14 @@ import (
 // stage already consumes. The flatten is a pure read of the tree; it never mutates
 // it, preserving the read-only-after-layout contract.
 type Fragment struct {
-	X, Y, W, H float64        // the BORDER box rectangle in page space
-	Background color.RGBA     // zero-alpha => no background fill
-	Border     [4]BorderEdge  // indexed by layout.EdgeSide (EdgeTop, EdgeRight, EdgeBottom, EdgeLeft)
-	Lines      []LineFragment // inline content (set for a box establishing an inline formatting context)
-	Children   []*Fragment    // child box fragments (block children; atomic inline boxes)
-	Image      *ImageContent  // decoded replaced-element image (set for a replaced box), painted in the content box
-	DebugTag   string         // optional label for test lookup; not used in paint
+	X, Y, W, H float64         // the BORDER box rectangle in page space
+	Background color.RGBA      // zero-alpha => no background fill
+	Border     [4]BorderEdge   // indexed by layout.EdgeSide (EdgeTop, EdgeRight, EdgeBottom, EdgeLeft)
+	Lines      []LineFragment  // inline content (set for a box establishing an inline formatting context)
+	Children   []*Fragment     // child box fragments (block children; atomic inline boxes)
+	Image      *ImageContent   // decoded replaced-element image (set for a replaced box), painted in the content box
+	Control    *ControlContent // form-control widget (set for a control replaced box), painted in the content box
+	DebugTag   string          // optional label for test lookup; not used in paint
 
 	// Box is the source cssbox.Box this fragment was produced from, retained so the
 	// flatten/paint stage can read style-driven paint facts that are not pre-resolved
@@ -399,6 +400,9 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 				PosX: f.Image.PosX, PosY: f.Image.PosY,
 			},
 		})
+	}
+	if f.Control != nil {
+		dst = f.Control.append(dst)
 	}
 	return dst
 }

@@ -593,7 +593,7 @@ func TestFontShorthandSizeFamily(t *testing.T) {
 	}{
 		{"20px monospace", 20, "monospace", false, false},
 		{"italic bold 24px/30px serif", 24, "serif", true, true},
-		{"12pt Arial, sans-serif", 12, "Arial", false, false},
+		{"12pt Arial, sans-serif", 12, "Arial, sans-serif", false, false},
 		{"large 'Times New Roman'", 18, "Times New Roman", false, false},
 		{"bold 14px sans-serif", 14, "sans-serif", true, false},
 	}

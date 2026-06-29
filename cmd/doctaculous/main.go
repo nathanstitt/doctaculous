@@ -44,7 +44,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `doctaculous - pure-Go document toolkit
 
 usage:
-  doctaculous rasterize <input.pdf> [flags]
+  doctaculous rasterize <input.pdf|.docx|.html> [flags]
   doctaculous version
   doctaculous help
 

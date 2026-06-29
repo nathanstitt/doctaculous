@@ -334,13 +334,15 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		cellPos := &positionedContext{}
 		res := e.layoutBlock(ctx, gc.box, cw, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: cw}, cellPos, posCBOwner{isPage: true})
 		gc.frag = res.frag
-		// A cell is a BFC and its own positioned containing block; resolve any abs/fixed
-		// descendants against the cell's provisional box now (mirroring the inline-block
-		// atom path) so they are not silently dropped. (Positioning relative to the cell
-		// is approximate here, like the inline-block atom case — exact cross-cell
-		// positioning is out of scope.)
+		// A cell is a BFC and its own positioned containing block; consume any relative
+		// descendants that bubbled out of the cell (so they paint in the cell's atom),
+		// then resolve any abs/fixed descendants against the cell's provisional box now
+		// (mirroring the inline-block atom path) so neither is silently dropped.
+		// (Positioning relative to the cell is approximate here, like the inline-block
+		// atom case — exact cross-cell positioning is out of scope.)
 		if gc.frag != nil {
 			natH[gc] = gc.frag.H
+			consumePendingPositioned(gc.frag, res.pendingPositioned)
 			e.resolveAbsolute(ctx, cellPos, gc.frag, cw, gc.frag.H)
 		}
 	}
@@ -391,6 +393,11 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		cw := g.cellWidth(gc)
 		ch := gc.rowBandHeight(g)
 		stretchCellFragment(gc.frag, cx, cy, cw, ch)
+		// A table cell establishes an independent formatting context (CSS 2.1 §17.5.1).
+		// Mark the fragment a BFC so AppendItems flattens it atomically and emits its
+		// positioned layer — otherwise an abs/fixed descendant of a cell is dropped at
+		// paint time (it is resolved onto gc.frag.Positioned above).
+		gc.frag.IsBFC = true
 		children = append(children, gc.frag)
 	}
 
@@ -760,13 +767,13 @@ func distributeAuto(cols []gridCol, idxs []int, budget float64) {
 }
 
 // isEmptyCellFragment reports whether a cell fragment has no rendered content — no
-// inline lines (text), no block/atomic children, no replaced image, no floats, and no
-// positioned descendants. Used by CSS empty-cells:hide to decide whether a cell's border
-// and background are suppressed. A cell holding only collapsed whitespace produces no
-// line boxes, so it reads as empty (matching browsers).
+// inline lines (text), no block/atomic children, no replaced image, no form control,
+// no floats, and no positioned descendants. Used by CSS empty-cells:hide to decide
+// whether a cell's border and background are suppressed. A cell holding only collapsed
+// whitespace produces no line boxes, so it reads as empty (matching browsers).
 func isEmptyCellFragment(f *Fragment) bool {
 	return len(f.Lines) == 0 && len(f.Children) == 0 && f.Image == nil &&
-		len(f.Floats) == 0 && len(f.Positioned) == 0
+		f.Control == nil && len(f.Floats) == 0 && len(f.Positioned) == 0
 }
 
 // cellMinMax returns a cell's min-content and max-content BORDER-box widths: the

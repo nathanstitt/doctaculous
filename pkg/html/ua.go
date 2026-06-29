@@ -9,7 +9,8 @@ import "github.com/nathanstitt/doctaculous/pkg/css"
 // later sub-projects need more defaults.
 const uaSource = `
 html, body, div, p, section, article, header, footer, nav, main, aside,
-ul, ol, blockquote, pre, form, figure, figcaption, hr, h1, h2, h3, h4, h5, h6 {
+ul, ol, blockquote, pre, form, figure, figcaption, hr, fieldset, legend,
+h1, h2, h3, h4, h5, h6 {
 	display: block;
 }
 li { display: list-item; }
@@ -34,6 +35,14 @@ h5 { font-size: 13px; font-weight: bold; margin-top: 9px; margin-bottom: 9px; }
 h6 { font-size: 11px; font-weight: bold; margin-top: 7px; margin-bottom: 7px; }
 p, blockquote { margin-top: 16px; margin-bottom: 16px; }
 th { font-weight: bold; }
+
+input, textarea, select, button {
+	display: inline-block;
+	font-size: 13px;
+	line-height: normal;
+}
+textarea { vertical-align: text-bottom; }
+input, select, button { vertical-align: baseline; }
 `
 
 // UAStylesheet is the parsed user-agent default stylesheet, cascaded at

@@ -77,9 +77,13 @@ func NewFaceCacheWithFonts(faces []gcss.FontFace, loader resource.ResourceLoader
 func normalizeFamily(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
 // Resolve returns the face for family in the requested style, substituting a
-// bundled look-alike via pkg/font. ok is false when no substitute is bundled for
-// the family (the caller skips affected runs). Results — including misses — are
-// cached, so repeated calls for the same (family, style) are cheap.
+// bundled look-alike via pkg/font. family may be a CSS font-family fallback list
+// (comma-separated, as cleaned by the cascade); each candidate is tried in order —
+// @font-face sources first, then a bundled substitute — and the first that
+// resolves wins (a generic keyword like serif always resolves, so it acts as the
+// terminal fallback). ok is false only when no candidate resolves (the caller
+// skips affected runs). Results — including misses — are cached under the whole
+// list string, so repeated calls for the same (list, style) are cheap.
 func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
 	key := faceKey{family: normalizeFamily(family), style: style}
 
@@ -88,16 +92,39 @@ func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, 
 	if e, found := c.faces[key]; found {
 		return e.face, e.ok
 	}
-	// Try @font-face sources for this family first; on any failure (or none), fall
-	// back to the bundled substitute. The result — including a miss — is cached, so
-	// a failed fetch is not retried per glyph.
-	if face, ok := c.resolveFontFace(family, style); ok {
-		c.faces[key] = cacheEntry{face: face, ok: true}
-		return face, true
-	}
-	face, ok := pkgfont.LoadStandard(family, style)
+	face, ok := c.resolveList(family, style)
 	c.faces[key] = cacheEntry{face: face, ok: ok}
 	return face, ok
+}
+
+// resolveList tries each comma-separated candidate in the font-family list in
+// order, returning the first face that resolves. For each candidate it tries the
+// @font-face sources first (so a downloaded face beats a bundled look-alike of the
+// same name), then the bundled substitute. Caller holds c.mu.
+func (c *FaceCache) resolveList(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
+	for _, name := range splitFamilyList(family) {
+		if face, ok := c.resolveFontFace(name, style); ok {
+			return face, true
+		}
+		if face, ok := pkgfont.LoadStandard(name, style); ok {
+			return face, true
+		}
+	}
+	return nil, false
+}
+
+// splitFamilyList splits a (already-cleaned) comma-separated font-family list into
+// its candidate names, dropping empties. A single bare name yields one element, so
+// callers need not special-case the non-list form.
+func splitFamilyList(family string) []string {
+	parts := strings.Split(family, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // resolveFontFace walks the @font-face entries for family (best style match first),

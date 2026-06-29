@@ -787,6 +787,27 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 // transitively), computes the used border-box rect via absRect, translates the
 // fragment there, marks it positioned + stacking context, and appends it to the
 // owning stacking context's Positioned layer.
+// consumePendingPositioned attaches relative-positioned descendants that bubbled out
+// of frag's interior onto frag's own Positioned layer. A flex item, grid item, and
+// table cell each lay their contents out as an isolated BFC paint atom but are not
+// themselves stacking contexts, so a static item never consumes its relative
+// descendants in layoutBlock — they bubble up in blockResult.pendingPositioned. The
+// container's item layout has nowhere to bubble them further (the item fragment is
+// flattened atomically), so it consumes them here, mirroring how layoutTree consumes
+// the root's leftover bubble. Without this, a position:relative box inside a flex/grid/
+// table item — and any abs/fixed descendant riding on it — is never emitted at paint
+// time (it stays an IsPositioned child, skipped by every in-flow pass). frag must be
+// marked a BFC by the caller so AppendItems emits the layer.
+func consumePendingPositioned(frag *Fragment, pending []pendingPos) {
+	if frag == nil {
+		return
+	}
+	for _, pp := range pending {
+		frag.PositionedInfo = append(frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: pp.clipChain})
+		frag.Positioned = append(frag.Positioned, pp.frag)
+	}
+}
+
 func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext, root *Fragment, viewportW, pageH float64) {
 	pageRect := rect{x: 0, y: 0, w: viewportW, h: pageH}
 	// Iterate by index: laying out a deferred box may APPEND more deferred boxes to
@@ -1007,7 +1028,9 @@ func establishesStackingContext(b *cssbox.Box) bool {
 // box's own dimensions as their defaults (auto width/height, no min/max, zero
 // margins/padding/borders — the last three already follow from the zero style).
 func isAnonymous(b *cssbox.Box) bool {
-	return b.Kind == cssbox.BoxAnonBlock || b.Kind == cssbox.BoxAnonInline
+	return b.Kind == cssbox.BoxAnonBlock || b.Kind == cssbox.BoxAnonInline ||
+		b.Kind == cssbox.BoxAnonFlexItem || b.Kind == cssbox.BoxAnonGridItem ||
+		b.Kind == cssbox.BoxAnonTablePart
 }
 
 // resolveContentWidth resolves the content-box width of block box b in a containing
@@ -1233,6 +1256,9 @@ func shiftFragment(f *Fragment, dy float64) {
 	}
 	if f.Image != nil {
 		f.Image.CY += dy
+	}
+	if f.Control != nil {
+		f.Control.CY += dy
 	}
 	for _, c := range f.Children {
 		shiftFragment(c, dy)

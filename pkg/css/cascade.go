@@ -410,7 +410,7 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		// The `font` shorthand: [style||variant||weight]? size[/line-height] family.
 		expandFont(cs, d.Value)
 	case "font-family":
-		cs.FontFamily = firstFamily(d.Value)
+		cs.FontFamily = cleanFamilyList(d.Value)
 	case "font-size":
 		// "auto" is not a valid font-size, so the UnitAuto guard drops it.
 		if l, ok := parseLength(newTokenizer(d.Value).next()); ok && l.Unit != UnitAuto {
@@ -863,16 +863,23 @@ func parseInt(s string) (int, bool) {
 	return n, true
 }
 
-// firstFamily returns the first family name from a font-family list, stripping
-// quotes and whitespace (e.g. `"Helvetica Neue", Arial` -> `Helvetica Neue`).
-func firstFamily(val string) string {
-	for _, part := range splitComma(val) {
-		part = trimQuotes(strings.TrimSpace(part))
-		if part != "" {
-			return part
+// cleanFamilyList normalizes a font-family value into a comma-joined fallback
+// list, preserving order so the face resolver can try each candidate in turn
+// (e.g. `"Helvetica Neue", Arial , sans-serif` -> `Helvetica Neue, Arial, sans-serif`).
+// Each name is unquoted and whitespace-trimmed; empty entries are dropped. The
+// raw value is returned only if it contains no usable name.
+func cleanFamilyList(val string) string {
+	parts := splitComma(val)
+	cleaned := parts[:0]
+	for _, part := range parts {
+		if part = trimQuotes(strings.TrimSpace(part)); part != "" {
+			cleaned = append(cleaned, part)
 		}
 	}
-	return val
+	if len(cleaned) == 0 {
+		return val
+	}
+	return strings.Join(cleaned, ", ")
 }
 
 // splitComma splits a comma-separated CSS value list (e.g. a font-family list).

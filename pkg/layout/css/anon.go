@@ -86,7 +86,15 @@ func normalize(b *cssbox.Box) {
 	// for its own children (Kind BoxBlock), so its interior gets the same wrap +
 	// reconcile even though it is inline-level OUTERLY (its parent's FC partitioning,
 	// handled by the per-child outer-level checks, is a separate question).
-	if b.Kind.IsBlockLevel() {
+	// A flex/grid/table container does NOT wrap its inline children into anonymous
+	// blocks here: its items are created by the format-specific fixups (fixupFlex /
+	// fixupGrid / fixupTables), which coalesce inline runs into anonymous FLEX/GRID
+	// items and keep block/replaced children as their own items. Running the generic
+	// block-level wrap first would coalesce a row's label span AND its adjacent control
+	// into one anonymous block, corrupting the item-to-cell mapping. (handleWhitespace
+	// + splitBlockInInline above still apply.)
+	if b.Kind.IsBlockLevel() && b.Formatting != cssbox.FlexFC &&
+		b.Formatting != cssbox.GridFC && b.Formatting != cssbox.TableFC {
 		b.Children = wrapInlineRuns(b.Children)
 		reconcileFormatting(b)
 	}

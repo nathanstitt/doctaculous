@@ -42,7 +42,14 @@ func (e *Engine) replacedUsedSize(ctx context.Context, b *cssbox.Box, pctBasis f
 		e.logf("css layout: percentage height on replaced element has no basis; treating as auto")
 	}
 
-	iw, ih, haveIntrinsic := e.intrinsicSize(ctx, b)
+	var iw, ih float64
+	var haveIntrinsic bool
+	if b.Replaced != nil && b.Replaced.Control != cssbox.CtrlNone {
+		iw, ih = e.controlIntrinsicSize(ctx, b)
+		haveIntrinsic = true
+	} else {
+		iw, ih, haveIntrinsic = e.intrinsicSize(ctx, b)
+	}
 
 	switch {
 	case hasW && hasH:
@@ -235,17 +242,21 @@ func (e *Engine) replacedFragment(ctx context.Context, b *cssbox.Box, w, h, bord
 	contentX := borderX + ed.bL + ed.pL
 	contentY := borderY + ed.bT + ed.pT
 
-	img := decodedImageFor(ctx, e, b)
 	frag := &Fragment{
 		X: borderX, Y: borderY, W: borderW, H: borderH,
 		Background: b.Style.BackgroundColor,
-		Image: &ImageContent{
+		DebugTag:   debugTag(b),
+	}
+	if b.Replaced != nil && b.Replaced.Control != cssbox.CtrlNone {
+		frag.Control = e.controlContentFor(b, contentX, contentY, w, h)
+	} else {
+		img := decodedImageFor(ctx, e, b)
+		frag.Image = &ImageContent{
 			Img: img,
 			CX:  contentX, CY: contentY, CW: w, CH: h,
 			Fit:  mapObjectFit(b.Style.ObjectFit),
 			PosX: b.Style.ObjectPositionX, PosY: b.Style.ObjectPositionY,
-		},
-		DebugTag: debugTag(b),
+		}
 	}
 	// Retain the source box like the block-fragment constructor does (block.go): the
 	// flatten reads it for the stacking z-index, and isRelativeFragment relies on it to

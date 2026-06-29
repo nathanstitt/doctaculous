@@ -1,0 +1,55 @@
+/* reset.css — the lower-priority author stylesheet.
+
+   Loaded as the FIRST <link> so it sits below main.css in source order: this file
+   establishes the page baseline (palette, box-sizing, type defaults) and main.css
+   overrides/extends it. Splitting the styles across two linked sheets exercises the
+   engine's multi-<link> cascade (LinkRefs is an ordered list; later sheets win on
+   equal specificity). Every rule here uses only engine-supported properties. */
+
+/* Palette + metrics as the conceptual design tokens of the document. (CSS custom
+   properties are not resolved by the engine, so the values are written literally
+   below; these comments are the single source of truth for the palette.)
+     ink     #1a1a18   near-black, primary text + heavy rules
+     paper   #f4f0e6   warm off-white page field
+     gold    #d9a521   primary accent
+     rust    #a64b2a   secondary accent
+     slate   #3a4a5a   tertiary / cool accent
+     mist    #e6e0d2   subtle fill behind panels
+*/
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #f4f0e6;
+  color: #1a1a18;
+  font-family: "TeX Gyre Termes", Georgia, serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Headings: a tight, editorial sans hierarchy. The UA sheet already makes these
+   block + bold; here we retune size/spacing and switch to the sans family. */
+h1, h2, h3, h4 {
+  font-family: "TeX Gyre Heros", Helvetica, sans-serif;
+  color: #1a1a18;
+  line-height: 1.15;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+/* Monospaced runs (used for the inline "code" spans labelling CSS features). */
+code, .mono {
+  font-family: "Inconsolata", monospace;
+  font-size: 13px;
+  color: #a64b2a;
+}

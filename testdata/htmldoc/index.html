@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Doctaculous — HTML Rendering Specimen</title>
+
+  <!-- Two linked author stylesheets resolved over HTTP relative to this document's
+       URL (css/…), exercising the multi-<link> cascade. reset.css is listed first
+       so main.css (second) wins on equal specificity. -->
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/main.css">
+
+  <!-- A downloaded web font (WOFF2) resolved relative to this document. The face
+       covers A–Z/a–z only, so .wordmark text is letters-only. -->
+  <style>
+    @font-face {
+      font-family: "Specimen Script";
+      src: url(fonts/pacifico.woff2) format("woff2");
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===================== MASTHEAD ===================== -->
+  <header class="masthead">
+    <div class="bar">
+      <div class="wordmark">Doctaculous</div>
+      <p class="tagline">Pure&#8209;Go&nbsp;document&nbsp;toolkit<br>HTML rendering specimen</p>
+    </div>
+    <h1>The Rendering Feature Tour</h1>
+    <p class="tagline">A single document that exercises every implemented slice of the
+      HTML / CSS / image pipeline &mdash; typography, the box model, floats, flexbox,
+      CSS grid, tables, positioning, overflow, stacking, and decoded images &mdash;
+      fetched over HTTP and paginated onto Letter pages.</p>
+  </header>
+
+  <!-- ===================== 1 · TYPOGRAPHY ===================== -->
+  <section class="section specimen">
+    <span class="kicker">01 / TYPE</span>
+    <h2>Typography &amp; Inline Flow</h2>
+    <p class="lede">Block stacking, inline wrapping, three font families, and inline
+      atoms sharing one baseline.</p>
+
+    <h3>Headings cascade from the UA sheet</h3>
+    <p class="drop">Body copy is set in <code>TeX Gyre Termes</code>, a serif. Headings
+      switch to <code>TeX Gyre Heros</code>, a grotesque. This paragraph carries enough
+      text to wrap across several lines at the page measure, so greedy line&#8209;breaking,
+      leading, and left alignment are all visible. Short inline runs such as
+      <code>display:inline-block</code> sit on the same line as the surrounding prose.</p>
+
+    <p>An inline&#8209;block atom <span class="mono" style="display:inline-block;
+      background:#f0e6c4; padding:0 4px;">BADGE</span> shrinks to fit its content and
+      rests on the text baseline &mdash; the words <em>before</em> and <em>after</em> it
+      stay on the same line and the same baseline.</p>
+
+    <blockquote class="pull">&ldquo;Accept interfaces, return concrete types.&rdquo;
+      A pull&#8209;quote drawn with a gold left rule and the sans family.</blockquote>
+
+    <h4>Alignment</h4>
+    <p style="text-align:center; background:#ece6d6; padding:4px;">This line is centered.</p>
+    <p style="text-align:right; background:#ece6d6; padding:4px;">This line is right&#8209;aligned.</p>
+  </section>
+
+  <!-- ===================== 2 · BOX MODEL ===================== -->
+  <section class="section break">
+    <span class="kicker">02 / BOX</span>
+    <h2>The Box Model &amp; Borders</h2>
+    <p class="lede">Padding, margins, backgrounds, and every border style the engine
+      renders &mdash; including the four 3D bevels.</p>
+
+    <div class="swatches">
+      <div class="swatch b-outset">border:<br>outset</div>
+      <div class="swatch b-inset">border:<br>inset</div>
+      <div class="swatch b-ridge">border:<br>ridge</div>
+      <div class="swatch b-groove">border:<br>groove</div>
+    </div>
+    <p class="caption">Four <code>border-style</code> bevels. Outset reads raised, inset
+      sunken; ridge and groove are their two&#8209;facet cousins.</p>
+
+    <div class="lines" style="margin-top:16px;">
+      <div class="l-solid"></div>
+      <div class="l-dashed"></div>
+      <div class="l-dotted"></div>
+      <div class="l-double"></div>
+    </div>
+    <p class="caption">Line styles: <code>solid</code>, <code>dashed</code>,
+      <code>dotted</code>, <code>double</code>.</p>
+  </section>
+
+  <!-- ===================== 3 · FLOATS ===================== -->
+  <section class="section break">
+    <span class="kicker">03 / FLOAT</span>
+    <h2>Floats &amp; Clear</h2>
+    <p class="lede">A floated figure with text wrapping beside it, then a cleared block
+      returning to full width.</p>
+
+    <div class="figure">
+      <img src="img/photo.jpg" alt="generated gradient disc">
+      <div class="cap">img/photo.jpg &middot; JPEG</div>
+    </div>
+    <p>This paragraph wraps its lines along the right edge of the left&#8209;floated
+      figure. The decoded JPEG to the left is a continuous&#8209;tone image, so it
+      exercises the baseline DCT decode path rather than a flat fill. As the text
+      continues past the bottom of the figure box, the lines reclaim the full measure of
+      the column and run edge to edge again, exactly as float behaviour requires. The
+      figure keeps its margin gap so the text never touches the frame.</p>
+    <div class="after-float">A <code>clear:left</code> block drops below the float and
+      spans the full width beneath it.</div>
+  </section>
+
+  <!-- ===================== 4 · FLEXBOX ===================== -->
+  <section class="section break">
+    <span class="kicker">04 / FLEX</span>
+    <h2>Flexbox</h2>
+    <p class="lede">Single&#8209;line flex containers: proportional growth, space
+      distribution, and cross&#8209;axis centering.</p>
+
+    <h4><code>flex-grow</code> in 1 : 2 : 3 proportion</h4>
+    <div class="flexrow">
+      <div class="grow1"></div>
+      <div class="grow2"></div>
+      <div class="grow3"></div>
+    </div>
+
+    <h4><code>justify-content: space-between</code></h4>
+    <div class="flexbetween">
+      <div class="chip"></div>
+      <div class="chip"></div>
+      <div class="chip"></div>
+      <div class="chip"></div>
+    </div>
+
+    <h4><code>align-items: center</code></h4>
+    <div class="flexcenter">
+      <div class="short"></div>
+      <div class="tall"></div>
+    </div>
+    <p class="caption">A short and a tall item, both centered in the strip.</p>
+  </section>
+
+  <!-- ===================== 5 · GRID ===================== -->
+  <section class="section break">
+    <span class="kicker">05 / GRID</span>
+    <h2>CSS Grid</h2>
+    <p class="lede">Explicit tracks, named template areas, fractional units, spans, and
+      auto&#8209;placement.</p>
+
+    <h4>Named areas &amp; <code>fr</code> tracks</h4>
+    <div class="dash">
+      <div class="g-head"></div>
+      <div class="g-main"></div>
+      <div class="g-side"></div>
+    </div>
+    <p class="caption">A header spanning both columns over a 2fr main / 1fr side row.</p>
+
+    <h4>Auto&#8209;placement with a spanning tile</h4>
+    <div class="tiles">
+      <div class="span2"></div>
+      <div class="t"></div>
+      <div class="t"></div>
+      <div class="t"></div>
+      <div class="t"></div>
+    </div>
+    <p class="caption">The gold tile spans two columns; the rest auto&#8209;flow into the
+      grid.</p>
+  </section>
+
+  <!-- ===================== 6 · TABLES ===================== -->
+  <section class="section break">
+    <span class="kicker">06 / TABLE</span>
+    <h2>Tables</h2>
+    <p class="lede">Collapsed borders, a caption, a spanning header, striped rows, and a
+      total rule &mdash; then separate borders with column / row background layers.</p>
+
+    <table class="ledger">
+      <caption>Quarterly Ledger</caption>
+      <thead>
+        <tr><th>Quarter</th><th>Region</th><th>Units</th><th>Revenue</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Q1</td><td>North</td><td>1,204</td><td>$48,160</td></tr>
+        <tr><td>Q2</td><td>North</td><td>1,560</td><td>$62,400</td></tr>
+        <tr><td>Q3</td><td>South</td><td>1,028</td><td>$41,120</td></tr>
+        <tr class="total"><td colspan="3">Total</td><td>$151,680</td></tr>
+      </tbody>
+    </table>
+
+    <table class="matrix">
+      <colgroup><col><col class="hi"><col><col></colgroup>
+      <tr class="stripe"><td>a1</td><td>b1</td><td>c1</td><td>d1</td></tr>
+      <tr><td>a2</td><td>b2</td><td>c2</td><td>d2</td></tr>
+      <tr class="stripe"><td>a3</td><td>b3</td><td>c3</td><td>d3</td></tr>
+    </table>
+    <p class="caption">Separate borders: column&nbsp;2 carries a tint, alternating rows a
+      stripe; where they cross, the row layer wins.</p>
+  </section>
+
+  <!-- ===================== 7 · POSITIONING / OVERFLOW / Z ===================== -->
+  <section class="section break">
+    <span class="kicker">07 / LAYER</span>
+    <h2>Positioning, Overflow &amp; Stacking</h2>
+    <p class="lede">Absolute pinning, relative paint&#8209;time offset, overflow clipping,
+      and z&#8209;index order.</p>
+
+    <div class="stage">
+      <div class="badge"><img src="img/icon.gif" alt="gold ring badge"></div>
+      <p style="margin:0; width:60%;">This stage is <code>position:relative</code>. The
+        gold badge is <code>position:absolute</code>, pinned to its top&#8209;right corner
+        and painted above this text. The GIF inside it decodes through the indexed
+        palette path.</p>
+      <div class="nudge"></div>
+    </div>
+    <p class="caption">The rust tag is <code>position:relative</code>, nudged down and
+      right from its in&#8209;flow slot at paint time.</p>
+
+    <div style="display:flex; justify-content:space-between;">
+      <div>
+        <h4><code>overflow: hidden</code></h4>
+        <div class="window"><div class="oversized"></div></div>
+        <p class="caption">A 320&times;320 child clipped to the padding box.</p>
+      </div>
+      <div>
+        <h4><code>z-index</code> order</h4>
+        <div class="zstack">
+          <div class="z z1"></div>
+          <div class="z z2"></div>
+          <div class="z z3"></div>
+        </div>
+        <p class="caption">Higher z paints on top: gold over slate over rust.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 8 · IMAGES ===================== -->
+  <section class="section break">
+    <span class="kicker">08 / IMAGE</span>
+    <h2>Decoded Images &amp; <code>object-fit</code></h2>
+    <p class="lede">One source square fitted three ways into wide frames.</p>
+
+    <div class="gallery">
+      <figure>
+        <img class="fit contain" src="img/quad.png" alt="quad contain">
+        <figcaption>object-fit: contain</figcaption>
+      </figure>
+      <figure>
+        <img class="fit cover" src="img/quad.png" alt="quad cover">
+        <figcaption>object-fit: cover</figcaption>
+      </figure>
+      <figure>
+        <img class="fit none" src="img/quad.png" alt="quad none">
+        <figcaption>none + position</figcaption>
+      </figure>
+    </div>
+    <p class="caption">The four&#8209;quadrant PNG makes orientation unambiguous:
+      <em>contain</em> letterboxes the whole square, <em>cover</em> fills and crops, and
+      <em>none</em> pins the unscaled image to the bottom&#8209;right.</p>
+  </section>
+
+  <!-- ===================== 9 · FORMS ===================== -->
+  <section class="section break">
+    <span class="kicker">09 / FORMS</span>
+    <h2>Form Controls</h2>
+    <p class="lede">Static, non&#8209;interactive native widgets &mdash; text fields,
+      buttons, checkboxes, radios, a textarea, and a select &mdash; sized and painted
+      with classic chrome.</p>
+
+    <form class="signup">
+      <span class="flabel">Full name</span><input type="text" value="Ada Lovelace">
+      <span class="flabel">Email</span><input type="text" placeholder="you@example.com">
+      <span class="flabel">Password</span><input type="password" value="hunter2">
+      <span class="flabel">Notes</span><textarea>Notes go here.</textarea>
+      <span class="flabel">Plan</span><select><option>Free</option><option selected>Pro</option><option>Team</option></select>
+
+      <fieldset class="choices">
+        <span class="legend">Preferences</span>
+        <label><input type="checkbox" checked> Subscribe to updates</label>
+        <label><input type="checkbox"> Remember this device</label>
+        <label><input type="radio" checked> Contact by email</label>
+        <label><input type="radio"> Contact by phone</label>
+      </fieldset>
+
+      <div class="actions"><button>Save changes</button> <input type="submit" value="Submit"></div>
+    </form>
+
+    <div class="colophon">
+      <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from
+        HTTP&#8209;fetched HTML, CSS, fonts and images, paginated onto US&#8209;Letter
+        pages. Set in TeX&nbsp;Gyre Heros &amp; Termes with Inconsolata; wordmark in
+        Pacifico.</p>
+    </div>
+  </section>
+
+</body>
+</html>

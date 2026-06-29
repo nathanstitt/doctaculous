@@ -714,6 +714,32 @@ var htmlGoldens = []struct {
   <div class="groove"></div>
 </body></html>`,
 	},
+	{
+		// Form controls painted as static native widgets: text/password fields, a
+		// checked + unchecked checkbox and radio, two buttons, a textarea, and a select.
+		// A disabled field shows the muted chrome. The page background is light gray so
+		// the white field faces are visible. Eyeball: each control sits in its own row,
+		// values/labels render, the password shows bullets, the checked checkbox shows a
+		// tick and the checked radio a dot, the select shows "Two" + a triangle, and
+		// nothing renders as leaked inline text.
+		name:       "forms",
+		viewportPx: 300,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 8px; font-family: sans-serif; background: #f0f0f0; }
+  div { margin: 6px 0; }
+</style></head><body>
+  <div><input type="text" value="typed text"></div>
+  <div><input type="text" placeholder="placeholder"></div>
+  <div><input type="password" value="secret"></div>
+  <div>chk <input type="checkbox" checked> <input type="checkbox"></div>
+  <div>rad <input type="radio" checked> <input type="radio"></div>
+  <div><button>Click Me</button> <input type="submit" value="Submit"></div>
+  <div><textarea>two
+line area</textarea></div>
+  <div><select><option>One</option><option selected>Two</option></select></div>
+  <div><input type="text" value="disabled" disabled></div>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for

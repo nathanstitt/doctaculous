@@ -28,9 +28,12 @@ func gridItems(kids []*cssbox.Box) []*cssbox.Box {
 			return
 		}
 		item := &cssbox.Box{
-			Kind:       cssbox.BoxAnonGridItem,
-			Display:    cssbox.DisplayBlock,
-			Formatting: cssbox.BlockFC,
+			Kind:    cssbox.BoxAnonGridItem,
+			Display: cssbox.DisplayBlock,
+			// The run holds only inline-level content (text / inline boxes — block and
+			// replaced children flush separately), so the anon item establishes an INLINE
+			// formatting context; with BlockFC its text would never lay out (zero size).
+			Formatting: cssbox.InlineFC,
 			Children:   run,
 		}
 		out = append(out, item)
@@ -43,7 +46,11 @@ func gridItems(kids []*cssbox.Box) []*cssbox.Box {
 			// away. Whitespace that arrives while an inline run IS open falls through to
 			// the default arm and stays in the run (correct per CSS Grid §6 — mirrors
 			// flexfix.go behavior).
-		case c.Kind.IsBlockLevel():
+		case c.Kind.IsBlockLevel() || c.Kind == cssbox.BoxReplaced:
+			// A block-level box, OR an atomic replaced box (an <img>/form control): each
+			// becomes its OWN grid item (CSS Grid §6 — an atomic inline is a grid item, not
+			// coalesced into an inline run like text). A replaced box keeps its Kind so
+			// replaced sizing applies; an inline-block is already block-level by Kind.
 			flush()
 			out = append(out, c)
 		default:

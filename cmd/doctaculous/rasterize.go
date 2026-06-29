@@ -23,15 +23,16 @@ import (
 func rasterizeCmd(args []string) error {
 	fs := flag.NewFlagSet("rasterize", flag.ContinueOnError)
 	var (
-		page    = fs.Int("page", 1, "1-based page number to render")
-		pages   = fs.String("pages", "", "page range, e.g. 1-3,5 (overrides --page)")
-		out     = fs.String("out", "", "output file or pattern (use %d for page number when rendering a range)")
-		dpi     = fs.Float64("dpi", 150, "render resolution in DPI")
-		format  = fs.String("format", "png", "output image format: png or jpg")
-		workers = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
+		page     = fs.Int("page", 1, "1-based page number to render")
+		pages    = fs.String("pages", "", "page range, e.g. 1-3,5 or \"all\" (overrides --page)")
+		out      = fs.String("out", "", "output file or pattern (use %d for page number when rendering a range)")
+		dpi      = fs.Float64("dpi", 150, "render resolution in DPI")
+		format   = fs.String("format", "png", "output image format: png or jpg")
+		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
+		pageSize = fs.String("page-size", "", "HTML page size: \"letter\" to paginate, empty for one tall page (HTML only)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx|.html> [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	// Go's flag package stops at the first non-flag argument, so reorder the
@@ -60,8 +61,11 @@ func rasterizeCmd(args []string) error {
 	if *workers < 1 {
 		return fmt.Errorf("--workers must be at least 1, got %d", *workers)
 	}
+	if *pageSize != "" && *pageSize != "letter" {
+		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or empty)", *pageSize)
+	}
 
-	doc, err := openDocument(input)
+	doc, err := openDocument(input, *pageSize)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -90,7 +94,7 @@ func rasterizeCmd(args []string) error {
 			}
 			continue
 		}
-		path := outputPath(*out, r.Index, multi)
+		path := outputPath(*out, r.Index)
 		if err := writeImage(path, r.Image, *format); err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -109,19 +113,37 @@ func rasterizeCmd(args []string) error {
 }
 
 // openDocument opens the input by format, dispatching on file extension: .docx
-// goes through the reflow pipeline, everything else is treated as PDF.
-func openDocument(input string) (*doctaculous.Document, error) {
-	if strings.EqualFold(filepath.Ext(input), ".docx") {
+// goes through the reflow pipeline, .html/.htm through the HTML pipeline (with an
+// optional page size — "letter" paginates, empty is one tall page), and everything
+// else is treated as PDF. pageSize is ignored for non-HTML inputs.
+func openDocument(input, pageSize string) (*doctaculous.Document, error) {
+	switch strings.ToLower(filepath.Ext(input)) {
+	case ".docx":
 		return doctaculous.OpenDOCX(input)
+	case ".html", ".htm":
+		var opts []doctaculous.HTMLOption
+		if pageSize == "letter" {
+			opts = append(opts, doctaculous.WithPageSize(doctaculous.LetterWidthPt, doctaculous.LetterHeightPt))
+		}
+		return doctaculous.OpenHTMLFile(input, opts...)
+	default:
+		return doctaculous.Open(input)
 	}
-	return doctaculous.Open(input)
 }
 
 // resolvePages converts the --pages/--page flags into zero-based, in-range page
-// indices. --pages (e.g. "1-3,5") takes precedence when non-empty.
+// indices. --pages (e.g. "1-3,5", or "all" for every page) takes precedence when
+// non-empty.
 func resolvePages(rangeSpec string, single, count int) ([]int, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("document has no pages")
+	}
+	if strings.EqualFold(strings.TrimSpace(rangeSpec), "all") {
+		indices := make([]int, count)
+		for i := range indices {
+			indices[i] = i
+		}
+		return indices, nil
 	}
 	if rangeSpec == "" {
 		if single < 1 || single > count {
@@ -182,10 +204,13 @@ func parseRangePart(part string, count int) (lo, hi int, err error) {
 	return lo, hi, nil
 }
 
-// outputPath builds the output filename for a page. When rendering multiple
-// pages, a "%d" in the pattern is replaced with the 1-based page number.
-func outputPath(pattern string, index int, multi bool) string {
-	if multi && strings.Contains(pattern, "%d") {
+// outputPath builds the output filename for a page. A "%d" in the pattern is
+// replaced with the 1-based page number whenever present, so a single-page render
+// to a "page-%d.png" pattern still yields "page-1.png" rather than a literal "%d"
+// in the name. (Whether %d is *required* — for a multi-page render — is enforced by
+// the caller, not here.)
+func outputPath(pattern string, index int) string {
+	if strings.Contains(pattern, "%d") {
 		return fmt.Sprintf(pattern, index+1)
 	}
 	return pattern
@@ -230,6 +255,7 @@ func reorderArgs(args []string) []string {
 		"-dpi": true, "--dpi": true,
 		"-format": true, "--format": true,
 		"-workers": true, "--workers": true,
+		"-page-size": true, "--page-size": true,
 	}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ { //nolint:intrange // index i is mutated inside the loop
