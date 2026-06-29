@@ -34,6 +34,14 @@ h5 { font-size: 13px; font-weight: bold; margin-top: 9px; margin-bottom: 9px; }
 h6 { font-size: 11px; font-weight: bold; margin-top: 7px; margin-bottom: 7px; }
 p, blockquote { margin-top: 16px; margin-bottom: 16px; }
 th { font-weight: bold; }
+
+input, textarea, select, button {
+	display: inline-block;
+	font-size: 13px;
+	line-height: normal;
+}
+textarea { vertical-align: text-bottom; }
+input, select, button { vertical-align: baseline; }
 `
 
 // UAStylesheet is the parsed user-agent default stylesheet, cascaded at

@@ -221,3 +221,13 @@ func TestControlIntrinsicSizeScalesWithChars(t *testing.T) {
 		t.Errorf("size=40 width %.1f should exceed size=5 width %.1f", ww, nw)
 	}
 }
+
+func TestControlUADefaultsInlineBlock(t *testing.T) {
+	b := buildControlBox(t, `<body><input type=text></body>`)
+	if b == nil {
+		t.Fatal("no control box")
+	}
+	if b.Display != cssbox.DisplayInlineBlock {
+		t.Errorf("input Display = %v, want DisplayInlineBlock (UA default)", b.Display)
+	}
+}
