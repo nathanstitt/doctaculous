@@ -77,7 +77,7 @@ func TestAbsRectLeftTop(t *testing.T) {
 		Width: px(40), Height: px(30), MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}, FontSizePt: 16}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Style: st}
 	ed := usedEdges(b, cb.w)
-	bb, contentW := absRect(b, ed, cb)
+	bb, contentW := absRect(b, ed, cb, cb.w)
 	if bb.x != 110 || bb.y != 70 { // 100+10, 50+20
 		t.Errorf("absRect left/top = (%v,%v), want (110,70)", bb.x, bb.y)
 	}
@@ -95,7 +95,7 @@ func TestAbsRectRightBottom(t *testing.T) {
 		Width: px(40), Height: px(30), MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}, FontSizePt: 16}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Style: st}
 	ed := usedEdges(b, cb.w)
-	bb, _ := absRect(b, ed, cb)
+	bb, _ := absRect(b, ed, cb, cb.w)
 	// border-box left = cb.x + cb.w - right - mR - borderBoxW = 100+400-10-0-40 = 450
 	// border-box top  = cb.y + cb.h - bottom - mB - borderBoxH = 50+300-20-0-30 = 300
 	if bb.x != 450 || bb.y != 300 {
@@ -113,7 +113,7 @@ func TestAbsRectLeftRightAutoWidth(t *testing.T) {
 		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto}, FontSizePt: 16}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Style: st}
 	ed := usedEdges(b, cb.w)
-	bb, contentW := absRect(b, ed, cb)
+	bb, contentW := absRect(b, ed, cb, cb.w)
 	// content width = cb.w - left - right - insetsX - mL - mR = 400-30-50-0-0-0 = 320
 	if contentW != 320 || bb.x != 30 {
 		t.Errorf("absRect L+R auto width: contentW=%v x=%v, want 320/30", contentW, bb.x)
@@ -130,7 +130,7 @@ func TestAbsRectAllAutoStatic(t *testing.T) {
 		Width: px(40), Height: px(30), MaxWidth: auto, MaxHeight: auto, FontSizePt: 16}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Style: st}
 	ed := usedEdges(b, cb.w)
-	bb, _ := absRect(b, ed, cb)
+	bb, _ := absRect(b, ed, cb, cb.w)
 	if bb.x != 100 || bb.y != 50 {
 		t.Errorf("absRect all-auto = (%v,%v), want CB top-left (100,50)", bb.x, bb.y)
 	}

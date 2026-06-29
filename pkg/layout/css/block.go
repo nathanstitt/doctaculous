@@ -796,17 +796,33 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		d := posCtx.deferred[i]
 		cb := e.resolveCBRect(d.cb, pageRect)
 		ed := usedEdges(d.box, cb.w)
-		border, contentW := absRect(d.box, ed, cb)
+
+		// CSS 10.3.7 shrink-to-fit: a width:auto abs box that is NOT pinned by both left+
+		// right (and is not replaced) sizes to min(max(min-content, available), max-content)
+		// rather than filling the CB. Compute it up front so BOTH the placement (absRect's
+		// auto-width fallback) and the interior layout width use it consistently — important
+		// for a right-anchored box whose left edge depends on the resolved width. autoFillW
+		// is the content-width fallback absRect uses when width is auto; default is the
+		// CB-fill (cb.w - margins - insets).
+		autoFillW := cb.w - ed.mL - ed.mR - ed.bL - ed.bR - ed.pL - ed.pR
+		if autoFillW < 0 {
+			autoFillW = 0
+		}
+		if e.absWidthShrinksToFit(d.box) {
+			autoFillW = e.absShrinkToFitWidth(ctx, d.box, autoFillW)
+		}
+		border, contentW := absRect(d.box, ed, cb, autoFillW)
 
 		// The width layoutBlock should flow the interior into. Normally the box's own
 		// width resolution (containing-block fill for auto, or the explicit width) is
-		// correct, so we lay out against the full CB width (cb.w). But when left+right
-		// both pin the width with width:auto (CSS 10.3.7 shrink-to-offsets), absRect's
-		// contentW is the used width — feed layoutBlock a containing width that makes its
-		// auto-fill reproduce that content width (cbWidth - margins - insets == contentW),
-		// so the interior flows at the constrained width, not the full CB width.
+		// correct, so we lay out against the full CB width (cb.w). But when the width is
+		// constrained — both left+right pinning a width:auto (shrink-to-offsets), or a
+		// shrink-to-fit auto width — absRect's contentW is the used width; feed layoutBlock
+		// a containing width whose auto-fill reproduces that content width
+		// (cbWidth - margins - insets == contentW), so the interior flows at the
+		// constrained width, not the full CB width.
 		layoutCBWidth := cb.w
-		if absWidthIsOffsetConstrained(d.box) {
+		if absWidthIsOffsetConstrained(d.box) || e.absWidthShrinksToFit(d.box) {
 			layoutCBWidth = contentW + ed.mL + ed.mR + ed.bL + ed.bR + ed.pL + ed.pR
 		}
 

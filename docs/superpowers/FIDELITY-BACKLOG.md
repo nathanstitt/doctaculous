@@ -42,12 +42,28 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 ## C. HTML/CSS — positioning fidelity
 
 - ☐ **C1. Precise static-position solve** for an all-`auto`-offset abs box (today approximates to the CB
-  top-left). *Medium.*
-- ☐ **C2. abs `width:auto` shrink-to-fit** (today fills the CB). *Medium.*
-- ☐ **C3. abs `margin:auto` centering** (today 0). *Small–medium.*
-- ☐ **C4. percentage `top`/`bottom` against an auto-height CB.** *Small–medium.*
-- ☐ **C5. `bottom`-only auto-height abs box** (positioned against a provisional height today). *Medium.*
-- ☐ **C6. `position:relative` on a text-only inline box** (a no-op today — needs inline-box fragments). *Medium–large.*
+  top-left). *Deferred (Medium).* Needs capturing each abs box's hypothetical in-flow position at collection
+  time (`layoutBlockChildren`) and threading it onto `deferredAbs` — touches the core positioning path; the
+  CB-top-left approximation is documented + logged. Lower frequency (all-auto abs is uncommon).
+- ☑ **C2. abs `width:auto` shrink-to-fit** — *DONE.* A `width:auto` abs box not pinned by both left+right (and
+  not replaced) now sizes to `min(max(min-content, available), max-content)` via `absShrinkToFitWidth` (the
+  memoized measure helpers), threaded into BOTH `absRect`'s auto-width fallback (so a right-anchored box's left
+  edge is consistent) and the interior layout width. Tests: `TestAbsAutoWidthShrinksToFit` +
+  `TestAbsRightAnchoredShrinkToFitPosition` (mutation-verified). + `html-abs-fidelity` golden (eyeballed).
+- ☑ **C3. abs `margin:auto` centering** — *DONE.* `distributeAbsMargins`: when an abs box's left+right (or
+  top+bottom) and size are all definite (over-constrained) and the margins are auto, the leftover space splits
+  evenly (centering) or goes to a single auto margin (CSS 10.3.7). Tests: `TestAbsMarginAuto…` (mutation-
+  verified) + the `html-abs-fidelity` golden (the blue box centers).
+- ☐ **C4. percentage `top`/`bottom` against an auto-height CB.** *Deferred (Medium).* The engine resolves
+  vertical percentages against the CB's computed height; an auto-height CB's height does not account for the
+  out-of-flow box — a documented edge case, low value.
+- ☐ **C5. `bottom`-only auto-height abs box** — *Deferred (Medium).* Needs a shrink-to-fit HEIGHT (the C2
+  machinery but vertical); the engine measures content WIDTH, not height (the same single-axis limitation D3 /
+  flex / grid / table vertical-content sizing all share). Documented + logged.
+- ☐ **C6. `position:relative` on a text-only inline box** — *Deferred (Medium–large).* Structural: inline
+  (`BoxInline`) elements generate no fragment (their glyphs flatten into the parent's lines), so there is
+  nothing to carry a `RelOffset`. Needs inline-box fragments or a per-run offset on `LineFragment`. A no-op
+  today (block-level relative is exact; atomic inline-block/replaced relative is a separate known no-op).
 
 ## D. HTML/CSS — replaced content
 

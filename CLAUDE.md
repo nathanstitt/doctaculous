@@ -605,13 +605,15 @@ that skip into real output.
    Done section). The one remaining non-fidelity slice is **CSS paged media** (`@page` size/margins/named pages,
    `break-inside`, widows/orphans, running headers/footers — the bounded pagination slice ships `WithPageSize` +
    between-block breaks + forced `break-before`/`break-after`, deferring these). **(EPUB is out of scope — see
-   the out-of-scope note at the bottom.)** Positioning fidelity
-   follow-ups within the existing engine: the **precise static-position solve** for an all-`auto`-offset
-   abs box (today approximates to the containing block's top-left), abs `width:auto` **shrink-to-fit**
-   (today fills the containing block), abs `margin:auto` centering, a percentage `top`/`bottom` against
-   an auto-height containing block, a `bottom`-only auto-height abs box (positioned against a provisional
-   height today), and `position:relative` on a **text-only inline box** (a no-op today — needs inline-box
-   fragments). Replaced-content — landed fidelity fixes: **D1** `object-position` (the fitted image shifts
+   the out-of-scope note at the bottom.)** Positioning — landed fidelity fixes:
+   **C2** abs `width:auto` **shrink-to-fit** (`min(max(min-content, available), max-content)` via
+   `absShrinkToFitWidth`, threaded into both placement and interior layout — a right-anchored box's left edge
+   stays consistent), and **C3** abs `margin:auto` centering (`distributeAbsMargins` splits the over-constrained
+   leftover space). Still open: the **precise static-position solve** for an all-`auto`-offset abs box (C1 —
+   approximates to the CB top-left, logged; needs threading the hypothetical in-flow position), a percentage
+   `top`/`bottom` against an auto-height containing block (C4 — edge case), a `bottom`-only auto-height abs box
+   (C5 — needs a vertical shrink-to-fit HEIGHT, the single-axis-measurement limitation), and `position:relative`
+   on a **text-only inline box** (C6 — a no-op; inline boxes generate no fragment to carry the offset). Replaced-content — landed fidelity fixes: **D1** `object-position` (the fitted image shifts
    within the content box for contain/none/scale-down; parsed keywords + percentages into `ObjectPositionX/Y`,
    applied in `fitDest`), **D2** the ratio-preserving min/max sizing step (CSS 10.4 `constrainRatio` — a single
    violated min/max bound scales the other axis to preserve the intrinsic ratio; both-dims-explicit still clamps

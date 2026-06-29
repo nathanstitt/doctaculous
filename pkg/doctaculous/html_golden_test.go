@@ -633,6 +633,26 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// Absolute-positioning fidelity (C2 shrink-to-fit + C3 margin:auto centering).
+		// Eyeball: box A (left:0, width:auto) hugs its short text at the top-left (NOT
+		// stretched to the container); box B (left:0;right:0;width:60;margin:auto) is
+		// horizontally CENTERED in the 200px container.
+		name:       "abs-fidelity",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .cb { position: relative; width: 200px; height: 90px; background: #eeeeee; }
+  .shrink { position: absolute; left: 0; top: 0; background: #cc7777; color: #fff; }
+  .center { position: absolute; left: 0; right: 0; top: 40px; width: 60px;
+            margin-left: auto; margin-right: auto; height: 24px; background: #7777cc; }
+</style></head><body>
+  <div class="cb">
+    <div class="shrink">Hi</div>
+    <div class="center"></div>
+  </div>
+</body></html>`,
+	},
+	{
 		// object-position (CSS, fidelity fix D1): a small square image inside a larger box
 		// with object-fit:none, positioned at three corners. Eyeball: the gray image sits
 		// at top-left, center, and bottom-right of its three boxes respectively (the box
