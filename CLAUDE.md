@@ -1,10 +1,10 @@
 # Doctaculous
 
 Pure-Go, MIT-licensed document toolkit. Long-term goal: convert any document to any other format,
-author/sign PDF/DOCX/EPUB/HTML, and rasterize pages to images. **Current focus: high-fidelity PDF
+author/sign PDF/DOCX/HTML, and rasterize pages to images. **Current focus: high-fidelity PDF
 page rasterization.** The core pipeline (parse → interpret → raster) is working end-to-end and
 renders real-world PDFs faithfully; see "Status & roadmap" at the bottom for what's done and what's
-next.
+next. (**EPUB is out of scope** — see the out-of-scope note at the bottom.)
 
 ## Non-negotiable constraints
 
@@ -24,7 +24,7 @@ next.
 `pkg/render` device-independent paint ops (`Device` interface) · `pkg/render/raster` bitmap
 backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 
-**Reflowable documents** (DOCX today; HTML/EPUB next) share a second pipeline that meets the PDF
+**Reflowable documents** (DOCX and HTML) share a second pipeline that meets the PDF
 pipeline at `render.Device`. During the HTML-rendering program there are **two box models**: the
 existing **flat** model (`pkg/layout/box.Document` — DOCX's `pkg/docx` parse → `pkg/docx/style`
 cascade → `pkg/docx/lower` → `pkg/layout` reflow engine → `pkg/layout/paint`), and a **recursive,
@@ -38,7 +38,7 @@ lowering onto `cssbox` and retires the flat model, so one recursive engine drive
 Font outlines for both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces
 for reflow); `pkg/layout/font` caches them.
 
-The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML/EPUB)
+The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML)
 must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
 interpretation, or layout.
 
@@ -536,20 +536,26 @@ what is done vs. pending.
   on page 0, the bottom on the last page, the side edges on every page; the first page's top is pulled up to the
   wrapper's border-box top so a `<body>` top border shows on page 0 with content below it). Degrades gracefully
   (no panic, logged where applicable): a **block taller than a page overflows** its page rather than splitting
-  (clipped by the `pageH`-tall page bitmap; logged per over-tall block); **absolute/fixed** boxes whose
-  containing block is the page (not a paginated relative ancestor) are **not** distributed across pages — they
-  ride the first page at their original Y; a **forced break on a nested (non-top-level) block** is not honored
-  (a browser propagates it to the ancestor) — warned once, not silent; a **margin-top is collapsed to 0 at an
-  unforced/overflow break** (correct at a forced break; a documented simplification at an unforced one); and
-  **mid-line / mid-table-row / mid-flex-or-grid-item splits, widows/orphans, `break-inside`, `@page`
-  size/margins, and running headers/footers** are deferred (each a no-op, never a crash). **No new dependency**
-  (stdlib). This is sub-project 12 of the HTML-rendering roadmap — the last engine-shaped feature (EPUB depends
-  on it). The post-ship **fidelity pass** (this follow-up) fixed the abs-descendant-of-a-paginated-relative-block
-  Y bug and its latent root cause (the `shiftFragment` page-space-field omission — which also fixed two
-  pre-existing base-engine bugs: a `border-collapse` table and an `overflow:hidden` box placed below other
-  content painted their grid lines / clip rect detached), the body-border-on-every-page artifact, the
-  vanishing-nested-relative-block bug, a negative-z-paints-behind-own-background stacking bug, and the relative
-  offset not moving an overflow clip; see `docs/superpowers/specs/2026-06-28-html-pagination-design.md`.
+  (clipped by the `pageH`-tall page bitmap; logged per over-tall block); and **mid-line / mid-table-row /
+  mid-flex-or-grid-item splits, widows/orphans, `break-inside`, per-page float distribution, per-page
+  bottom-anchored `fixed`, mid-block forced breaks, `@page` size/margins, and running headers/footers** are
+  deferred (each a no-op, never a crash). **No new dependency** (stdlib). This is sub-project 12 of the
+  HTML-rendering roadmap — the last engine-shaped feature. The post-ship **fidelity pass**
+  fixed the abs-descendant-of-a-paginated-relative-block Y bug and its latent root cause (the `shiftFragment`
+  page-space-field omission — which also fixed two pre-existing base-engine bugs: a `border-collapse` table and
+  an `overflow:hidden` box placed below other content painted their grid lines / clip rect detached), the
+  body-border-on-every-page artifact, the vanishing-nested-relative-block bug, a
+  negative-z-paints-behind-own-background stacking bug, and the relative offset not moving an overflow clip.
+  A second **fidelity pass (bundle)** then took on three of the larger deferrals that fit the post-pass model:
+  a **page-CB `position:absolute` box is distributed to the page whose band contains its top** (shifted into
+  that page's local frame) instead of riding page 0; a **`position:fixed` box repeats on every page** (the same
+  read-only fragment shared per page — its `frag.Y` is already viewport-relative, so no per-page shift); a
+  **forced break on content at a top-level block's leading/trailing edge is propagated to that block** (so a
+  nested `break-before:page` splits as expected — only a genuinely *mid-block* forced break stays deferred,
+  warned once); and a block's **leading top margin is retained at an unforced/overflow break** (the page top is
+  pulled up by the margin so the block lands at local Y == its margin; a forced break still truncates it). See
+  `docs/superpowers/specs/2026-06-28-html-pagination-design.md` and
+  `docs/superpowers/specs/2026-06-28-html-pagination-fidelity-bundle-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -573,7 +579,7 @@ that skip into real output.
    metrics.
 5. **DOCX features (reflow frontend)** — each a new `testdata/gen/docx` fixture + golden in the same
    PR; add new box-model vocabulary to `pkg/layout/box` (engine track) before the DOCX frontend
-   emits it, so HTML/EPUB get it for free. In rough order: **lists/numbering** (`numbering.xml`,
+   emits it, so HTML gets it for free. In rough order: **lists/numbering** (`numbering.xml`,
    per-level counters, marker glyphs), **tables** (`w:tbl`, grid + column-width solve, spans, cell
    content recursion — the biggest engine addition), **images** (`w:drawing`→`a:blip`→media,
    PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
@@ -586,11 +592,10 @@ that skip into real output.
    **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9),
    **CSS Grid (explicit grid)** (sub-project 10), **`OpenURL` + the HTTP `ResourceLoader`**
    (sub-project 11), and **pagination (fixed-height page fragmentation)** (sub-project 12) are done — see the
-   Done section). Roughly in order, each a parse/layout slice with its own fixtures + golden/WPT tests:
-   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter — wants pagination, now done,
-   first); and **CSS paged media** (`@page` size/margins/named pages, `break-inside`, widows/orphans, running
-   headers/footers — the bounded pagination slice ships `WithPageSize` + between-block breaks + forced
-   `break-before`/`break-after`, deferring these). Positioning fidelity
+   Done section). The one remaining non-fidelity slice is **CSS paged media** (`@page` size/margins/named pages,
+   `break-inside`, widows/orphans, running headers/footers — the bounded pagination slice ships `WithPageSize` +
+   between-block breaks + forced `break-before`/`break-after`, deferring these). **(EPUB is out of scope — see
+   the out-of-scope note at the bottom.)** Positioning fidelity
    follow-ups within the existing engine: the **precise static-position solve** for an all-`auto`-offset
    abs box (today approximates to the containing block's top-left), abs `width:auto` **shrink-to-fit**
    (today fills the containing block), abs `margin:auto` centering, a percentage `top`/`bottom` against
@@ -658,19 +663,22 @@ that skip into real output.
    Pagination fidelity follow-ups within the existing engine (the bounded slice breaks **between top-level
    blocks only**, post-pass): **mid-box fragmentation** (a block taller than a page overflows rather than
    splitting); **mid-line / mid-table-row / mid-flex-or-grid-item splits**; **widows/orphans**;
-   **`break-inside: avoid`** and **`break-*: avoid`** (parsed onto `ComputedStyle` but not acted on);
-   **per-page distribution of absolute/fixed content** (an abs/fixed box whose containing block is the PAGE
-   rides the first page; an abs descendant of a *paginated relative ancestor* now follows that ancestor to its
-   page, and `position:relative` blocks paginate normally — top-level AND nested-under-a-static-wrapper — so
-   what remains is page-distributing page-CB abs/fixed and making `fixed` **repeat** on every page);
-   **honoring a forced break on a NESTED (non-top-level) block** (today warned once and dropped — needs
-   propagating the break to the nearest top-level ancestor); **retaining a leading margin-top at an unforced
-   break** (today collapsed to 0; correct only at a forced break); **`@page`** size/margins/named pages (page
-   size comes only from `WithPageSize`; margins are zero); and **running headers/footers**. Done in the fidelity
-   pass: per-page distribution of relative blocks (incl. nested) + their abs descendants/clip/collapsed grid,
-   and **per-page fragmentation of the html/body border + background**. Note `WithPageSize(w,h)` sets the layout
-   **width** to `w` (not a pure "slice what's already laid out"), so switching a default render to a different
-   page width reflows the document.
+   **`break-inside: avoid`** and **`break-*: avoid`** (parsed onto `ComputedStyle` but not acted on); **per-page
+   distribution of floats** (a top-level float rides page 0); **per-page bottom-anchored `fixed`** (a `fixed`
+   box now repeats on every page, but a `bottom`-anchored one is positioned against the single-tall height, so
+   it sits at the document bottom, not each page's bottom — the per-page `resolveAbsolute` height is the fix);
+   **honoring a MID-BLOCK forced break on a nested block** (an edge break is now propagated to the top-level
+   ancestor; a genuinely mid-block one is still warned-once and dropped — needs mid-box fragmentation to split
+   the block); **`@page`** size/margins/named pages (page size comes only from `WithPageSize`; margins are
+   zero); and **running headers/footers**. Done in the fidelity passes: per-page distribution of relative blocks
+   (incl. nested) + their abs descendants/clip/collapsed grid, **per-page fragmentation of the html/body border
+   + background**, **per-page distribution of page-CB `position:absolute`** (routed by its top's Y-band), a
+   **`position:fixed` box repeating on every page**, **propagating a forced break on a top-level block's
+   leading/trailing-edge nested content** to that block, and **retaining a leading margin-top at an unforced
+   break** (a forced break still truncates it). Note `WithPageSize(w,h)` sets the layout **width** to `w` (not a
+   pure "slice what's already laid out"), so switching a default render to a different page width reflows the
+   document.
 
-Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
+Out-of-scope, don't gold-plate without a concrete need: **EPUB** (`OpenEPUB` / ebook reading — explicitly
+descoped; the HTML pipeline is the reflow target), full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
