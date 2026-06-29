@@ -70,6 +70,10 @@ type ComputedStyle struct {
 	// ObjectFit is the replaced-element fitting mode (CSS object-fit):
 	// "fill" (default) | "contain" | "cover" | "none" | "scale-down".
 	ObjectFit string
+	// ObjectPositionX/Y are the CSS object-position as fractions of the content box's
+	// free space (0 = left/top, 1 = right/bottom, 0.5 = centered — the initial value).
+	// Resolved at parse time from keywords/percentages.
+	ObjectPositionX, ObjectPositionY float64
 
 	// Overflow is the CSS overflow shorthand: "visible" (default) | "hidden" |
 	// "scroll" | "auto". Not inherited. overflow≠visible establishes a block
@@ -330,31 +334,33 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 func initialStyle() ComputedStyle {
 	black := color.RGBA{0, 0, 0, 255}
 	return ComputedStyle{
-		Display:     "inline",
-		Color:       black,
-		FontFamily:  "serif",
-		FontSizePt:  16,
-		LineHeight:  Length{Unit: UnitAuto},
-		TextAlign:   "left",
-		Width:       Length{Unit: UnitAuto},
-		Height:      Length{Unit: UnitAuto},
-		MinWidth:    Length{Unit: UnitPx},   // CSS initial min-width is 0
-		MaxWidth:    Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
-		MinHeight:   Length{Unit: UnitPx},   // CSS initial min-height is 0
-		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
-		BoxSizing:   "content-box",
-		ObjectFit:   "fill",    // CSS initial object-fit
-		Overflow:    "visible", // CSS initial overflow
-		Float:       "none",    // CSS initial float
-		Clear:       "none",    // CSS initial clear
-		Position:    "static",  // CSS initial position
-		Top:         Length{Unit: UnitAuto},
-		Right:       Length{Unit: UnitAuto},
-		Bottom:      Length{Unit: UnitAuto},
-		Left:        Length{Unit: UnitAuto},
-		ZIndexAuto:  true, // CSS initial z-index is auto
-		MarginTop:   Length{Unit: UnitPx},
-		MarginRight: Length{Unit: UnitPx},
+		Display:         "inline",
+		Color:           black,
+		FontFamily:      "serif",
+		FontSizePt:      16,
+		LineHeight:      Length{Unit: UnitAuto},
+		TextAlign:       "left",
+		Width:           Length{Unit: UnitAuto},
+		Height:          Length{Unit: UnitAuto},
+		MinWidth:        Length{Unit: UnitPx},   // CSS initial min-width is 0
+		MaxWidth:        Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		MinHeight:       Length{Unit: UnitPx},   // CSS initial min-height is 0
+		MaxHeight:       Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		BoxSizing:       "content-box",
+		ObjectFit:       "fill", // CSS initial object-fit
+		ObjectPositionX: 0.5,    // CSS initial object-position: 50% 50%
+		ObjectPositionY: 0.5,
+		Overflow:        "visible", // CSS initial overflow
+		Float:           "none",    // CSS initial float
+		Clear:           "none",    // CSS initial clear
+		Position:        "static",  // CSS initial position
+		Top:             Length{Unit: UnitAuto},
+		Right:           Length{Unit: UnitAuto},
+		Bottom:          Length{Unit: UnitAuto},
+		Left:            Length{Unit: UnitAuto},
+		ZIndexAuto:      true, // CSS initial z-index is auto
+		MarginTop:       Length{Unit: UnitPx},
+		MarginRight:     Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
 		FlexDirection:  "row",
 		FlexWrap:       "nowrap",
@@ -468,6 +474,10 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "fill", "contain", "cover", "none", "scale-down":
 			cs.ObjectFit = d.Value
+		}
+	case "object-position":
+		if x, y, ok := parseObjectPosition(d.Value); ok {
+			cs.ObjectPositionX, cs.ObjectPositionY = x, y
 		}
 	case "overflow":
 		switch d.Value {

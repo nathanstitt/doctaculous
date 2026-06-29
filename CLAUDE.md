@@ -611,9 +611,13 @@ that skip into real output.
    (today fills the containing block), abs `margin:auto` centering, a percentage `top`/`bottom` against
    an auto-height containing block, a `bottom`-only auto-height abs box (positioned against a provisional
    height today), and `position:relative` on a **text-only inline box** (a no-op today — needs inline-box
-   fragments). Replaced-content fidelity follow-ups: `object-position`, the ratio-preserving min/max
-   sizing step (CSS 10.4; today min/max clamps per-axis after ratio derivation), a percentage `height`
-   basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
+   fragments). Replaced-content — landed fidelity fixes: **D1** `object-position` (the fitted image shifts
+   within the content box for contain/none/scale-down; parsed keywords + percentages into `ObjectPositionX/Y`,
+   applied in `fitDest`), **D2** the ratio-preserving min/max sizing step (CSS 10.4 `constrainRatio` — a single
+   violated min/max bound scales the other axis to preserve the intrinsic ratio; both-dims-explicit still clamps
+   per-axis). Still open: a percentage `height` basis on replaced elements (D3 — deferred, needs a definite
+   containing-block height threaded through the width/single-axis engine; treated as auto today), and CSS
+   `background-image` decode (D4 — deferred feature slice; `background` keeps color only). General
    inline/flow — landed fidelity fixes: **B2** (a `vertical-align:baseline` inline-block WITH text aligns its
    last in-flow line box's baseline per CSS 2.1 §10.8.1 via `atomicRunFor`/`lastInFlowLineBaseline`, instead of
    resting its whole border box on the baseline; a replaced/empty/`overflow≠visible` atom stays bottom-aligned),

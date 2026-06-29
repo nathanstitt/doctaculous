@@ -168,4 +168,9 @@ type ImageItem struct {
 	Img                image.Image
 	XPt, YPt, WPt, HPt float64
 	Fit                ObjectFit
+	// PosX, PosY are the object-position as fractions of the free space in the content
+	// box (0 = left/top edge, 1 = right/bottom edge, 0.5 = centered — the default).
+	// They shift the fitted image within the content box for fits that leave free space
+	// (contain / none / scale-down); fill ignores them.
+	PosX, PosY float64
 }

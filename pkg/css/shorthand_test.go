@@ -638,3 +638,34 @@ func TestFontShorthandInvalidDropped(t *testing.T) {
 		t.Errorf("family-only font shorthand (no size) must be dropped, but family was set")
 	}
 }
+
+// TestObjectPosition pins D1: object-position parses keywords and percentages into
+// (x,y) fractions of the content box's free space; the initial is 50% 50%.
+func TestObjectPosition(t *testing.T) {
+	cases := []struct {
+		val  string
+		x, y float64
+	}{
+		{"left top", 0, 0},
+		{"right bottom", 1, 1},
+		{"center", 0.5, 0.5},
+		{"left", 0, 0.5},
+		{"top", 0.5, 0}, // single keyword sets y, x centered
+		{"25% 75%", 0.25, 0.75},
+		{"0% 100%", 0, 1},
+		{"right center", 1, 0.5},
+	}
+	for _, c := range cases {
+		cs := initialStyle()
+		applyOne(&cs, "object-position", c.val)
+		if cs.ObjectPositionX != c.x || cs.ObjectPositionY != c.y {
+			t.Errorf("object-position %q -> (%.2f,%.2f), want (%.2f,%.2f)",
+				c.val, cs.ObjectPositionX, cs.ObjectPositionY, c.x, c.y)
+		}
+	}
+	// Initial value is 50% 50%.
+	cs := initialStyle()
+	if cs.ObjectPositionX != 0.5 || cs.ObjectPositionY != 0.5 {
+		t.Errorf("initial object-position = (%.2f,%.2f), want (0.5,0.5)", cs.ObjectPositionX, cs.ObjectPositionY)
+	}
+}

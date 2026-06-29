@@ -51,11 +51,24 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## D. HTML/CSS — replaced content
 
-- ☐ **D1. `object-position`.** *Small.*
-- ☐ **D2. ratio-preserving min/max sizing step (CSS 10.4)** — today min/max clamps per-axis after ratio
-  derivation. *Medium.*
-- ☐ **D3. percentage `height` basis on replaced elements** (today treated as auto). *Small–medium.*
-- ☐ **D4. CSS `background-image` decode.** *Medium* (new paint path for backgrounds).
+- ☑ **D1. `object-position`** — *DONE.* `object-position` parsed (keywords + percentages, 1–2 values) into
+  `ObjectPositionX/Y` fractions (initial 0.5/0.5); threaded onto `ImageItem`/`ImageContent` and applied in
+  `fitDest` (`positioned` helper) so the fitted image shifts within the content box for contain/none/scale-down.
+  Tests: `TestObjectPosition` (parse), `TestPaintImageObjectPosition` (paint), `html-object-position` golden
+  (eyeballed: top-left/center/bottom-right). Default 0.5 reproduces the prior centering → corpus byte-identical.
+- ☑ **D2. ratio-preserving min/max sizing (CSS 10.4)** — *DONE.* When the used size came from the intrinsic
+  ratio (≥1 axis auto, ratio available, not both pinned), `constrainRatio` applies the §10.4
+  constraint-violation table (a single violated bound scales the other axis to preserve the ratio; conflicting
+  bounds clamp independently). Both-dims-explicit falls back to per-axis clamping (ratio already broken). Tests:
+  `TestReplacedRatioPreserving…` + the both-explicit guard (mutation-verified).
+- ☐ **D3. percentage `height` basis on replaced elements** — *Deferred (structural).* Needs a definite
+  containing-block HEIGHT threaded through the layout chain; the engine is fundamentally width/single-axis
+  (a percentage height resolves against a 0 basis → treated as auto today, logged). A broad plumbing change;
+  low frequency. Documented in `replaced.go`.
+- ☐ **D4. CSS `background-image` decode** — *Deferred (feature slice).* A whole new path: parse
+  `background-image: url()`, decode via the resource loader, carry on the fragment, and paint with
+  `background-repeat`/`-position`/`-size`. Medium–large; its own slice. (Today `background` keeps color only;
+  `url()` is dropped.)
 
 ## E. HTML/CSS — general inline / flow
 

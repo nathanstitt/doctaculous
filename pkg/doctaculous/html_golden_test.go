@@ -633,6 +633,24 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// object-position (CSS, fidelity fix D1): a small square image inside a larger box
+		// with object-fit:none, positioned at three corners. Eyeball: the gray image sits
+		// at top-left, center, and bottom-right of its three boxes respectively (the box
+		// background is light blue so the free space is visible).
+		name:       "object-position",
+		viewportPx: 260,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  img { width: 70px; height: 70px; object-fit: none; background: #cce0ff; margin: 6px; display: inline-block; }
+  .tl { object-position: left top; }
+  .ctr { object-position: center; }
+  .br { object-position: right bottom; }
+</style></head><body>
+  <img class="tl" src="quad.png"><img class="ctr" src="quad.png"><img class="br" src="quad.png">
+</body></html>`,
+		loader: quadLoader(),
+	},
+	{
 		// Table background LAYERS (CSS 17.5.1, fidelity fix F2): a column background and
 		// row backgrounds paint behind the cells. Eyeball: column 1 has a blue tint behind
 		// all its cells; rows 1 and 3 have an orange tint; the cell text sits on top; where

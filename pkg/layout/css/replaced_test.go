@@ -471,3 +471,40 @@ func TestInlineTallImageRaisesAscent(t *testing.T) {
 		t.Errorf("image bottom %v != baseline %v (bottom-aligned)", imgF.Y+imgF.H, ln.BaselineY)
 	}
 }
+
+// TestReplacedRatioPreservingMaxHeight pins D2 (CSS 10.4): when the used size came from
+// the intrinsic ratio, a violated max bound scales the OTHER axis to preserve the ratio.
+// Intrinsic 200x100 (2:1), width:100 -> tentative 100x50; max-height:30 caps height to 30,
+// so width scales to 60 (keeping 2:1), NOT staying 100 (the old per-axis clamp).
+func TestReplacedRatioPreservingMaxHeight(t *testing.T) {
+	f := imgFragment(t, `<img src="img.png" style="width:100px;max-height:30px">`, 800, pngLoader(t, 200, 100))
+	if f.H != 30 {
+		t.Errorf("height = %v, want 30 (max-height)", f.H)
+	}
+	// Ratio-preserving: width = 30 * 200/100 = 60.
+	if f.W < 59 || f.W > 61 {
+		t.Errorf("width = %v, want ~60 (ratio-preserving max-height); per-axis clamp would give 100", f.W)
+	}
+}
+
+// TestReplacedRatioPreservingMinWidth pins D2 for a min bound: intrinsic 200x100,
+// height:20 -> tentative 40x20; min-width:80 raises width to 80, scaling height to 40
+// (keeping 2:1), NOT staying 20.
+func TestReplacedRatioPreservingMinWidth(t *testing.T) {
+	f := imgFragment(t, `<img src="img.png" style="height:20px;min-width:80px">`, 800, pngLoader(t, 200, 100))
+	if f.W != 80 {
+		t.Errorf("width = %v, want 80 (min-width)", f.W)
+	}
+	if f.H < 39 || f.H > 41 {
+		t.Errorf("height = %v, want ~40 (ratio-preserving min-width); per-axis would give 20", f.H)
+	}
+}
+
+// TestReplacedBothDimsExplicitNoRatioPreserve guards the fallback: when BOTH width and
+// height are explicit (ratio already broken), min/max clamp per-axis (unchanged).
+func TestReplacedBothDimsExplicitNoRatioPreserve(t *testing.T) {
+	f := imgFragment(t, `<img src="img.png" width="200" height="100" style="max-width:80px">`, 800, pngLoader(t, 200, 100))
+	if f.W != 80 || f.H != 100 {
+		t.Errorf("size = %vx%v, want 80x100 (per-axis clamp; both dims explicit)", f.W, f.H)
+	}
+}

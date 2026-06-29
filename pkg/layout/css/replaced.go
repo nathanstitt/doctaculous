@@ -65,9 +65,76 @@ func (e *Engine) replacedUsedSize(ctx context.Context, b *cssbox.Box, pctBasis f
 
 	maxW, hasMaxW := resolveMaxFor(b.Style.MaxWidth, fs, pctBasis, true)
 	maxH, hasMaxH := resolveMaxFor(b.Style.MaxHeight, fs, 0, false)
-	w = clampMaxMin(w, resolveMin(b.Style.MinWidth, fs, pctBasis, true), maxW, hasMaxW)
-	h = clampMaxMin(h, resolveMin(b.Style.MinHeight, fs, 0, false), maxH, hasMaxH)
+	minW := resolveMin(b.Style.MinWidth, fs, pctBasis, true)
+	minH := resolveMin(b.Style.MinHeight, fs, 0, false)
+
+	// CSS 10.4: when the used size came from the intrinsic aspect ratio (at least one
+	// axis auto, an intrinsic ratio available) and is NOT explicitly pinned on both axes,
+	// apply min/max preserving the ratio (the §10.4 constraint-violation table). When both
+	// width and height are explicitly specified the ratio is already broken, so fall back
+	// to independent per-axis clamping.
+	if haveIntrinsic && (!hasW || !hasH) && w > 0 && h > 0 {
+		w, h = constrainRatio(w, h, minW, maxW, hasMaxW, minH, maxH, hasMaxH)
+	} else {
+		w = clampMaxMin(w, minW, maxW, hasMaxW)
+		h = clampMaxMin(h, minH, maxH, hasMaxH)
+	}
 	return w, h
+}
+
+// constrainRatio applies min/max-width/-height to a tentative size (w,h) that carries an
+// intrinsic aspect ratio, following the CSS 2.1 §10.4 constraint-violation table: a single
+// violated bound scales the OTHER axis to preserve the ratio; conflicting bounds on both
+// axes clamp each independently (the ratio cannot be preserved). hasMaxW/hasMaxH gate the
+// max bounds ("none" when false). All bounds are content-box values; min defaults to 0.
+func constrainRatio(w, h, minW, maxW float64, hasMaxW bool, minH, maxH float64, hasMaxH bool) (float64, float64) {
+	// Effective max (huge when "none") simplifies the comparisons.
+	mw, mh := maxW, maxH
+	if !hasMaxW {
+		mw = 1e18
+	}
+	if !hasMaxH {
+		mh = 1e18
+	}
+	gtMaxW, gtMaxH := w > mw, h > mh
+	ltMinW, ltMinH := w < minW, h < minH
+
+	switch {
+	case gtMaxW && gtMaxH:
+		// Both exceed max: shrink by the more-constraining ratio.
+		if mw/w <= mh/h {
+			return mw, max0(mw * h / w)
+		}
+		return max0(mh * w / h), mh
+	case ltMinW && ltMinH:
+		// Both below min: grow by the more-constraining ratio.
+		if minW/w >= minH/h {
+			return minW, minW * h / w
+		}
+		return minH * w / h, minH
+	case gtMaxW && ltMinH:
+		return mw, minH
+	case ltMinW && gtMaxH:
+		return minW, mh
+	case gtMaxW:
+		// Width over max: set w=max-w, derive h, then clamp h to its own min/max.
+		return mw, clampMaxMin(mw*h/w, minH, mh, true)
+	case ltMinW:
+		return minW, clampMaxMin(minW*h/w, minH, mh, true)
+	case gtMaxH:
+		return clampMaxMin(mh*w/h, minW, mw, true), mh
+	case ltMinH:
+		return clampMaxMin(minH*w/h, minW, mw, true), minH
+	}
+	return w, h
+}
+
+// max0 floors a value at 0.
+func max0(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // intrinsicSize returns b's replaced image's intrinsic pixel size (treated 1:1 as
@@ -175,7 +242,8 @@ func (e *Engine) replacedFragment(ctx context.Context, b *cssbox.Box, w, h, bord
 		Image: &ImageContent{
 			Img: img,
 			CX:  contentX, CY: contentY, CW: w, CH: h,
-			Fit: mapObjectFit(b.Style.ObjectFit),
+			Fit:  mapObjectFit(b.Style.ObjectFit),
+			PosX: b.Style.ObjectPositionX, PosY: b.Style.ObjectPositionY,
 		},
 		DebugTag: debugTag(b),
 	}

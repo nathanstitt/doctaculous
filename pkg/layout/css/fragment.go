@@ -138,6 +138,9 @@ type ImageContent struct {
 	Img            image.Image
 	CX, CY, CW, CH float64
 	Fit            layout.ObjectFit
+	// PosX, PosY are the object-position as fractions of the content box's free space
+	// (0.5/0.5 = centered, the default). See layout.ImageItem.
+	PosX, PosY float64
 }
 
 // BorderEdge is one side of a fragment's border box. A zero edge (Width == 0 or
@@ -392,7 +395,8 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			Image: layout.ImageItem{
 				Img: f.Image.Img,
 				XPt: f.Image.CX, YPt: f.Image.CY, WPt: f.Image.CW, HPt: f.Image.CH,
-				Fit: f.Image.Fit,
+				Fit:  f.Image.Fit,
+				PosX: f.Image.PosX, PosY: f.Image.PosY,
 			},
 		})
 	}

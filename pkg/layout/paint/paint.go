@@ -227,7 +227,7 @@ func paintImage(dev render.Device, it *layout.ImageItem, mat render.Matrix) {
 		return
 	}
 
-	d := fitDest(it.Fit, it.XPt, it.YPt, it.WPt, it.HPt, iw, ih)
+	d := fitDest(it.Fit, it.XPt, it.YPt, it.WPt, it.HPt, iw, ih, it.PosX, it.PosY)
 	if d.w <= 0 || d.h <= 0 {
 		return
 	}
@@ -260,26 +260,29 @@ const epsilon = 1e-6
 // ratio and center; none uses intrinsic size centered; scale-down picks the smaller
 // of none and contain. The result may exceed the content box (cover, oversized
 // none) — the caller clips.
-func fitDest(fit layout.ObjectFit, cx, cy, cw, ch, iw, ih float64) imageDest {
-	centered := func(w, h float64) imageDest {
-		return imageDest{x: cx + (cw-w)/2, y: cy + (ch-h)/2, w: w, h: h}
+func fitDest(fit layout.ObjectFit, cx, cy, cw, ch, iw, ih, posX, posY float64) imageDest {
+	// positioned places a w×h image within the content box at the object-position
+	// fractions (posX/posY of the free space cw-w / ch-h). posX=posY=0.5 centers it
+	// (the default), reproducing the prior behavior exactly.
+	positioned := func(w, h float64) imageDest {
+		return imageDest{x: cx + (cw-w)*posX, y: cy + (ch-h)*posY, w: w, h: h}
 	}
 	switch fit {
 	case layout.FitContain:
 		s := scaleRatio(cw/iw, ch/ih, true) // fit inside: the smaller ratio
-		return centered(iw*s, ih*s)
+		return positioned(iw*s, ih*s)
 	case layout.FitCover:
 		s := scaleRatio(cw/iw, ch/ih, false) // cover: the larger ratio
-		return centered(iw*s, ih*s)
+		return positioned(iw*s, ih*s)
 	case layout.FitNone:
-		return centered(iw, ih)
+		return positioned(iw, ih)
 	case layout.FitScaleDown:
 		// none unless it overflows the box, in which case contain (the smaller image).
 		s := scaleRatio(cw/iw, ch/ih, true)
 		if s >= 1 {
-			return centered(iw, ih) // intrinsic already fits: use none
+			return positioned(iw, ih) // intrinsic already fits: use none
 		}
-		return centered(iw*s, ih*s)
+		return positioned(iw*s, ih*s)
 	default: // FitFill
 		return imageDest{x: cx, y: cy, w: cw, h: ch}
 	}

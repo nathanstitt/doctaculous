@@ -533,6 +533,63 @@ func applyBackground(cs *ComputedStyle, value string) {
 	}
 }
 
+// parseObjectPosition parses a CSS object-position value into (x, y) fractions of the
+// content box's free space [0,1] (0=left/top, 0.5=center, 1=right/bottom). It handles the
+// common forms: one or two space-separated components, each a keyword (left/center/right
+// for x; top/center/bottom for y) or a percentage. A single component sets that axis and
+// centers the other. Two keyword components may appear in either order (x/y keywords are
+// disjoint); a percentage pair is x then y. Lengths and 3/4-value forms are not supported
+// (ok=false, leaving the initial 50% 50%).
+func parseObjectPosition(value string) (x, y float64, ok bool) {
+	comps := splitComponents(value)
+	if len(comps) == 0 || len(comps) > 2 {
+		return 0, 0, false
+	}
+	x, y = 0.5, 0.5
+	pctSeen := 0 // how many percentage components consumed (first → x, second → y)
+	apply := func(c string) bool {
+		switch c {
+		case "left":
+			x = 0
+		case "right":
+			x = 1
+		case "top":
+			y = 0
+		case "bottom":
+			y = 1
+		case "center":
+			// leaves both axes at their current value (default 0.5)
+		default:
+			f, isPct := pctFraction(c)
+			if !isPct {
+				return false
+			}
+			if pctSeen == 0 {
+				x = f
+			} else {
+				y = f
+			}
+			pctSeen++
+		}
+		return true
+	}
+	for _, c := range comps {
+		if !apply(c) {
+			return 0, 0, false
+		}
+	}
+	return x, y, true
+}
+
+// pctFraction parses a percentage token (e.g. "25%") into a fraction [0,1]; ok=false for
+// a non-percentage.
+func pctFraction(s string) (float64, bool) {
+	if l, parsed := parseLength(newTokenizer(s).next()); parsed && l.Unit == UnitPercent {
+		return l.Value / 100, true
+	}
+	return 0, false
+}
+
 // fontKeywordSizes are the CSS absolute-size keywords recognized in the `font`
 // shorthand's size slot, mapped to a px value (a coarse scale; the exact CSS
 // medium-relative ratios are not modeled). Relative sizes (larger/smaller) and the
