@@ -24,4 +24,9 @@ var (
 	// program (no FontFile2/FontFile3). Non-embedded (e.g. base-14) fonts are out
 	// of scope.
 	ErrNoEmbeddedProgram = errors.New("font: no embedded font program (FontFile2/FontFile3)")
+
+	// ErrInvalidWOFF is returned when a WOFF/WOFF2 container is malformed (bad
+	// signature, truncated, bad compression, or an unreconstructable table
+	// transform). Callers fall back to a bundled substitute.
+	ErrInvalidWOFF = errors.New("font: invalid WOFF container")
 )

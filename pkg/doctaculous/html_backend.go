@@ -19,6 +19,7 @@ type HTMLOption func(*htmlConfig)
 type htmlConfig struct {
 	viewportPt float64
 	loader     resource.ResourceLoader
+	sys        layoutfont.SystemFontProvider
 	logf       func(string, ...any)
 }
 
@@ -51,6 +52,13 @@ func WithResourceLoader(l resource.ResourceLoader) HTMLOption {
 	return func(c *htmlConfig) { c.loader = l }
 }
 
+// WithSystemFontProvider sets the provider used to resolve @font-face local()
+// sources. Defaults to nil (local() never matches; the next src is tried). OpenHTML
+// supplies a DiskFontProvider rooted at the document's directory.
+func WithSystemFontProvider(p layoutfont.SystemFontProvider) HTMLOption {
+	return func(c *htmlConfig) { c.sys = p }
+}
+
 // WithLogf sets a logger for layout/degradation diagnostics (may be called during
 // Build and Layout). Defaults to a no-op.
 func WithLogf(f func(string, ...any)) HTMLOption {
@@ -66,7 +74,11 @@ func OpenHTML(path string) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: open html %q: %w", path, err)
 	}
-	return OpenHTMLBytes(data, WithResourceLoader(resource.DirLoader{Base: filepath.Dir(path)}))
+	dir := filepath.Dir(path)
+	return OpenHTMLBytes(data,
+		WithResourceLoader(resource.DirLoader{Base: dir}),
+		WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
+	)
 }
 
 // OpenHTMLBytes parses and renders in-memory HTML, applying any options, and
@@ -89,11 +101,12 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 		return nil, fmt.Errorf("doctaculous: parse html: %w", err)
 	}
 	ctx := context.Background()
-	root, err := layoutcss.Build(ctx, doc, cfg.loader, cfg.logf)
+	root, fontFaces, err := layoutcss.BuildWithFonts(ctx, doc, cfg.loader, cfg.logf)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
 	}
-	engine := layoutcss.New(layoutfont.NewFaceCache(), cfg.loader, cfg.logf)
+	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, cfg.sys, cfg.logf)
+	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
 	pages, err := engine.Layout(ctx, root, cfg.viewportPt)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)

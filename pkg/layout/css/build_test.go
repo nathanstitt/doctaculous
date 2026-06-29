@@ -368,3 +368,21 @@ func findCellWithRowSpan(b *cssbox.Box, n int) *cssbox.Box {
 	}
 	return nil
 }
+
+func TestBuildWithFontsCollectsFontFaces(t *testing.T) {
+	src := `<!DOCTYPE html><html><head><style>
+		@font-face { font-family: "Doc Face"; src: url(doc.ttf) }
+		p { font-family: "Doc Face" }
+	</style></head><body><p>hi</p></body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("html.Parse: %v", err)
+	}
+	_, faces, err := BuildWithFonts(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildWithFonts: %v", err)
+	}
+	if len(faces) != 1 || faces[0].Family != "Doc Face" || len(faces[0].Sources) != 1 {
+		t.Fatalf("collected faces = %+v, want one Doc Face with one source", faces)
+	}
+}

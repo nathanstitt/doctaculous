@@ -17,10 +17,12 @@ type Rule struct {
 	Declarations []Declaration
 }
 
-// Stylesheet is a parsed CSS document: an ordered list of style rules. Source
-// order is preserved because the cascade uses it as a tie-breaker.
+// Stylesheet is a parsed CSS document: an ordered list of style rules plus any
+// captured @font-face rules. Source order is preserved (the cascade uses it as a
+// tie-breaker; @font-face order is the fallback order within a family).
 type Stylesheet struct {
-	Rules []Rule
+	Rules     []Rule
+	FontFaces []FontFace
 }
 
 // Parse parses a CSS stylesheet. It is total: malformed rules and unsupported
@@ -40,7 +42,12 @@ func Parse(src string) Stylesheet {
 			continue
 		}
 		if strings.HasPrefix(prelude, "@") {
-			continue // unsupported at-rule: block already consumed by the scanner
+			if strings.EqualFold(strings.TrimSpace(prelude), "@font-face") {
+				if ff, ok := parseFontFace(parseDeclarations(body)); ok {
+					sheet.FontFaces = append(sheet.FontFaces, ff)
+				}
+			}
+			continue // any other at-rule: block already consumed by the scanner
 		}
 		sels := parseSelectorList(prelude)
 		if len(sels) == 0 {
