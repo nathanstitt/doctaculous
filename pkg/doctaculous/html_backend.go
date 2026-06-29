@@ -92,17 +92,29 @@ func WithLogf(f func(string, ...any)) HTMLOption {
 // OpenHTML reads and renders an HTML file at path, laying it out at the default
 // viewport width into a single tall page, and returns a Document ready to
 // rasterize. Relative <link> stylesheet refs resolve through a loader rooted at
-// the file's directory.
+// the file's directory. For additional options (e.g. WithPageSize), use
+// OpenHTMLFile.
 func OpenHTML(path string) (*Document, error) {
+	return OpenHTMLFile(path)
+}
+
+// OpenHTMLFile reads and renders an HTML file at path, applying any options, and
+// returns a Document ready to rasterize. Like OpenHTML it roots a DirLoader and a
+// DiskFontProvider at the file's directory so relative <link>/<img>/@font-face refs
+// resolve from disk; the caller's opts are applied AFTER those defaults, so e.g.
+// WithPageSize(LetterWidthPt, LetterHeightPt) paginates the file, and a caller's own
+// WithResourceLoader overrides the directory loader.
+func OpenHTMLFile(path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: open html %q: %w", path, err)
 	}
 	dir := filepath.Dir(path)
-	return OpenHTMLBytes(data,
+	all := append([]HTMLOption{
 		WithResourceLoader(resource.DirLoader{Base: dir}),
 		WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
-	)
+	}, opts...)
+	return OpenHTMLBytes(data, all...)
 }
 
 // ErrUnsupportedScheme is returned (wrapped) by OpenURL when rawURL uses a scheme

@@ -64,11 +64,15 @@ func TestResolvePagesDedup(t *testing.T) {
 }
 
 func TestOutputPath(t *testing.T) {
-	if got := outputPath("page-%d.png", 4, true); got != "page-5.png" {
-		t.Errorf("multi output = %q, want page-5.png", got)
+	if got := outputPath("page-%d.png", 4); got != "page-5.png" {
+		t.Errorf("%%d output = %q, want page-5.png", got)
 	}
-	if got := outputPath("out.png", 0, false); got != "out.png" {
-		t.Errorf("single output = %q, want out.png", got)
+	if got := outputPath("out.png", 0); got != "out.png" {
+		t.Errorf("no-%%d output = %q, want out.png", got)
+	}
+	// A %d pattern with a single page still substitutes (no literal "%d" in the name).
+	if got := outputPath("page-%d.png", 0); got != "page-1.png" {
+		t.Errorf("single-page %%d output = %q, want page-1.png", got)
 	}
 }
 
