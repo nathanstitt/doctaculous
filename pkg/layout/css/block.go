@@ -74,7 +74,17 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 	if root == nil {
 		return nil
 	}
-	res := e.layoutBlock(ctx, root, viewportW, 0, 0)
+	fc := &floatContext{cbLeft: 0, cbRight: viewportW}
+	// Root BFC: bandOriginY = 0 (its content-box top defines the frame origin).
+	res := e.layoutBlock(ctx, root, viewportW, 0, 0, 0, fc)
+	if res.frag != nil {
+		res.frag.IsBFC = true
+		// The root is the BFC owner: collect any floats placed directly in it. (A
+		// nested-BFC box collects its own via layoutInterior -> in.bfcFloats.)
+		if res.frag.Floats == nil {
+			res.frag.Floats = fc.floats2frags()
+		}
+	}
 	return res.frag
 }
 
@@ -97,14 +107,17 @@ type blockResult struct {
 // The fragment's X/Y are the border-box top-left: X = originX + usedMarginLeft,
 // Y = marginTopEdgeY + result.marginTop. Children are positioned absolutely in
 // page space within the fragment.
-func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, originX, marginTopEdgeY float64) blockResult {
+//
+// bandOriginY is b's content-box top measured in the BFC-root-local frame (the frame the float context fc is queried in — see layoutBlockChildren's frame model); fc is the current block formatting context's float context.
+func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, originX, marginTopEdgeY, bandOriginY float64, fc *floatContext) blockResult {
 	if b.Kind == cssbox.BoxReplaced {
 		// A block-level replaced box (e.g. <img style="display:block">) is sized by
 		// the replaced-element algorithm, not the block content flow: with width:auto
 		// it uses its INTRINSIC width (not the containing-block fill a normal block
 		// gets). It has no in-flow children to collapse margins with, so its top/bottom
 		// margins are solid. Margins/border/padding/min-max are honored by
-		// replacedUsedSize + replacedFragment.
+		// replacedUsedSize + replacedFragment. A replaced box has no float children;
+		// it ignores fc/bandOriginY.
 		return e.layoutBlockReplaced(ctx, b, cbWidth, originX, marginTopEdgeY)
 	}
 
@@ -120,7 +133,14 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 
 	// Lay out the interior, producing child fragments / inline lines in a *local*
 	// frame whose content-box top is local Y 0, plus the collapsing facts.
-	in := e.layoutInterior(ctx, b, contentW, contentX)
+	//
+	// The interior's band origin is this box's content-box top in the BFC-root
+	// frame. (marginTopEdgeY is passed as 0 by the stacker in the provisional
+	// layout; the float context is queried in the BFC-root frame via bandOriginY,
+	// and the stacker's later shift repositions in-flow fragments — floats are
+	// placed directly in the BFC frame, so they don't need that shift.)
+	childBandOrigin := bandOriginY + ed.mT + ed.bT + ed.pT
+	in := e.layoutInterior(ctx, b, contentW, contentX, childBandOrigin, fc)
 
 	// Resolve the box's own collapse-resolved top/bottom margins and the offset of
 	// the content-box top from the border-box top's "natural" position.
@@ -194,6 +214,12 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
 	frag.Border[layout.EdgeLeft] = BorderEdge{Width: ed.bL, Color: b.Style.BorderLeftColor, Style: mapBorderStyle(b.Style.BorderLeftStyle)}
 
+	// A box that establishes its own BFC owns its floats' paint layer.
+	if establishesNewBFC(b) {
+		frag.IsBFC = true
+		frag.Floats = in.bfcFloats
+	}
+
 	return blockResult{frag: frag, marginTop: marginTop, marginBottom: marginBottom}
 }
 
@@ -206,15 +232,30 @@ type interior struct {
 	children       []*Fragment
 	lines          []LineFragment
 	contentHeight  float64
-	leadingMargin  float64 // first in-flow child's top margin (block flow only)
-	trailingMargin float64 // last in-flow child's bottom margin (block flow only)
+	leadingMargin  float64     // first in-flow child's top margin (block flow only)
+	trailingMargin float64     // last in-flow child's bottom margin (block flow only)
+	bfcFloats      []*Fragment // floats placed in this box's OWN BFC (set only when b establishes one)
 }
 
 // layoutInterior lays out b's children into a local frame (content-box top at 0)
 // according to b's formatting context. contentW is the content width children flow
 // into; contentX is the page-space x of the content box's left edge (children that
 // establish their own page-space position, i.e. blocks, use it directly).
-func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, contentX float64) interior {
+//
+// bandOriginY and fc thread the float context: bandOriginY is this box's content-box top in the BFC-root frame, and fc is the BFC's float context (a fresh one is created here if b establishes its own BFC).
+func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
+	// A box that establishes a new BFC (inline-block today) isolates floats: its
+	// interior gets a fresh context spanning its own content box, and its own band
+	// frame (origin 0). Otherwise children share the parent's context and frame, so a
+	// float placed by a child is visible to its siblings and the band Y stays in the
+	// ancestor BFC-root frame.
+	childFC, childBand := fc, bandOriginY
+	if establishesNewBFC(b) {
+		childFC = &floatContext{cbLeft: contentX, cbRight: contentX + contentW}
+		childBand = 0
+	}
+
+	var in interior
 	switch b.Formatting {
 	case cssbox.InlineFC:
 		// Inline-level children: hand off to the inline formatting context. The hook
@@ -222,18 +263,25 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		// in the local content-top-0 frame for Y; block layout shifts them into place.
 		// Any atomic inline boxes (inline-block / replaced) come back as child
 		// fragments in the same frame, to attach as fragment children so they paint.
-		lines, h, atomics := e.layoutInline(ctx, b, contentW, 0, contentX)
-		return interior{lines: lines, children: atomics, contentHeight: h}
+		lines, h, atomics := e.layoutInline(ctx, b, contentW, 0, contentX, childBand, childFC)
+		in = interior{lines: lines, children: atomics, contentHeight: h}
 	case cssbox.BlockFC:
-		return e.layoutBlockChildren(ctx, b, contentW, contentX)
+		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC)
 	default:
 		// TableFC / FlexFC / GridFC: their real layout algorithms are later
 		// sub-projects. Degrade to block normal flow so the children still position
 		// and paint (per the degradation contract: the box arrives with its true
 		// Formatting; the fallback is at this layout stage).
 		e.logf("css layout: %v not yet implemented; falling back to block normal flow", b.Formatting)
-		return e.layoutBlockChildren(ctx, b, contentW, contentX)
+		in = e.layoutBlockChildren(ctx, b, contentW, contentX, childBand, childFC)
 	}
+
+	// A new BFC's floats are self-contained: surface them so layoutBlock attaches them
+	// to b's own fragment (the float paint layer for b's BFC).
+	if establishesNewBFC(b) {
+		in.bfcFloats = childFC.floats2frags()
+	}
+	return in
 }
 
 // layoutBlockChildren stacks b's block-level children vertically in a local frame
@@ -247,7 +295,18 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 // its own *reported* top margin (which already folds in any nested
 // parent/first-child collapse-through), so the gap arithmetic stays correct for
 // deeply collapsing subtrees, not just leaf children.
-func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, contentW, contentX float64) interior {
+//
+// Coordinate-frame model (the load-bearing detail): the float context is queried
+// in ONE frame per BFC — the BFC-root-local frame, whose Y origin is the BFC root's
+// content-box top (page Y 0 for the page root). Every place/leftEdge/rightEdge/
+// clearY call passes bandOriginY + <local Y>, where bandOriginY is the current
+// box's content-top in that frame and <local Y> is the local content-top-0 cursor.
+// In-flow fragments are still built in their own local frame and shifted into place
+// by the existing per-child shift; float fragments are built directly in the
+// BFC-root frame (they attach to the BFC root's Floats, not to a shifted child) —
+// see placeFloat. A nested BFC resets bandOriginY to 0 and uses its own context
+// (layoutInterior).
+func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
 	var (
 		out        []*Fragment
 		prevBottom float64 // previous in-flow sibling's reported bottom margin
@@ -255,6 +314,7 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		leading    float64
 		trailing   float64
 		first      = true
+		cursorY    float64 // local content-top-0 Y of the in-flow cursor
 	)
 	for _, child := range b.Children {
 		if err := ctx.Err(); err != nil {
@@ -271,17 +331,38 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			continue
 		}
 
+		if child.Float != cssbox.FloatNone {
+			// Place the float in the BFC-root frame at the current in-flow band:
+			// bandOriginY (this content box's top in that frame) + cursorY (local).
+			e.placeFloat(ctx, child, contentW, contentX, bandOriginY+cursorY, fc)
+			continue // a float does not advance the in-flow cursor or collapse margins
+		}
+
+		// clear: lower the cursor below the matching floats. clearY is in the BFC-root
+		// frame; convert to local by subtracting bandOriginY.
+		startY := cursorY
+		if child.Style.Clear != "" && child.Style.Clear != "none" {
+			if cy := fc.clearY(child.Style.Clear, bandOriginY+cursorY) - bandOriginY; cy > startY {
+				startY = cy
+			}
+		}
+
 		// Lay the child out at a provisional margin edge of 0; its border top then
-		// sits at res.marginTop, which we now know and use to place it exactly.
-		res := e.layoutBlock(ctx, child, contentW, contentX, 0)
+		// sits at res.marginTop, which we now know and use to place it exactly. Pass
+		// bandOriginY+startY as the child's band origin so a nested in-flow block
+		// knows its position in the BFC-root frame (its IFC queries floats there).
+		res := e.layoutBlock(ctx, child, contentW, contentX, 0, bandOriginY+startY, fc)
 
 		var borderTop float64 // desired local Y of this child's border-box top
 		if first {
-			borderTop = 0 // first child's border top defines the content-box top
+			borderTop = startY // first child's border top defines the content-box top
 			leading = res.marginTop
 			first = false
 		} else {
 			borderTop = prevBorder + collapseMargins(prevBottom, res.marginTop)
+			if startY > borderTop {
+				borderTop = startY // clearance pushed it down past the collapsed margin
+			}
 		}
 		// The child currently sits with its border top at res.marginTop (margin edge
 		// was 0); shift it so its border top lands at borderTop.
@@ -291,8 +372,45 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		prevBorder = res.frag.Y + res.frag.H
 		prevBottom = res.marginBottom
 		trailing = res.marginBottom
+		cursorY = prevBorder
 	}
 	return interior{children: out, contentHeight: prevBorder, leadingMargin: leading, trailingMargin: trailing}
+}
+
+// placeFloat lays out a floated child and places it in the float context at
+// placeY (the in-flow band's Y in the BFC-root-local frame). The child is laid out
+// to learn its size, expanded to its margin box, placed via fc.place, and its
+// fragment translated to the placed margin box's border-box origin — directly in the
+// BFC-root frame, because a float attaches to the BFC root's Floats (the float paint
+// layer), not to a shifted in-flow child. The fragment is marked IsFloat and recorded
+// on the just-appended floatBox so the BFC owner (layoutTree / layoutInterior) can
+// collect it via floats2frags.
+func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, contentX, placeY float64, fc *floatContext) {
+	// Lay the float out (provisional origin) to learn its border-box size. A float is
+	// block-level and establishes its own BFC for its contents, so layoutInterior
+	// gives it a fresh float context (it does not inherit this BFC's floats). placeY is
+	// passed as bandOriginY for the float's own margin-box arithmetic; its interior
+	// resets to its own frame (bandOriginY=0) in layoutInterior.
+	res := e.layoutBlock(ctx, child, cbWidth, contentX, 0, placeY, fc)
+	if res.frag == nil {
+		return
+	}
+	ed := usedEdges(child, cbWidth)
+	marginW := ed.mL + res.frag.W + ed.mR
+	marginH := res.marginTop + res.frag.H + res.marginBottom
+
+	fb := fc.place(child.Float, marginW, marginH, placeY)
+
+	// fb.x/fb.y is the float's MARGIN-box top-left in the BFC-root frame. The border
+	// box sits inside it by the left/top margins. Translate the provisional fragment
+	// there (X and Y both move; a float's position is absolute in the BFC frame).
+	dx := (fb.x + ed.mL) - res.frag.X
+	dy := (fb.y + res.marginTop) - res.frag.Y
+	translateFragment(res.frag, dx, dy)
+	res.frag.IsFloat = true
+
+	// Record the fragment on the just-appended floatBox (fc.place appended it last).
+	fc.floats[len(fc.floats)-1].frag = res.frag
 }
 
 // The inline formatting context (layoutInline) lives in inline.go; it is the hook
@@ -358,10 +476,11 @@ func usedEdges(b *cssbox.Box, cbWidth float64) edges {
 
 // establishesNewBFC reports whether b establishes a new block formatting context,
 // which suppresses margin collapsing between the box and its in-flow children. In
-// the supported subset only an inline-block does (its interior is an independent
-// BFC); floats and overflow≠visible — the other BFC triggers — are not modeled yet.
+// the supported subset an inline-block does (its interior is an independent BFC) and
+// a float does (CSS 9.7: a float establishes a BFC for its contents); overflow≠visible
+// — the other BFC trigger — is not modeled yet.
 func establishesNewBFC(b *cssbox.Box) bool {
-	return b.Display == cssbox.DisplayInlineBlock
+	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous
@@ -556,7 +675,8 @@ func shiftFragments(frags []*Fragment, dy float64) {
 
 // shiftFragment translates one fragment and its descendants (children and inline
 // line baselines) by dy. Block children were positioned in page-space X already, so
-// only Y moves.
+// only Y moves. Floats are recursed separately from Children because a nested BFC's
+// floats live in Floats (not Children) and must ride any repositioning of the BFC subtree.
 func shiftFragment(f *Fragment, dy float64) {
 	f.Y += dy
 	for li := range f.Lines {
@@ -567,6 +687,9 @@ func shiftFragment(f *Fragment, dy float64) {
 	}
 	for _, c := range f.Children {
 		shiftFragment(c, dy)
+	}
+	for _, fl := range f.Floats {
+		shiftFragment(fl, dy)
 	}
 }
 

@@ -411,3 +411,55 @@ func TestComputeRootUsesInitialBase(t *testing.T) {
 		t.Errorf("root base = {size %v color %v}, want initial {16 black}", cs.FontSizePt, cs.Color)
 	}
 }
+
+// TestInitialFloatClear: the cascade defaults float and clear to "none".
+func TestInitialFloatClear(t *testing.T) {
+	cs := initialStyle()
+	if cs.Float != "none" {
+		t.Errorf("initial float = %q, want none", cs.Float)
+	}
+	if cs.Clear != "none" {
+		t.Errorf("initial clear = %q, want none", cs.Clear)
+	}
+}
+
+// TestApplyFloatClear: each valid float/clear keyword is accepted; an invalid one
+// is dropped (leaving the prior value).
+func TestApplyFloatClear(t *testing.T) {
+	for _, kw := range []string{"left", "right", "none"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "float", Value: kw})
+		if cs.Float != kw {
+			t.Errorf("float %q not applied, got %q", kw, cs.Float)
+		}
+	}
+	for _, kw := range []string{"left", "right", "both", "none"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "clear", Value: kw})
+		if cs.Clear != kw {
+			t.Errorf("clear %q not applied, got %q", kw, cs.Clear)
+		}
+	}
+	// Invalid values are dropped, default preserved.
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "float", Value: "center"})
+	if cs.Float != "none" {
+		t.Errorf("float after invalid keyword = %q, want none preserved", cs.Float)
+	}
+	applyDeclaration(&cs, Declaration{Property: "clear", Value: "all"})
+	if cs.Clear != "none" {
+		t.Errorf("clear after invalid keyword = %q, want none preserved", cs.Clear)
+	}
+}
+
+// TestFloatNotInherited: float/clear are not inherited (a child without its own
+// float defaults to none even if the parent floats).
+func TestFloatNotInherited(t *testing.T) {
+	parent := initialStyle()
+	parent.Float = "left"
+	parent.Clear = "both"
+	child := inheritFrom(parent)
+	if child.Float != "none" || child.Clear != "none" {
+		t.Errorf("float/clear inherited: got float=%q clear=%q, want none/none", child.Float, child.Clear)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/resource"
@@ -159,5 +160,80 @@ func TestBuildMissingLinkDegrades(t *testing.T) {
 	root := build(t, `<html><head><link rel="stylesheet" href="missing.css"></head><body><p>x</p></body></html>`, resource.MapLoader{})
 	if root == nil {
 		t.Fatal("Build should succeed despite a missing link")
+	}
+}
+
+// TestFloatOf maps the computed float keyword to a FloatKind.
+func TestFloatOf(t *testing.T) {
+	cases := map[string]cssbox.FloatKind{
+		"none":  cssbox.FloatNone,
+		"left":  cssbox.FloatLeft,
+		"right": cssbox.FloatRight,
+		"":      cssbox.FloatNone, // unset/zero string
+	}
+	for in, want := range cases {
+		if got := floatOf(gcss.ComputedStyle{Float: in}); got != want {
+			t.Errorf("floatOf(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// TestBlockifyFloatedInline: a floated inline-level element classifies as a
+// block-level box (CSS 9.7), so the layout engine lays it out as a float.
+func TestBlockifyFloatedInline(t *testing.T) {
+	cs := gcss.ComputedStyle{Display: "inline", Float: "left"}
+	b := &cssbox.Box{Style: cs}
+	classifyDisplay(b, cs.Display)
+	// Pre-blockify it is inline; applyFloatBlockify promotes it.
+	applyFloatBlockify(b, cs)
+	if !b.Kind.IsBlockLevel() {
+		t.Errorf("floated inline: Kind=%v not block-level", b.Kind)
+	}
+	if b.Display != cssbox.DisplayBlock {
+		t.Errorf("floated inline: Display=%v, want DisplayBlock", b.Display)
+	}
+}
+
+// TestNoBlockifyWithoutFloat: an inline element with no float stays inline.
+func TestNoBlockifyWithoutFloat(t *testing.T) {
+	cs := gcss.ComputedStyle{Display: "inline", Float: "none"}
+	b := &cssbox.Box{Style: cs}
+	classifyDisplay(b, cs.Display)
+	applyFloatBlockify(b, cs)
+	if b.Kind != cssbox.BoxInline {
+		t.Errorf("non-floated inline: Kind=%v, want BoxInline", b.Kind)
+	}
+}
+
+// TestNoBlockifyFloatedInlineBlock: a floated display:inline-block element already
+// has a block-level Kind (classifyDisplay maps inline-block to BoxBlock), so
+// applyFloatBlockify leaves it unchanged — it does NOT reset DisplayInlineBlock to
+// DisplayBlock.
+func TestNoBlockifyFloatedInlineBlock(t *testing.T) {
+	cs := gcss.ComputedStyle{Display: "inline-block", Float: "left"}
+	b := &cssbox.Box{Style: cs}
+	classifyDisplay(b, cs.Display)
+	applyFloatBlockify(b, cs)
+	if b.Kind != cssbox.BoxBlock {
+		t.Errorf("floated inline-block: Kind=%v, want BoxBlock (unchanged)", b.Kind)
+	}
+	if b.Display != cssbox.DisplayInlineBlock {
+		t.Errorf("floated inline-block: Display=%v, want DisplayInlineBlock (unchanged)", b.Display)
+	}
+}
+
+// TestBlockifyFloatedInlinePreservesFormatting: a floated display:inline box becomes
+// block-level but KEEPS its inline formatting context (InlineFC) so its inline/text
+// children still lay out inline inside the now block-level box.
+func TestBlockifyFloatedInlinePreservesFormatting(t *testing.T) {
+	cs := gcss.ComputedStyle{Display: "inline", Float: "left"}
+	b := &cssbox.Box{Style: cs}
+	classifyDisplay(b, cs.Display)
+	if b.Formatting != cssbox.InlineFC {
+		t.Fatalf("precondition: classifyDisplay should set InlineFC for inline, got %v", b.Formatting)
+	}
+	applyFloatBlockify(b, cs)
+	if b.Formatting != cssbox.InlineFC {
+		t.Errorf("floated inline: Formatting=%v, want InlineFC preserved", b.Formatting)
 	}
 }

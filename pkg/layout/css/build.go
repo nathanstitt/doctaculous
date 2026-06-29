@@ -82,6 +82,7 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 	classifyDisplay(b, cs.Display)
 	b.Float = floatOf(cs)
 	b.Position = positionOf(cs)
+	applyFloatBlockify(b, cs) // CSS 9.7: a float blockifies an inline-level box
 
 	if replacedTags[e.Tag()] {
 		b.Kind = cssbox.BoxReplaced
@@ -136,10 +137,44 @@ func attrSnapshot(e *html.Element) map[string]string {
 	return out
 }
 
-// floatOf maps a computed style to a FloatKind. The float property is not on
-// ComputedStyle's normal-flow subset yet, so this returns FloatNone until float
-// support lands in pkg/css.
-func floatOf(_ gcss.ComputedStyle) cssbox.FloatKind { return cssbox.FloatNone }
+// floatOf maps a computed style's float keyword to a FloatKind. An empty or
+// unrecognized value is FloatNone.
+func floatOf(cs gcss.ComputedStyle) cssbox.FloatKind {
+	switch cs.Float {
+	case "left":
+		return cssbox.FloatLeft
+	case "right":
+		return cssbox.FloatRight
+	default:
+		return cssbox.FloatNone
+	}
+}
+
+// applyFloatBlockify promotes a floated inline-level box to block-level, per CSS
+// 2.1 §9.7 (a float computes display to a block-level value). Only a box that is
+// still inline-level when this runs is promoted — in practice a display:inline
+// element (Kind=BoxInline) and the inline anonymous/text kinds; a display:block or
+// display:inline-block element already has Kind=BoxBlock (set by classifyDisplay)
+// and is left unchanged. The box's Formatting is deliberately preserved: a floated
+// display:inline element keeps InlineFC so its text/inline children still lay out in
+// an inline formatting context inside the now block-level box. A floated <img> stays
+// BoxReplaced — replaced sizing handles a block-level replaced box.
+//
+// The BoxReplaced guard is defensive: in generate, the replacedTags override sets
+// Kind=BoxReplaced AFTER this call, so a box is never BoxReplaced when
+// applyFloatBlockify runs today; the guard protects any future caller that inverts
+// that order.
+func applyFloatBlockify(b *cssbox.Box, cs gcss.ComputedStyle) {
+	if floatOf(cs) == cssbox.FloatNone {
+		return
+	}
+	if b.Kind == cssbox.BoxReplaced {
+		return // replaced stays replaced; replaced sizing handles block-level
+	}
+	if b.Kind.IsInlineLevel() {
+		b.Kind, b.Display = cssbox.BoxBlock, cssbox.DisplayBlock
+	}
+}
 
 // positionOf maps a computed style to a PositionKind. Like floatOf, position is
 // not yet on ComputedStyle's subset; returns PosStatic until it is.

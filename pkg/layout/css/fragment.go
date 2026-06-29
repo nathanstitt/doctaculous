@@ -10,9 +10,12 @@ import (
 
 // Fragment is one positioned box in page space (points, Y-down, origin at the
 // page top-left). Produced by the CSS layout engine; read-only after layout, so a
-// fragment tree may be shared across the render fan-out without locks. Children
-// paint after this box's own background and border, in slice order, giving correct
-// normal-flow paint order (background, border, then content; parent before child).
+// fragment tree may be shared across the render fan-out without locks. Paint order
+// follows CSS 2.1 Appendix E for a fragment that establishes a block formatting
+// context (IsBFC): in-flow block backgrounds/borders, then floats, then in-flow
+// inline content. A non-BFC fragment keeps the simpler parent-before-child tree
+// order (its own background and border, then its content, then its children). See
+// AppendItems.
 //
 // Fragment is the recursive analogue of layout.Item: the layout engine emits this
 // tree, and AppendItems flattens it into the flat layout.Page.Items slice the paint
@@ -26,6 +29,21 @@ type Fragment struct {
 	Children   []*Fragment    // child box fragments (block children; atomic inline boxes)
 	Image      *ImageContent  // decoded replaced-element image (set for a replaced box), painted in the content box
 	DebugTag   string         // optional label for test lookup; not used in paint
+
+	// IsFloat marks a fragment produced by a floated box. The float paint phases
+	// skip such subtrees during the in-flow passes and paint them in the float pass
+	// instead (CSS 2.1 Appendix E).
+	IsFloat bool
+	// IsBFC marks a fragment that establishes a block formatting context (the page
+	// root and inline-blocks). Such a fragment owns the float-layer paint sequencing
+	// for the floats placed in its BFC (held in Floats); a non-BFC fragment recurses
+	// normally within each phase.
+	IsBFC bool
+	// Floats holds the fragments of floats placed in this fragment's BFC, painted in
+	// their own layer (after in-flow block decorations, before in-flow inline
+	// content). Set only on an IsBFC fragment. Kept separate from Children so in-flow
+	// tree order is untouched.
+	Floats []*Fragment
 }
 
 // ImageContent is a decoded replaced-element image carried on a Fragment. CX,CY,
@@ -69,38 +87,117 @@ type GlyphFragment struct {
 	Color   color.RGBA
 }
 
-// AppendItems appends f's drawing primitives, and its descendants', to dst in
-// paint order and returns the extended slice: this box's background (if any), then
-// each non-empty border edge, then its inline line glyphs, then each child
-// (recursively). The result feeds layout.Page.Items / paint.PaintPage.
+// AppendItems appends f's drawing primitives, and its descendants', to dst in CSS
+// paint order and returns the extended slice. For a fragment that establishes a
+// block formatting context (IsBFC), the order follows CSS 2.1 Appendix E within the
+// context: in-flow block backgrounds/borders, then floats (Floats), then in-flow
+// inline content / images / atomics — each phase skipping floated subtrees in the
+// in-flow passes. A non-BFC fragment paints its own background/border/inline/image
+// then recurses into its children (normal-flow tree order), which is what the BFC
+// phases call per in-flow subtree.
 //
 // AppendItems only reads the fragment tree; it does not mutate it, so it is safe to
 // call on a tree shared across the render fan-out.
+//
+// The 3-phase BFC ordering is the seam the positioning slice generalizes into a full
+// stacking-context pass (CSS 2.1 Appendix E z-index layers): positioned descendants
+// and z-ordered layers will be inserted relative to the float phase, so keep the phase
+// split intact when extending this.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
-	// 1. Background fills the border box. A zero-alpha background means none.
+	if f.IsBFC {
+		dst = f.appendDecorations(dst) // in-flow backgrounds + borders (skip floats)
+		for _, fl := range f.Floats {  // the float layer
+			dst = fl.AppendItems(dst)
+		}
+		dst = f.appendContent(dst) // in-flow inline content + images (skip floats)
+		return dst
+	}
+	// Non-BFC fragment: paint self, then recurse (normal tree order). This is the
+	// per-subtree behavior the BFC phases invoke; it is unchanged from the original
+	// single-pass AppendItems except that a floated subtree is skipped (the BFC root
+	// paints it via Floats instead).
+	dst = f.appendSelfDecorations(dst)
+	dst = f.appendSelfContent(dst)
+	for _, c := range f.Children {
+		if c.IsFloat {
+			continue
+		}
+		dst = c.AppendItems(dst)
+	}
+	return dst
+}
+
+// appendDecorations recurses the in-flow subtree emitting only backgrounds and
+// borders, skipping floated subtrees (painted in the float layer) and NESTED BFC
+// subtrees (an inline-block / new-BFC box paints as a single atom in the content
+// phase via its own AppendItems — its internal block/float/inline layering is
+// self-contained, so it must not be flattened into this BFC's decoration layer).
+//
+// f itself may be a float here: a float establishes its own BFC, so its AppendItems
+// takes the IsBFC branch and calls this on the float as the decoration-phase root of
+// its OWN context — it must paint its own background/border. The float-skip therefore
+// applies to in-flow CHILDREN (a floated child is painted by the BFC's float layer,
+// not in this in-flow recursion), not to f itself.
+func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
+	dst = f.appendSelfDecorations(dst)
+	for _, c := range f.Children {
+		if c.IsFloat || c.IsBFC {
+			// A floated child paints in the BFC root's float layer; a nested BFC child
+			// paints whole in the content phase (atomic). Skip both here.
+			continue
+		}
+		dst = c.appendDecorations(dst)
+	}
+	return dst
+}
+
+// appendContent recurses the in-flow subtree emitting glyphs, images, and inline
+// atomics, skipping floated subtrees. A NESTED BFC child (inline-block / new BFC)
+// is painted here as a single atom via its full AppendItems — running its own
+// decoration → float → content phases as a self-contained unit (CSS paints an
+// atomic inline / BFC as one item in step 7), rather than being split across this
+// BFC's phases.
+//
+// As in appendDecorations, f itself may be a float (its own BFC's content-phase
+// root) and must paint its own inline content; only floated CHILDREN are skipped
+// (they paint in the BFC root's float layer).
+func (f *Fragment) appendContent(dst []layout.Item) []layout.Item {
+	dst = f.appendSelfContent(dst)
+	for _, c := range f.Children {
+		if c.IsFloat {
+			continue // painted in the BFC root's float layer, not as in-flow content
+		}
+		if c.IsBFC {
+			dst = c.AppendItems(dst) // atomic: its own full phase sequence
+			continue
+		}
+		dst = c.appendContent(dst)
+	}
+	return dst
+}
+
+// appendSelfDecorations emits this fragment's own background then border edges (no
+// recursion).
+func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	if f.Background.A > 0 {
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundKind,
 			Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Color: f.Background},
 		})
 	}
-
-	// 2. Border edges, in EdgeTop, EdgeRight, EdgeBottom, EdgeLeft order. Each edge is
-	// a full-length strip cut from the border box; the four strips overlap at the
-	// corners (mitering is out of scope, matching paint.paintBorder).
 	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
 		e := f.Border[s]
 		if e.Width <= 0 || e.Style == layout.BorderNone {
 			continue
 		}
-		dst = append(dst, layout.Item{
-			Kind:   layout.BorderKind,
-			Border: f.edgeStrip(s, e),
-		})
+		dst = append(dst, layout.Item{Kind: layout.BorderKind, Border: f.edgeStrip(s, e)})
 	}
+	return dst
+}
 
-	// 3. Inline line glyphs, in line then glyph order. A glyph with no outline
-	// (whitespace) contributes nothing.
+// appendSelfContent emits this fragment's own inline line glyphs then its replaced
+// image (no recursion).
+func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 	for li := range f.Lines {
 		ln := &f.Lines[li]
 		for gi := range ln.Glyphs {
@@ -109,21 +206,11 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 				continue
 			}
 			dst = append(dst, layout.Item{
-				Kind: layout.GlyphKind,
-				Glyph: layout.GlyphItem{
-					Outline: g.Outline,
-					XPt:     g.X,
-					YPt:     ln.BaselineY,
-					SizePt:  g.SizePt,
-					Color:   g.Color,
-				},
+				Kind:  layout.GlyphKind,
+				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY, SizePt: g.SizePt, Color: g.Color},
 			})
 		}
 	}
-
-	// 4. A replaced-element image draws into the content box, after this box's
-	// background/border and before its children. A nil decoded image (failed decode)
-	// reserves the box but paints nothing — a sized placeholder.
 	if f.Image != nil && f.Image.Img != nil {
 		dst = append(dst, layout.Item{
 			Kind: layout.ImageKind,
@@ -133,11 +220,6 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 				Fit: f.Image.Fit,
 			},
 		})
-	}
-
-	// 5. Children paint after this box (parent-before-child), in slice order.
-	for _, c := range f.Children {
-		dst = c.AppendItems(dst)
 	}
 	return dst
 }
