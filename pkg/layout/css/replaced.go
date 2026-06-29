@@ -42,7 +42,14 @@ func (e *Engine) replacedUsedSize(ctx context.Context, b *cssbox.Box, pctBasis f
 		e.logf("css layout: percentage height on replaced element has no basis; treating as auto")
 	}
 
-	iw, ih, haveIntrinsic := e.intrinsicSize(ctx, b)
+	var iw, ih float64
+	var haveIntrinsic bool
+	if b.Replaced != nil && b.Replaced.Control != cssbox.CtrlNone {
+		iw, ih = e.controlIntrinsicSize(ctx, b)
+		haveIntrinsic = true
+	} else {
+		iw, ih, haveIntrinsic = e.intrinsicSize(ctx, b)
+	}
 
 	switch {
 	case hasW && hasH:

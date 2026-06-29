@@ -212,6 +212,34 @@ func TestBuildControlBoxes(t *testing.T) {
 	}
 }
 
+func TestControlUsedSizeDefaultsAndOverride(t *testing.T) {
+	eng := New(nil, nil, nil)
+	ctx := context.Background()
+
+	// No CSS width → character-count default (well above zero).
+	def := ctrlBox(cssbox.CtrlText, map[string]string{"size": "10"})
+	w, h := eng.replacedUsedSize(ctx, def, 1000)
+	if w < ctrlMinTextW-1 || h <= 0 {
+		t.Errorf("default text size = (%.1f,%.1f), want char-count width and >0 height", w, h)
+	}
+
+	// Explicit CSS width:50px overrides the intrinsic default.
+	over := ctrlBox(cssbox.CtrlText, map[string]string{"size": "10"})
+	over.Style.Width = gcss.Length{Value: 50, Unit: gcss.UnitPx}
+	w2, _ := eng.replacedUsedSize(ctx, over, 1000)
+	if w2 != 50 {
+		t.Errorf("CSS-width override = %.1f, want 50", w2)
+	}
+
+	// Explicit width:0 is honored (deliberate), NOT floored.
+	zero := ctrlBox(cssbox.CtrlText, nil)
+	zero.Style.Width = gcss.Length{Value: 0, Unit: gcss.UnitPx}
+	w3, _ := eng.replacedUsedSize(ctx, zero, 1000)
+	if w3 != 0 {
+		t.Errorf("explicit width:0 = %.1f, want 0 (author override wins)", w3)
+	}
+}
+
 func TestControlIntrinsicSizeScalesWithChars(t *testing.T) {
 	eng := New(nil, nil, nil)
 	ctx := context.Background()
