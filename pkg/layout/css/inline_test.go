@@ -318,7 +318,7 @@ func TestInlineBlockAtomics(t *testing.T) {
 		},
 	}
 	e := New(nil, nil, nil)
-	res := e.layoutBlock(context.Background(), ifc, 1000, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: 1000})
+	res := e.layoutBlock(context.Background(), ifc, 1000, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: 1000}, &positionedContext{}, posCBOwner{isPage: true})
 	frag := res.frag
 
 	if len(frag.Children) != 2 {

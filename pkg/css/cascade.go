@@ -76,6 +76,22 @@ type ComputedStyle struct {
 	// Clear is the CSS clear value: "none" (default) | "left" | "right" | "both".
 	// Not inherited. The layout engine lowers a cleared box below matching floats.
 	Clear string
+
+	// Position is the CSS position value: "static" (default) | "relative" |
+	// "absolute" | "fixed". Not inherited. The box generator maps it to
+	// cssbox.PositionKind.
+	Position string
+	// Top/Right/Bottom/Left are the positioning offset properties (CSS 9.3.2),
+	// UnitAuto = "auto" (the initial value). Not inherited. Meaningful only on a
+	// positioned box (relative: paint offset; absolute/fixed: placement against
+	// the containing block).
+	Top, Right, Bottom, Left Length
+	// ZIndex is the stack level of a positioned box; ZIndexAuto models the "auto"
+	// initial value (ZIndex is read only when ZIndexAuto is false). Not inherited.
+	// Parsed now; the minimal stacking pass does not yet sort on it (positioned
+	// boxes paint in document order) — full z-index ordering is a later slice.
+	ZIndex     int
+	ZIndexAuto bool
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -256,9 +272,15 @@ func initialStyle() ComputedStyle {
 		MinHeight:   Length{Unit: UnitPx},   // CSS initial min-height is 0
 		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
 		BoxSizing:   "content-box",
-		ObjectFit:   "fill", // CSS initial object-fit
-		Float:       "none", // CSS initial float
-		Clear:       "none", // CSS initial clear
+		ObjectFit:   "fill",   // CSS initial object-fit
+		Float:       "none",   // CSS initial float
+		Clear:       "none",   // CSS initial clear
+		Position:    "static", // CSS initial position
+		Top:         Length{Unit: UnitAuto},
+		Right:       Length{Unit: UnitAuto},
+		Bottom:      Length{Unit: UnitAuto},
+		Left:        Length{Unit: UnitAuto},
+		ZIndexAuto:  true, // CSS initial z-index is auto
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
@@ -359,6 +381,21 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "left", "right", "both", "none":
 			cs.Clear = d.Value
 		}
+	case "position":
+		switch d.Value {
+		case "static", "relative", "absolute", "fixed":
+			cs.Position = d.Value
+		}
+	case "top":
+		setLength(&cs.Top, d.Value)
+	case "right":
+		setLength(&cs.Right, d.Value)
+	case "bottom":
+		setLength(&cs.Bottom, d.Value)
+	case "left":
+		setLength(&cs.Left, d.Value)
+	case "z-index":
+		applyZIndex(cs, d.Value)
 	case "border-top-width":
 		setLength(&cs.BorderTopWidth, d.Value)
 	case "border-right-width":
@@ -437,6 +474,51 @@ func setMaxLength(dst *Length, val string) {
 		return
 	}
 	setLength(dst, val)
+}
+
+// applyZIndex parses a z-index value: "auto" sets ZIndexAuto; an integer sets
+// ZIndex (ZIndexAuto=false). A non-integer value is dropped, leaving the prior
+// value. (Parsed now for the cascade; the minimal stacking pass does not yet sort
+// on it.)
+func applyZIndex(cs *ComputedStyle, val string) {
+	if val == "auto" {
+		cs.ZIndexAuto = true
+		return
+	}
+	n, ok := parseInt(val)
+	if !ok {
+		return
+	}
+	cs.ZIndex, cs.ZIndexAuto = n, false
+}
+
+// parseInt parses an optionally-signed base-10 integer, returning ok=false for any
+// non-integer (including empty, a float, or trailing junk). Used for z-index.
+func parseInt(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	neg := false
+	i := 0
+	if s[0] == '+' || s[0] == '-' {
+		neg = s[0] == '-'
+		i = 1
+		if i == len(s) {
+			return 0, false
+		}
+	}
+	n := 0
+	for ; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	if neg {
+		n = -n
+	}
+	return n, true
 }
 
 // firstFamily returns the first family name from a font-family list, stripping

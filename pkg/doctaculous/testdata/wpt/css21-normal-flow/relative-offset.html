@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!-- TEST: a relatively-positioned box offset by top:15px/left:15px (CSS 2.1 9.4.3).
+     position:relative shifts only the PAINTED position; the box still reserves its
+     un-offset in-flow space (top-left of the container). To keep the page bounds
+     equal to the reference (whose static box is pushed down by margins), the box
+     lives inside a fixed-height container that determines the page height in BOTH
+     pages, so the reserved-space difference does not change the compared bounds. The
+     frame's 1px padding (no background, so invisible) blocks parent/first-child
+     margin collapse-through in the reference, keeping both pages identical. The box
+     is the only painted content; it lands at (16,16) inside the page. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  .frame { width: 120px; height: 90px; padding: 1px; }
+  .box { position: relative; top: 15px; left: 15px; width: 50px; height: 50px; background: #3366cc; }
+</style>
+</head>
+<body>
+  <div class="frame"><div class="box"></div></div>
+</body>
+</html>

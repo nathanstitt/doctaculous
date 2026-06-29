@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!-- TEST: an absolutely-positioned child placed at top:30px/left:40px inside a
+     relatively-positioned containing block (CSS 2.1 sections 9.6/10.3.7). The abs
+     containing block is the relative ancestor's CONTENT box, and the abs offsets are
+     measured from it: the child's margin edge lands at content-origin + (40,30). The
+     container has an explicit height so the page bounds match the reference (the abs
+     child is out of flow and contributes no height). The container's 1px padding (no
+     background on the padding band — it is part of the grey content box only via the
+     content fill; here it just blocks parent/first-child margin collapse-through in
+     the reference and offsets BOTH pages' content origin by the same (1,1), so the
+     equivalence holds). -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  .cb { position: relative; width: 200px; height: 120px; padding: 1px; background: #cccccc; }
+  .p { position: absolute; top: 30px; left: 40px; width: 50px; height: 50px; background: #cc3333; }
+</style>
+</head>
+<body>
+  <div class="cb"><div class="p"></div></div>
+</body>
+</html>

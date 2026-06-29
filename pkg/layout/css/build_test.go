@@ -50,6 +50,34 @@ func firstByKind(b *cssbox.Box, k cssbox.BoxKind) *cssbox.Box {
 	return nil
 }
 
+// firstElementBox descends depth-first to the styled test element's box: the
+// first element-level box (block/inline/replaced — not an anonymous wrapper or
+// text run) carrying an explicit pixel Width. The positioning wiring tests below
+// all mark their subject element with `width:10px`, which the document's html/body
+// wrappers (width:auto) never carry, so this unambiguously returns that box.
+func firstElementBox(t *testing.T, b *cssbox.Box) *cssbox.Box {
+	t.Helper()
+	got := findElementBox(b)
+	if got == nil {
+		t.Fatal("no styled element box (width:10px) found")
+	}
+	return got
+}
+
+func findElementBox(b *cssbox.Box) *cssbox.Box {
+	if b.Kind != cssbox.BoxAnonBlock && b.Kind != cssbox.BoxAnonInline && b.Kind != cssbox.BoxText {
+		if b.Style.Width.Unit == gcss.UnitPx && b.Style.Width.Value == 10 {
+			return b
+		}
+	}
+	for _, c := range b.Children {
+		if got := findElementBox(c); got != nil {
+			return got
+		}
+	}
+	return nil
+}
+
 // parentOfText returns the box whose direct child is a text run equal to text.
 func parentOfText(b *cssbox.Box, text string) *cssbox.Box {
 	for _, c := range b.Children {
@@ -184,8 +212,8 @@ func TestBlockifyFloatedInline(t *testing.T) {
 	cs := gcss.ComputedStyle{Display: "inline", Float: "left"}
 	b := &cssbox.Box{Style: cs}
 	classifyDisplay(b, cs.Display)
-	// Pre-blockify it is inline; applyFloatBlockify promotes it.
-	applyFloatBlockify(b, cs)
+	// Pre-blockify it is inline; applyBlockify promotes it.
+	applyBlockify(b, cs)
 	if !b.Kind.IsBlockLevel() {
 		t.Errorf("floated inline: Kind=%v not block-level", b.Kind)
 	}
@@ -199,7 +227,7 @@ func TestNoBlockifyWithoutFloat(t *testing.T) {
 	cs := gcss.ComputedStyle{Display: "inline", Float: "none"}
 	b := &cssbox.Box{Style: cs}
 	classifyDisplay(b, cs.Display)
-	applyFloatBlockify(b, cs)
+	applyBlockify(b, cs)
 	if b.Kind != cssbox.BoxInline {
 		t.Errorf("non-floated inline: Kind=%v, want BoxInline", b.Kind)
 	}
@@ -207,13 +235,13 @@ func TestNoBlockifyWithoutFloat(t *testing.T) {
 
 // TestNoBlockifyFloatedInlineBlock: a floated display:inline-block element already
 // has a block-level Kind (classifyDisplay maps inline-block to BoxBlock), so
-// applyFloatBlockify leaves it unchanged — it does NOT reset DisplayInlineBlock to
+// applyBlockify leaves it unchanged — it does NOT reset DisplayInlineBlock to
 // DisplayBlock.
 func TestNoBlockifyFloatedInlineBlock(t *testing.T) {
 	cs := gcss.ComputedStyle{Display: "inline-block", Float: "left"}
 	b := &cssbox.Box{Style: cs}
 	classifyDisplay(b, cs.Display)
-	applyFloatBlockify(b, cs)
+	applyBlockify(b, cs)
 	if b.Kind != cssbox.BoxBlock {
 		t.Errorf("floated inline-block: Kind=%v, want BoxBlock (unchanged)", b.Kind)
 	}
@@ -232,8 +260,57 @@ func TestBlockifyFloatedInlinePreservesFormatting(t *testing.T) {
 	if b.Formatting != cssbox.InlineFC {
 		t.Fatalf("precondition: classifyDisplay should set InlineFC for inline, got %v", b.Formatting)
 	}
-	applyFloatBlockify(b, cs)
+	applyBlockify(b, cs)
 	if b.Formatting != cssbox.InlineFC {
 		t.Errorf("floated inline: Formatting=%v, want InlineFC preserved", b.Formatting)
+	}
+}
+
+// TestPositionOf: positionOf maps each keyword.
+func TestPositionOf(t *testing.T) {
+	cases := map[string]cssbox.PositionKind{
+		"static": cssbox.PosStatic, "relative": cssbox.PosRelative,
+		"absolute": cssbox.PosAbsolute, "fixed": cssbox.PosFixed, "": cssbox.PosStatic,
+	}
+	for kw, want := range cases {
+		cs := gcss.ComputedStyle{Position: kw}
+		if got := positionOf(cs); got != want {
+			t.Errorf("positionOf(%q) = %v, want %v", kw, got, want)
+		}
+	}
+}
+
+// TestAbsPositionForcesFloatNone: an absolutely/fixed-positioned element computes
+// float to none (CSS 9.7), so it is NOT placed as a float.
+func TestAbsPositionForcesFloatNone(t *testing.T) {
+	root := build(t, `<div style="position:absolute; float:left; width:10px; height:10px"></div>`, nil)
+	abs := firstElementBox(t, root) // helper: descend to the styled div's box
+	if abs.Position != cssbox.PosAbsolute {
+		t.Fatalf("position = %v, want PosAbsolute", abs.Position)
+	}
+	if abs.Float != cssbox.FloatNone {
+		t.Errorf("abs-pos box Float = %v, want FloatNone (CSS 9.7)", abs.Float)
+	}
+}
+
+// TestRelativeFloatKeepsBoth: a relative+float box stays a float AND positioned.
+func TestRelativeFloatKeepsBoth(t *testing.T) {
+	root := build(t, `<div style="position:relative; float:left; width:10px; height:10px"></div>`, nil)
+	b := firstElementBox(t, root)
+	if b.Float != cssbox.FloatLeft {
+		t.Errorf("Float = %v, want FloatLeft (relative does not override float)", b.Float)
+	}
+	if b.Position != cssbox.PosRelative {
+		t.Errorf("Position = %v, want PosRelative", b.Position)
+	}
+}
+
+// TestAbsInlineBlockifies: an inline element that is absolutely positioned
+// blockifies (CSS 9.7), like a float.
+func TestAbsInlineBlockifies(t *testing.T) {
+	root := build(t, `<span style="position:absolute; width:10px; height:10px"></span>`, nil)
+	b := firstElementBox(t, root)
+	if !b.Kind.IsBlockLevel() {
+		t.Errorf("abs-pos inline did not blockify: Kind=%v", b.Kind)
 	}
 }

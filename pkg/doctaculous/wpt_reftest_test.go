@@ -52,6 +52,8 @@ var wptReftests = []struct {
 	{"padding-shorthand", 320, "the 2-value padding shorthand equals the 4-value form", nil},
 	{"img-vs-div", 200, "a solid <img> sized W×H equals a <div> of the same size and background", solidSwatchLoader()},
 	{"float-left", 200, "a left float paints at the container's top-left, independent of the following in-flow block", nil},
+	{"abs-pos", 240, "an absolute box at top/left inside a relative container == a static box at the same coords", nil},
+	{"relative-offset", 240, "a relative offset == the same box placed at the shifted position with margins", nil},
 	// NOTE: the planned "float-row" reftest (float version vs an inline-block version,
 	// two-on-a-row-then-wrap) is intentionally dropped. The float test page's body
 	// holds ONLY floats, which (per CSS 2.1) do not extend a non-BFC parent's height,
