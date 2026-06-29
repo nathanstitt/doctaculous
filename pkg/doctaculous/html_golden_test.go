@@ -235,6 +235,26 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// Negative z-index behind the HOST's own background (CSS 2.1 Appendix E: a box
+		// paints its own background first, then its negative-z descendants). The teal host
+		// has a background; its z-index:-1 red child is offset down-right so half of it
+		// sits OVER the host background region and half spills below. Eyeball: the red
+		// child shows through everywhere it is NOT covered by a later-painted box — i.e.
+		// the host's own teal background does NOT hide it (the host bg paints behind it),
+		// but the in-flow yellow block (painted after negatives) DOES cover the part of
+		// red beneath the yellow. Pre-fix, the teal host background painted over the red.
+		name:       "zindex-neg-behind-own-bg",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .host { position: relative; width: 120px; height: 120px; background: #2aa0a0; }
+  .neg { position: relative; z-index: -1; top: 60px; left: 60px; width: 100px; height: 100px; background: #cc2222; }
+  .flow { width: 60px; height: 60px; background: #d0d000; }
+</style></head><body>
+  <div class="host"><div class="neg"></div><div class="flow"></div></div>
+</body></html>`,
+	},
+	{
 		// Positive z-index ordering: three overlapping absolutely-positioned boxes with
 		// z-index 1/2/3; the higher z paints on top. Blue(3) over green(2) over red(1).
 		name:       "zindex-stack",

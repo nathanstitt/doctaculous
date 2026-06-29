@@ -3,6 +3,8 @@ package css
 import (
 	"context"
 	"image/color"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/html"
@@ -187,24 +189,13 @@ func TestPaginateOverTallBlock(t *testing.T) {
 	}
 	found := false
 	for _, l := range logs {
-		if containsTallerThanPage(l) {
+		if strings.Contains(l, "taller than page") {
 			found = true
 		}
 	}
 	if !found {
 		t.Errorf("expected a 'taller than page' log, got %v", logs)
 	}
-}
-
-func containsTallerThanPage(s string) bool {
-	// the message contains the substring "taller than page"
-	needle := "taller than page"
-	for i := 0; i+len(needle) <= len(s); i++ {
-		if s[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }
 
 // countBackgrounds returns how many BackgroundKind items on the page have color c.
@@ -277,6 +268,360 @@ func TestPaginateRelativeBlockPaginatesNormally(t *testing.T) {
 	}
 	if got := countBackgrounds(pages.Pages[1], relColor); got != 1 {
 		t.Errorf("page 1 must paint the relative block once, got %d", got)
+	}
+}
+
+// backgroundsY returns the YPt of every BackgroundKind item with color c on the page.
+func backgroundsY(p layout.Page, c color.RGBA) []float64 {
+	var ys []float64
+	for i := range p.Items {
+		if p.Items[i].Kind == layout.BackgroundKind && p.Items[i].Rule.Color == c {
+			ys = append(ys, p.Items[i].Rule.YPt)
+		}
+	}
+	return ys
+}
+
+// countBorders returns how many BorderKind items on the page have color c.
+func countBorders(p layout.Page, c color.RGBA) int {
+	n := 0
+	for i := range p.Items {
+		if p.Items[i].Kind == layout.BorderKind && p.Items[i].Border.Color == c {
+			n++
+		}
+	}
+	return n
+}
+
+// borderEdgeOnPage reports whether the page has a BorderKind item of the given Side and
+// color whose strip intersects the visible page band [0, pageH).
+func borderEdgeOnPage(p layout.Page, side layout.EdgeSide, c color.RGBA, pageH float64) bool {
+	for i := range p.Items {
+		if p.Items[i].Kind != layout.BorderKind {
+			continue
+		}
+		b := p.Items[i].Border
+		if b.Side != side || b.Color != c {
+			continue
+		}
+		// Visible if the strip's Y-extent overlaps [0, pageH).
+		if b.YPt < pageH && b.YPt+b.HPt > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// minBorderY returns the smallest YPt among BorderKind items of color c (math.Inf if none).
+func minBorderY(p layout.Page, c color.RGBA) float64 {
+	min := math.Inf(1)
+	for i := range p.Items {
+		if p.Items[i].Kind == layout.BorderKind && p.Items[i].Border.Color == c {
+			if p.Items[i].Border.YPt < min {
+				min = p.Items[i].Border.YPt
+			}
+		}
+	}
+	return min
+}
+
+// TestPaginateAbsChildOfRelativeBlockLandsAtCorrectY is the C1 regression test: an
+// absolutely-positioned descendant of a top-level position:relative block must follow
+// that block to its real page AND land at the correct local Y (the relative block is
+// shifted to local Y 0, so an abs child at top:5px paints at ~5pt). The bug was that
+// shiftFragment did not recurse Positioned, leaving the abs child at its page-space Y
+// (~205pt). Mutation-verify: revert shiftFragmentExtras' Positioned recursion and this
+// FAILS (the abs background lands at ~205, not ~5). The existing relative-block test
+// omits a nested abs child, so it never exercised this path.
+func TestPaginateAbsChildOfRelativeBlockLandsAtCorrectY(t *testing.T) {
+	const w = 400
+	absColor := color.RGBA{7, 7, 7, 255}
+	src := `<html><body style="margin:0">` +
+		`<div style="height:200px;margin:0">filler</div>` +
+		`<div style="height:100px;margin:0;position:relative">` +
+		`<div style="position:absolute;top:5px;left:5px;width:20px;height:20px;background-color:rgb(7,7,7)"></div>` +
+		`</div></body></html>`
+
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, 250)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Fatalf("expected 2 pages (filler fills page 0, relative block on page 1), got %d", len(pages.Pages))
+	}
+	// The abs child rides its relative block onto page 1 and must NOT appear on page 0.
+	if ys := backgroundsY(pages.Pages[0], absColor); len(ys) != 0 {
+		t.Errorf("page 0 must not paint the abs child, got Ys %v", ys)
+	}
+	ys := backgroundsY(pages.Pages[1], absColor)
+	if len(ys) != 1 {
+		t.Fatalf("page 1 must paint the abs child exactly once, got Ys %v", ys)
+	}
+	// top:5px relative to the relative block, which is at local Y 0 on page 1 => ~5pt.
+	if ys[0] < 0 || ys[0] > 20 {
+		t.Errorf("abs child painted at Y=%.1f on page 1, want ~5pt (top of page); the C1 bug put it at ~205pt", ys[0])
+	}
+}
+
+// TestCollapsedTableGridLinesHugCellsBelowContent pins a PRE-EXISTING (non-pagination)
+// bug uncovered while fixing C2: a border-collapse:collapse table placed below other
+// content emitted its grid lines (Collapsed strips) at table-LOCAL coordinates (~Y 0),
+// detached from its cells (~Y 50) — because shiftFragment moved the table fragment and
+// its cells but NOT the Collapsed strips. The existing html-table-collapse golden masked
+// it (its table is flush at the top, where the shift is ~0). Mutation-verify: revert the
+// Collapsed loop in shiftFragmentExtras and the strips' minimum Y stays ~0 while the
+// cells are at ~50, so this FAILS.
+func TestCollapsedTableGridLinesHugCellsBelowContent(t *testing.T) {
+	const w = 300
+	borderColor := color.RGBA{0xc0, 0, 0, 255}
+	src := `<html><head><style>td{border:3px solid rgb(192,0,0);padding:6px}` +
+		`table{border-collapse:collapse}</style></head><body style="margin:0">` +
+		`<div style="height:50px;margin:0">filler</div>` +
+		`<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table></body></html>`
+
+	root := buildRoot(t, src, nil)
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, w)
+	if frag == nil {
+		t.Fatal("layoutTree returned nil")
+	}
+	page := frag.Page(w, frag.Y+frag.H)
+	if n := countBorders(page, borderColor); n == 0 {
+		t.Fatalf("expected collapsed grid lines, got 0")
+	}
+	// The filler is 50pt tall, so the table (and thus its grid lines) starts at Y >= 50.
+	// The bug left the strips at table-local Y (~0), well above the cells.
+	minY := minBorderY(page, borderColor)
+	if minY < 45 {
+		t.Errorf("collapsed grid lines start at Y=%.1f, want >= ~50 (below the 50pt filler); the bug left them at ~0pt detached from the cells", minY)
+	}
+}
+
+// TestClipRectFollowsBoxBelowContent pins a second PRE-EXISTING (non-pagination) bug
+// uncovered while fixing C2: an overflow:hidden box placed below other content clipped
+// its content to a rect at the wrong Y (the box's build-frame origin ~0, not its final
+// position ~50) — because shiftFragment moved the box fragment but NOT its ClipRect. The
+// existing html-overflow-hidden golden masked it (its box is flush at the top). Mutation-
+// verify: revert the ClipRect lines in shiftFragmentExtras and the emitted ClipPush rect
+// stays at Y~0 while the box is at Y~50, so this FAILS.
+func TestClipRectFollowsBoxBelowContent(t *testing.T) {
+	const w = 240
+	src := `<html><body style="margin:0">` +
+		`<div style="height:50px;margin:0">filler</div>` +
+		`<div style="height:40px;overflow:hidden;margin:0">` +
+		`<div style="height:200px;margin:0">tall</div>` +
+		`</div></body></html>`
+
+	root := buildRoot(t, src, nil)
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, w)
+	if frag == nil {
+		t.Fatal("layoutTree returned nil")
+	}
+	page := frag.Page(w, frag.Y+frag.H)
+	var clipY float64 = -1
+	for i := range page.Items {
+		if page.Items[i].Kind == layout.ClipPushKind {
+			clipY = page.Items[i].Rule.YPt
+			break
+		}
+	}
+	if clipY < 0 {
+		t.Fatal("expected a ClipPush item for the overflow:hidden box")
+	}
+	// The overflow box sits below the 50pt filler, so its clip rect must be at Y ~50.
+	if clipY < 45 {
+		t.Errorf("ClipPush rect at Y=%.1f, want ~50 (below the 50pt filler); the bug left it at ~0pt", clipY)
+	}
+}
+
+// TestPaginateRelativeOverflowAbsClipFollowsToPage is a C2 regression combining a
+// position:relative + overflow:hidden top-level block (paginated to a later page) that
+// itself contains an absolutely-positioned descendant. The relative+overflow box's clip
+// rect and its abs child must both follow to the page the block lands on, at local
+// coordinates. The bug class: shiftFragment shifted neither ClipRect nor Positioned.
+func TestPaginateRelativeOverflowAbsClipFollowsToPage(t *testing.T) {
+	const w = 400
+	absColor := color.RGBA{9, 9, 9, 255}
+	src := `<html><body style="margin:0">` +
+		`<div style="height:200px;margin:0">filler</div>` +
+		`<div style="height:100px;margin:0;position:relative;overflow:hidden">` +
+		`<div style="position:absolute;top:8px;left:8px;width:20px;height:20px;background-color:rgb(9,9,9)"></div>` +
+		`</div></body></html>`
+
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, 250)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Fatalf("expected 2 pages, got %d", len(pages.Pages))
+	}
+	// The abs child is a CB-owned descendant of the overflow box; it must paint on page 1
+	// inside the clip, near the top (top:8px against the block at local Y 0).
+	ys := backgroundsY(pages.Pages[1], absColor)
+	if len(ys) != 1 {
+		t.Fatalf("page 1 must paint the abs child once, got Ys %v", ys)
+	}
+	if ys[0] < 0 || ys[0] > 20 {
+		t.Errorf("abs child painted at Y=%.1f on page 1, want ~8pt; the bug put it at ~208pt", ys[0])
+	}
+}
+
+// TestPaginateNestedForcedBreakWarns pins C3: a forced break-before on a NESTED
+// (non-top-level) block is not honored (the bounded slice breaks between top-level
+// blocks only), but it must not be SILENT — a one-time warning fires. The document
+// stays a single page (the nested break is dropped, not propagated to the ancestor).
+func TestPaginateNestedForcedBreakWarns(t *testing.T) {
+	const w = 400
+	var logs []string
+	logf := func(format string, args ...any) { logs = append(logs, format) }
+
+	// A nested div with break-before:page inside a top-level wrapper; a page tall enough
+	// that only a forced break could split it.
+	src := `<html><body style="margin:0">` +
+		`<div style="margin:0"><div style="height:20px;margin:0;break-before:page">x</div></div>` +
+		`</body></html>`
+
+	root := buildRoot(t, src, logf)
+	pages, err := New(nil, nil, logf).LayoutPaged(context.Background(), root, w, 1000)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 1 {
+		t.Errorf("nested forced break must NOT split (bounded scope): got %d pages, want 1", len(pages.Pages))
+	}
+	found := false
+	for _, l := range logs {
+		if strings.Contains(l, "nested") && strings.Contains(l, "not honored") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a one-time nested-forced-break warning, got logs %v", logs)
+	}
+}
+
+// TestPaginateTopLevelForcedBreakDoesNotWarn guards the C3 warning against false
+// positives: a forced break on a TOP-LEVEL block is honored (splits) and must NOT log
+// the nested-break warning.
+func TestPaginateTopLevelForcedBreakDoesNotWarn(t *testing.T) {
+	const w = 400
+	var logs []string
+	logf := func(format string, args ...any) { logs = append(logs, format) }
+
+	src := `<html><body style="margin:0">` +
+		`<div style="height:20px;margin:0">a</div>` +
+		`<div style="height:20px;margin:0;break-before:page">b</div>` +
+		`</body></html>`
+
+	root := buildRoot(t, src, logf)
+	pages, err := New(nil, nil, logf).LayoutPaged(context.Background(), root, w, 1000)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Errorf("top-level forced break must split: got %d pages, want 2", len(pages.Pages))
+	}
+	for _, l := range logs {
+		if strings.Contains(l, "nested") {
+			t.Errorf("a top-level forced break must not emit the nested-break warning, got %q", l)
+		}
+	}
+}
+
+// TestPaginateNestedRelativeBlockFollowsToPage pins F-B (adversarial-review finding): a
+// position:relative block NESTED under a static wrapper, whose in-flow position lands on
+// a later page, must paint on THAT page — not vanish. The bug was that splitPositionedByPage
+// only routed top-level bucket blocks, so a nested relative entry (bubbled to root.Positioned
+// but shifted to a later page's local Y via its ancestor's subtree) painted on page 0 at an
+// off-page Y and disappeared. Mutation-verify: revert splitPositionedByPage to map only the
+// top-level blocks (drop the subtree mark) and the block paints on neither page.
+func TestPaginateNestedRelativeBlockFollowsToPage(t *testing.T) {
+	const w = 400
+	relColor := color.RGBA{180, 40, 40, 255}
+	// A tall filler fills page 0; a static wrapper holds a nested relative block that lands
+	// on page 1.
+	src := `<html><body style="margin:0">` +
+		`<div style="height:300px;margin:0">filler</div>` +
+		`<div style="margin:0"><div style="height:60px;margin:0;position:relative;background-color:rgb(180,40,40)">nested-rel</div></div>` +
+		`</body></html>`
+
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, 250)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Fatalf("expected 2 pages (filler page 0, nested-rel on page 1), got %d", len(pages.Pages))
+	}
+	if got := countBackgrounds(pages.Pages[0], relColor); got != 0 {
+		t.Errorf("page 0 must NOT ghost the nested relative block, got %d", got)
+	}
+	ys := backgroundsY(pages.Pages[1], relColor)
+	if len(ys) != 1 {
+		t.Fatalf("page 1 must paint the nested relative block exactly once (it must not vanish), got Ys %v", ys)
+	}
+	// On page 1 the block sits at its local Y (filler is 300, page 0 is 250 tall, so the
+	// wrapper+block start at page-space ~300 → local ~50 on page 1). Must be on-page (< 250).
+	if ys[0] < 0 || ys[0] >= 250 {
+		t.Errorf("nested relative block painted at Y=%.1f on page 1, want an on-page Y in [0,250)", ys[0])
+	}
+}
+
+// TestPaginateBodyBorderFragments pins C4: the html/body border must FRAGMENT across
+// pages — the TOP edge only on page 0, the BOTTOM edge only on the last page, and the
+// LEFT/RIGHT side edges on every page (clipped to the band). The bug was that the
+// per-page wrapper clone kept full-document geometry, so the body border painted
+// identically on every page (a spurious top edge at Y 0 on pages ≥1, full-height sides).
+// Mutation-verify: remove the shiftFragmentSelf(&pageBody,...) call and the top edge
+// reappears on pages ≥1, so this FAILS.
+func TestPaginateBodyBorderFragments(t *testing.T) {
+	const w = 400
+	const pageH = 250
+	blue := color.RGBA{0, 0, 255, 255}
+	// A body with a 10px blue border and three 200pt blocks => 3 pages.
+	src := `<html><body style="border:10px solid rgb(0,0,255);margin:0">` +
+		`<div style="height:200px;margin:0">a</div>` +
+		`<div style="height:200px;margin:0">b</div>` +
+		`<div style="height:200px;margin:0">c</div>` +
+		`</body></html>`
+
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, pageH)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 3 {
+		t.Fatalf("expected 3 pages, got %d", len(pages.Pages))
+	}
+	last := len(pages.Pages) - 1
+
+	// Top edge: ON page 0, OFF every later page.
+	if !borderEdgeOnPage(pages.Pages[0], layout.EdgeTop, blue, pageH) {
+		t.Errorf("page 0 must paint the body TOP border")
+	}
+	for i := 1; i < len(pages.Pages); i++ {
+		if borderEdgeOnPage(pages.Pages[i], layout.EdgeTop, blue, pageH) {
+			t.Errorf("page %d must NOT paint the body top border (it belongs on page 0 only)", i)
+		}
+	}
+	// Bottom edge: OFF every page but the last, ON the last.
+	for i := 0; i < last; i++ {
+		if borderEdgeOnPage(pages.Pages[i], layout.EdgeBottom, blue, pageH) {
+			t.Errorf("page %d must NOT paint the body bottom border (it belongs on the last page)", i)
+		}
+	}
+	if !borderEdgeOnPage(pages.Pages[last], layout.EdgeBottom, blue, pageH) {
+		t.Errorf("last page must paint the body BOTTOM border")
+	}
+	// Side edges: ON every page.
+	for i := range pages.Pages {
+		if !borderEdgeOnPage(pages.Pages[i], layout.EdgeLeft, blue, pageH) {
+			t.Errorf("page %d must paint the body LEFT border (sides span every page)", i)
+		}
+		if !borderEdgeOnPage(pages.Pages[i], layout.EdgeRight, blue, pageH) {
+			t.Errorf("page %d must paint the body RIGHT border (sides span every page)", i)
+		}
 	}
 }
 

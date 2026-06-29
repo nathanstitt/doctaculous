@@ -361,6 +361,48 @@ over-tall block is visibly cut at the page bottom, exactly the graceful degradat
 infinite page). A test asserts the over-tall case yields the expected page count (it does **not** spill into a
 second page) and a non-blank page.
 
+### Fidelity-pass update (post-ship correctness + honesty pass)
+
+A dedicated audit after this slice shipped found the table above **understated** a few behaviors; the follow-up
+PR fixed them, so the rows now read as:
+
+- **Positioned descendants.** The slice claimed an abs descendant of a relative block "rides the first page at
+  its original page-space Y." It actually **followed the relative block to its real page** (good) but at the
+  **un-shifted Y** (bug — `shiftFragment` recursed `Children`/`Floats` but not the fragment's `Positioned`,
+  `ClipRect`, `Collapsed`, or `PositionedInfo.ClipChain`). **Fixed:** `shiftFragment`/`translateFragment` now
+  move every page-space field a fragment owns (recursing `Positioned`, but **skipping `position:relative`
+  entries** — they are aliased with `Children` and already moved there, so recursing them would double-shift).
+  This also fixed **two pre-existing base-engine bugs** the slice's goldens masked (they place such boxes flush
+  at the top, where the shift is ~0): a `border-collapse` table and an `overflow:hidden` box placed **below
+  other content** painted their grid lines / clip rect at the un-shifted (build-frame) Y, detached from the box.
+- **Nested `position:relative` block.** Only a **top-level** relative block paginated; a relative block
+  **nested under a static wrapper** routed to page 0 but was shifted to a later page's local Y → it painted
+  off-page and **vanished**. **Fixed:** `splitPositionedByPage` routes a positioned entry to the page of its
+  nearest **top-level ancestor block** (walking each bucket block's `Children` subtree), so a nested relative
+  block follows its ancestor's page.
+- **html/body border.** The slice said only that the "background/border still paints per page (a documented
+  approximation)" — it did not disclose that the **border** painted at **full-document geometry on every page**
+  (a spurious top edge at Y 0 and full-height side edges on pages ≥1). **Fixed:** the per-page wrapper clone is
+  shifted into the page's local frame (`shiftFragmentSelf`, which moves the wrapper's own box but **not** its
+  children — they shift separately), so the page bitmap fragments the border: top edge on page 0, bottom on the
+  last page, sides on every page. The first page's top is pulled up to the wrapper's border-box top
+  (`wrapperDecorationTop`) so a `<body>` top border shows on page 0 with content below it.
+- **Forced break on a nested block.** Silently dropped before; now **warned once** (`warnNestedForcedBreaks`)
+  — still a deferral (a browser would propagate the break to the ancestor), but no longer silent.
+- **Margin-top at an unforced break.** `bucketBlocks` sets the page top to the first block's border-box top,
+  collapsing any leading margin-top to 0. Correct at a **forced** break (CSS truncates margins there); at an
+  **unforced/overflow** break CSS retains the leading margin — a documented simplification.
+- **"Logged once"** (over-tall block) was imprecise: the degradation logs **once per over-tall block**, not
+  once total.
+
+Also corrected outside pagination by the same pass (uncovered while auditing the shift/flatten code): a
+negative-z positioned descendant painted **behind its stacking context's own background** in the non-clipping
+`AppendItems` branch (Appendix-E step order), and `translateItems` did not move a `ClipPushKind`, so a
+`position:relative` box's paint offset moved its content but not its overflow clip. Both fixed. And, unrelated
+to layout, the **PDF render path gained the page-boundary `recover`** CLAUDE.md always promised (it had none;
+two crafted-PDF panic sites — a malformed single-element image `/ColorSpace` array and a self-referential
+Type 3 function — are also guarded directly).
+
 ## Testing (CLAUDE.md "Testing" — new fixtures + tests in this PR)
 
 Match the proof to the change: pagination changes **page structure**, so the strongest tests assert **which

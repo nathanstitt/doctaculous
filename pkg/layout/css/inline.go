@@ -429,4 +429,9 @@ func translateFragment(f *Fragment, dx, dy float64) {
 	for _, fl := range f.Floats {
 		translateFragment(fl, dx, dy)
 	}
+	// Move the page-space fields the fragment owns (clip rect, collapsed grid strips,
+	// positioned clip chains, and out-of-flow positioned descendants) by the same delta,
+	// AFTER the Children/Floats recursion so an abs/fixed Positioned entry — present only
+	// here, never in Children — moves exactly once. See shiftFragmentExtras.
+	shiftFragmentExtras(f, dx, dy)
 }

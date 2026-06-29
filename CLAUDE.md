@@ -147,7 +147,10 @@ what is done vs. pending.
   (`pkg/render/raster/image.go`, `page.go`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
-  kill a batch.
+  kill a batch (the PDF render path recovers in `raster.RenderPage`, returning the partially-painted page
+  on a panic; the reflow engines recover in `css.Engine`/`layout`). Crafted-PDF panic sites are also
+  guarded directly (a malformed single-element image `/ColorSpace` array, a self-referential Type 3
+  function) so they degrade rather than relying on the recover alone.
 - **Reflowable documents — DOCX** (covered by `testdata/gen/docx` fixtures + `pkg/doctaculous`
   `docx-*` golden images): open a `.docx` via `OpenDOCX`/`OpenDOCXBytes` and rasterize its pages
   through the shared reflow engine. Parsing (`pkg/docx`): ZIP/OPC container, relationship + main-part
@@ -325,8 +328,15 @@ what is done vs. pending.
   *absolute/fixed* intervening-clip case was found to be **not a gap** — CSS 2.1 §11.1.1 does not clip an
   abs/fixed descendant whose CB is an ancestor of the overflow box, so 5c's "escape" was already correct (no
   clip-ancestor threading was needed). Covered by `clipescape_layout_test.go`, the `html-clip-relative-escape`
-  golden, and the `positioned-clip-relative` WPT reftest. See
-  `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
+  golden, and the `positioned-clip-relative` WPT reftest. The pagination **fidelity pass** corrected two
+  Appendix-E defects here: (1) in the **non-clipping** `AppendItems` branch the context's own
+  background/border was emitted AFTER its negative-z descendants, so a `z-index:-1` positioned child was hidden
+  behind a host that has its own background — now own decorations paint first, then negatives (matching the
+  clipping branch), covered by `TestZNegativeBehindHostOwnBackground` + the `html-zindex-neg-behind-own-bg`
+  golden; and (2) `translateItems` (which applies a `position:relative` box's paint-time offset over its
+  flattened item range) did not translate `ClipPushKind`, so a relative box with `overflow:hidden` (or
+  containing an overflow box) moved its content but not its clip — now the clip rides the offset
+  (`TestRelativeOffsetMovesOwnClip`). See `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
 - **HTML rendering — CSS 2.1 §17 table layout** (`pkg/layout/css/table.go` + `tableborder.go` (new),
   `pkg/layout/css/tablefix.go` + `measure.go` (new), extended `pkg/layout/css/build.go`/`block.go`/
   `fragment.go`/`anon.go`, `pkg/layout/cssbox` display kinds + `BoxAnonTablePart`, `pkg/html/ua.go` table
@@ -499,8 +509,9 @@ what is done vs. pending.
 - **HTML rendering — pagination (fixed-height page fragmentation)** (`pkg/layout/css/paginate.go` (new) +
   `pkg/css` `break-before`/`break-after` on `ComputedStyle`, `pkg/doctaculous` `WithPageSize` +
   `LetterWidthPt`/`LetterHeightPt`; covered by `paginate_test.go` bucketing + page-count + degradation +
-  positioned-distribution unit tests, `pagination_test.go` end-to-end, and the `html-paginate-p{0,1}`
-  multi-page goldens): a document can now be **split into fixed-height pages**. `WithPageSize(w, h)` on
+  positioned-distribution + nested-relative + body-border-fragmentation unit tests, `pagination_test.go`
+  end-to-end, and the `html-paginate-p{0,1}` + `html-paginate-body-border-p{0,1,2}` multi-page goldens): a
+  document can now be **split into fixed-height pages**. `WithPageSize(w, h)` on
   `OpenHTML`/`OpenHTMLBytes`/`OpenURL` opts in — the document lays out at width `w` and is sliced into
   `h`-tall `layout.Page`s; **without it the output is a single tall page (byte-identical to before** — the
   whole existing golden/reftest corpus is unchanged, since no existing call passes the option and `pageH<=0`
@@ -513,18 +524,32 @@ what is done vs. pending.
   pages, breaking **between blocks** on height overflow (strict `>`, so an exact-fit block stays) and at
   **forced** `break-before`/`break-after: page|always`, with no leading/trailing empty page for a forced break
   on the first/last block); per-page **shift** to local Y 0 via the existing `shiftFragments`; and a shallow
-  **clone of the root/body wrapper** per page. **`position:relative` blocks paginate normally** — a relative
-  top-level block is in flow (bucketed) but also lifted into the positioned layer for painting, so
-  `splitPositionedByPage` routes its positioned entry to the page its block landed on (the entry is the same
-  `*Fragment` pointer, so the shift comes for free). Degrades gracefully (no panic, logged where applicable):
-  a **block taller than a page overflows** its page rather than splitting (clipped by the page bitmap); the
-  page bitmap is `pageH` tall, so over-tall content is cut at the page bottom; **absolute/fixed** boxes (and
-  abs/fixed descendants of a relative block) are **not** distributed across pages — they ride the first page
-  at their original Y; and **mid-line / mid-table-row / mid-flex-or-grid-item splits, widows/orphans,
-  `break-inside`, `@page` size/margins, and running headers/footers** are deferred (each a no-op, never a
-  crash). **No new dependency** (stdlib). This is sub-project 12 of the HTML-rendering roadmap — the last
-  engine-shaped feature (EPUB depends on it). See
-  `docs/superpowers/specs/2026-06-28-html-pagination-design.md`.
+  **clone of the root/body wrapper** per page. **`position:relative` blocks paginate normally** — a top-level
+  relative block (in flow, hence bucketed, but lifted into the positioned layer for painting) is routed by
+  `splitPositionedByPage` to its bucket's page; a relative block **nested under a static wrapper** is routed to
+  its nearest top-level ancestor block's page (the wrapper's subtree is shifted onto that page), so it does not
+  vanish; and a relative block's **abs-positioned descendants, its own overflow clip rect, and its collapsed
+  table grid** all follow it to its page because `shiftFragment`/`translateFragment` move every page-space field
+  a fragment owns (not just `Children`/`Floats` — `Positioned`, `ClipRect`, `Collapsed`, and the
+  `PositionedInfo` clip chains too). The **html/body wrapper's border and background are fragmented per page**
+  (the per-page wrapper clone is shifted into the page's local frame, so the page bitmap clips it: the top edge
+  on page 0, the bottom on the last page, the side edges on every page; the first page's top is pulled up to the
+  wrapper's border-box top so a `<body>` top border shows on page 0 with content below it). Degrades gracefully
+  (no panic, logged where applicable): a **block taller than a page overflows** its page rather than splitting
+  (clipped by the `pageH`-tall page bitmap; logged per over-tall block); **absolute/fixed** boxes whose
+  containing block is the page (not a paginated relative ancestor) are **not** distributed across pages — they
+  ride the first page at their original Y; a **forced break on a nested (non-top-level) block** is not honored
+  (a browser propagates it to the ancestor) — warned once, not silent; a **margin-top is collapsed to 0 at an
+  unforced/overflow break** (correct at a forced break; a documented simplification at an unforced one); and
+  **mid-line / mid-table-row / mid-flex-or-grid-item splits, widows/orphans, `break-inside`, `@page`
+  size/margins, and running headers/footers** are deferred (each a no-op, never a crash). **No new dependency**
+  (stdlib). This is sub-project 12 of the HTML-rendering roadmap — the last engine-shaped feature (EPUB depends
+  on it). The post-ship **fidelity pass** (this follow-up) fixed the abs-descendant-of-a-paginated-relative-block
+  Y bug and its latent root cause (the `shiftFragment` page-space-field omission — which also fixed two
+  pre-existing base-engine bugs: a `border-collapse` table and an `overflow:hidden` box placed below other
+  content painted their grid lines / clip rect detached), the body-border-on-every-page artifact, the
+  vanishing-nested-relative-block bug, a negative-z-paints-behind-own-background stacking bug, and the relative
+  offset not moving an overflow clip; see `docs/superpowers/specs/2026-06-28-html-pagination-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -634,12 +659,18 @@ that skip into real output.
    blocks only**, post-pass): **mid-box fragmentation** (a block taller than a page overflows rather than
    splitting); **mid-line / mid-table-row / mid-flex-or-grid-item splits**; **widows/orphans**;
    **`break-inside: avoid`** and **`break-*: avoid`** (parsed onto `ComputedStyle` but not acted on);
-   **per-page distribution of absolute/fixed content** (today abs/fixed — incl. an abs descendant of a
-   relative block — ride the first page; only `position:relative` top-level blocks paginate, and `fixed`
-   does not yet repeat on every page); **`@page`** size/margins/named pages (page size comes only from
-   `WithPageSize`; margins are zero); and **running headers/footers**. Note `WithPageSize(w,h)` sets the
-   layout **width** to `w` (not a pure "slice what's already laid out"), so switching a default render to a
-   different page width reflows the document.
+   **per-page distribution of absolute/fixed content** (an abs/fixed box whose containing block is the PAGE
+   rides the first page; an abs descendant of a *paginated relative ancestor* now follows that ancestor to its
+   page, and `position:relative` blocks paginate normally — top-level AND nested-under-a-static-wrapper — so
+   what remains is page-distributing page-CB abs/fixed and making `fixed` **repeat** on every page);
+   **honoring a forced break on a NESTED (non-top-level) block** (today warned once and dropped — needs
+   propagating the break to the nearest top-level ancestor); **retaining a leading margin-top at an unforced
+   break** (today collapsed to 0; correct only at a forced break); **`@page`** size/margins/named pages (page
+   size comes only from `WithPageSize`; margins are zero); and **running headers/footers**. Done in the fidelity
+   pass: per-page distribution of relative blocks (incl. nested) + their abs descendants/clip/collapsed grid,
+   and **per-page fragmentation of the html/body border + background**. Note `WithPageSize(w,h)` sets the layout
+   **width** to `w` (not a pure "slice what's already laid out"), so switching a default render to a different
+   page width reflows the document.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.

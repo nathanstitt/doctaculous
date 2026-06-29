@@ -22,6 +22,23 @@ type Engine struct {
 	faces  *layoutfont.FaceCache
 	images *imageCache
 	logf   func(string, ...any)
+	// measures memoizes per-box min/max-content widths within ONE layout. measureContent
+	// is a pure function of the box subtree and the (fixed) face cache, but table auto
+	// layout, grid track sizing, and flex base sizing each measure every cell/item for
+	// BOTH min- and max-content — and measureInline re-gathers+re-shapes (and even lays
+	// out inline-block atoms) on each call. Caching keyed by (box, wantMax) collapses that
+	// to once per box per intrinsic size. The engine is created per layout (and layout is
+	// single-threaded — only rasterization fans out), so this needs no lock and does not
+	// leak across documents; the box tree is read-only after box generation, so a cached
+	// width is exactly what a fresh measure would return (output stays byte-identical).
+	measures map[*cssbox.Box]*minMaxContent
+}
+
+// minMaxContent holds a box's memoized intrinsic widths; each is filled lazily and
+// guarded by its own set flag (0 is a legitimate width, so a bool is needed).
+type minMaxContent struct {
+	min, max       float64
+	minSet, maxSet bool
 }
 
 // New returns an Engine that resolves fonts through faces, decodes replaced-element
@@ -36,7 +53,12 @@ func New(faces *layoutfont.FaceCache, loader resource.ResourceLoader, logf func(
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Engine{faces: faces, images: newImageCache(loader, logf), logf: logf}
+	return &Engine{
+		faces:    faces,
+		images:   newImageCache(loader, logf),
+		logf:     logf,
+		measures: make(map[*cssbox.Box]*minMaxContent),
+	}
 }
 
 // Layout lays out root at viewportW points and returns a single tall page sized
@@ -1189,6 +1211,72 @@ func shiftFragment(f *Fragment, dy float64) {
 	for _, fl := range f.Floats {
 		shiftFragment(fl, dy)
 	}
+	shiftFragmentExtras(f, 0, dy)
+}
+
+// shiftFragmentSelf translates ONLY a fragment's own border box (Y — its border edges and
+// background derive from Y) by dy, WITHOUT recursing Children, Floats, or Positioned and
+// WITHOUT touching its clip/collapsed/positioned-chain fields. The pagination pass uses it
+// on a shallow-cloned html/body wrapper to move the wrapper's own border/background into a
+// page's local frame so they fragment correctly, while the wrapper's children (the page's
+// blocks) and its positioned layer are shifted separately — moving them here too would
+// double-shift them. (A structural html/body wrapper carries no overflow clip, collapsed
+// grid, or positioned clip chain of its own, so Y is the only page-space field it owns.)
+func shiftFragmentSelf(f *Fragment, dy float64) {
+	f.Y += dy
+}
+
+// shiftFragmentExtras moves the page-space fields a fragment OWNS — but that are not
+// reachable through Children/Floats/Lines/Image — by (dx,dy): the box's own clip
+// rectangle (ClipRect), its border-collapse grid strips (Collapsed), each positioned
+// descendant's clip-escape chain (PositionedInfo[].ClipChain), and its out-of-flow
+// positioned descendants (the abs/fixed entries of Positioned). It is shared by
+// shiftFragment (dx==0) and translateFragment (dx may be non-zero) so the two stay in
+// lock-step; both call it AFTER recursing Children/Floats so a Positioned entry that is
+// abs/fixed (out of flow, NOT aliased by any Children entry) is moved exactly once.
+//
+// A position:relative entry of Positioned is deliberately SKIPPED here: a relative box
+// stays in flow, so the SAME *Fragment pointer is also a Children entry and already moved
+// by the Children recursion — moving it again here would double-shift it. (Its paint-time
+// RelOffset is applied separately by AppendItems and is frame-independent.) Abs/fixed
+// entries are out of flow, appear only in Positioned, and so must be moved here. During
+// the in-flow layout passes Positioned holds only consumed relatives (abs/fixed are
+// resolved later, in pass 2, directly at final coordinates), so in the un-paginated path
+// this loop moves nothing — preserving byte-identical output; the abs/fixed branch fires
+// only when a finished subtree carrying baked-in abs/fixed descendants is relocated
+// wholesale (the pagination relative-block shift, and resolveAbsolute's own translate).
+func shiftFragmentExtras(f *Fragment, dx, dy float64) {
+	if f.Clips {
+		f.ClipRect.x += dx
+		f.ClipRect.y += dy
+	}
+	for i := range f.Collapsed {
+		f.Collapsed[i].XPt += dx
+		f.Collapsed[i].YPt += dy
+	}
+	for i := range f.PositionedInfo {
+		for j := range f.PositionedInfo[i].ClipChain {
+			f.PositionedInfo[i].ClipChain[j].x += dx
+			f.PositionedInfo[i].ClipChain[j].y += dy
+		}
+	}
+	for _, p := range f.Positioned {
+		if isRelativeFragment(p) {
+			continue // in flow → also a Children entry → already shifted there
+		}
+		if dx != 0 {
+			translateFragment(p, dx, dy)
+		} else {
+			shiftFragment(p, dy)
+		}
+	}
+}
+
+// isRelativeFragment reports whether a positioned fragment came from a position:relative
+// box (in flow, hence aliased with a Children entry). A nil Box reads as not-relative
+// (anonymous/synthetic fragments and abs/fixed boxes, whose coordinates are baked in).
+func isRelativeFragment(f *Fragment) bool {
+	return f.Box != nil && f.Box.Position == cssbox.PosRelative
 }
 
 // shiftLines translates inline line baselines by dy (the inline content of the box

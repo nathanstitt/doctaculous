@@ -99,6 +99,40 @@ func TestZNegativeBehindInFlowContent(t *testing.T) {
 	}
 }
 
+// TestZNegativeBehindHostOwnBackground pins F-C (adversarial-review finding): a
+// stacking context with its OWN background containing a position:relative; z-index:-1
+// descendant must paint its own background BEFORE the negative-z descendant (CSS 2.1
+// Appendix E: own background = step 1, negative-z = step 2). The bug was that the
+// non-clipping AppendItems branch emitted negatives before the context's own
+// decorations, so the host background painted OVER (hid) the negative-z child. Mutation-
+// verify: restore `appendBand(negatives) ; appendDecorations` order in AppendItems and
+// the host background lands AFTER the negative child, so this FAILS.
+func TestZNegativeBehindHostOwnBackground(t *testing.T) {
+	eng := New(nil, nil, nil)
+	hostBG := color.RGBA{30, 30, 30, 255}
+	negBG := color.RGBA{90, 10, 10, 255}
+
+	// A relative host WITH a background, containing a z-index:-1 relative child that
+	// overlaps it. Appendix E: host bg first, then the negative child (which thus peeks
+	// out where it extends beyond / on top of the host's own background region).
+	neg := posBox(zfill(60, negBG, 10, 10, -1, false), cssbox.PosRelative)
+	hostStyle := posStyle()
+	hostStyle.Height = gcss.Length{Value: 100, Unit: gcss.UnitPx}
+	hostStyle.Width = gcss.Length{Value: 100, Unit: gcss.UnitPx}
+	hostStyle.BackgroundColor = hostBG
+	host := posBox(hostStyle, cssbox.PosRelative, neg)
+	root := posBox(posStyle(), cssbox.PosStatic, host)
+
+	items := eng.layoutTree(context.Background(), root, 200).AppendItems(nil)
+	hi, ni := bgIndex(items, hostBG), bgIndex(items, negBG)
+	if hi < 0 || ni < 0 {
+		t.Fatalf("missing backgrounds: host=%d neg=%d", hi, ni)
+	}
+	if hi >= ni {
+		t.Errorf("host's own background at %d must paint BEFORE its negative-z child at %d (Appendix E steps 1 then 2)", hi, ni)
+	}
+}
+
 // TestZPositiveOverAuto: a z-index:2 abs box paints AFTER (over) a z:auto abs box.
 func TestZPositiveOverAuto(t *testing.T) {
 	eng := New(nil, nil, nil)

@@ -179,6 +179,13 @@ func (e *Engine) replacedFragment(ctx context.Context, b *cssbox.Box, w, h, bord
 		},
 		DebugTag: debugTag(b),
 	}
+	// Retain the source box like the block-fragment constructor does (block.go): the
+	// flatten reads it for the stacking z-index, and isRelativeFragment relies on it to
+	// tell a relative replaced element (in flow → aliased with a Children entry, must NOT
+	// be shifted again via Positioned) from an abs/fixed one. A nil Box here would read as
+	// non-relative and risk a double-shift if a relative replaced box reaches a holder's
+	// Positioned layer.
+	frag.Box = b
 	frag.Border[layout.EdgeTop] = BorderEdge{Width: ed.bT, Color: b.Style.BorderTopColor, Style: mapBorderStyle(b.Style.BorderTopStyle)}
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
