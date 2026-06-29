@@ -395,6 +395,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "background":
 		// Color-only support for now; see applyBackground.
 		applyBackground(cs, d.Value)
+	case "font":
+		// The `font` shorthand: [style||variant||weight]? size[/line-height] family.
+		expandFont(cs, d.Value)
 	case "font-family":
 		cs.FontFamily = firstFamily(d.Value)
 	case "font-size":

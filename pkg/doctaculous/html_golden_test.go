@@ -616,18 +616,18 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
-		// An inline-block WITH text inside a line of text (CSS 2.1 §10.8.1 baseline
-		// alignment, the B2 fix). Eyeball: the highlighted inline-block ("BOX") sits on
-		// the SAME baseline as the surrounding words — its text aligns with "before" and
-		// "after", on ONE line, not dropped below. (Before the fix the box rested its whole
-		// border box on the baseline, dropping its text far below and inflating the line.)
-		// The inline-block has an explicit width so its box is a fixed size (auto-width
-		// inline-block shrink-to-fit is a separate, still-open fidelity item).
+		// An auto-width inline-block WITH text inside a line of text. Exercises four
+		// inline/font fidelity fixes together: B2 (the highlighted "BOX" sits on the SAME
+		// baseline as "before"/"after", not dropped below), E4 (the inline-block
+		// SHRINKS TO FIT "BOX" instead of filling the line), E5 (the line is a sane height,
+		// not ~2× inflated), and E6 (the `font: 20px monospace` shorthand applies the size +
+		// monospace family). Eyeball: "before BOX after" on one line, the yellow box hugging
+		// "BOX", everything on one baseline.
 		name:       "inline-block-baseline",
 		viewportPx: 300,
 		html: `<!DOCTYPE html><html><head><style>
   body { margin: 0; font: 20px monospace; }
-  .ib { display: inline-block; width: 56px; background: #ffdd55; }
+  .ib { display: inline-block; background: #ffdd55; }
 </style></head><body>
   <p>before <span class="ib">BOX</span> after</p>
 </body></html>`,

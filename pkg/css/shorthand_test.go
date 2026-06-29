@@ -579,3 +579,62 @@ func TestGridShorthandAutoFlowMalformedSuffix(t *testing.T) {
 		t.Errorf("malformed suffix auto-flow: GridAutoFlow=%q, want \"row\" (reset to initial, no branch fired)", cs.GridAutoFlow)
 	}
 }
+
+// TestFontShorthandSizeFamily pins the `font` shorthand (E6 fix): size + family are
+// mandatory and applied; preceding weight/style tokens set Bold/Italic; an inline
+// size/line-height sets LineHeight; an absolute-size keyword resolves to px.
+func TestFontShorthandSizeFamily(t *testing.T) {
+	cases := []struct {
+		val        string
+		wantSize   float64
+		wantFam    string
+		wantBold   bool
+		wantItalic bool
+	}{
+		{"20px monospace", 20, "monospace", false, false},
+		{"italic bold 24px/30px serif", 24, "serif", true, true},
+		{"12pt Arial, sans-serif", 12, "Arial", false, false},
+		{"large 'Times New Roman'", 18, "Times New Roman", false, false},
+		{"bold 14px sans-serif", 14, "sans-serif", true, false},
+	}
+	for _, c := range cases {
+		cs := initialStyle()
+		applyOne(&cs, "font", c.val)
+		if cs.FontSizePt != c.wantSize {
+			t.Errorf("font %q: size=%.1f, want %.1f", c.val, cs.FontSizePt, c.wantSize)
+		}
+		if cs.FontFamily != c.wantFam {
+			t.Errorf("font %q: family=%q, want %q", c.val, cs.FontFamily, c.wantFam)
+		}
+		if cs.Bold != c.wantBold {
+			t.Errorf("font %q: bold=%v, want %v", c.val, cs.Bold, c.wantBold)
+		}
+		if cs.Italic != c.wantItalic {
+			t.Errorf("font %q: italic=%v, want %v", c.val, cs.Italic, c.wantItalic)
+		}
+	}
+}
+
+// TestFontShorthandInlineLineHeight checks the size/line-height slot sets LineHeight.
+func TestFontShorthandInlineLineHeight(t *testing.T) {
+	cs := initialStyle()
+	applyOne(&cs, "font", "16px/24px serif")
+	if cs.LineHeight != (Length{24, UnitPx}) {
+		t.Errorf("font 16px/24px: line-height=%+v, want {24 px}", cs.LineHeight)
+	}
+}
+
+// TestFontShorthandInvalidDropped: a shorthand with no family (or no size) is invalid
+// and left unapplied — the longhands keep their prior values.
+func TestFontShorthandInvalidDropped(t *testing.T) {
+	cs := initialStyle()
+	before := cs.FontSizePt
+	applyOne(&cs, "font", "20px") // no family
+	if cs.FontSizePt != before {
+		t.Errorf("size-only font shorthand must be dropped: size=%.1f, want %.1f", cs.FontSizePt, before)
+	}
+	applyOne(&cs, "font", "monospace") // no size
+	if cs.FontFamily == "monospace" {
+		t.Errorf("family-only font shorthand (no size) must be dropped, but family was set")
+	}
+}

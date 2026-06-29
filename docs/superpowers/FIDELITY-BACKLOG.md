@@ -63,19 +63,26 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   `middle`/`bottom`/`text-top`/`text-bottom`/`%`/length). *Medium–large.* (Overlaps B2.)
 - ☐ **E2. `margin:auto` horizontal centering** (block-level). *Small–medium.*
 - ☐ **E3. Margin-collapse edge cases** — empty-block collapse-through, clearance, `min-height` interaction. *Medium.*
-- ☐ **E4. inline-block (auto width) shrink-to-fit** — an `width:auto` inline-block fills its containing block
-  (`resolveContentWidth` returns `cbWidth`) instead of shrinking to its content (CSS 10.3.9). Tables and
-  inline-grid already shrink-to-fit (`intrinsicWidth`); inline-block does not. *Medium.* (Discovered while
-  building the B2 golden — an auto-width inline-block with text spanned the full line.)
-- ☐ **E5. line-gap metric inflated (→ inline-block height inflation)** — a single 16px line reports
-  `LineGapPt ≈ 21pt` (ascent 16.9, descent 4.5, gap 21.4), so `autoLineHeight = (asc+desc+gap)×1.15 ≈ 49pt` —
-  ~2× the expected ~24pt. Root cause: the font line-gap metric in `inline.Shape`/`MakeLine` is too large (likely
-  a units-per-em scaling or hhea lineGap vs OS/2 typo-gap mixup in the bundled face). Affects EVERY auto
-  line-height line, not just inline-block — the inline-block just makes it visible (its border box is the
-  inflated line). *Medium.* (Diagnosed while building the B2 golden; the B2 baseline fix is correct and
-  orthogonal — the box's text baseline aligns; only its descent extent is too tall.)
-- ☐ **E6. `font` shorthand size not applied** — `font: 20px monospace` leaves `FontSizePt` at the 16px default
-  (the shorthand's size component is not parsed onto `font-size`). *Small.* (Discovered via the B2 probe.)
+- ☑ **E4. inline-block (auto width) shrink-to-fit** — *DONE.* `inlineBlockCBWidth` computes the CSS 10.3.9
+  shrink-to-fit width (`min(max(min-content, available), max-content)`, via the memoized measure helpers) and
+  the inline-block atom is laid out against it, so an `width:auto` inline-block wraps its content instead of
+  filling the line. A specified/percentage width still resolves normally. Tests:
+  `TestInlineBlockShrinkToFit` (mutation-verified) + `TestInlineBlockSpecifiedWidthHonored`. No existing golden
+  changed (no prior golden had an auto-width inline-block with text); the `inline-block-baseline` golden was
+  switched to auto-width to demonstrate it.
+- ☑ **E5. line-gap metric inflated (→ inline-block height inflation)** — *DONE.* Root cause: the bundled TeX
+  Gyre faces report an anomalous **hhea line gap of ~1.3–1.4 em**, and `autoLineHeight` added it then multiplied
+  by 1.15 — ballooning a 16px line to ~49pt. Fix: `autoLineHeight = (ascent+descent)×cssDefaultLineMult` — the
+  gap is dropped (browsers compute "normal" from ascent/descent, not a runaway hhea gap); this gives
+  browser-comparable ~1.2–1.65 em for the three bundled families. Tests: `TestAutoLineHeightExcludesLineGap` +
+  `TestParagraphLineHeightReasonable` (mutation-verified — the bug gives a 49pt inter-line gap). **9 goldens
+  regenerated + eyeballed** (paragraphs/tables/float-figure: proper line spacing now, ~2× tighter — a major
+  visible improvement).
+- ☑ **E6. `font` shorthand size not applied** — *DONE.* `expandFont` parses the CSS 2.1 `font` shorthand
+  (`[style||variant||weight]? size[/line-height] family`) into longhands: size (length or absolute-size
+  keyword), family, weight/style, inline line-height; an invalid shorthand (no size or no family) is dropped.
+  Wired as `case "font"` in `applyDeclaration`. Tests: `TestFontShorthandSizeFamily` /`…InlineLineHeight`
+  /`…InvalidDropped` (mutation-verified).
 
 ## F. HTML/CSS — tables
 

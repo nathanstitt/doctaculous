@@ -6,6 +6,7 @@ import (
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
 
 // The inline tests assert numeric glyph/atomic positions after a full Layout (not
@@ -351,6 +352,89 @@ func TestInlineBlockAtomics(t *testing.T) {
 	// inline-block aligns its own text baseline instead — see TestInlineBlockTextBaseline.)
 	if got := a.Y + a.H; got != frag.Lines[0].BaselineY {
 		t.Errorf("atomic bottom = %v, want on baseline %v", got, frag.Lines[0].BaselineY)
+	}
+}
+
+// TestAutoLineHeightExcludesLineGap pins E5: "normal" line height is
+// (ascent+descent)×cssDefaultLineMult and does NOT add the font's line gap. The bundled
+// substitute faces report an anomalous ~1.3em hhea gap; adding it (then ×1.15) ballooned a
+// 16px line to ~49pt. With a line carrying a large gap, the computed height must depend
+// only on ascent+descent. Mutation-verify: re-add LineGapPt to autoLineHeight and the
+// height jumps by gap×mult.
+func TestAutoLineHeightExcludesLineGap(t *testing.T) {
+	// A synthetic line with a big line gap and modest ascent/descent.
+	line := inline.Line{AscentPt: 12, DescentPt: 4, LineGapPt: 20}
+	got := autoLineHeight(line)
+	want := (12.0 + 4.0) * cssDefaultLineMult // gap excluded
+	if absf(got-want) > 1e-6 {
+		t.Errorf("autoLineHeight = %.3f, want %.3f (ascent+descent only, gap excluded)", got, want)
+	}
+	// Sanity: the gap-inclusive value would be much larger — guard we didn't regress to it.
+	gapInclusive := (12.0 + 4.0 + 20.0) * cssDefaultLineMult
+	if absf(got-gapInclusive) < 1e-6 {
+		t.Errorf("autoLineHeight still includes the line gap (%.3f)", got)
+	}
+}
+
+// TestParagraphLineHeightReasonable is the end-to-end companion: two wrapped lines of
+// 16px text must be spaced by a browser-comparable ~1.1–1.4× the font size, NOT ~3× (the
+// E5 bug spaced them ~49pt apart). It asserts the gap between consecutive line baselines.
+func TestParagraphLineHeightReasonable(t *testing.T) {
+	// Narrow width forces a wrap; default font (serif) is the one with the bad gap.
+	src := `<p style="margin:0">wrap this sentence onto two lines please now ok</p>`
+	root := layoutTreeFor(t, src, 120, nil)
+	p := descendToIFC(t, root)
+	if len(p.Lines) < 2 {
+		t.Fatalf("expected the text to wrap to >=2 lines, got %d", len(p.Lines))
+	}
+	gap := p.Lines[1].BaselineY - p.Lines[0].BaselineY
+	// Default font size is 16px; a sane normal line height is ~18–24pt. The bug gave ~49.
+	if gap < 16 || gap > 30 {
+		t.Errorf("inter-line baseline gap = %.1f, want a sane ~18–24pt (the E5 bug gave ~49)", gap)
+	}
+}
+
+// TestInlineBlockShrinkToFit pins E4: an auto-width inline-block with text shrinks to fit
+// its content (CSS 10.3.9) instead of filling the parent's content width. "BOX" in a 300pt
+// line must produce an inline-block far narrower than 300 (≈ the width of 3 glyphs), sitting
+// inline after "before". Mutation-verify: make inlineBlockCBWidth return parentContentW and
+// the inline-block fills the line (W≈300, forcing the text onto separate lines).
+func TestInlineBlockShrinkToFit(t *testing.T) {
+	src := `<p style="margin:0;font:20px monospace">before <span style="display:inline-block;background:#ffdd55">BOX</span> after</p>`
+	root := layoutTreeFor(t, src, 300, nil)
+	p := descendToIFC(t, root)
+	if len(p.Children) != 1 {
+		t.Fatalf("want 1 inline-block atom, got %d children", len(p.Children))
+	}
+	ib := p.Children[0]
+	// "BOX" at 20px monospace is roughly 3×12 = ~36pt; certainly far below the 300pt line.
+	if ib.W >= 100 {
+		t.Errorf("auto-width inline-block W = %.1f, want shrink-to-fit (~36, well under 100); it is filling the line", ib.W)
+	}
+	if ib.W <= 0 {
+		t.Errorf("inline-block W = %.1f, want a positive shrink-to-fit width", ib.W)
+	}
+	// It flows inline: "before " precedes it, so its X is past the content-left.
+	if ib.X <= 0 {
+		t.Errorf("inline-block X = %.1f, want > 0 (it sits after 'before ')", ib.X)
+	}
+	// The whole line fits: with shrink-to-fit, "before BOX after" is one line.
+	if len(p.Lines) != 1 {
+		t.Errorf("want the content on one line (shrink-to-fit), got %d lines", len(p.Lines))
+	}
+}
+
+// TestInlineBlockSpecifiedWidthHonored guards E4: a SPECIFIED width on an inline-block is
+// still honored exactly (shrink-to-fit applies only to auto width).
+func TestInlineBlockSpecifiedWidthHonored(t *testing.T) {
+	src := `<p style="margin:0;font:20px monospace">x<span style="display:inline-block;width:80px">B</span></p>`
+	root := layoutTreeFor(t, src, 300, nil)
+	p := descendToIFC(t, root)
+	if len(p.Children) != 1 {
+		t.Fatalf("want 1 inline-block atom, got %d", len(p.Children))
+	}
+	if ib := p.Children[0]; absf(ib.W-80) > 1e-6 {
+		t.Errorf("specified-width inline-block W = %.1f, want 80", ib.W)
 	}
 }
 

@@ -609,15 +609,16 @@ that skip into real output.
    fragments). Replaced-content fidelity follow-ups: `object-position`, the ratio-preserving min/max
    sizing step (CSS 10.4; today min/max clamps per-axis after ratio derivation), a percentage `height`
    basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
-   inline/flow follow-ups still open: full `vertical-align` keyword set (only the atom baseline
-   mechanics landed — and, **fidelity fix B2**, a `vertical-align:baseline` inline-block WITH text now aligns
-   its last in-flow line box's baseline per CSS 2.1 §10.8.1 via `atomicRunFor`/`lastInFlowLineBaseline`, instead
-   of resting its whole border box on the baseline; a replaced/empty/`overflow≠visible` atom stays
-   bottom-aligned), `margin:auto` centering, **auto-width inline-block shrink-to-fit** (an `width:auto`
-   inline-block fills its container — separate from B2), an **inflated font line-gap metric** (a 16px line
-   reports a ~21pt gap → ~2× line height, visible as a tall inline-block box), the **`font` shorthand size**
-   (`font:20px …` keeps the default size), and the deferred margin-collapse edge cases (empty-block
-   collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
+   inline/flow — landed fidelity fixes: **B2** (a `vertical-align:baseline` inline-block WITH text aligns its
+   last in-flow line box's baseline per CSS 2.1 §10.8.1 via `atomicRunFor`/`lastInFlowLineBaseline`, instead of
+   resting its whole border box on the baseline; a replaced/empty/`overflow≠visible` atom stays bottom-aligned),
+   **E4** (an `width:auto` inline-block SHRINKS TO FIT its content per CSS 10.3.9 via `inlineBlockCBWidth` rather
+   than filling the line), **E5** (`autoLineHeight` no longer adds the font line gap — the bundled TeX Gyre faces
+   report an anomalous ~1.3–1.4 em hhea gap that ballooned "normal" to ~2× height; it is now
+   `(ascent+descent)×1.15`, browser-comparable), and **E6** (the `font` shorthand, `font: 20px monospace`,
+   expands to its longhands). Still open: full `vertical-align` keyword set (only atom-baseline mechanics + B2's
+   default-baseline case landed), `margin:auto` centering, and the deferred margin-collapse edge cases
+   (empty-block collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
    engine: **RTL/`direction`** (the sole table deferral — parsed but not acted on, LTR column order
    always, logged; needs the general bidi/`direction` support the engine lacks entirely);
    (**table-cell `vertical-align: baseline`** shared-row baseline is now **real** — resolved by the grid
