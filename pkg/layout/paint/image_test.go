@@ -99,7 +99,7 @@ func TestPaintImageFillMapsToContentBox(t *testing.T) {
 // 100x50 centered vertically (y from 25 to 75). No clip (contain never overflows).
 func TestPaintImageContainLetterboxes(t *testing.T) {
 	dev := &imageRecordDevice{}
-	it := &layout.ImageItem{Img: solid(20, 10), XPt: 0, YPt: 0, WPt: 100, HPt: 100, Fit: layout.FitContain}
+	it := &layout.ImageItem{Img: solid(20, 10), XPt: 0, YPt: 0, WPt: 100, HPt: 100, Fit: layout.FitContain, PosX: 0.5, PosY: 0.5}
 	paintImage(dev, it, render.Scale(1, 1))
 	m := dev.ctms[0]
 	// Top-left of the fitted image: x=0 (full width), y=25 (centered: (100-50)/2).
@@ -122,7 +122,7 @@ func TestPaintImageContainLetterboxes(t *testing.T) {
 // 200x100 centered horizontally (x from -50 to 150), so a clip is pushed.
 func TestPaintImageCoverClips(t *testing.T) {
 	dev := &imageRecordDevice{}
-	it := &layout.ImageItem{Img: solid(20, 10), XPt: 0, YPt: 0, WPt: 100, HPt: 100, Fit: layout.FitCover}
+	it := &layout.ImageItem{Img: solid(20, 10), XPt: 0, YPt: 0, WPt: 100, HPt: 100, Fit: layout.FitCover, PosX: 0.5, PosY: 0.5}
 	paintImage(dev, it, render.Scale(1, 1))
 	m := dev.ctms[0]
 	x, y := m.Apply(0, 1) // top-left of the oversized image
@@ -139,7 +139,7 @@ func TestPaintImageCoverClips(t *testing.T) {
 // so no clip.
 func TestPaintImageNoneCentersIntrinsic(t *testing.T) {
 	dev := &imageRecordDevice{}
-	it := &layout.ImageItem{Img: solid(40, 20), XPt: 0, YPt: 0, WPt: 100, HPt: 100, Fit: layout.FitNone}
+	it := &layout.ImageItem{Img: solid(40, 20), XPt: 0, YPt: 0, WPt: 100, HPt: 100, Fit: layout.FitNone, PosX: 0.5, PosY: 0.5}
 	paintImage(dev, it, render.Scale(1, 1))
 	m := dev.ctms[0]
 	x, y := m.Apply(0, 1)
@@ -175,4 +175,23 @@ func solid(w, h int) *image.RGBA {
 func approx(a, b float64) bool {
 	d := a - b
 	return d < 1e-6 && d > -1e-6
+}
+
+// TestPaintImageObjectPosition pins D1: object-position shifts the fitted image within
+// the content box. A 40x20 image with object-fit:none in a 100x100 box: at PosX=0,PosY=0
+// (left top) it sits at (0,0); at PosX=1,PosY=1 (right bottom) at (60,80).
+func TestPaintImageObjectPosition(t *testing.T) {
+	check := func(posX, posY, wantX, wantY float64) {
+		dev := &imageRecordDevice{}
+		it := &layout.ImageItem{Img: solid(40, 20), XPt: 0, YPt: 0, WPt: 100, HPt: 100,
+			Fit: layout.FitNone, PosX: posX, PosY: posY}
+		paintImage(dev, it, render.Scale(1, 1))
+		x, y := dev.ctms[0].Apply(0, 1) // top-left corner
+		if !approx(x, wantX) || !approx(y, wantY) {
+			t.Errorf("object-position (%.1f,%.1f) top-left -> (%v,%v), want (%v,%v)", posX, posY, x, y, wantX, wantY)
+		}
+	}
+	check(0, 0, 0, 0)       // left top
+	check(1, 1, 60, 80)     // right bottom: free space 60x80
+	check(0.5, 0.5, 30, 40) // center (default)
 }

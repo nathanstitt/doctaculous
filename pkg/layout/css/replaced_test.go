@@ -248,6 +248,46 @@ func TestReplacedBlockSizing(t *testing.T) {
 	}
 }
 
+// TestReplacedBlockStacksAsBlock pins B1 (the F-E bug): a display:block <img> between
+// two text runs must STACK as a block — the browser produces three stacked blocks
+// (anonymous "AAA", the img block, anonymous "BBB"), NOT one inline line. The bug was
+// that isBlockLevelOuter/the block-stacker child guard read Kind.IsBlockLevel(), which
+// is false for BoxReplaced regardless of display, so the block img was treated
+// inline-level and either flowed on the text line or was skipped. Mutation-verify:
+// revert isBlockLevelReplaced (or the anon.go BoxReplaced branch) and the img no longer
+// stacks (the div's child count / vertical order changes).
+func TestReplacedBlockStacksAsBlock(t *testing.T) {
+	src := `<div>AAA<img src="img.png" style="display:block;width:40px;height:40px">BBB</div>`
+	root := layoutWithLoader(t, src, 800, pngLoader(t, 40, 40), nil)
+	// root -> body -> div; the div must hold three stacked block children.
+	body := root.Children[len(root.Children)-1]
+	if len(body.Children) != 1 {
+		t.Fatalf("want 1 body child (the div), got %d", len(body.Children))
+	}
+	div := body.Children[0]
+	if len(div.Children) != 3 {
+		t.Fatalf("div should hold 3 stacked blocks (anon AAA, img, anon BBB), got %d", len(div.Children))
+	}
+	// The img is the middle child and carries the image.
+	imgChild := div.Children[1]
+	if imgChild.Image == nil {
+		t.Errorf("middle child should be the block img (has Image), got Image=nil")
+	}
+	if imgChild.W != 40 || imgChild.H != 40 {
+		t.Errorf("block img size = %vx%v, want 40x40", imgChild.W, imgChild.H)
+	}
+	// Vertical stacking: AAA above the img, BBB below it.
+	aaa, bbb := div.Children[0], div.Children[2]
+	if !(aaa.Y < imgChild.Y && imgChild.Y < bbb.Y) {
+		t.Errorf("blocks must stack vertically: AAA.Y=%.1f img.Y=%.1f BBB.Y=%.1f", aaa.Y, imgChild.Y, bbb.Y)
+	}
+	// And they do NOT share a baseline/line (the img is not an inline atom): each block's
+	// Y strictly increases by at least the prior block's height.
+	if imgChild.Y < aaa.Y+aaa.H-1e-6 {
+		t.Errorf("img must start at/below AAA's bottom (block flow), img.Y=%.1f AAA bottom=%.1f", imgChild.Y, aaa.Y+aaa.H)
+	}
+}
+
 // TestReplacedInlineBlockSizing: a display:inline-block <img> sizes via the replaced
 // algorithm (a replaced box is replaced regardless of inline-block display).
 func TestReplacedInlineBlockSizing(t *testing.T) {
@@ -429,5 +469,42 @@ func TestInlineTallImageRaisesAscent(t *testing.T) {
 	// The image bottom rests on the baseline.
 	if absf((imgF.Y+imgF.H)-ln.BaselineY) > 1e-6 {
 		t.Errorf("image bottom %v != baseline %v (bottom-aligned)", imgF.Y+imgF.H, ln.BaselineY)
+	}
+}
+
+// TestReplacedRatioPreservingMaxHeight pins D2 (CSS 10.4): when the used size came from
+// the intrinsic ratio, a violated max bound scales the OTHER axis to preserve the ratio.
+// Intrinsic 200x100 (2:1), width:100 -> tentative 100x50; max-height:30 caps height to 30,
+// so width scales to 60 (keeping 2:1), NOT staying 100 (the old per-axis clamp).
+func TestReplacedRatioPreservingMaxHeight(t *testing.T) {
+	f := imgFragment(t, `<img src="img.png" style="width:100px;max-height:30px">`, 800, pngLoader(t, 200, 100))
+	if f.H != 30 {
+		t.Errorf("height = %v, want 30 (max-height)", f.H)
+	}
+	// Ratio-preserving: width = 30 * 200/100 = 60.
+	if f.W < 59 || f.W > 61 {
+		t.Errorf("width = %v, want ~60 (ratio-preserving max-height); per-axis clamp would give 100", f.W)
+	}
+}
+
+// TestReplacedRatioPreservingMinWidth pins D2 for a min bound: intrinsic 200x100,
+// height:20 -> tentative 40x20; min-width:80 raises width to 80, scaling height to 40
+// (keeping 2:1), NOT staying 20.
+func TestReplacedRatioPreservingMinWidth(t *testing.T) {
+	f := imgFragment(t, `<img src="img.png" style="height:20px;min-width:80px">`, 800, pngLoader(t, 200, 100))
+	if f.W != 80 {
+		t.Errorf("width = %v, want 80 (min-width)", f.W)
+	}
+	if f.H < 39 || f.H > 41 {
+		t.Errorf("height = %v, want ~40 (ratio-preserving min-width); per-axis would give 20", f.H)
+	}
+}
+
+// TestReplacedBothDimsExplicitNoRatioPreserve guards the fallback: when BOTH width and
+// height are explicit (ratio already broken), min/max clamp per-axis (unchanged).
+func TestReplacedBothDimsExplicitNoRatioPreserve(t *testing.T) {
+	f := imgFragment(t, `<img src="img.png" width="200" height="100" style="max-width:80px">`, 800, pngLoader(t, 200, 100))
+	if f.W != 80 || f.H != 100 {
+		t.Errorf("size = %vx%v, want 80x100 (per-axis clamp; both dims explicit)", f.W, f.H)
 	}
 }

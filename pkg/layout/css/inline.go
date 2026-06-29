@@ -202,12 +202,23 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// line by translateFragment, which does not move its Positioned layer), so
 			// these resolve approximately against the atom's provisional box — a
 			// documented limitation; block-level positioning is exact.
+			// CSS 10.3.9 shrink-to-fit: a width:auto inline-block wraps its content
+			// rather than filling the parent's content width. Compute the shrink-to-fit
+			// width and lay the atom out as if its containing block were that wide, so
+			// resolveContentWidth's auto branch (cbWidth - horiz) yields the shrink-to-fit
+			// content width. (inline-flex/inline-grid keep their own sizing — inline-grid
+			// already shrink-to-fits via its intrinsic width; only inline-BLOCK is filled
+			// here.) A specified width is honored as-is (atomCBWidth stays contentW).
+			atomCBWidth := contentW
+			if child.Display == cssbox.DisplayInlineBlock {
+				atomCBWidth = e.inlineBlockCBWidth(ctx, child, contentW)
+			}
 			atomPos := &positionedContext{}
-			res := e.layoutBlock(ctx, child, contentW, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: contentW}, atomPos, posCBOwner{isPage: true})
+			res := e.layoutBlock(ctx, child, atomCBWidth, 0, 0, 0, &floatContext{cbLeft: 0, cbRight: atomCBWidth}, atomPos, posCBOwner{isPage: true})
 			frag := res.frag
-			e.resolveAbsolute(ctx, atomPos, frag, contentW, 0)
+			e.resolveAbsolute(ctx, atomPos, frag, atomCBWidth, 0)
 			*atomics = append(*atomics, frag)
-			*runs = append(*runs, atomicRunFor(child, frag, contentW))
+			*runs = append(*runs, atomicRunFor(child, frag, atomCBWidth))
 		case child.Kind == cssbox.BoxInline || child.Kind == cssbox.BoxAnonInline:
 			// Descend into the inline element box; its text leaves carry the correct
 			// cascaded font/color. Inline-box decoration is deferred (see layoutInline).
@@ -220,22 +231,98 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 	}
 }
 
+// inlineBlockCBWidth returns the containing-block width to lay a width:auto inline-block
+// out against so it SHRINKS TO FIT its content (CSS 10.3.9) rather than filling the
+// parent's content width (the default resolveContentWidth auto behavior). It returns a
+// width W such that the auto branch (W - horiz) equals the shrink-to-fit content width
+//
+//	stf = min( max(min-content, available), max-content )
+//
+// where available = parentContentW - horiz (the inline-block's own margins/border/padding).
+// A specified (non-auto) width is left to resolveContentWidth — this returns parentContentW
+// unchanged so the specified width and its min/max clamp apply normally. Percentage widths
+// also pass through (resolved against parentContentW). Min/max-content are measured via the
+// memoized measure helpers (shared with table/grid sizing), so this adds no committed layout.
+func (e *Engine) inlineBlockCBWidth(ctx context.Context, b *cssbox.Box, parentContentW float64) float64 {
+	if _, isAuto := resolveLen(b.Style.Width, b.Style.FontSizePt, parentContentW); !isAuto {
+		return parentContentW // specified width: normal resolution + clamp
+	}
+	ed := usedEdges(b, parentContentW)
+	horiz := ed.mL + ed.mR + ed.bL + ed.bR + ed.pL + ed.pR
+	avail := parentContentW - horiz
+	if avail < 0 {
+		avail = 0
+	}
+	maxC := e.measureMaxContent(ctx, b)
+	minC := e.measureMinContent(ctx, b)
+	stf := avail
+	if minC > stf { // never narrower than min-content
+		stf = minC
+	}
+	if maxC < stf { // never wider than max-content
+		stf = maxC
+	}
+	if stf < 0 {
+		stf = 0
+	}
+	return stf + horiz
+}
+
 // atomicRunFor builds the inline.Run for an atomic inline-level box (inline-block
 // or replaced) whose border-box fragment is frag, resolving its horizontal margins
 // against basis. The atom's advance is marginL + borderWidth + marginR, with the
-// left margin recorded so the IFC offsets the fragment's border box past it; the
-// atom is bottom-aligned (baseline at its margin-box bottom) for now — full inline
-// vertical-align is deferred. Negative margins are honored (they may pull the atom
-// or following content leftward), matching the block flow's margin treatment.
+// left margin recorded so the IFC offsets the fragment's border box past it. Negative
+// margins are honored (they may pull the atom or following content leftward), matching
+// the block flow's margin treatment.
+//
+// The atom's baseline (BaselinePt, measured from its border-box top) follows CSS 2.1
+// §10.8.1 for vertical-align:baseline: it is the baseline of the atom's LAST in-flow
+// line box, UNLESS the atom has no in-flow line boxes or its overflow is not visible —
+// in which case it is the bottom margin edge (frag.H). So a replaced atom (an <img>: no
+// line boxes) and an overflow:hidden inline-block stay bottom-aligned, while a plain
+// inline-block with text aligns its text baseline with the surrounding line's baseline
+// (rather than resting its whole box on the baseline, which dropped the box too low and
+// inflated the line box). Full vertical-align keyword handling (sub/super/top/middle/…)
+// is still deferred — this fixes only the default-baseline case.
 func atomicRunFor(b *cssbox.Box, frag *Fragment, basis float64) inline.Run {
 	ed := usedEdges(b, basis)
+	baseline := frag.H // default: bottom margin edge (replaced, overflow≠visible, empty)
+	if !clips(b) {
+		if by, ok := lastInFlowLineBaseline(frag); ok {
+			baseline = by - frag.Y // distance from the border-box top to that baseline
+		}
+	}
 	return inline.Run{Atomic: &inline.AtomicItem{
 		WidthPt:      ed.mL + frag.W + ed.mR,
 		HeightPt:     frag.H,
 		MarginLeftPt: ed.mL,
-		BaselinePt:   frag.H, // bottom-aligned baseline for now
+		BaselinePt:   baseline,
 		Ref:          frag,
 	}}
+}
+
+// lastInFlowLineBaseline returns the page-frame Y of the baseline of the LAST in-flow
+// line box in frag's subtree (CSS 2.1 §10.8.1 "the baseline of its last line box in the
+// normal flow"), and whether one exists. A fragment that establishes an inline formatting
+// context carries its line boxes in Lines; a block-container fragment carries block
+// children, so the last line box is found by recursing into its last IN-FLOW child
+// (skipping out-of-flow positioned/floated children, which do not contribute a normal-flow
+// line box). Returns ok=false for an atom with no in-flow line box (e.g. a replaced image,
+// or an empty inline-block), so the caller falls back to the bottom margin edge.
+func lastInFlowLineBaseline(frag *Fragment) (float64, bool) {
+	if n := len(frag.Lines); n > 0 {
+		return frag.Lines[n-1].BaselineY, true
+	}
+	for i := len(frag.Children) - 1; i >= 0; i-- {
+		c := frag.Children[i]
+		if c.IsPositioned || c.IsFloat {
+			continue
+		}
+		if by, ok := lastInFlowLineBaseline(c); ok {
+			return by, true
+		}
+	}
+	return 0, false
 }
 
 // attrPx parses a width/height presentation attribute as a non-negative integer
@@ -371,10 +458,20 @@ func resolveLineHeight(lh gcss.Length, fontSizePt float64, line inline.Line) flo
 	}
 }
 
-// autoLineHeight is the "normal"/auto line height: the line's natural height
-// (ascent+descent+gap) times cssDefaultLineMult.
+// autoLineHeight is the "normal"/auto line height: the glyph extent
+// (ascent+descent) times cssDefaultLineMult, which supplies the leading.
+//
+// The font's own line GAP is deliberately NOT added: the bundled substitute faces (the
+// TeX Gyre family) report an anomalous hhea line gap of ~1.3–1.4 em, so adding it (and
+// then multiplying by the 1.15 leading factor) ballooned "normal" to ~3 em — a 16px line
+// came out ~49pt tall. Browsers compute "normal" from a font's ascent/descent (the Windows
+// or typo metrics), not a runaway hhea gap; (ascent+descent)×1.15 reproduces a
+// browser-comparable ~1.2 em for all three bundled families (mono ≈ 1.21, serif ≈ 1.54,
+// sans ≈ 1.65 em) without the bad gap. A real (small) line gap from a well-behaved embedded
+// font is likewise folded into the leading factor rather than added on top. (LineGapPt is
+// still tracked on the line for any future metric that wants the raw value.)
 func autoLineHeight(line inline.Line) float64 {
-	return (line.AscentPt + line.DescentPt + line.LineGapPt) * cssDefaultLineMult
+	return (line.AscentPt + line.DescentPt) * cssDefaultLineMult
 }
 
 // ascentOfLine returns the line's ascent used to place its baseline below the pen
@@ -429,4 +526,9 @@ func translateFragment(f *Fragment, dx, dy float64) {
 	for _, fl := range f.Floats {
 		translateFragment(fl, dx, dy)
 	}
+	// Move the page-space fields the fragment owns (clip rect, collapsed grid strips,
+	// positioned clip chains, and out-of-flow positioned descendants) by the same delta,
+	// AFTER the Children/Floats recursion so an abs/fixed Positioned entry — present only
+	// here, never in Children — moves exactly once. See shiftFragmentExtras.
+	shiftFragmentExtras(f, dx, dy)
 }

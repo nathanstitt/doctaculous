@@ -39,6 +39,13 @@ type gstate struct {
 	fillCS   colorSpace
 	strokeCS colorSpace
 
+	// fillTint/strokeTint hold the tint transform when the selected fill/stroke color
+	// space is a Separation or DeviceN (set by cs/CS, consulted by sc/scn). nil for
+	// every other color space. Copied by value (a shared *TintTransform pointer) on
+	// q/Q; the transform itself is immutable, so sharing it is safe.
+	fillTint   *TintTransform
+	strokeTint *TintTransform
+
 	// fillShading, when non-nil, is a shading pattern set as the fill "color" via
 	// scn under the /Pattern color space. A subsequent fill paints the shading
 	// clipped to the path instead of a solid color (see fillPath). It is cloned by

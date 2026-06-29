@@ -12,6 +12,22 @@ func TextPDF() []byte {
 	return buildSinglePage(content, `<< >>`)
 }
 
+// SeparationColorPDF returns a single-page PDF that fills a rectangle with a
+// Separation ("spot") color at full ink (scn 1). The /Separation color space's
+// tint-transform /Function (an inline Type 2 exponential) maps tint t to CMYK
+// (0,1,1,0)·t — so full ink (tint 1) is RED. A conformant renderer evaluates the tint
+// transform; the bug treated the single tint component as gray, rendering full ink as
+// WHITE. The rect is at user (100,100)-(300,250). This locks down Separation tint
+// transforms from the content stream through the rasterizer.
+func SeparationColorPDF() []byte {
+	// /CS1 = [/Separation /Spot /DeviceCMYK <tint fn>]; tint fn: C0=no ink, C1=CMYK red.
+	cs := "/CS1 [ /Separation /Spot /DeviceCMYK " +
+		"<< /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 1 1 0] /N 1 >> ]"
+	resources := fmt.Sprintf("<< /ColorSpace << %s >> >>", cs)
+	content := []byte("/CS1 cs 1 scn 100 100 200 150 re f")
+	return buildSinglePage(content, resources)
+}
+
 // VectorPDF returns a single-page PDF that fills a red rectangle and strokes a
 // blue diagonal line.
 func VectorPDF() []byte {
@@ -101,6 +117,37 @@ func (b *builder) addStreamForm(content []byte) int {
 	dictExtra := " /Type /XObject /Subtype /Form /BBox [0 0 200 200] " +
 		"/Matrix [1 0 0 1 50 50] /Resources << >>"
 	return b.addStream(dictExtra, content)
+}
+
+// FormBBoxClipPDF returns a single-page PDF whose form XObject declares a small
+// /BBox [0 0 50 50] but whose content fills a much larger 200x200 green square. A
+// conformant renderer clips the form's painting to its BBox (ISO 32000 §8.10.1), so
+// only the 50x50 region paints; the rest of the would-be 200x200 square stays white.
+// The form sits at the page origin (identity /Matrix, no page cm), so in user space the
+// BBox is (0,0)-(50,50) and the unclipped square would be (0,0)-(200,200). This locks
+// down the /BBox clip: a point inside the BBox is green, a point outside it (but inside
+// the drawn square) is white.
+func FormBBoxClipPDF() []byte {
+	b := newBuilder()
+
+	// The form fills a 200x200 green square — larger than its 50x50 BBox.
+	formContent := []byte("0 1 0 rg 0 0 200 200 re f")
+	dictExtra := " /Type /XObject /Subtype /Form /BBox [0 0 50 50] " +
+		"/Matrix [1 0 0 1 0 0] /Resources << >>"
+	form := b.addStream(dictExtra, formContent)
+
+	pageContent := []byte("/Fm0 Do")
+	content := b.addStream("", pageContent)
+	resources := fmt.Sprintf("<< /XObject << /Fm0 %d 0 R >> >>", form)
+
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources %s /Contents %d 0 R >>",
+		pagesNum, resources, content))
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
 }
 
 // AlphaPDF returns a single-page PDF exercising ExtGState constant alpha. It

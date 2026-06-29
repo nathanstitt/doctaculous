@@ -138,6 +138,9 @@ type ImageContent struct {
 	Img            image.Image
 	CX, CY, CW, CH float64
 	Fit            layout.ObjectFit
+	// PosX, PosY are the object-position as fractions of the content box's free space
+	// (0.5/0.5 = centered, the default). See layout.ImageItem.
+	PosX, PosY float64
 }
 
 // BorderEdge is one side of a fragment's border box. A zero edge (Width == 0 or
@@ -228,10 +231,16 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 			dst = f.appendBand(dst, ord.positives, true, false) // escaped positives, unclipped
 			return dst
 		}
-		// Non-clipping stacking context / BFC: negatives BEFORE decorations, then the
-		// 3-phase in-flow sequence, then middle, then positives.
+		// Non-clipping stacking context / BFC. CSS 2.1 Appendix E order: the context's
+		// OWN background/border first, THEN negative-z descendants (which paint behind the
+		// in-flow content but in front of this box's own background), then child
+		// decorations, the float layer, in-flow content, the z:auto/0 middle, and positives.
+		// (Own decorations must precede negatives — a z-index:-1 positioned descendant peeks
+		// out behind the in-flow content but is NOT hidden by this box's own background. The
+		// clipping branch above already orders it this way.)
+		dst = f.appendSelfDecorations(dst)
 		dst = f.appendBand(dst, ord.negatives, false, false)
-		dst = f.appendDecorations(dst)
+		dst = f.appendChildDecorations(dst)
 		dst = f.appendFloatLayer(dst)
 		dst = f.appendContent(dst)
 		// Collapsed border-collapse grid lines paint after all cell backgrounds and
@@ -386,7 +395,8 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			Image: layout.ImageItem{
 				Img: f.Image.Img,
 				XPt: f.Image.CX, YPt: f.Image.CY, WPt: f.Image.CW, HPt: f.Image.CH,
-				Fit: f.Image.Fit,
+				Fit:  f.Image.Fit,
+				PosX: f.Image.PosX, PosY: f.Image.PosY,
 			},
 		})
 	}
@@ -417,9 +427,10 @@ func (f *Fragment) edgeStrip(s layout.EdgeSide, e BorderEdge) layout.BorderItem 
 // the fragment (and its subtree, incl. any abs-pos descendant on its Positioned
 // layer) just emitted via AppendItems — so the whole positioned subtree rides the
 // relative shift. Every coordinate-bearing item kind carries XPt/YPt
-// (Background/Border/Glyph/Image), so a uniform per-item translate is exact. This
-// keeps AppendItems a pure read of the fragment tree: only the freshly-appended dst
-// items are moved, never a Fragment.
+// (Background/Border/Glyph/Image, plus a ClipPushKind's rect when the offset box or a
+// descendant establishes an overflow clip), so a uniform per-item translate is exact;
+// ClipPopKind has no coordinates. This keeps AppendItems a pure read of the fragment
+// tree: only the freshly-appended dst items are moved, never a Fragment.
 func translateItems(dst []layout.Item, start int, dx, dy float64) {
 	for i := start; i < len(dst); i++ {
 		switch dst[i].Kind {
@@ -435,6 +446,16 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 		case layout.ImageKind:
 			dst[i].Image.XPt += dx
 			dst[i].Image.YPt += dy
+		case layout.ClipPushKind:
+			// A clip established by the offset box itself (overflow≠visible) or by an
+			// overflow box inside its subtree rides the paint-time offset with the content
+			// it clips. The range [start:] excludes the fixed ancestor-clip pushes a
+			// positioned entry passed through (appendBand emits those BEFORE start), so only
+			// the box's own / descendant clips move — exactly what CSS 9.4.3 requires.
+			dst[i].Rule.XPt += dx
+			dst[i].Rule.YPt += dy
+		case layout.ClipPopKind:
+			// No coordinates; nothing to translate (paired with its ClipPushKind).
 		}
 	}
 }
@@ -545,8 +566,9 @@ func (f *Fragment) appendBand(dst []layout.Item, band []positionedEntry, filterC
 }
 
 // Page returns a single Page sized widthPt × heightPt whose Items are the flattened
-// drawing primitives of the fragment tree rooted at f. This is the single-tall-page
-// output model; real pagination is a later sub-project. It feeds the same
+// drawing primitives of the fragment tree rooted at f. It is called once for the
+// single-tall-page output model and once per page by the pagination pass (paginate),
+// which flattens each page's shallow-cloned root wrapper. It feeds the same
 // paint.PaintPage path as the flat (DOCX) engine's output.
 func (f *Fragment) Page(widthPt, heightPt float64) layout.Page {
 	return layout.Page{

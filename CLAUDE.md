@@ -1,10 +1,10 @@
 # Doctaculous
 
 Pure-Go, MIT-licensed document toolkit. Long-term goal: convert any document to any other format,
-author/sign PDF/DOCX/EPUB/HTML, and rasterize pages to images. **Current focus: high-fidelity PDF
+author/sign PDF/DOCX/HTML, and rasterize pages to images. **Current focus: high-fidelity PDF
 page rasterization.** The core pipeline (parse → interpret → raster) is working end-to-end and
 renders real-world PDFs faithfully; see "Status & roadmap" at the bottom for what's done and what's
-next.
+next. (**EPUB is out of scope** — see the out-of-scope note at the bottom.)
 
 ## Non-negotiable constraints
 
@@ -24,7 +24,7 @@ next.
 `pkg/render` device-independent paint ops (`Device` interface) · `pkg/render/raster` bitmap
 backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 
-**Reflowable documents** (DOCX today; HTML/EPUB next) share a second pipeline that meets the PDF
+**Reflowable documents** (DOCX and HTML) share a second pipeline that meets the PDF
 pipeline at `render.Device`. During the HTML-rendering program there are **two box models**: the
 existing **flat** model (`pkg/layout/box.Document` — DOCX's `pkg/docx` parse → `pkg/docx/style`
 cascade → `pkg/docx/lower` → `pkg/layout` reflow engine → `pkg/layout/paint`), and a **recursive,
@@ -38,7 +38,7 @@ lowering onto `cssbox` and retires the flat model, so one recursive engine drive
 Font outlines for both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces
 for reflow); `pkg/layout/font` caches them.
 
-The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML/EPUB)
+The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML)
 must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
 interpretation, or layout.
 
@@ -116,11 +116,15 @@ what is done vs. pending.
 - **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors), CCITTFax
   (Group 4 / Group 3 1D+2D, `pkg/pdf/filter/ccitt.go`). DCTDecode (JPEG) decoded at image-draw time.
 - **Content interpreter**: full path construction/painting, graphics state (`q/Q/cm/w/J/j/M/d`),
-  device color (`g/rg/k/cs/sc/scn`), clipping (`W/W*`), text operators, `Do` XObjects.
+  device color (`g/rg/k/cs/sc/scn`), **Separation/DeviceN spot color** (`sc`/`scn` mapped through the
+  tint-transform `/Function` to the alternate space — fidelity fix J1, via `Resources.ColorSpace`), clipping
+  (`W/W*`), text operators (incl. **text render modes** — fill/stroke/invisible/clip-only per `Tr`; fidelity
+  fix J4, with text-clip accumulation for modes 4–7 still deferred), `Do` XObjects.
 - **Fills**: nonzero and even-odd winding (the even-odd rasterizer is hand-rolled, dep-free).
 - **Strokes**: line joins (miter/round/bevel + miter limit), caps (butt/round/square), and dashes,
   via `github.com/srwiley/rasterx` (`pkg/render/raster/stroke.go`).
-- **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard.
+- **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard, and the mandatory
+  `/BBox` clip (ISO 32000 §8.10.1 — clipped to the BBox rectangle through the form CTM; fidelity fix J2).
 - **Fonts** (via `github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), symbolic subset
   TrueType (raw-code / code-as-GID glyph lookup), and non-embedded base-14 fonts via bundled
@@ -143,11 +147,15 @@ what is done vs. pending.
   (PatternType 1) remain pending (see TODO).
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
   1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
-  stencils painted in the fill color, `/Decode` arrays, and inline images (`BI`/`ID`/`EI`)
-  (`pkg/render/raster/image.go`, `page.go`).
+  stencils painted in the fill color, `/Decode` arrays (on BOTH the raw-sample AND the DCT/JPEG path — the
+  DCT path honors a non-identity `/Decode`, e.g. an Adobe CMYK JPEG's inverting `[1 0 …]`; fidelity fix J3),
+  and inline images (`BI`/`ID`/`EI`) (`pkg/render/raster/image.go`, `page.go`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
-  kill a batch.
+  kill a batch (the PDF render path recovers in `raster.RenderPage`, returning the partially-painted page
+  on a panic; the reflow engines recover in `css.Engine`/`layout`). Crafted-PDF panic sites are also
+  guarded directly (a malformed single-element image `/ColorSpace` array, a self-referential Type 3
+  function) so they degrade rather than relying on the recover alone.
 - **Reflowable documents — DOCX** (covered by `testdata/gen/docx` fixtures + `pkg/doctaculous`
   `docx-*` golden images): open a `.docx` via `OpenDOCX`/`OpenDOCXBytes` and rasterize its pages
   through the shared reflow engine. Parsing (`pkg/docx`): ZIP/OPC container, relationship + main-part
@@ -225,7 +233,12 @@ what is done vs. pending.
   drops the baseline below it without the line-height leading multiplier scaling the atom). An
   undecodable/404/missing-`src`/unsupported-format image degrades to a sized placeholder (reserves its
   box, paints nothing) + debug log, never panicking; recovery is at the page boundary. See
-  `docs/superpowers/specs/2026-06-24-html-replaced-images-design.md`.
+  `docs/superpowers/specs/2026-06-24-html-replaced-images-design.md`. **(Fidelity fix B1:)** a
+  `display:block` replaced box now genuinely **stacks as a block** — previously `isBlockLevelOuter` and the
+  block stacker's child guard read `Kind.IsBlockLevel()` (always false for `BoxReplaced`), so a `display:block
+  <img>` was treated inline-level and flowed on the text line (or was skipped). `isBlockLevelOuter` now reads a
+  replaced box's outer level from its display, and the stacker accepts a block-level replaced child
+  (`isBlockLevelReplaced`); covered by `TestReplacedBlockStacksAsBlock` + the `block-img` reftest.
 - **HTML rendering — floats + clear** (`pkg/layout/css/floats.go`, extended `block.go`/`inline.go`/
   `fragment.go`, `pkg/layout/inline` `BreakNext`, `pkg/css` `float`/`clear`; covered by float-context
   geometry unit tests, fragment-geometry assertions, the `html-float-figure` golden, and the
@@ -325,8 +338,15 @@ what is done vs. pending.
   *absolute/fixed* intervening-clip case was found to be **not a gap** — CSS 2.1 §11.1.1 does not clip an
   abs/fixed descendant whose CB is an ancestor of the overflow box, so 5c's "escape" was already correct (no
   clip-ancestor threading was needed). Covered by `clipescape_layout_test.go`, the `html-clip-relative-escape`
-  golden, and the `positioned-clip-relative` WPT reftest. See
-  `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
+  golden, and the `positioned-clip-relative` WPT reftest. The pagination **fidelity pass** corrected two
+  Appendix-E defects here: (1) in the **non-clipping** `AppendItems` branch the context's own
+  background/border was emitted AFTER its negative-z descendants, so a `z-index:-1` positioned child was hidden
+  behind a host that has its own background — now own decorations paint first, then negatives (matching the
+  clipping branch), covered by `TestZNegativeBehindHostOwnBackground` + the `html-zindex-neg-behind-own-bg`
+  golden; and (2) `translateItems` (which applies a `position:relative` box's paint-time offset over its
+  flattened item range) did not translate `ClipPushKind`, so a relative box with `overflow:hidden` (or
+  containing an overflow box) moved its content but not its clip — now the clip rides the offset
+  (`TestRelativeOffsetMovesOwnClip`). See `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
 - **HTML rendering — CSS 2.1 §17 table layout** (`pkg/layout/css/table.go` + `tableborder.go` (new),
   `pkg/layout/css/tablefix.go` + `measure.go` (new), extended `pkg/layout/css/build.go`/`block.go`/
   `fragment.go`/`anon.go`, `pkg/layout/cssbox` display kinds + `BoxAnonTablePart`, `pkg/html/ua.go` table
@@ -499,8 +519,9 @@ what is done vs. pending.
 - **HTML rendering — pagination (fixed-height page fragmentation)** (`pkg/layout/css/paginate.go` (new) +
   `pkg/css` `break-before`/`break-after` on `ComputedStyle`, `pkg/doctaculous` `WithPageSize` +
   `LetterWidthPt`/`LetterHeightPt`; covered by `paginate_test.go` bucketing + page-count + degradation +
-  positioned-distribution unit tests, `pagination_test.go` end-to-end, and the `html-paginate-p{0,1}`
-  multi-page goldens): a document can now be **split into fixed-height pages**. `WithPageSize(w, h)` on
+  positioned-distribution + nested-relative + body-border-fragmentation unit tests, `pagination_test.go`
+  end-to-end, and the `html-paginate-p{0,1}` + `html-paginate-body-border-p{0,1,2}` multi-page goldens): a
+  document can now be **split into fixed-height pages**. `WithPageSize(w, h)` on
   `OpenHTML`/`OpenHTMLBytes`/`OpenURL` opts in — the document lays out at width `w` and is sliced into
   `h`-tall `layout.Page`s; **without it the output is a single tall page (byte-identical to before** — the
   whole existing golden/reftest corpus is unchanged, since no existing call passes the option and `pageH<=0`
@@ -513,18 +534,38 @@ what is done vs. pending.
   pages, breaking **between blocks** on height overflow (strict `>`, so an exact-fit block stays) and at
   **forced** `break-before`/`break-after: page|always`, with no leading/trailing empty page for a forced break
   on the first/last block); per-page **shift** to local Y 0 via the existing `shiftFragments`; and a shallow
-  **clone of the root/body wrapper** per page. **`position:relative` blocks paginate normally** — a relative
-  top-level block is in flow (bucketed) but also lifted into the positioned layer for painting, so
-  `splitPositionedByPage` routes its positioned entry to the page its block landed on (the entry is the same
-  `*Fragment` pointer, so the shift comes for free). Degrades gracefully (no panic, logged where applicable):
-  a **block taller than a page overflows** its page rather than splitting (clipped by the page bitmap); the
-  page bitmap is `pageH` tall, so over-tall content is cut at the page bottom; **absolute/fixed** boxes (and
-  abs/fixed descendants of a relative block) are **not** distributed across pages — they ride the first page
-  at their original Y; and **mid-line / mid-table-row / mid-flex-or-grid-item splits, widows/orphans,
-  `break-inside`, `@page` size/margins, and running headers/footers** are deferred (each a no-op, never a
-  crash). **No new dependency** (stdlib). This is sub-project 12 of the HTML-rendering roadmap — the last
-  engine-shaped feature (EPUB depends on it). See
-  `docs/superpowers/specs/2026-06-28-html-pagination-design.md`.
+  **clone of the root/body wrapper** per page. **`position:relative` blocks paginate normally** — a top-level
+  relative block (in flow, hence bucketed, but lifted into the positioned layer for painting) is routed by
+  `splitPositionedByPage` to its bucket's page; a relative block **nested under a static wrapper** is routed to
+  its nearest top-level ancestor block's page (the wrapper's subtree is shifted onto that page), so it does not
+  vanish; and a relative block's **abs-positioned descendants, its own overflow clip rect, and its collapsed
+  table grid** all follow it to its page because `shiftFragment`/`translateFragment` move every page-space field
+  a fragment owns (not just `Children`/`Floats` — `Positioned`, `ClipRect`, `Collapsed`, and the
+  `PositionedInfo` clip chains too). The **html/body wrapper's border and background are fragmented per page**
+  (the per-page wrapper clone is shifted into the page's local frame, so the page bitmap clips it: the top edge
+  on page 0, the bottom on the last page, the side edges on every page; the first page's top is pulled up to the
+  wrapper's border-box top so a `<body>` top border shows on page 0 with content below it). Degrades gracefully
+  (no panic, logged where applicable): a **block taller than a page overflows** its page rather than splitting
+  (clipped by the `pageH`-tall page bitmap; logged per over-tall block); and **mid-line / mid-table-row /
+  mid-flex-or-grid-item splits, widows/orphans, `break-inside`, per-page float distribution, per-page
+  bottom-anchored `fixed`, mid-block forced breaks, `@page` size/margins, and running headers/footers** are
+  deferred (each a no-op, never a crash). **No new dependency** (stdlib). This is sub-project 12 of the
+  HTML-rendering roadmap — the last engine-shaped feature. The post-ship **fidelity pass**
+  fixed the abs-descendant-of-a-paginated-relative-block Y bug and its latent root cause (the `shiftFragment`
+  page-space-field omission — which also fixed two pre-existing base-engine bugs: a `border-collapse` table and
+  an `overflow:hidden` box placed below other content painted their grid lines / clip rect detached), the
+  body-border-on-every-page artifact, the vanishing-nested-relative-block bug, a
+  negative-z-paints-behind-own-background stacking bug, and the relative offset not moving an overflow clip.
+  A second **fidelity pass (bundle)** then took on three of the larger deferrals that fit the post-pass model:
+  a **page-CB `position:absolute` box is distributed to the page whose band contains its top** (shifted into
+  that page's local frame) instead of riding page 0; a **`position:fixed` box repeats on every page** (the same
+  read-only fragment shared per page — its `frag.Y` is already viewport-relative, so no per-page shift); a
+  **forced break on content at a top-level block's leading/trailing edge is propagated to that block** (so a
+  nested `break-before:page` splits as expected — only a genuinely *mid-block* forced break stays deferred,
+  warned once); and a block's **leading top margin is retained at an unforced/overflow break** (the page top is
+  pulled up by the margin so the block lands at local Y == its margin; a forced break still truncates it). See
+  `docs/superpowers/specs/2026-06-28-html-pagination-design.md` and
+  `docs/superpowers/specs/2026-06-28-html-pagination-fidelity-bundle-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -548,7 +589,7 @@ that skip into real output.
    metrics.
 5. **DOCX features (reflow frontend)** — each a new `testdata/gen/docx` fixture + golden in the same
    PR; add new box-model vocabulary to `pkg/layout/box` (engine track) before the DOCX frontend
-   emits it, so HTML/EPUB get it for free. In rough order: **lists/numbering** (`numbering.xml`,
+   emits it, so HTML gets it for free. In rough order: **lists/numbering** (`numbering.xml`,
    per-level counters, marker glyphs), **tables** (`w:tbl`, grid + column-width solve, spans, cell
    content recursion — the biggest engine addition), **images** (`w:drawing`→`a:blip`→media,
    PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
@@ -561,36 +602,48 @@ that skip into real output.
    **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9),
    **CSS Grid (explicit grid)** (sub-project 10), **`OpenURL` + the HTTP `ResourceLoader`**
    (sub-project 11), and **pagination (fixed-height page fragmentation)** (sub-project 12) are done — see the
-   Done section). Roughly in order, each a parse/layout slice with its own fixtures + golden/WPT tests:
-   **EPUB** (`OpenEPUB`, ZIP + OPF spine reusing the HTML frontend per chapter — wants pagination, now done,
-   first); and **CSS paged media** (`@page` size/margins/named pages, `break-inside`, widows/orphans, running
-   headers/footers — the bounded pagination slice ships `WithPageSize` + between-block breaks + forced
-   `break-before`/`break-after`, deferring these). Positioning fidelity
-   follow-ups within the existing engine: the **precise static-position solve** for an all-`auto`-offset
-   abs box (today approximates to the containing block's top-left), abs `width:auto` **shrink-to-fit**
-   (today fills the containing block), abs `margin:auto` centering, a percentage `top`/`bottom` against
-   an auto-height containing block, a `bottom`-only auto-height abs box (positioned against a provisional
-   height today), and `position:relative` on a **text-only inline box** (a no-op today — needs inline-box
-   fragments). Replaced-content fidelity follow-ups: `object-position`, the ratio-preserving min/max
-   sizing step (CSS 10.4; today min/max clamps per-axis after ratio derivation), a percentage `height`
-   basis on replaced elements (today treated as auto), and CSS `background-image` decode. General
-   inline/flow follow-ups still open: full `vertical-align` keyword set (only the atom baseline
-   mechanics landed), `margin:auto` centering, and the deferred margin-collapse edge cases (empty-block
-   collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
+   Done section). The one remaining non-fidelity slice is **CSS paged media** (`@page` size/margins/named pages,
+   `break-inside`, widows/orphans, running headers/footers — the bounded pagination slice ships `WithPageSize` +
+   between-block breaks + forced `break-before`/`break-after`, deferring these). **(EPUB is out of scope — see
+   the out-of-scope note at the bottom.)** Positioning — landed fidelity fixes:
+   **C2** abs `width:auto` **shrink-to-fit** (`min(max(min-content, available), max-content)` via
+   `absShrinkToFitWidth`, threaded into both placement and interior layout — a right-anchored box's left edge
+   stays consistent), and **C3** abs `margin:auto` centering (`distributeAbsMargins` splits the over-constrained
+   leftover space). Still open: the **precise static-position solve** for an all-`auto`-offset abs box (C1 —
+   approximates to the CB top-left, logged; needs threading the hypothetical in-flow position), a percentage
+   `top`/`bottom` against an auto-height containing block (C4 — edge case), a `bottom`-only auto-height abs box
+   (C5 — needs a vertical shrink-to-fit HEIGHT, the single-axis-measurement limitation), and `position:relative`
+   on a **text-only inline box** (C6 — a no-op; inline boxes generate no fragment to carry the offset). Replaced-content — landed fidelity fixes: **D1** `object-position` (the fitted image shifts
+   within the content box for contain/none/scale-down; parsed keywords + percentages into `ObjectPositionX/Y`,
+   applied in `fitDest`), **D2** the ratio-preserving min/max sizing step (CSS 10.4 `constrainRatio` — a single
+   violated min/max bound scales the other axis to preserve the intrinsic ratio; both-dims-explicit still clamps
+   per-axis). Still open: a percentage `height` basis on replaced elements (D3 — deferred, needs a definite
+   containing-block height threaded through the width/single-axis engine; treated as auto today), and CSS
+   `background-image` decode (D4 — deferred feature slice; `background` keeps color only). General
+   inline/flow — landed fidelity fixes: **B2** (a `vertical-align:baseline` inline-block WITH text aligns its
+   last in-flow line box's baseline per CSS 2.1 §10.8.1 via `atomicRunFor`/`lastInFlowLineBaseline`, instead of
+   resting its whole border box on the baseline; a replaced/empty/`overflow≠visible` atom stays bottom-aligned),
+   **E4** (an `width:auto` inline-block SHRINKS TO FIT its content per CSS 10.3.9 via `inlineBlockCBWidth` rather
+   than filling the line), **E5** (`autoLineHeight` no longer adds the font line gap — the bundled TeX Gyre faces
+   report an anomalous ~1.3–1.4 em hhea gap that ballooned "normal" to ~2× height; it is now
+   `(ascent+descent)×1.15`, browser-comparable), and **E6** (the `font` shorthand, `font: 20px monospace`,
+   expands to its longhands). Still open: full `vertical-align` keyword set (only atom-baseline mechanics + B2's
+   default-baseline case landed), `margin:auto` centering, and the deferred margin-collapse edge cases
+   (empty-block collapse-through, clearance, `min-height` interaction). Table fidelity follow-ups within the existing
    engine: **RTL/`direction`** (the sole table deferral — parsed but not acted on, LTR column order
    always, logged; needs the general bidi/`direction` support the engine lacks entirely);
    (**table-cell `vertical-align: baseline`** shared-row baseline is now **real** — resolved by the grid
-   slice's baseline backport, was treated as top; one localized approximation remains — a rowspan cell
-   whose spanned-into row grows from baseline does not re-grow); the
-   **six table background layers** (table → column-groups → columns → row-groups → rows → cells — today
-   cell + table backgrounds paint, but `<col>`/row-group background layering is not modeled); the
-   **`empty-cells` property** (always rendered as `show`); a **percentage `<col>` width with no cells in
-   its column**; higher-fidelity 3D border styles in collapse (`ridge`/`groove`/`outset`/`inset`
-   render as `solid`); the **percentage-column basis is computed slightly differently in fixed
-   (border-spacing included) vs auto (excluded)** layout — only observable with `border-spacing > 0`
-   plus percentage columns, and off by the spacing amount; and **`buildCollapsedBorders` is O(cells²)**
-   (a per-neighbor linear scan — fine for normal tables, a perf cliff for very large collapsed grids;
-   retain `buildGrid`'s occupancy map to make it O(1)). Web-font fidelity follow-ups within the existing
+   slice's baseline backport, was treated as top; one localized approximation remains, F8 — a rowspan cell
+   whose spanned-into row grows from baseline does not re-grow, deferred (needs the cross-row re-solve the
+   design avoids)); **Landed fidelity fixes:** **F2** the six table background layers (table → column-groups → columns →
+   row-groups → rows → cells) now all paint — `<col>`/`<colgroup>`/`<tr>`/row-group backgrounds emit behind the
+   cells in CSS 17.5.1 order (`backgroundLayers`); **F3** `empty-cells:hide` (an empty cell in separate-borders
+   mode suppresses its border/background); **F4** a percentage `<col>` with no originating cell reserves its
+   width (verified already-correct, locked by test); **F5** the 3D border styles `ridge`/`groove`/`outset`/
+   `inset` now render as real bevels (new `BorderStyle` enum values + paint, shared by collapse AND non-collapse
+   borders — non-collapse previously rendered them as nothing); **F6** a percentage column width in fixed layout
+   now resolves against `contentW - border-spacing` (matching auto), no longer over-sized by the spacing; **F7**
+   `buildCollapsedBorders` is now O(1) per neighbor (the occupancy scan retains a `cellMap`). Web-font fidelity follow-ups within the existing
    engine: **synthetic bold/oblique** (a `@font-face` family supplying only one weight/style falls back to
    the bundled substitute for the missing variant rather than algorithmically emboldening/slanting the
    downloaded face — note the bundled substitutes themselves still ship regular-only, see item 4);
@@ -604,10 +657,11 @@ that skip into real output.
    Flexbox fidelity follow-ups within the existing engine: **multi-line flex** (`flex-wrap: wrap`/
    `wrap-reverse` + `align-content`, the big one — currently single-line `nowrap` with overflow);
    **RTL/`direction`** on a row (LTR only — logged; needs the general bidi support the engine lacks);
-   the **line cross size clamped to a definite container cross size** (today the line cross size is the
-   max item's cross size — so `align-items: center`/`flex-end` align within the tallest item's extent,
-   not the container's definite `height`/`width` when one is set; the `flex-align-center` reftest
-   reflects this); the **column `flex-basis: auto`/`content` height** (today uses the item's
+   (**fidelity fix H3:** the **line cross size is now the container's definite cross size** when set — for a
+   single-line container `flexCrossSize` returns the definite `height` (row) / `width` (column), so
+   `align-items: center`/`flex-end` align within the container's extent, not the tallest item's; the
+   `flex-align-center` golden + reftest reference were corrected to the browser-accurate offsets); the
+   **column `flex-basis: auto`/`content` height** (today uses the item's
    max-content width as the main-axis proxy — a documented approximation; exact column content height
    is the 9b refinement); and the **`flex-grow`/`shrink` scale factors for cross-axis gaps** (`row-gap`
    for `row*` is a no-op on a single line — correct per spec, but worth revisiting when multi-line
@@ -622,9 +676,10 @@ that skip into real output.
    (LTR only — logged; needs the general bidi support the engine lacks); the **row-track content-height
    width-proxy** (an `auto`/min/max-content ROW track sizes to content via `measureMaxContent`, which
    returns a WIDTH — the same documented approximation flexbox and tables carry for vertical content
-   sizing); the **conservative baseline-group extra** (`alignBaselineGroup` grows a row/line by the
-   largest downward shift, a safe upper bound that can slightly over-expand when a shifted item is shorter
-   than its baseline distance); a **rowspan cell whose *spanned-into* (not origin) row grows from baseline**
+   sizing); (**fidelity fix I5:** `alignBaselineGroup` now returns the **EXACT** baseline-group extra —
+   `max(bottom after shift) − max(bottom before shift)` — instead of the largest single shift, so a row/line is
+   no longer over-expanded when the most-shifted item is not the one reaching lowest); a **rowspan cell whose
+   *spanned-into* (not origin) row grows from baseline**
    does not re-grow (a localized approximation — the cross-row re-solve is out of scope); **`subgrid`**
    (parsed-and-ignored → `none`); and **`repeat(auto-fill/auto-fit)`** is supported but the
    auto-fit empty-track *collapse* is approximate. Multi-line/masonry are not in scope.
@@ -633,13 +688,22 @@ that skip into real output.
    Pagination fidelity follow-ups within the existing engine (the bounded slice breaks **between top-level
    blocks only**, post-pass): **mid-box fragmentation** (a block taller than a page overflows rather than
    splitting); **mid-line / mid-table-row / mid-flex-or-grid-item splits**; **widows/orphans**;
-   **`break-inside: avoid`** and **`break-*: avoid`** (parsed onto `ComputedStyle` but not acted on);
-   **per-page distribution of absolute/fixed content** (today abs/fixed — incl. an abs descendant of a
-   relative block — ride the first page; only `position:relative` top-level blocks paginate, and `fixed`
-   does not yet repeat on every page); **`@page`** size/margins/named pages (page size comes only from
-   `WithPageSize`; margins are zero); and **running headers/footers**. Note `WithPageSize(w,h)` sets the
-   layout **width** to `w` (not a pure "slice what's already laid out"), so switching a default render to a
-   different page width reflows the document.
+   **`break-inside: avoid`** and **`break-*: avoid`** (parsed onto `ComputedStyle` but not acted on); **per-page
+   distribution of floats** (a top-level float rides page 0); **per-page bottom-anchored `fixed`** (a `fixed`
+   box now repeats on every page, but a `bottom`-anchored one is positioned against the single-tall height, so
+   it sits at the document bottom, not each page's bottom — the per-page `resolveAbsolute` height is the fix);
+   **honoring a MID-BLOCK forced break on a nested block** (an edge break is now propagated to the top-level
+   ancestor; a genuinely mid-block one is still warned-once and dropped — needs mid-box fragmentation to split
+   the block); **`@page`** size/margins/named pages (page size comes only from `WithPageSize`; margins are
+   zero); and **running headers/footers**. Done in the fidelity passes: per-page distribution of relative blocks
+   (incl. nested) + their abs descendants/clip/collapsed grid, **per-page fragmentation of the html/body border
+   + background**, **per-page distribution of page-CB `position:absolute`** (routed by its top's Y-band), a
+   **`position:fixed` box repeating on every page**, **propagating a forced break on a top-level block's
+   leading/trailing-edge nested content** to that block, and **retaining a leading margin-top at an unforced
+   break** (a forced break still truncates it). Note `WithPageSize(w,h)` sets the layout **width** to `w` (not a
+   pure "slice what's already laid out"), so switching a default render to a different page width reflows the
+   document.
 
-Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
+Out-of-scope, don't gold-plate without a concrete need: **EPUB** (`OpenEPUB` / ebook reading — explicitly
+descoped; the HTML pipeline is the reflow target), full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.

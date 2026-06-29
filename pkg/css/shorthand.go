@@ -532,3 +532,167 @@ func applyBackground(cs *ComputedStyle, value string) {
 		}
 	}
 }
+
+// parseObjectPosition parses a CSS object-position value into (x, y) fractions of the
+// content box's free space [0,1] (0=left/top, 0.5=center, 1=right/bottom). It handles the
+// common forms: one or two space-separated components, each a keyword (left/center/right
+// for x; top/center/bottom for y) or a percentage. A single component sets that axis and
+// centers the other. Two keyword components may appear in either order (x/y keywords are
+// disjoint); a percentage pair is x then y. Lengths and 3/4-value forms are not supported
+// (ok=false, leaving the initial 50% 50%).
+func parseObjectPosition(value string) (x, y float64, ok bool) {
+	comps := splitComponents(value)
+	if len(comps) == 0 || len(comps) > 2 {
+		return 0, 0, false
+	}
+	x, y = 0.5, 0.5
+	pctSeen := 0 // how many percentage components consumed (first → x, second → y)
+	apply := func(c string) bool {
+		switch c {
+		case "left":
+			x = 0
+		case "right":
+			x = 1
+		case "top":
+			y = 0
+		case "bottom":
+			y = 1
+		case "center":
+			// leaves both axes at their current value (default 0.5)
+		default:
+			f, isPct := pctFraction(c)
+			if !isPct {
+				return false
+			}
+			if pctSeen == 0 {
+				x = f
+			} else {
+				y = f
+			}
+			pctSeen++
+		}
+		return true
+	}
+	for _, c := range comps {
+		if !apply(c) {
+			return 0, 0, false
+		}
+	}
+	return x, y, true
+}
+
+// pctFraction parses a percentage token (e.g. "25%") into a fraction [0,1]; ok=false for
+// a non-percentage.
+func pctFraction(s string) (float64, bool) {
+	if l, parsed := parseLength(newTokenizer(s).next()); parsed && l.Unit == UnitPercent {
+		return l.Value / 100, true
+	}
+	return 0, false
+}
+
+// fontKeywordSizes are the CSS absolute-size keywords recognized in the `font`
+// shorthand's size slot, mapped to a px value (a coarse scale; the exact CSS
+// medium-relative ratios are not modeled). Relative sizes (larger/smaller) and the
+// system-font keywords (caption/menu/…) are not supported and leave the shorthand's
+// size unset.
+var fontKeywordSizes = map[string]float64{
+	"xx-small": 9,
+	"x-small":  10,
+	"small":    13,
+	"medium":   16,
+	"large":    18,
+	"x-large":  24,
+	"xx-large": 32,
+}
+
+// expandFont expands the CSS `font` shorthand into its longhand declarations, applied
+// in order through applyDeclaration so normal cascade semantics hold (a later longhand
+// still overrides, and vice-versa). The supported grammar is the CSS 2.1 form
+//
+//	[ <style> || <variant> || <weight> ]?  <size>[ / <line-height> ]?  <family>
+//
+// where <size> and <family> are mandatory. The size is the first component that is a
+// length or an absolute-size keyword; components before it that are a weight
+// (bold / 100–900) or style (italic / oblique) set font-weight / font-style (variant
+// is ignored), and every component after the size is the family list. A size component
+// may carry an inline line-height as size/line-height. The system-font keywords
+// (caption / icon / menu / …) and the global keywords (inherit / initial) are not
+// expanded — the shorthand is dropped, leaving the longhands intact. A shorthand with
+// no resolvable size or no family is left unapplied (treated as invalid), matching how
+// browsers reject a malformed font shorthand.
+func expandFont(cs *ComputedStyle, value string) {
+	comps := splitComponents(value)
+	if len(comps) < 2 {
+		return // need at least size + family
+	}
+	// Locate the size component: the first one that resolves to a length or an
+	// absolute-size keyword (its left side, if it carries /line-height).
+	sizeIdx := -1
+	for i, c := range comps {
+		sizePart, _, _ := strings.Cut(c, "/")
+		if _, ok := fontSizeValue(sizePart); ok {
+			sizeIdx = i
+			break
+		}
+	}
+	// A valid font shorthand needs a size and at least one family component after it.
+	if sizeIdx < 0 || sizeIdx == len(comps)-1 {
+		return
+	}
+
+	// Components before the size: weight / style (any order; variant ignored).
+	for _, c := range comps[:sizeIdx] {
+		switch {
+		case isFontWeightToken(c):
+			applyDeclaration(cs, Declaration{Property: "font-weight", Value: c})
+		case c == "italic" || c == "oblique":
+			applyDeclaration(cs, Declaration{Property: "font-style", Value: c})
+		}
+		// "normal", "small-caps", and other variant/normal tokens carry no longhand here.
+	}
+
+	// The size (and optional inline line-height). Resolve the size HERE (it may be an
+	// absolute-size keyword the font-size longhand does not accept) and set it directly,
+	// px:pt 1:1 like the longhand.
+	sizePart, lhPart, hasLH := strings.Cut(comps[sizeIdx], "/")
+	if v, ok := fontSizeValue(sizePart); ok {
+		cs.FontSizePt = v
+	}
+	if hasLH && lhPart != "" {
+		applyDeclaration(cs, Declaration{Property: "line-height", Value: lhPart})
+	}
+
+	// Everything after the size is the family list (re-join with spaces; the family
+	// longhand reads the first family).
+	family := strings.Join(comps[sizeIdx+1:], " ")
+	applyDeclaration(cs, Declaration{Property: "font-family", Value: family})
+}
+
+// fontSizeValue resolves the `font` shorthand's size slot to a px value: a length
+// (px:pt 1:1, matching font-size's longhand) or an absolute-size keyword. Returns
+// ok=false for a relative size, a system keyword, or an unparseable token (so the
+// caller does not treat it as the size component).
+func fontSizeValue(s string) (float64, bool) {
+	if l, ok := parseLength(newTokenizer(s).next()); ok && l.Unit != UnitAuto {
+		return l.Value, true
+	}
+	if v, ok := fontKeywordSizes[s]; ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// isFontWeightToken reports whether a `font` shorthand component is a font-weight
+// value (the keyword bold / bolder / lighter / normal or a numeric 100–900). normal
+// and the relative keywords carry no Bold longhand effect (only bold / 700–900 do, per
+// applyDeclaration), but they are still classified here so they are not mistaken for a
+// family token.
+func isFontWeightToken(s string) bool {
+	switch s {
+	case "bold", "bolder", "lighter", "normal":
+		return true
+	case "100", "200", "300", "400", "500", "600", "700", "800", "900":
+		return true
+	}
+	return false
+}

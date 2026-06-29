@@ -280,13 +280,20 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		frags[i], crossSizes[i] = e.layoutFlexItem(ctx, it, ax, usedMain[i])
 	}
 
-	// Line cross size = max item outer cross size (clamped to a definite container cross
-	// size if set — deferred refinement; for now the max).
+	// Line cross size: for a single-line flex container the line's cross size is the
+	// container's inner cross size when that is DEFINITE (CSS Flexbox §9.4 step 8 — the
+	// line stretches to fill), else the max item's outer cross size. A definite cross size
+	// is what makes align-items:center/flex-end align within the container's extent rather
+	// than the tallest item's. (lineCross is still floored at the max item size so an item
+	// taller than a too-small definite container is not clipped by the line metric.)
 	lineCross := 0.0
 	for _, cs := range crossSizes {
 		if cs > lineCross {
 			lineCross = cs
 		}
+	}
+	if def, ok := e.flexCrossSize(b, contentW, ax); ok && def > lineCross {
+		lineCross = def
 	}
 
 	// Total main extent consumed by items + gaps (used for reverse placement and the
@@ -502,6 +509,24 @@ func (e *Engine) flexMainSize(b *cssbox.Box, contentW float64, ax flexAxis) (flo
 	if b.Style.Height.Unit != gcss.UnitAuto && b.Style.Height.Unit != gcss.UnitPercent {
 		h, _ := resolveLen(b.Style.Height, b.Style.FontSizePt, 0)
 		return h, true
+	}
+	return 0, false
+}
+
+// flexCrossSize returns the container inner CROSS size and whether it is definite. For a
+// ROW container the cross axis is vertical (height) — definite only if an explicit non-auto,
+// non-% height is set. For a COLUMN container the cross axis is horizontal (width) — the
+// content width, always definite here. (The mirror of flexMainSize across the axes.)
+func (e *Engine) flexCrossSize(b *cssbox.Box, contentW float64, ax flexAxis) (float64, bool) {
+	if ax.vertical {
+		return contentW, true // column: cross = width = content width (definite)
+	}
+	// row: cross = height; definite only if an explicit non-auto, non-% height is set.
+	if b.Style.Height.Unit != gcss.UnitAuto && b.Style.Height.Unit != gcss.UnitPercent {
+		h, _ := resolveLen(b.Style.Height, b.Style.FontSizePt, 0)
+		if h >= 0 {
+			return h, true
+		}
 	}
 	return 0, false
 }

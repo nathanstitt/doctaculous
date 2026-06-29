@@ -2,9 +2,11 @@ package css
 
 import (
 	"context"
+	"image/color"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -753,5 +755,194 @@ func TestAutoWidthTableBoxWrapsGrid(t *testing.T) {
 	}
 	if tableW < 95 {
 		t.Errorf("auto-width table box should be at least the ~100px grid width; got W=%v", tableW)
+	}
+}
+
+// TestEmptyCellsHideSuppressesDecorations pins F3: in separate-borders mode, an EMPTY
+// cell with empty-cells:hide paints no background or border, while a non-empty cell still
+// does. Both cells have a yellow background + border in CSS; only the filled cell keeps
+// them. We find the cells by their fragment and check Background/Border.
+func TestEmptyCellsHideSuppressesDecorations(t *testing.T) {
+	src := `<table style="border-collapse:separate;empty-cells:hide">
+<tr>
+<td style="width:40px;height:20px;background:#ffdd00;border:2px solid #cc0000">X</td>
+<td style="width:40px;height:20px;background:#ffdd00;border:2px solid #cc0000"></td>
+</tr></table>`
+	root := layoutTreeFor(t, src, 200, nil)
+	// Collect the two table cells (border-box ~ 44x24 incl. the 2px border each side).
+	var cells []*Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.Box != nil && f.Box.Display == cssbox.DisplayTableCell {
+			cells = append(cells, f)
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if len(cells) != 2 {
+		t.Fatalf("want 2 cell fragments, got %d", len(cells))
+	}
+	// cells[0] has text "X" (non-empty): keeps its background + border.
+	full := cells[0]
+	if full.Background.A == 0 {
+		t.Errorf("non-empty cell lost its background")
+	}
+	hasBorder := false
+	for _, e := range full.Border {
+		if e.Width > 0 && e.Style != 0 {
+			hasBorder = true
+		}
+	}
+	if !hasBorder {
+		t.Errorf("non-empty cell lost its border")
+	}
+	// cells[1] is empty: empty-cells:hide suppresses its background + border.
+	empty := cells[1]
+	if empty.Background.A != 0 {
+		t.Errorf("empty cell kept its background %v, want suppressed (empty-cells:hide)", empty.Background)
+	}
+	for _, e := range empty.Border {
+		if e.Width > 0 && e.Style != 0 {
+			t.Errorf("empty cell kept a border edge, want suppressed (empty-cells:hide)")
+		}
+	}
+}
+
+// TestEmptyCellsShowKeepsDecorations guards the default: empty-cells:show (initial) keeps
+// an empty cell's border + background.
+func TestEmptyCellsShowKeepsDecorations(t *testing.T) {
+	src := `<table style="border-collapse:separate">
+<tr><td style="width:40px;height:20px;background:#ffdd00"></td></tr></table>`
+	root := layoutTreeFor(t, src, 200, nil)
+	var cell *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.Box != nil && f.Box.Display == cssbox.DisplayTableCell {
+			cell = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if cell == nil {
+		t.Fatal("no cell fragment")
+	}
+	if cell.Background.A == 0 {
+		t.Errorf("empty-cells:show (default) must keep the empty cell's background")
+	}
+}
+
+// TestPercentColumnWithNoCells pins F4: a <col> with a percentage width but NO cell
+// originating in its column still reserves its share of the table width (and the other
+// columns get the leftover). Here a 200px table has two <col>s — the second is 40% — but
+// only ONE cell in the single row, so column 1 has no cell. Column 1 must still claim
+// 40% (80px), leaving column 0's cell at 120px. (Verified already-correct; this locks it.)
+func TestPercentColumnWithNoCells(t *testing.T) {
+	for _, layout := range []string{"auto", "fixed"} {
+		t.Run(layout, func(t *testing.T) {
+			src := `<table style="width:200px;table-layout:` + layout +
+				`;border-collapse:separate"><colgroup><col><col style="width:40%"></colgroup>` +
+				`<tr><td>A</td></tr></table>`
+			root := layoutTreeFor(t, src, 400, nil)
+			var cell *Fragment
+			var walk func(f *Fragment)
+			walk = func(f *Fragment) {
+				if f.Box != nil && f.Box.Display == cssbox.DisplayTableCell {
+					cell = f
+				}
+				for _, c := range f.Children {
+					walk(c)
+				}
+			}
+			walk(root)
+			if cell == nil {
+				t.Fatalf("[%s] no cell fragment", layout)
+			}
+			// Column 1 (40% of 200 = 80) is reserved even with no cell, so the cell in
+			// column 0 gets the leftover 120 (± a couple px for borders/spacing rounding).
+			if cell.W < 110 || cell.W > 125 {
+				t.Errorf("[%s] cell W = %.1f, want ~120 (col 1's 40%% reserved without a cell)", layout, cell.W)
+			}
+		})
+	}
+}
+
+// TestTableBackgroundLayers pins F2 (CSS 17.5.1 background layers): a column background and
+// a row background are emitted behind the cells, in CSS paint order (columns before rows,
+// so the row paints on top where they overlap). A 2x2 table with a background on column 1
+// (<col>) and on row 1 (<tr>). Mutation-verify: drop backgroundLayers() and neither bg
+// fragment is emitted.
+func TestTableBackgroundLayers(t *testing.T) {
+	src := `<table style="border-collapse:separate;border-spacing:0">
+<colgroup><col style="background:rgb(170,204,255)"><col></colgroup>
+<tr style="background:rgb(255,204,153)"><td>a</td><td>b</td></tr>
+<tr><td>c</td><td>d</td></tr></table>`
+	root := layoutTreeFor(t, src, 200, nil)
+	page := root.Page(200, root.Y+root.H)
+	colBg := color.RGBA{170, 204, 255, 255}
+	rowBg := color.RGBA{255, 204, 153, 255}
+	colIdx, rowIdx := -1, -1
+	for i := range page.Items {
+		if page.Items[i].Kind != layout.BackgroundKind {
+			continue
+		}
+		switch page.Items[i].Rule.Color {
+		case colBg:
+			if colIdx < 0 {
+				colIdx = i
+			}
+		case rowBg:
+			if rowIdx < 0 {
+				rowIdx = i
+			}
+		}
+	}
+	if colIdx < 0 {
+		t.Errorf("no column background emitted (F2)")
+	}
+	if rowIdx < 0 {
+		t.Errorf("no row background emitted (F2)")
+	}
+	if colIdx >= 0 && rowIdx >= 0 && colIdx > rowIdx {
+		t.Errorf("column bg (item %d) must paint BEFORE the row bg (item %d)", colIdx, rowIdx)
+	}
+}
+
+// TestFixedPercentColumnBasisExcludesSpacing pins F6: in fixed layout a percentage column
+// width resolves against the table content width MINUS the inter-column border-spacing
+// (matching auto layout), not the full content width. A 2-col fixed table, width 200,
+// border-spacing 10 (3 gaps = 30), col 0 = 50%. The 50% column must be 0.5×(200-30)=85,
+// not 0.5×200=100. Mutation-verify: revert `used = contentW - spacing` to `used = contentW`
+// and the column becomes 100.
+func TestFixedPercentColumnBasisExcludesSpacing(t *testing.T) {
+	src := `<table style="width:200px;table-layout:fixed;border-collapse:separate;border-spacing:10px">
+<tr><td style="width:50%">A</td><td>B</td></tr></table>`
+	root := layoutTreeFor(t, src, 400, nil)
+	var first *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if first == nil && f.Box != nil && f.Box.Display == cssbox.DisplayTableCell {
+			first = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if first == nil {
+		t.Fatal("no cell fragment")
+	}
+	// 50% of (200 - 30 spacing) = 85 (± a couple px for borders).
+	if first.W < 82 || first.W > 88 {
+		t.Errorf("fixed %% column W = %.1f, want ~85 (50%% of contentW-spacing); the F6 bug gives ~100", first.W)
 	}
 }

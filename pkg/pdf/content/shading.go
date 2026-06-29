@@ -23,9 +23,10 @@ func (it *Interpreter) setFillColorN(operands []pdf.Object) {
 		it.gs.fillShading = nil
 		return
 	}
-	// Ordinary color: clear any shading source and set the solid color.
+	// Ordinary color: clear any shading source and set the solid color (mapping a
+	// Separation/DeviceN tint through its transform when one is set).
 	it.gs.fillShading = nil
-	it.gs.fill = colorFromComponents(it.gs.fillCS, numericOperands(operands))
+	it.gs.fill = it.resolveColorN(it.gs.fillCS, it.gs.fillTint, numericOperands(operands))
 }
 
 // paintShading handles the "sh" operator: it paints the named shading across the

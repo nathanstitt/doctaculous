@@ -82,12 +82,23 @@ func (it *Interpreter) drawGlyphs(s []byte) {
 	}
 }
 
-// drawGlyph renders one glyph's outline (if any) through the text rendering
-// matrix and CTM, unless the render mode is invisible (3) or clip-only.
+// drawGlyph renders one glyph's outline (if any) through the text rendering matrix
+// and CTM, honoring the PDF text render mode (Tr): 0 fill, 1 stroke, 2 fill+stroke,
+// 3 invisible, 4 fill+clip, 5 stroke+clip, 6 fill+stroke+clip, 7 clip. The paint
+// component is applied exactly — a stroke mode strokes the glyph outline with the
+// stroke color/line params instead of filling it, and mode 2/6 do both. The CLIP
+// component of modes 4–7 is a documented deferral: the glyph outlines are not
+// accumulated into the text clip applied at ET (so modes 4–6 still paint, and mode 7
+// paints nothing — both never crash). Mode 3 (and the no-outline case) paint nothing.
 func (it *Interpreter) drawGlyph(g Glyph) {
 	ts := &it.gs.text
-	if g.Outline == nil || ts.renderMode == 3 || ts.renderMode == 7 {
+	if g.Outline == nil || ts.renderMode == 3 {
 		return
+	}
+	fill := textModeFills(ts.renderMode)
+	stroke := textModeStrokes(ts.renderMode)
+	if !fill && !stroke {
+		return // mode 7 (clip-only): no paint in this slice
 	}
 	// Text rendering matrix: scale by fontSize/hScale/rise, then text matrix, CTM.
 	trm := render.Matrix{
@@ -97,8 +108,44 @@ func (it *Interpreter) drawGlyph(g Glyph) {
 	}.Mul(ts.matrix).Mul(it.gs.ctm)
 
 	out := transformOutline(g.Outline, trm)
-	c := withAlpha(it.gs.fill, it.gs.fillAlpha)
-	it.dev.FillGlyph(out, render.FillColor{R: c.R, G: c.G, B: c.B, A: c.A}, it.gs.blendMode)
+	if fill {
+		c := withAlpha(it.gs.fill, it.gs.fillAlpha)
+		it.dev.FillGlyph(out, render.FillColor{R: c.R, G: c.G, B: c.B, A: c.A}, it.gs.blendMode)
+	}
+	if stroke {
+		w := it.gs.lineWidth * it.gs.ctm.ScaleFactor()
+		if w <= 0 {
+			w = 1
+		}
+		it.dev.Stroke(out, render.StrokePaint{
+			Color:      withAlpha(it.gs.stroke, it.gs.strokeAlpha),
+			BlendMode:  it.gs.blendMode,
+			Width:      w,
+			Cap:        it.gs.lineCap,
+			Join:       it.gs.lineJoin,
+			MiterLimit: it.gs.miterLimit,
+			DashArray:  it.scaledDash(),
+			DashPhase:  it.gs.dashPhase * it.gs.ctm.ScaleFactor(),
+		})
+	}
+}
+
+// textModeFills reports whether a text render mode paints a fill (modes 0, 2, 4, 6).
+func textModeFills(mode int) bool {
+	switch mode {
+	case 0, 2, 4, 6:
+		return true
+	}
+	return false
+}
+
+// textModeStrokes reports whether a text render mode paints a stroke (modes 1, 2, 5, 6).
+func textModeStrokes(mode int) bool {
+	switch mode {
+	case 1, 2, 5, 6:
+		return true
+	}
+	return false
 }
 
 // advanceText translates the text matrix by tx text-space units along the

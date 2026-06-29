@@ -1,6 +1,8 @@
 package css
 
 import (
+	"context"
+
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
@@ -43,7 +45,7 @@ func axisRelative(start, end gcss.Length, fontSizePt, pctBasis float64) float64 
 // subset of CSS 10.3.7/10.6.4 (see the spec's "The positioning geometry"):
 // over-constrained cases resolve start-edge-wins; all-auto offsets approximate the
 // static position (cb top-left); width:auto with both left+right derives the width.
-func absRect(b *cssbox.Box, ed edges, cb rect) (border rect, contentW float64) {
+func absRect(b *cssbox.Box, ed edges, cb rect, autoFillW float64) (border rect, contentW float64) {
 	fs := b.Style.FontSizePt
 	insetsX := ed.bL + ed.bR + ed.pL + ed.pR
 	insetsY := ed.bT + ed.bB + ed.pT + ed.pB
@@ -58,17 +60,22 @@ func absRect(b *cssbox.Box, ed edges, cb rect) (border rect, contentW float64) {
 	if !hAuto && borderBox {
 		hVal -= insetsY
 	}
-	// Fallback width for the no-constraint case: containing-block fill for a
-	// non-replaced box (replaced boxes are handled by the replaced path before
-	// reaching here in pass 2; if a replaced box does reach here its intrinsic
-	// width is already in b.Style.Width or resolved upstream).
-	fillW := cb.w - ed.mL - ed.mR - insetsX
+	// Fallback content width when width:auto (no offset constraint): the caller supplies
+	// either the containing-block fill or the CSS 10.3.7 shrink-to-fit width.
+	fillW := autoFillW
 	if fillW < 0 {
 		fillW = 0
 	}
 
-	bx, cw := axisAbs(cb.x, cb.w, b.Style.Left, b.Style.Right, fs, ed.mL, ed.mR, insetsX, wVal, wAuto, fillW)
-	by, _ := axisAbs(cb.y, cb.h, b.Style.Top, b.Style.Bottom, fs, ed.mT, ed.mB, insetsY, hVal, hAuto, hVal)
+	// Auto-margin flags (usedEdges already resolved auto margins to 0); abs margin:auto
+	// centering distributes the over-constrained leftover space to the auto margins.
+	mLAuto := isAuto2(b.Style.MarginLeft, fs)
+	mRAuto := isAuto2(b.Style.MarginRight, fs)
+	mTAuto := isAuto2(b.Style.MarginTop, fs)
+	mBAuto := isAuto2(b.Style.MarginBottom, fs)
+
+	bx, cw := axisAbs(cb.x, cb.w, b.Style.Left, b.Style.Right, fs, ed.mL, ed.mR, mLAuto, mRAuto, insetsX, wVal, wAuto, fillW)
+	by, _ := axisAbs(cb.y, cb.h, b.Style.Top, b.Style.Bottom, fs, ed.mT, ed.mB, mTAuto, mBAuto, insetsY, hVal, hAuto, hVal)
 
 	// The returned border-box WIDTH/HEIGHT are advisory: the abs-pos pass
 	// (resolveAbsolute) uses the laid-out fragment's own border box for W/H and reads
@@ -102,7 +109,7 @@ func absRect(b *cssbox.Box, ed edges, cb rect) (border rect, contentW float64) {
 // top/bottom); mStart/mEnd the margins; insets the border+padding on the axis;
 // sizeVal/sizeAuto the box's own content size; fillSize the fallback content size
 // when the size is auto and at most one offset is set.
-func axisAbs(cbStart, cbExtent float64, startOff, endOff gcss.Length, fontSizePt, mStart, mEnd, insets, sizeVal float64, sizeAuto bool, fillSize float64) (borderStart, contentSize float64) {
+func axisAbs(cbStart, cbExtent float64, startOff, endOff gcss.Length, fontSizePt, mStart, mEnd float64, mStartAuto, mEndAuto bool, insets, sizeVal float64, sizeAuto bool, fillSize float64) (borderStart, contentSize float64) {
 	sVal, sAuto := resolveLen(startOff, fontSizePt, cbExtent)
 	eVal, eAuto := resolveLen(endOff, fontSizePt, cbExtent)
 
@@ -114,6 +121,15 @@ func axisAbs(cbStart, cbExtent float64, startOff, endOff gcss.Length, fontSizePt
 			cs = 0
 		}
 		return cbStart + sVal + mStart, cs
+	case !sAuto && !eAuto:
+		// start+end+size all definite (over-constrained, CSS 10.3.7): auto margins absorb
+		// the leftover space — both auto → split evenly (centering); one auto → it takes
+		// all. With no auto margin the box is over-constrained and the start edge wins
+		// (the leftover is ignored, matching "ignore end"). Only the START margin affects
+		// the placement (the box is positioned by start + margin-start); the end margin is
+		// computed by distributeAbsMargins for completeness but does not move the box.
+		usedMStart, _ := distributeAbsMargins(cbExtent-sVal-eVal-sizeVal-insets, mStart, mEnd, mStartAuto, mEndAuto)
+		return cbStart + sVal + usedMStart, sizeVal
 	case !sAuto:
 		// start specified (size definite, or end ignored): place against the start edge.
 		size := sizeVal
@@ -139,6 +155,25 @@ func axisAbs(cbStart, cbExtent float64, startOff, endOff gcss.Length, fontSizePt
 	}
 }
 
+// distributeAbsMargins resolves auto margins on an over-constrained abs axis (both
+// offsets + a definite size specified, CSS 10.3.7): the leftover space is split evenly
+// between two auto margins (centering), given entirely to a single auto margin, or
+// ignored when neither margin is auto. Returns the used (mStart, mEnd). A negative
+// leftover (the box overflows) still distributes (the margins go negative), matching
+// browsers.
+func distributeAbsMargins(leftover, mStart, mEnd float64, mStartAuto, mEndAuto bool) (float64, float64) {
+	switch {
+	case mStartAuto && mEndAuto:
+		return leftover / 2, leftover / 2
+	case mStartAuto:
+		return leftover, mEnd
+	case mEndAuto:
+		return mStart, leftover
+	default:
+		return mStart, mEnd
+	}
+}
+
 // isAuto2 reports whether a length is the auto keyword (helper for absRect's
 // both-specified height-derivation guard).
 func isAuto2(l gcss.Length, fontSizePt float64) bool {
@@ -156,4 +191,35 @@ func isAuto2(l gcss.Length, fontSizePt float64) bool {
 func absWidthIsOffsetConstrained(b *cssbox.Box) bool {
 	fs := b.Style.FontSizePt
 	return isAuto2(b.Style.Width, fs) && !isAuto2(b.Style.Left, fs) && !isAuto2(b.Style.Right, fs)
+}
+
+// absWidthShrinksToFit reports whether an abs/fixed box's width:auto is resolved by
+// CSS 10.3.7 shrink-to-fit (min(max(min-content, available), max-content)) rather than
+// filling the containing block: width is auto, the offsets do NOT both pin it (that is
+// the offset-constrained case handled separately), and it is not a replaced box (which
+// has an intrinsic width). A box with no offsets, or a single offset, takes this path.
+func (e *Engine) absWidthShrinksToFit(b *cssbox.Box) bool {
+	fs := b.Style.FontSizePt
+	return isAuto2(b.Style.Width, fs) && !absWidthIsOffsetConstrained(b) && b.Kind != cssbox.BoxReplaced
+}
+
+// absShrinkToFitWidth returns the CSS 10.3.7 shrink-to-fit CONTENT width for a width:auto
+// abs box: min(max(preferred-minimum, available), preferred), where available is the box's
+// available content width (CB content width minus its own margins/border/padding), the
+// preferred width is the max-content width, and the preferred minimum is the min-content
+// width. Measured via the memoized measure helpers (shared with table/grid/inline-block).
+func (e *Engine) absShrinkToFitWidth(ctx context.Context, b *cssbox.Box, available float64) float64 {
+	maxC := e.measureMaxContent(ctx, b)
+	minC := e.measureMinContent(ctx, b)
+	w := available
+	if maxC < w {
+		w = maxC
+	}
+	if minC > w {
+		w = minC
+	}
+	if w < 0 {
+		w = 0
+	}
+	return w
 }

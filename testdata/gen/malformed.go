@@ -71,6 +71,18 @@ func BadStreamLengthPDF() []byte {
 	return b.finish(catalog)
 }
 
+// MalformedImageColorSpacePDF returns a single-page PDF whose image XObject declares a
+// malformed single-element array color space "/ColorSpace [/ICCBased]" — the array form
+// has no operand to dereference. Resolving it used to index arr[1] out of range and
+// panic; the contract is that the page now degrades (renders, no panic). Drawn with a
+// 2x2 image so the image-draw path is reached.
+func MalformedImageColorSpacePDF() []byte {
+	const w, h = 2, 2
+	samples := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // 2x2 * 3 bytes (RGB fallback)
+	return buildImagePage(w, h, zlibCompress(samples),
+		"/Filter /FlateDecode /ColorSpace [/ICCBased] /BitsPerComponent 8")
+}
+
 func sprintfPage(pagesNum, font, contentNum int) string {
 	return "<< /Type /Page /Parent " + itoa(pagesNum) +
 		" 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 " + itoa(font) +

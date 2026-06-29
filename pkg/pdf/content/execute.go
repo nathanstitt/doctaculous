@@ -107,13 +107,15 @@ func (it *Interpreter) execute(op string, operands []pdf.Object, depth int) {
 		it.gs.stroke = colorFromComponents(deviceCMYK, nums(operands, 4))
 	case "cs":
 		it.gs.fillCS = it.colorSpaceByName(operands)
+		it.gs.fillTint = it.tintTransform(operands)
 		it.gs.fillShading = nil
 	case "CS":
 		it.gs.strokeCS = it.colorSpaceByName(operands)
+		it.gs.strokeTint = it.tintTransform(operands)
 	case "sc", "scn":
 		it.setFillColorN(operands)
 	case "SC", "SCN":
-		it.gs.stroke = colorFromComponents(it.gs.strokeCS, numericOperands(operands))
+		it.gs.stroke = it.resolveColorN(it.gs.strokeCS, it.gs.strokeTint, numericOperands(operands))
 
 	// --- text ---
 	case "BT":

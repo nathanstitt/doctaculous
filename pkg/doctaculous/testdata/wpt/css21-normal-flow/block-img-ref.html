@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<!-- REFERENCE: the broken-out layout authored explicitly — the inline-block swatch on its
+     own line (it is the sole inline content of an anonymous block), then the block <img> as
+     a div of the same size + color (#3366cc) below it. The test matches this iff the engine
+     breaks the display:block <img> out of the inline flow onto its own line. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  .pre { display: inline-block; width: 30px; height: 30px; background: #cc3333; }
+  .swatch { width: 40px; height: 40px; background: #3366cc; }
+</style>
+</head>
+<body>
+  <div>
+    <div><span class="pre"></span></div>
+    <div class="swatch"></div>
+  </div>
+</body>
+</html>

@@ -162,7 +162,47 @@ func paintBorder(dev render.Device, b *layout.BorderItem, mat render.Matrix) {
 				fillRect(dev, mat, x0, y, x1, end, b.Color)
 			}
 		}
+
+	case layout.BorderOutset, layout.BorderInset:
+		// 3D edge: fill the whole strip with the light or dark shade chosen by side.
+		// outset = top/left light, bottom/right dark; inset is the inverse.
+		light := b.Style == layout.BorderOutset
+		fillRect(dev, mat, x0, y0, x1, y1, edge3DColor(b.Color, b.Side, light))
+
+	case layout.BorderRidge, layout.BorderGroove:
+		// 3D ridge/groove: split the strip across its thickness into an outer and inner
+		// half, painting them with opposite light/dark shades. ridge = outer behaves
+		// like outset; groove is the inverse.
+		outerLight := b.Style == layout.BorderRidge
+		outer := edge3DColor(b.Color, b.Side, outerLight)
+		inner := edge3DColor(b.Color, b.Side, !outerLight)
+		if horizontal {
+			mid := (y0 + y1) / 2
+			fillRect(dev, mat, x0, y0, x1, mid, outer)
+			fillRect(dev, mat, x0, mid, x1, y1, inner)
+		} else {
+			mid := (x0 + x1) / 2
+			fillRect(dev, mat, x0, y0, mid, y1, outer)
+			fillRect(dev, mat, mid, y0, x1, y1, inner)
+		}
 	}
+}
+
+// edge3DColor returns the shade for a 3D border edge: the "light" side of the bevel
+// (top/left when raised) keeps the base color, the "dark" side is darkened to ~half.
+// light selects whether THIS edge is on the lit side (caller derives it from the style
+// and side). The top and left edges are lit when light is true; bottom and right edges
+// are the opposite, so the caller passes the already-resolved light flag and this only
+// flips it for bottom/right. (Matches browser bevels: a raised box lights top+left.)
+func edge3DColor(c color.RGBA, side layout.EdgeSide, light bool) color.RGBA {
+	// Bottom/right edges are the opposite face of the bevel from top/left.
+	if side == layout.EdgeBottom || side == layout.EdgeRight {
+		light = !light
+	}
+	if light {
+		return c
+	}
+	return color.RGBA{R: c.R / 2, G: c.G / 2, B: c.B / 2, A: c.A}
 }
 
 // paintImage draws a replaced-element image into its content box under the chosen
@@ -187,7 +227,7 @@ func paintImage(dev render.Device, it *layout.ImageItem, mat render.Matrix) {
 		return
 	}
 
-	d := fitDest(it.Fit, it.XPt, it.YPt, it.WPt, it.HPt, iw, ih)
+	d := fitDest(it.Fit, it.XPt, it.YPt, it.WPt, it.HPt, iw, ih, it.PosX, it.PosY)
 	if d.w <= 0 || d.h <= 0 {
 		return
 	}
@@ -220,26 +260,29 @@ const epsilon = 1e-6
 // ratio and center; none uses intrinsic size centered; scale-down picks the smaller
 // of none and contain. The result may exceed the content box (cover, oversized
 // none) — the caller clips.
-func fitDest(fit layout.ObjectFit, cx, cy, cw, ch, iw, ih float64) imageDest {
-	centered := func(w, h float64) imageDest {
-		return imageDest{x: cx + (cw-w)/2, y: cy + (ch-h)/2, w: w, h: h}
+func fitDest(fit layout.ObjectFit, cx, cy, cw, ch, iw, ih, posX, posY float64) imageDest {
+	// positioned places a w×h image within the content box at the object-position
+	// fractions (posX/posY of the free space cw-w / ch-h). posX=posY=0.5 centers it
+	// (the default), reproducing the prior behavior exactly.
+	positioned := func(w, h float64) imageDest {
+		return imageDest{x: cx + (cw-w)*posX, y: cy + (ch-h)*posY, w: w, h: h}
 	}
 	switch fit {
 	case layout.FitContain:
 		s := scaleRatio(cw/iw, ch/ih, true) // fit inside: the smaller ratio
-		return centered(iw*s, ih*s)
+		return positioned(iw*s, ih*s)
 	case layout.FitCover:
 		s := scaleRatio(cw/iw, ch/ih, false) // cover: the larger ratio
-		return centered(iw*s, ih*s)
+		return positioned(iw*s, ih*s)
 	case layout.FitNone:
-		return centered(iw, ih)
+		return positioned(iw, ih)
 	case layout.FitScaleDown:
 		// none unless it overflows the box, in which case contain (the smaller image).
 		s := scaleRatio(cw/iw, ch/ih, true)
 		if s >= 1 {
-			return centered(iw, ih) // intrinsic already fits: use none
+			return positioned(iw, ih) // intrinsic already fits: use none
 		}
-		return centered(iw*s, ih*s)
+		return positioned(iw*s, ih*s)
 	default: // FitFill
 		return imageDest{x: cx, y: cy, w: cw, h: ch}
 	}

@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 	"image/color"
+	"math"
 	"strings"
 	"testing"
 
@@ -252,5 +253,51 @@ func TestPositionedClippingBoxStillClips(t *testing.T) {
 	bg := bgIndex(items, color.RGBA{6, 6, 6, 255})
 	if push < 0 || pop < 0 || push >= bg || bg >= pop {
 		t.Errorf("child bg at %d not inside the positioned+clip box's bracket [%d,%d]", bg, push, pop)
+	}
+}
+
+// TestRelativeOffsetMovesOwnClip pins a bug uncovered in the adversarial review:
+// translateItems (which applies a position:relative box's paint-time RelOffset over its
+// flattened item range) did not translate ClipPushKind, so a relative box that ALSO
+// establishes an overflow clip moved its content but left the clip rect at the un-offset
+// position — clipping the offset content against the wrong rectangle (CSS 9.4.3 requires
+// the offset to move the whole painted subtree, clip included). Mutation-verify: remove
+// the ClipPushKind case in translateItems and the clip rect stays at (0,0) while the
+// content is at the offset, so this FAILS.
+func TestRelativeOffsetMovesOwnClip(t *testing.T) {
+	const w = 300
+	contentColor := color.RGBA{0xcc, 0, 0, 255}
+	// A relative box offset by (100,60) that clips a tall child to its 50x50 padding box.
+	src := `<html><body style="margin:0">` +
+		`<div style="position:relative;left:100px;top:60px;overflow:hidden;width:50px;height:50px;margin:0">` +
+		`<div style="height:200px;background-color:rgb(204,0,0);margin:0">tall</div>` +
+		`</div></body></html>`
+	root := buildRoot(t, src, nil)
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, w)
+	items := frag.Page(w, 400).Items
+
+	// Find the ClipPush rect and the clipped content background.
+	clipX, clipY := math.Inf(1), math.Inf(1)
+	for i := range items {
+		if items[i].Kind == layout.ClipPushKind {
+			clipX, clipY = items[i].Rule.XPt, items[i].Rule.YPt
+			break
+		}
+	}
+	bgX, bgY := math.Inf(1), math.Inf(1)
+	for i := range items {
+		if items[i].Kind == layout.BackgroundKind && items[i].Rule.Color == contentColor {
+			bgX, bgY = items[i].Rule.XPt, items[i].Rule.YPt
+			break
+		}
+	}
+	if math.IsInf(clipX, 1) || math.IsInf(bgX, 1) {
+		t.Fatalf("expected both a ClipPush and the red content background; clip=(%v,%v) bg=(%v,%v)", clipX, clipY, bgX, bgY)
+	}
+	// The clip rect must ride the offset: its top-left should match the offset box's
+	// padding box origin (~100,60), i.e. it must sit at/above the offset content, not at
+	// the un-offset origin (0,0).
+	if clipX < 90 || clipY < 50 {
+		t.Errorf("ClipPush rect at (%.1f,%.1f), want ~(100,60) — it did not ride the relative offset; the content bg is at (%.1f,%.1f)", clipX, clipY, bgX, bgY)
 	}
 }

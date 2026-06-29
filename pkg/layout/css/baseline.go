@@ -32,11 +32,12 @@ type baselineItem struct {
 }
 
 // alignBaselineGroup shifts every participating item DOWN so its first baseline sits
-// at the group's max first baseline, and returns a CONSERVATIVE extra cross (block)
-// size for the group: the largest downward shift applied. This is a safe upper bound,
-// not the exact extra height — it can slightly over-expand the row/line when a shifted
-// item is shorter than its baseline distance — which callers (grid rows, the flex line,
-// table rows) grow the cross extent by. Items with ok=false (no baseline) or
+// at the group's max first baseline, and returns the EXACT extra cross (block) size the
+// group needs: the increase in its lowest edge, max(bottom after shift) − max(bottom
+// before shift) over the participating items — which callers (grid rows, the flex line,
+// table rows) grow the cross extent by. (This is tighter than the largest single shift,
+// which over-expands when the most-shifted item is not the one reaching lowest — I5.)
+// Items with ok=false (no baseline) or
 // baseline=false are not shifted and do not affect the group baseline (the spec's
 // "no baseline → start" fallback). The shift is applied via translateFragment (moves
 // the fragment's own rect + its descendants; note the Positioned layer is NOT moved,
@@ -56,18 +57,38 @@ func alignBaselineGroup(items []baselineItem) float64 {
 			maxBaseline = off
 		}
 	}
-	extra := 0.0
+	// The extra cross size the group needs is the increase in the group's lowest edge:
+	// max(bottom after shifting) − max(bottom before shifting), over the participating
+	// items. This is the EXACT growth (a tighter value than the largest single shift,
+	// which over-expands when the most-shifted item is not the one reaching lowest): an
+	// item shifted down by dy whose bottom was already high may not extend the group at
+	// all, while a small shift on a tall item can. (I5 refinement.)
+	maxInitialBottom, maxFinalBottom := 0.0, 0.0
+	seen := false
 	for i, it := range items {
 		if !it.baseline || !oks[i] {
 			continue
 		}
 		dy := maxBaseline - offs[i]
+		if dy < 0 {
+			dy = 0
+		}
+		initialBottom := it.frag.Y + it.frag.H
+		finalBottom := initialBottom + dy
+		if !seen || initialBottom > maxInitialBottom {
+			maxInitialBottom = initialBottom
+		}
+		if !seen || finalBottom > maxFinalBottom {
+			maxFinalBottom = finalBottom
+		}
+		seen = true
 		if dy > 0 {
 			translateFragment(it.frag, 0, dy)
-			if dy > extra {
-				extra = dy
-			}
 		}
+	}
+	extra := maxFinalBottom - maxInitialBottom
+	if extra < 0 {
+		extra = 0
 	}
 	return extra
 }

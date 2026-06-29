@@ -70,6 +70,15 @@ func resolveImageCSArray(doc *pdf.Document, arr pdf.Array, bpc int, logf func(st
 		return imageCS{kind: csRGB, nComps: 3}, nil
 	}
 	family, _ := doc.GetName(arr[0])
+	// The array forms below dereference arr[1]; a malformed single-element array (e.g.
+	// "[/ICCBased]" or "[/DeviceN]") has no operand, so degrade to a device space rather
+	// than indexing out of range.
+	if len(arr) < 2 {
+		if logf != nil {
+			logf("raster: image color-space /%s array missing its operand; assuming RGB", family)
+		}
+		return imageCS{kind: csRGB, nComps: 3}, nil
+	}
 	switch family {
 	case "ICCBased":
 		// [/ICCBased stream]; the stream's /N gives the component count. We do not

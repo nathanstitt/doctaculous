@@ -38,6 +38,19 @@ const (
 	// BorderDouble is two parallel lines (the outer and inner thirds of the strip)
 	// with an empty gap between them.
 	BorderDouble
+	// BorderOutset is a 3D "raised" edge: the top/left edges paint a lightened color
+	// and the bottom/right edges a darkened color, so the box appears to pop out.
+	BorderOutset
+	// BorderInset is a 3D "sunken" edge: the inverse of outset (top/left darkened,
+	// bottom/right lightened), so the box appears pressed in.
+	BorderInset
+	// BorderRidge is a 3D ridge: the strip is split across its thickness into an outer
+	// and inner half, painted as outset then inset, so it appears raised from the
+	// surface on both sides of the edge.
+	BorderRidge
+	// BorderGroove is a 3D groove: the inverse of ridge (inset outer half, outset
+	// inner half), so it appears carved into the surface.
+	BorderGroove
 )
 
 // ObjectFit is how a replaced element's image is fitted into its content box,
@@ -155,4 +168,9 @@ type ImageItem struct {
 	Img                image.Image
 	XPt, YPt, WPt, HPt float64
 	Fit                ObjectFit
+	// PosX, PosY are the object-position as fractions of the free space in the content
+	// box (0 = left/top edge, 1 = right/bottom edge, 0.5 = centered — the default).
+	// They shift the fitted image within the content box for fits that leave free space
+	// (contain / none / scale-down); fill ignores them.
+	PosX, PosY float64
 }

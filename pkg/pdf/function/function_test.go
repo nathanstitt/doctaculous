@@ -138,6 +138,31 @@ func TestType3Stitching(t *testing.T) {
 	assertOut(t, f.Eval([]float64{1}), []float64{0}, tol)      // f1(1)=0
 }
 
+// TestType3DepthGuard pins the recursion-depth guard added for the adversarial-review
+// finding that a Type 3 (stitching) function whose /Functions reference each other (or
+// itself, via an indirect ref) recursed until the goroutine stack overflowed — a
+// crafted-PDF crash. Deeply nesting Type 3 dicts past maxFunctionDepth must return an
+// error rather than overflowing. (A direct deep nest reproduces the unbounded-recursion
+// shape without needing an indirect cycle, which would require a full *pdf.Document.)
+func TestType3DepthGuard(t *testing.T) {
+	// Build a chain of nested Type 3 functions deeper than the guard limit.
+	leaf := type2SubDict([]float64{0}, []float64{1})
+	cur := pdf.Object(leaf)
+	for i := 0; i < maxFunctionDepth+5; i++ {
+		cur = pdf.Dict{
+			"FunctionType": pdf.Integer(3),
+			"Domain":       pdf.Array{pdf.Integer(0), pdf.Integer(1)},
+			"Functions":    pdf.Array{cur},
+			"Bounds":       pdf.Array{}, // k-1 = 0 for a single subfunction
+			"Encode":       pdf.Array{pdf.Integer(0), pdf.Integer(1)},
+		}
+	}
+	_, err := Parse(nil, cur)
+	if err == nil {
+		t.Fatal("expected an error for over-deep Type 3 nesting (cyclic-reference guard), got nil")
+	}
+}
+
 func TestType3EncodeMapping(t *testing.T) {
 	// Single subfunction but encode maps [0,1] -> [0,0.5], so f0 only sees half.
 	sub0 := type2SubDict([]float64{0}, []float64{1})

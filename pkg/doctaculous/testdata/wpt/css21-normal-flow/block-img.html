@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<!-- TEST: a display:block <img> forces a block break even with an inline atom beside it.
+     An inline-block swatch precedes a display:block <img>: per CSS 2.1 the block-level
+     replaced box breaks out of the inline flow, so the <img> drops to its OWN line below
+     the inline-block (not to its right). The reference authors that broken layout. If the
+     engine wrongly treated the block <img> as inline, the <img> would sit to the RIGHT of
+     the inline-block and the pixels would differ (different bounds + positions). -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  .pre { display: inline-block; width: 30px; height: 30px; background: #cc3333; }
+  .swatch { display: block; width: 40px; height: 40px; object-fit: fill; }
+</style>
+</head>
+<body>
+  <div><span class="pre"></span><img class="swatch" src="swatch.png"></div>
+</body>
+</html>

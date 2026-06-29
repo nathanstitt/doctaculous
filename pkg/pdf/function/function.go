@@ -46,6 +46,22 @@ type Func interface {
 // Indirect references are resolved through doc. A nil doc is tolerated for
 // fully direct objects. Malformed or unsupported inputs return an error.
 func Parse(doc *pdf.Document, obj pdf.Object) (Func, error) {
+	return parseDepth(doc, obj, 0)
+}
+
+// maxFunctionDepth bounds the nesting of a Type 3 (stitching) or array function whose
+// subfunctions are themselves functions. It guards against a self- or mutually-referential
+// /Functions array (reachable via an indirect reference) that would otherwise recurse
+// until the goroutine stack overflows — a crafted-PDF crash. A real document nests at most
+// a handful of levels.
+const maxFunctionDepth = 32
+
+// parseDepth is Parse with a recursion-depth guard threaded through the two nesting forms
+// (Type 3 subfunctions and function arrays).
+func parseDepth(doc *pdf.Document, obj pdf.Object, depth int) (Func, error) {
+	if depth > maxFunctionDepth {
+		return nil, fmt.Errorf("function: nesting too deep (>%d); cyclic /Functions reference?", maxFunctionDepth)
+	}
 	resolved := resolve(doc, obj)
 	if resolved == nil {
 		return nil, fmt.Errorf("function: nil function object")
@@ -54,7 +70,7 @@ func Parse(doc *pdf.Document, obj pdf.Object) (Func, error) {
 	// An array of functions: each element is a 1-output function; the combined
 	// function outputs one component per element.
 	if arr, ok := resolved.(pdf.Array); ok {
-		return parseArray(doc, arr)
+		return parseArray(doc, arr, depth)
 	}
 
 	dict := getDict(doc, resolved)
@@ -73,7 +89,7 @@ func Parse(doc *pdf.Document, obj pdf.Object) (Func, error) {
 	case 2:
 		return parseExponential(doc, dict)
 	case 3:
-		return parseStitching(doc, dict)
+		return parseStitching(doc, dict, depth)
 	case 4:
 		return parsePostScript(doc, resolved)
 	default:
@@ -87,13 +103,13 @@ type arrayFunc struct {
 	members []Func
 }
 
-func parseArray(doc *pdf.Document, arr pdf.Array) (Func, error) {
+func parseArray(doc *pdf.Document, arr pdf.Array, depth int) (Func, error) {
 	if len(arr) == 0 {
 		return nil, fmt.Errorf("function: empty function array")
 	}
 	members := make([]Func, len(arr))
 	for i, e := range arr {
-		f, err := Parse(doc, e)
+		f, err := parseDepth(doc, e, depth+1)
 		if err != nil {
 			return nil, fmt.Errorf("function: array element %d: %w", i, err)
 		}

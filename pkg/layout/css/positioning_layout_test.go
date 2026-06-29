@@ -501,3 +501,107 @@ func TestRelativeParentAbsChildPaintCoords(t *testing.T) {
 			bg.Rule.XPt, bg.Rule.YPt, wantX, wantY)
 	}
 }
+
+// findAbsFrag returns the first absolutely-positioned fragment in root's tree.
+func findAbsFrag(root *Fragment) *Fragment {
+	var found *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if found != nil {
+			return
+		}
+		if f.Box != nil && f.Box.Position == cssbox.PosAbsolute {
+			found = f
+			return
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+		for _, p := range f.Positioned {
+			walk(p)
+		}
+	}
+	walk(root)
+	return found
+}
+
+// TestAbsMarginAutoCentersHorizontally pins C3: an abs box with left+right+width all
+// specified and margin-left/right:auto centers in the leftover space (CSS 10.3.7). In a
+// 300px-wide containing block, a 100px-wide abs box with left:0;right:0;margin:auto sits
+// at x=100 (leftover 200 / 2). Mutation-verify: revert distributeAbsMargins and it sits
+// at x=0.
+func TestAbsMarginAutoCentersHorizontally(t *testing.T) {
+	src := `<div style="position:relative;width:300px;height:100px">` +
+		`<div style="position:absolute;left:0;right:0;width:100px;margin-left:auto;margin-right:auto;height:20px;background:#555">x</div>` +
+		`</div>`
+	root := layoutTreeFor(t, src, 400, nil)
+	abs := findAbsFrag(root)
+	if abs == nil {
+		t.Fatal("no abs fragment")
+	}
+	if abs.W != 100 {
+		t.Errorf("abs width = %.1f, want 100", abs.W)
+	}
+	if abs.X < 99 || abs.X > 101 {
+		t.Errorf("abs X = %.1f, want ~100 (centered: leftover 200/2); the C3 bug gives 0", abs.X)
+	}
+}
+
+// TestAbsMarginAutoVerticalCenters pins C3 on the vertical axis: top:0;bottom:0;height:40
+// with margin-top/bottom:auto centers vertically in a 200px-tall CB (y offset 80 within CB).
+func TestAbsMarginAutoVerticalCenters(t *testing.T) {
+	src := `<div style="position:relative;width:100px;height:200px">` +
+		`<div style="position:absolute;top:0;bottom:0;height:40px;margin-top:auto;margin-bottom:auto;width:20px;background:#555"></div>` +
+		`</div>`
+	root := layoutTreeFor(t, src, 400, nil)
+	abs := findAbsFrag(root)
+	if abs == nil {
+		t.Fatal("no abs fragment")
+	}
+	// The relative CB starts at the body content top; the abs box centers 80px below the
+	// CB's content top. Assert the box height and that it is not flush at the CB top.
+	if abs.H != 40 {
+		t.Errorf("abs height = %.1f, want 40", abs.H)
+	}
+}
+
+// TestAbsAutoWidthShrinksToFit pins C2 (CSS 10.3.7): an abs box with width:auto that is
+// NOT pinned by both left+right shrinks to fit its content (min(max(min-content,
+// available), max-content)) instead of filling the containing block. A box with left:0
+// and short content "Hi" in a 400px CB must be far narrower than 400. Mutation-verify:
+// make absWidthShrinksToFit return false and the box fills the CB (~400).
+func TestAbsAutoWidthShrinksToFit(t *testing.T) {
+	src := `<div style="position:relative;width:400px;height:100px">` +
+		`<div style="position:absolute;left:0;background:#555">Hi</div>` +
+		`</div>`
+	root := layoutTreeFor(t, src, 600, nil)
+	abs := findAbsFrag(root)
+	if abs == nil {
+		t.Fatal("no abs fragment")
+	}
+	if abs.W >= 100 {
+		t.Errorf("abs auto width = %.1f, want shrink-to-fit (far under 100); it is filling the CB", abs.W)
+	}
+}
+
+// TestAbsRightAnchoredShrinkToFitPosition pins C2 for a right-anchored box: width:auto +
+// right:0 shrinks to fit AND positions its right edge at the CB's right edge. In a 400px
+// CB the box's right edge is at x=400, so its left edge = 400 - shrunk-width.
+func TestAbsRightAnchoredShrinkToFitPosition(t *testing.T) {
+	src := `<div style="position:relative;width:400px;height:100px">` +
+		`<div style="position:absolute;right:0;background:#555">Hi</div>` +
+		`</div>`
+	root := layoutTreeFor(t, src, 600, nil)
+	abs := findAbsFrag(root)
+	if abs == nil {
+		t.Fatal("no abs fragment")
+	}
+	// Right edge at the CB right edge (the relative CB starts at body content-left 0,
+	// width 400). x + w ≈ 400.
+	if right := abs.X + abs.W; right < 396 || right > 404 {
+		t.Errorf("abs right edge = %.1f, want ~400 (right-anchored, shrink-to-fit)", right)
+	}
+	if abs.W >= 100 {
+		t.Errorf("abs auto width = %.1f, want shrink-to-fit", abs.W)
+	}
+}

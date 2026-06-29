@@ -51,6 +51,7 @@ var wptReftests = []struct {
 	{"percent-width", 400, "a percentage width resolves against the containing block width", nil},
 	{"padding-shorthand", 320, "the 2-value padding shorthand equals the 4-value form", nil},
 	{"img-vs-div", 200, "a solid <img> sized W×H equals a <div> of the same size and background", solidSwatchLoader()},
+	{"block-img", 200, "a display:block <img> breaks out of inline flow onto its own line (== the inline-block then the img as a sized block div)", solidSwatchLoader()},
 	{"float-left", 200, "a left float paints at the container's top-left, independent of the following in-flow block", nil},
 	{"abs-pos", 240, "an absolute box at top/left inside a relative container == a static box at the same coords", nil},
 	{"relative-offset", 240, "a relative offset == the same box placed at the shifted position with margins", nil},

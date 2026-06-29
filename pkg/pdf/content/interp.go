@@ -25,8 +25,11 @@ type Resources interface {
 	// cannot be decoded.
 	InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (img image.Image, ok bool)
 	// Form returns the decoded content bytes and resources of a form XObject, or
-	// ok=false if name is not a form XObject. matrix is the form's /Matrix.
-	Form(name string) (content []byte, res Resources, matrix render.Matrix, ok bool)
+	// ok=false if name is not a form XObject. matrix is the form's /Matrix; bbox is
+	// the form's /BBox ([llx lly urx ury] in form space) which the interpreter applies
+	// as a mandatory clip (ISO 32000 §8.10.1), or nil when the /BBox is absent/malformed
+	// (no clip — a graceful degradation, since /BBox is technically required).
+	Form(name string) (content []byte, res Resources, matrix render.Matrix, bbox *[4]float64, ok bool)
 	// Shading returns a backend-built shader for a named /Shading resource, or
 	// ok=false if the name is absent or the shading cannot be built (unsupported
 	// type, malformed geometry). The backend keeps shading geometry and color math
@@ -44,6 +47,23 @@ type Resources interface {
 	// reported (see ExtGStateParams); unsupported entries are flagged so the
 	// caller can log graceful degradation.
 	ExtGState(name string) (params ExtGStateParams, ok bool)
+	// ColorSpace returns the tint transform of a named /ColorSpace resource when it
+	// is a Separation or DeviceN space (whose sc/scn operands are tint values that
+	// must be mapped through a /Function to a real color in the alternate space), or
+	// ok=false for a device/Pattern/ICCBased/other space (handled by component count).
+	// The backend owns the function parsing (it has the *pdf.Document); the
+	// interpreter just evaluates the returned TintTransform at scn time.
+	ColorSpace(name string) (tint *TintTransform, ok bool)
+}
+
+// TintTransform maps a Separation/DeviceN tint (the sc/scn operands) to a color. Eval
+// runs the tint-transform /Function on the tint components and returns the resulting
+// components in the alternate color space; AlternateComps is how many that is (so the
+// interpreter picks the right device conversion: 1→gray, 3→rgb, 4→cmyk). Built by the
+// Resources backend; the interpreter only calls Eval.
+type TintTransform struct {
+	Eval           func(tint []float64) []float64
+	AlternateComps int
 }
 
 // ExtGStateParams holds the subset of an ExtGState dictionary the interpreter

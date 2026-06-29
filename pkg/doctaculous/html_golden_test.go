@@ -235,6 +235,26 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// Negative z-index behind the HOST's own background (CSS 2.1 Appendix E: a box
+		// paints its own background first, then its negative-z descendants). The teal host
+		// has a background; its z-index:-1 red child is offset down-right so half of it
+		// sits OVER the host background region and half spills below. Eyeball: the red
+		// child shows through everywhere it is NOT covered by a later-painted box — i.e.
+		// the host's own teal background does NOT hide it (the host bg paints behind it),
+		// but the in-flow yellow block (painted after negatives) DOES cover the part of
+		// red beneath the yellow. Pre-fix, the teal host background painted over the red.
+		name:       "zindex-neg-behind-own-bg",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .host { position: relative; width: 120px; height: 120px; background: #2aa0a0; }
+  .neg { position: relative; z-index: -1; top: 60px; left: 60px; width: 100px; height: 100px; background: #cc2222; }
+  .flow { width: 60px; height: 60px; background: #d0d000; }
+</style></head><body>
+  <div class="host"><div class="neg"></div><div class="flow"></div></div>
+</body></html>`,
+	},
+	{
 		// Positive z-index ordering: three overlapping absolutely-positioned boxes with
 		// z-index 1/2/3; the higher z paints on top. Blue(3) over green(2) over red(1).
 		name:       "zindex-stack",
@@ -593,6 +613,105 @@ var htmlGoldens = []struct {
     <div class="d"></div>
     <div class="e"></div>
   </div>
+</body></html>`,
+	},
+	{
+		// An auto-width inline-block WITH text inside a line of text. Exercises four
+		// inline/font fidelity fixes together: B2 (the highlighted "BOX" sits on the SAME
+		// baseline as "before"/"after", not dropped below), E4 (the inline-block
+		// SHRINKS TO FIT "BOX" instead of filling the line), E5 (the line is a sane height,
+		// not ~2× inflated), and E6 (the `font: 20px monospace` shorthand applies the size +
+		// monospace family). Eyeball: "before BOX after" on one line, the yellow box hugging
+		// "BOX", everything on one baseline.
+		name:       "inline-block-baseline",
+		viewportPx: 300,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; font: 20px monospace; }
+  .ib { display: inline-block; background: #ffdd55; }
+</style></head><body>
+  <p>before <span class="ib">BOX</span> after</p>
+</body></html>`,
+	},
+	{
+		// Absolute-positioning fidelity (C2 shrink-to-fit + C3 margin:auto centering).
+		// Eyeball: box A (left:0, width:auto) hugs its short text at the top-left (NOT
+		// stretched to the container); box B (left:0;right:0;width:60;margin:auto) is
+		// horizontally CENTERED in the 200px container.
+		name:       "abs-fidelity",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .cb { position: relative; width: 200px; height: 90px; background: #eeeeee; }
+  .shrink { position: absolute; left: 0; top: 0; background: #cc7777; color: #fff; }
+  .center { position: absolute; left: 0; right: 0; top: 40px; width: 60px;
+            margin-left: auto; margin-right: auto; height: 24px; background: #7777cc; }
+</style></head><body>
+  <div class="cb">
+    <div class="shrink">Hi</div>
+    <div class="center"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// object-position (CSS, fidelity fix D1): a small square image inside a larger box
+		// with object-fit:none, positioned at three corners. Eyeball: the gray image sits
+		// at top-left, center, and bottom-right of its three boxes respectively (the box
+		// background is light blue so the free space is visible).
+		name:       "object-position",
+		viewportPx: 260,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  img { width: 70px; height: 70px; object-fit: none; background: #cce0ff; margin: 6px; display: inline-block; }
+  .tl { object-position: left top; }
+  .ctr { object-position: center; }
+  .br { object-position: right bottom; }
+</style></head><body>
+  <img class="tl" src="quad.png"><img class="ctr" src="quad.png"><img class="br" src="quad.png">
+</body></html>`,
+		loader: quadLoader(),
+	},
+	{
+		// Table background LAYERS (CSS 17.5.1, fidelity fix F2): a column background and
+		// row backgrounds paint behind the cells. Eyeball: column 1 has a blue tint behind
+		// all its cells; rows 1 and 3 have an orange tint; the cell text sits on top; where
+		// a tinted row crosses the tinted column, the ROW wins (rows paint after columns).
+		name:       "table-bg-layers",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-collapse: separate; border-spacing: 0; }
+  td { width: 50px; height: 22px; padding: 2px; }
+  col.hi { background: #aaccff; }
+  tr.stripe { background: #ffcc99; }
+</style></head><body>
+  <table>
+    <colgroup><col><col class="hi"><col></colgroup>
+    <tr class="stripe"><td>a1</td><td>b1</td><td>c1</td></tr>
+    <tr><td>a2</td><td>b2</td><td>c2</td></tr>
+    <tr class="stripe"><td>a3</td><td>b3</td><td>c3</td></tr>
+  </table>
+</body></html>`,
+	},
+	{
+		// The four 3D border styles (CSS, fidelity fix F5). Each box has a thick gray
+		// border in one 3D style. Eyeball the bevel: outset = raised (light top/left, dark
+		// bottom/right), inset = sunken (inverse), ridge = a raised ridge (outer light /
+		// inner dark on top-left), groove = a carved groove (inverse of ridge). Before the
+		// fix these all painted as flat solid (or nothing for non-collapse borders).
+		name:       "border-3d-styles",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  div { width: 80px; height: 30px; margin: 8px; border: 12px gray; background: #dddddd; }
+  .outset { border-style: outset; }
+  .inset  { border-style: inset; }
+  .ridge  { border-style: ridge; }
+  .groove { border-style: groove; }
+</style></head><body>
+  <div class="outset"></div>
+  <div class="inset"></div>
+  <div class="ridge"></div>
+  <div class="groove"></div>
 </body></html>`,
 	},
 }

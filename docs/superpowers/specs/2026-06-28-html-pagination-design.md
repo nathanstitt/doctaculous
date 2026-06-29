@@ -349,7 +349,7 @@ already funnels through `OpenHTMLBytes` options).
 |---|---|---|
 | **Mid-box fragmentation** (a block taller than a page) | The block stays on its page and **overflows** the page's bottom (painted; the page is still `pageH` tall, so the overflow is clipped only by the raster bitmap size — actually it renders past the page if `renderPage` sizes to `pageH`; **it is clipped to `pageH` because the bitmap is `pageH` tall**). Logged once. | Real block/line/row splitting. |
 | **Mid-line / mid-table-row / mid-flex-or-grid-item** breaks | Never split — the whole atomic box rides one page (it is a single `Children` entry under body only if it *is* a top-level block; nested content never independently breaks). | Fragmentation inside formatting contexts. |
-| **Positioned descendants** | Split by kind (`splitPositionedByPage`). A **top-level `position:relative` block** is in flow (so it is in `body.Children` and gets bucketed) but is *also* lifted into the root's `Positioned` layer for painting — the **same `*Fragment` pointer** in both. Its positioned entry is **routed to the page its block landed on**, so it **paginates normally** (the shift comes for free: the entry is the bucket block). **Absolute / fixed** boxes (including descendants of a relative block) live only in `root.Positioned` (not `body.Children`); they are **not** distributed and **ride the first page**, at their original page-space Y (so an abs box may sit off a short first page). This is a documented, non-panicking approximation. | Distribute abs/fixed per page (incl. an abs descendant following its relative-block CB to a later page); `fixed` repeating on every page. |
+| **Positioned descendants** | Split by kind (`splitPositionedByPage`). A **top-level `position:relative` block** is in flow (so it is in `body.Children` and gets bucketed) but is *also* lifted into the root's `Positioned` layer for painting — the **same `*Fragment` pointer** in both. Its positioned entry is **routed to the page its block landed on**, so it **paginates normally** (the shift comes for free: the entry is the bucket block). **(Fidelity pass #2:)** a **page-CB `position:absolute`** box is now **routed to the page whose band contains its top** and shifted into that page's local frame; a **`position:fixed`** box now **repeats on every page** (the same read-only fragment shared per page, no shift — its `frag.Y` is already viewport-relative). An abs box whose CB is a positioned ancestor follows that ancestor. | Per-page distribution of *floats*; per-page **bottom**-anchored `fixed` (positioned against the single-tall height today). |
 | **Floats spanning a page boundary** | A float is in its BFC owner's `Floats`; a top-level float owned by body rides whichever block-bucket logic places it — but top-level floats are **not** in `body.Children`, so like positioned content they flatten with page 0's root wrapper. A float **inside** a block rides that block's page (it is in the block's subtree, moved by `shiftFragment`). | Per-page float distribution. |
 | **`break-inside: avoid`, `break-*: avoid`** | Parsed onto `ComputedStyle` but **not acted on** (a block that would split still breaks at the page boundary as if `auto`). Logged is unnecessary (no behavior change); documented. | Keep-together. |
 | **Widows / orphans** | Not modeled (no minimum line counts). | Line-count control. |
@@ -360,6 +360,57 @@ The first row's parenthetical resolves to: **the per-page bitmap is `pageH` tall
 over-tall block is visibly cut at the page bottom, exactly the graceful degradation we want (no panic, no
 infinite page). A test asserts the over-tall case yields the expected page count (it does **not** spill into a
 second page) and a non-blank page.
+
+### Fidelity-pass update (post-ship correctness + honesty pass)
+
+A dedicated audit after this slice shipped found the table above **understated** a few behaviors; the follow-up
+PR fixed them, so the rows now read as:
+
+- **Positioned descendants.** The slice claimed an abs descendant of a relative block "rides the first page at
+  its original page-space Y." It actually **followed the relative block to its real page** (good) but at the
+  **un-shifted Y** (bug — `shiftFragment` recursed `Children`/`Floats` but not the fragment's `Positioned`,
+  `ClipRect`, `Collapsed`, or `PositionedInfo.ClipChain`). **Fixed:** `shiftFragment`/`translateFragment` now
+  move every page-space field a fragment owns (recursing `Positioned`, but **skipping `position:relative`
+  entries** — they are aliased with `Children` and already moved there, so recursing them would double-shift).
+  This also fixed **two pre-existing base-engine bugs** the slice's goldens masked (they place such boxes flush
+  at the top, where the shift is ~0): a `border-collapse` table and an `overflow:hidden` box placed **below
+  other content** painted their grid lines / clip rect at the un-shifted (build-frame) Y, detached from the box.
+- **Nested `position:relative` block.** Only a **top-level** relative block paginated; a relative block
+  **nested under a static wrapper** routed to page 0 but was shifted to a later page's local Y → it painted
+  off-page and **vanished**. **Fixed:** `splitPositionedByPage` routes a positioned entry to the page of its
+  nearest **top-level ancestor block** (walking each bucket block's `Children` subtree), so a nested relative
+  block follows its ancestor's page.
+- **html/body border.** The slice said only that the "background/border still paints per page (a documented
+  approximation)" — it did not disclose that the **border** painted at **full-document geometry on every page**
+  (a spurious top edge at Y 0 and full-height side edges on pages ≥1). **Fixed:** the per-page wrapper clone is
+  shifted into the page's local frame (`shiftFragmentSelf`, which moves the wrapper's own box but **not** its
+  children — they shift separately), so the page bitmap fragments the border: top edge on page 0, bottom on the
+  last page, sides on every page. The first page's top is pulled up to the wrapper's border-box top
+  (`wrapperDecorationTop`) so a `<body>` top border shows on page 0 with content below it.
+- **Forced break on a nested block.** Pass #1 made the silent drop a **one-time warning**. **Pass #2 now
+  PROPAGATES** a forced break on content at a top-level block's **leading/trailing edge** to that block (so
+  `.page-break { break-before: page }` on a nested element splits as expected — `effectiveBreaks`); only a
+  genuinely **mid-block** forced break remains deferred (still warned once, needs mid-box fragmentation).
+- **Margin-top at an unforced break.** Pass #1 documented the collapse-to-0 simplification. **Pass #2 now
+  RETAINS** the block's own leading top margin at an unforced/overflow break (the new page's top is pulled up by
+  the margin so the block lands at local Y == its margin); a forced break still truncates it (CSS).
+- **"Logged once"** (over-tall block) was imprecise: the degradation logs **once per over-tall block**, not
+  once total.
+
+**Fidelity pass #2** (`2026-06-28-html-pagination-fidelity-bundle-design.md`) additionally took on three of the
+larger deferrals that fit the post-pass model: **per-page distribution of page-CB `position:absolute`** (routed
+by Y-band, shifted local), **`position:fixed` repeating on every page** (shared fragment, no shift), the
+**nested edge-break propagation** and **margin-top retention** above. Still deferred (structural): mid-box /
+mid-line / mid-row / mid-flex-grid splitting, widows/orphans, `break-inside`, per-page **float** distribution,
+per-page **bottom**-anchored `fixed`, mid-block forced breaks, `@page` margins, running headers/footers.
+
+Also corrected outside pagination by the same pass (uncovered while auditing the shift/flatten code): a
+negative-z positioned descendant painted **behind its stacking context's own background** in the non-clipping
+`AppendItems` branch (Appendix-E step order), and `translateItems` did not move a `ClipPushKind`, so a
+`position:relative` box's paint offset moved its content but not its overflow clip. Both fixed. And, unrelated
+to layout, the **PDF render path gained the page-boundary `recover`** CLAUDE.md always promised (it had none;
+two crafted-PDF panic sites — a malformed single-element image `/ColorSpace` array and a self-referential
+Type 3 function — are also guarded directly).
 
 ## Testing (CLAUDE.md "Testing" — new fixtures + tests in this PR)
 
