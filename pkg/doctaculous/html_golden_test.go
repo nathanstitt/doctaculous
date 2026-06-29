@@ -273,6 +273,25 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// Sub-case B (positioned-clip-box relative escape): a position:relative child of
+		// a position:relative + overflow:hidden box, offset down+right past the box edge.
+		// Because the box is BOTH the child's containing block (it is in flow within it)
+		// AND a stacking context that consumes the relative child, the child is clipped to
+		// the box's padding box. Eyeball: the green child is CUT at the gray box's
+		// bottom-right edge — it does NOT spill outside (an unclipped render would show the
+		// green overhanging the box). The navy border marks the box's full extent.
+		name:       "clip-relative-escape",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .clip { position: relative; overflow: hidden; width: 90px; height: 90px;
+          border: 4px solid #002255; background: #dddddd; }
+  .child { position: relative; left: 40px; top: 40px; width: 80px; height: 80px; background: #33aa33; }
+</style></head><body>
+  <div class="clip"><div class="child"></div></div>
+</body></html>`,
+	},
+	{
 		// z-index ∘ float: a left float (step 4) and a positive-z positioned box (step 7)
 		// overlap; the positioned box paints OVER the float per Appendix E.
 		name:       "zindex-float",

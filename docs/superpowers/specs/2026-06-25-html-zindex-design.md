@@ -1,5 +1,20 @@
 # HTML rendering — full CSS 2.1 Appendix E z-index stacking (+ the relative-clip-escape fix) (sub-project 6)
 
+> **CORRECTION (added after sub-project 6b, 2026-06-25).** This doc repeatedly describes an
+> **"absolute/fixed intervening-clip" sub-case** deferred to 6b — an abs/fixed descendant whose containing
+> block is an ancestor *beyond* an intervening `overflow:hidden` box, claimed to need clip-ancestor
+> threading to be clipped. **That premise is wrong.** Per **CSS 2.1 §11.1.1**, an overflow box does NOT
+> clip an abs/fixed descendant whose containing block is an *ancestor of* that box — the prior "escape"
+> behavior was already correct, not a gap. There is no tree configuration where an intervening clip chain
+> is needed for an abs box: whenever an overflow box *does* clip an abs descendant, that descendant's CB is
+> the box or a descendant of it, so it already paints inside that CB's clip bracket (or rides the CB's
+> bubble chain). Sub-project 6b therefore did **not** build the abs clip-ancestor threading; it fixed the
+> two genuine *relative* clip-escape cases (the positioned-clip-box case via `CBOwned: frag.Clips`, and the
+> float-internal chain re-translation) and recorded the abs case as resolved-not-a-bug. Read every mention
+> of the "abs intervening-clip sub-case" / "deferred to 6b" below as **superseded by this banner**; the
+> *relative*-case design (which IS this slice's shipped work) stands. See
+> `docs/superpowers/HANDOVER-subproject-6b-abs-clip-escape.md`.
+
 **Branch:** `feat/html-zindex` (off `feat/html-overflow` — it builds directly on the stacking pass +
 clip machinery 5c shipped; rebase onto `main` if the stack has merged).
 **Builds on:** 5b positioning (`docs/superpowers/specs/2026-06-24-html-positioning-design.md`) and 5c
@@ -386,34 +401,35 @@ Every unsupported / edge case degrades silently (no panic; recovery at the page 
   the bracket emits `ClipPush`/`ClipPop` harmlessly.
 - **Deeply nested intervening clips** — nested `ClipChain` brackets, bounded by tree depth (the same
   depth guard the recursion already has).
-- **The abs intervening-clip sub-case (deferred to 6b)** — an `absolute`/`fixed` descendant whose CB is an
-  ancestor *beyond* an intervening `overflow:hidden` box paints in its holder's layer **unclipped** by that
-  intervening box (today's behavior, unchanged by 6). This degrades silently: it never panics, and the
-  result is exactly what 5c produced for this configuration. **Detecting it even to log it requires the
-  clip-ancestor threading that 6b adds** (`resolveAbsolute` has only the CB owner, not the chain of clips
-  the box passed through), so 6 neither fixes nor logs it — it is documented here and in the CLAUDE.md
-  Done note as a known, scoped gap. (The *relative* analogue IS fully handled in 6.)
-- **The positioned-clip-box relative-escape sub-case (pre-existing 5c deferral, still deferred)** — a
+- **The abs intervening-clip sub-case (described below as deferred to 6b — but see the CORRECTION banner
+  at the top of this doc)** — an `absolute`/`fixed` descendant whose CB is an ancestor *beyond* an
+  intervening `overflow:hidden` box paints in its holder's layer **unclipped** by that intervening box. At
+  the time of writing 6 this was framed as a gap awaiting 6b's clip-ancestor threading. **6b found this to
+  be the CORRECT behavior, not a gap** (CSS 2.1 §11.1.1: an overflow box does not clip a descendant whose CB
+  is an ancestor of it). No threading was built; the behavior is unchanged and is spec-correct. (The
+  *relative* analogue — an in-flow relative descendant — IS handled, in 6 for the non-positioned clip box
+  and in 6b for the positioned clip box.)
+- **The positioned-clip-box relative-escape sub-case (was a 5c deferral — FIXED in 6b)** — a
   `position:relative` descendant of a ***positioned*** `overflow:hidden` box (the box is then a stacking
-  context, so the descendant lands on the box's **own** `Positioned` with `CBOwned=false`) paints in the
-  **escaped band after `ClipPop`**, unclipped. This is NOT the case the relative-clip-escape fix targets
-  (that case is a *non-positioned* clip box, where the descendant bubbles *past* the box and the `ClipChain`
-  carries the clip). It is the same gap 5c's overflow spec already deferred ("a relative descendant of a
-  positioned clipping box is not specially clipped"), and the chain mechanism does not reach it because the
-  descendant never bubbles *out of* the box. Grouped with 6b (the consume branch would need to recognize
-  when `b` is the descendant's own CB and set `CBOwned=true` so the box's own bracket clips it). Degrades
-  silently (unclipped, no panic); unchanged by 6.
-- **A clip chain captured inside a float (known limitation, logged)** — if a relative descendant bubbles out
-  of a non-positioned clip box that sits **inside a float**, the captured `ClipChain` rects are in the
-  float's pre-translation local frame, and `placeFloat`'s `translateFragment` does not re-offset them (that
-  translate predates the chain). A rare nesting; `placeFloat` emits a one-line `(approximate)` debug log
-  (matching the 5b/5c float-offset deferral family). No panic.
+  context, so the descendant lands on the box's **own** `Positioned`). 6 left it unclipped (`CBOwned=false`);
+  **6b fixed it** by setting `CBOwned: frag.Clips` in the consume branch — a clipping positioned box clips
+  every relative descendant it consumes (the box is the descendant's nearest positioned ancestor, since any
+  intervening positioned box would have consumed it first; so the descendant's in-flow painting bubbles to
+  the box's layer as content it must clip). This also covers a relative descendant separated from the box by
+  *static* intermediates. NOT the same as the case 6 targets (a *non-positioned* clip box, where the
+  descendant bubbles *past* the box and the `ClipChain` carries the clip).
+- **A clip chain captured inside a float (was logged as approximate in 6 — FIXED in 6b)** — if a relative
+  descendant bubbles out of a non-positioned clip box that sits **inside a float**, the captured `ClipChain`
+  rects were in the float's pre-translation local frame and `placeFloat`'s `translateFragment` did not
+  re-offset them. **6b fixed it** with `translateRects(pp.clipChain, dx, dy)` in `placeFloat`, re-translating
+  the chain by the float's placement delta so the bracket lands at the float's final position.
 
 The CLAUDE.md degradation notes flip when the PR lands: the positioning + overflow Done bullets' "z-index
 parsed but not sorted on" becomes **supported (full Appendix E ordering)**; the overflow bullet's "a
 `position:relative` descendant of a non-positioned `overflow:hidden` box escapes the clip" becomes
-**clipped (relative case)**, narrowed to note the remaining gap — "the *absolute/fixed* intervening-clip
-sub-case is deferred to 6b" — so the Done section stays honest about exactly what is and isn't covered.
+**clipped (relative case)**. (This sentence originally said the abs/fixed intervening-clip sub-case is
+"deferred to 6b"; per the CORRECTION banner at the top, 6b instead recorded that case as **not a gap** —
+spec-correct already — and CLAUDE.md was updated to say so.)
 
 ## Tests
 
