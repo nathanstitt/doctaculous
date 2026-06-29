@@ -350,6 +350,30 @@ func TestControlPaintShiftedToPosition(t *testing.T) {
 	}
 }
 
+func TestButtonLabelSources(t *testing.T) {
+	// <button>Go</button> → label "Go" (2 glyphs).
+	btnEl := renderControlItems(t, `<body><button>Go</button></body>`)
+	// <input type=submit value=Send> → label "Send" (4 glyphs) via the value attr.
+	inSubmit := renderControlItems(t, `<body><input type=submit value=Send></body>`)
+	// bare <input type=submit> → default label "Submit" (6 glyphs).
+	inDefault := renderControlItems(t, `<body><input type=submit></body>`)
+	// <input type=button> with no value/label → empty (0 glyphs).
+	inEmpty := renderControlItems(t, `<body><input type=button></body>`)
+
+	if countKind(btnEl, layout.GlyphKind) == 0 {
+		t.Error("<button>Go</button> emitted no label glyphs")
+	}
+	if countKind(inSubmit, layout.GlyphKind) == 0 {
+		t.Error("<input type=submit value=Send> emitted no label glyphs (value not used)")
+	}
+	if countKind(inDefault, layout.GlyphKind) == 0 {
+		t.Error("bare <input type=submit> emitted no label glyphs (no default 'Submit')")
+	}
+	if countKind(inEmpty, layout.GlyphKind) != 0 {
+		t.Errorf("<input type=button> with no label should emit 0 glyphs, got %d", countKind(inEmpty, layout.GlyphKind))
+	}
+}
+
 func TestControlPaintChrome(t *testing.T) {
 	// Text field: a background fill + inset (sunken) borders.
 	tf := renderControlItems(t, `<body><input type=text value=hi></body>`)

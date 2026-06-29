@@ -269,7 +269,9 @@ func (e *Engine) controlContentFor(b *cssbox.Box, cx, cy, w, h float64) *Control
 	_, cc.Checked = b.Replaced.Attrs["checked"]
 	_, cc.Disabled = b.Replaced.Attrs["disabled"]
 	switch cc.Kind {
-	case cssbox.CtrlButton, cssbox.CtrlTextarea, cssbox.CtrlSelect:
+	case cssbox.CtrlButton:
+		cc.Text = buttonLabel(b)
+	case cssbox.CtrlTextarea, cssbox.CtrlSelect:
 		cc.Text = b.Replaced.Text
 	default:
 		if v, ok := b.Replaced.Attrs["value"]; ok && v != "" {
@@ -282,6 +284,27 @@ func (e *Engine) controlContentFor(b *cssbox.Box, cx, cy, w, h float64) *Control
 		cc.Text = strings.Repeat("•", len([]rune(cc.Text)))
 	}
 	return cc
+}
+
+// buttonLabel returns a button control's label: the extracted text of a <button>
+// element if present, else an <input> button's value attribute, else a type-based
+// default ("Submit"/"Reset" for submit/reset inputs, matching browsers; empty
+// otherwise).
+func buttonLabel(b *cssbox.Box) string {
+	if b.Replaced.Text != "" {
+		return b.Replaced.Text
+	}
+	if v, ok := b.Replaced.Attrs["value"]; ok && v != "" {
+		return v
+	}
+	switch strings.ToLower(strings.TrimSpace(b.Replaced.Attrs["type"])) {
+	case "submit":
+		return "Submit"
+	case "reset":
+		return "Reset"
+	default:
+		return ""
+	}
 }
 
 type ctrlAlign int
