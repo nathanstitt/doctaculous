@@ -116,6 +116,7 @@ const (
 	ctrlMinTextareaW = 150
 	ctrlMinTextareaH = 40
 	ctrlMinButtonW   = 24
+	ctrlMinFieldH    = 16 // minimum field/button height (one line + chrome), points
 )
 
 // controlIntrinsicSize returns the intrinsic content-box size (points) of a form
@@ -139,7 +140,7 @@ func (e *Engine) controlIntrinsicSize(ctx context.Context, b *cssbox.Box) (w, h 
 		labelW := e.textWidth(b, b.Replaced.Text)
 		w = labelW + 2*ctrlBtnPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinButtonW), h
+		return max2(w, ctrlMinButtonW), max2(h, ctrlMinFieldH)
 	case cssbox.CtrlTextarea:
 		cols := attrIntOr(b, "cols", 20)
 		rows := attrIntOr(b, "rows", 2)
@@ -150,12 +151,12 @@ func (e *Engine) controlIntrinsicSize(ctx context.Context, b *cssbox.Box) (w, h 
 		textW := e.textWidth(b, b.Replaced.Text)
 		w = textW + ctrlSelectTri + 2*ctrlPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinTextW), h
+		return max2(w, ctrlMinTextW), max2(h, ctrlMinFieldH)
 	default: // CtrlText, CtrlPassword
 		size := attrIntOr(b, "size", 20)
 		w = float64(size)*ch + 2*ctrlPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinTextW), h
+		return max2(w, ctrlMinTextW), max2(h, ctrlMinFieldH)
 	}
 }
 

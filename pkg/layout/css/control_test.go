@@ -142,6 +142,8 @@ func TestControlIntrinsicSizeNonZero(t *testing.T) {
 		{"textarea-bare", ctrlBox(cssbox.CtrlTextarea, nil)},
 		{"checkbox", ctrlBox(cssbox.CtrlCheckbox, nil)},
 		{"select-empty", ctrlBox(cssbox.CtrlSelect, nil)},
+		{"radio", ctrlBox(cssbox.CtrlRadio, nil)},
+		{"password-empty", ctrlBox(cssbox.CtrlPassword, nil)},
 	}
 	for _, c := range cases {
 		w, h := eng.controlIntrinsicSize(ctx, c.box)
