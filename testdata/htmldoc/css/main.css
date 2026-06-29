@@ -1,0 +1,396 @@
+/* main.css — the primary author stylesheet (loaded second, wins over reset.css).
+
+   Aesthetic: an editorial "type & layout specimen" — flat color fields, decisive
+   rules, a Swiss grid, and the engine's distinctive 3D border bevels used as real
+   ornament. Strictly within implemented CSS: no gradients, shadows, radii,
+   transforms, opacity, or text-decoration (none are rendered by the engine). */
+
+/* ----- page frame ------------------------------------------------------------ */
+
+/* A heavy ruled band that the engine fragments across pages (the body border is
+   split per page by the paginator: top edge on page 0, bottom on the last page,
+   sides on every page). The inner padding insets all content from that rule. */
+body {
+  border: 6px solid #1a1a18;
+  padding: 28px 36px 36px 36px;
+}
+
+/* ----- masthead -------------------------------------------------------------- */
+
+.masthead {
+  border-bottom: 3px solid #1a1a18;
+  padding-bottom: 14px;
+  margin-bottom: 22px;
+}
+
+.masthead h1 {
+  font-size: 44px;
+  font-weight: bold;
+  margin: 0 0 4px 0;
+}
+
+/* The brush-script web font (Pacifico, served from fonts/). Covers A–Z/a–z + space
+   only, so the wordmark text is letters-only. Proves the @font-face WOFF2 decode +
+   download path: these glyphs are unmistakably not the base-14 serif. */
+.wordmark {
+  font-family: "Specimen Script", cursive;
+  font-size: 40px;
+  color: #a64b2a;
+  line-height: 1;
+}
+
+.masthead .tagline {
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 14px;
+  color: #3a4a5a;
+  margin: 0;
+}
+
+/* The masthead lays its wordmark and meta side by side via flex, pushed apart. */
+.masthead .bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+/* ----- section scaffolding --------------------------------------------------- */
+
+/* Each major feature area is a <section>. Forcing a page break before each one
+   (except the first) gives the paginator clean, predictable pages to fragment. */
+.section {
+  margin-bottom: 26px;
+}
+
+.section.break {
+  break-before: page;
+}
+
+/* Numbered section header: a gold tab + sans title, separated by a thin rule. */
+.section h2 {
+  font-size: 24px;
+  font-weight: bold;
+  margin: 0 0 2px 0;
+  padding: 0;
+}
+
+.section .kicker {
+  display: inline-block;
+  background: #d9a521;
+  color: #1a1a18;
+  font-family: "Inconsolata", monospace;
+  font-size: 12px;
+  font-weight: bold;
+  padding: 2px 8px;
+  margin-bottom: 8px;
+}
+
+.section .lede {
+  border-bottom: 1px solid #c9c2b0;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  color: #3a4a5a;
+}
+
+/* A small caption used under demos to explain what to look at. */
+.caption {
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 12px;
+  color: #3a4a5a;
+  margin: 6px 0 0 0;
+}
+
+/* ----- typography specimen --------------------------------------------------- */
+
+.specimen h3 {
+  font-size: 18px;
+  margin: 14px 0 4px 0;
+}
+
+.specimen .drop {
+  font-size: 17px;
+}
+
+.pull {
+  border-left: 5px solid #d9a521;
+  padding: 4px 0 4px 16px;
+  margin: 14px 0;
+  color: #1a1a18;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+/* ----- the box-model / border specimen --------------------------------------- */
+
+.swatches {
+  display: flex;
+  justify-content: space-between;
+}
+
+.swatch {
+  width: 132px;
+  height: 96px;
+  background: #e6e0d2;
+  padding: 10px;
+  font-family: "Inconsolata", monospace;
+  font-size: 12px;
+  color: #1a1a18;
+}
+
+/* The four 3D bevel styles used as genuine ornament — a real differentiator of
+   this engine. Thick borders so the light/dark facets read clearly. */
+.b-outset { border: 12px outset #c9a94a; }
+.b-inset  { border: 12px inset  #c9a94a; }
+.b-ridge  { border: 12px ridge  #9aa7b3; }
+.b-groove { border: 12px groove #9aa7b3; }
+
+/* A second row: the line styles. */
+.lines div {
+  height: 26px;
+  margin-bottom: 8px;
+  border-width: 4px;
+  border-color: #3a4a5a;
+}
+.l-solid  { border-style: solid; }
+.l-dashed { border-style: dashed; }
+.l-dotted { border-style: dotted; }
+.l-double { border-style: double; border-width: 6px; }
+
+/* ----- floats + clear -------------------------------------------------------- */
+
+.figure {
+  float: left;
+  width: 150px;
+  margin: 4px 18px 8px 0;
+  border: 1px solid #1a1a18;
+  padding: 6px;
+  background: #ffffff;
+}
+
+.figure img {
+  display: block;
+  width: 138px;
+  height: 104px;
+}
+
+.figure .cap {
+  font-family: "Inconsolata", monospace;
+  font-size: 11px;
+  color: #3a4a5a;
+  margin-top: 4px;
+}
+
+.after-float {
+  clear: left;
+  border-top: 1px solid #c9c2b0;
+  padding-top: 8px;
+  color: #3a4a5a;
+}
+
+/* ----- flexbox demos --------------------------------------------------------- */
+
+.flexrow {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.flexrow .grow1 { flex: 1 1 0; height: 44px; background: #a64b2a; }
+.flexrow .grow2 { flex: 2 1 0; height: 44px; background: #3a4a5a; }
+.flexrow .grow3 { flex: 3 1 0; height: 44px; background: #d9a521; }
+
+.flexbetween {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.flexbetween .chip {
+  width: 84px;
+  height: 40px;
+  background: #3a4a5a;
+}
+
+.flexcenter {
+  display: flex;
+  align-items: center;
+  height: 92px;
+  background: #e6e0d2;
+  padding: 0 12px;
+}
+.flexcenter .short { width: 70px; height: 32px; background: #a64b2a; margin-right: 12px; }
+.flexcenter .tall  { width: 70px; height: 72px; background: #d9a521; }
+
+/* ----- CSS grid -------------------------------------------------------------- */
+
+.dash {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: 46px 110px;
+  grid-template-areas:
+    "head head"
+    "main side";
+  gap: 10px;
+}
+.dash .g-head { grid-area: head; background: #1a1a18; }
+.dash .g-main { grid-area: main; background: #3a4a5a; }
+.dash .g-side { grid-area: side; background: #a64b2a; }
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-auto-rows: 60px;
+  gap: 8px;
+  margin-top: 12px;
+}
+.tiles .span2 { grid-column: 1 / 3; background: #d9a521; }
+.tiles .t { background: #e6e0d2; border: 1px solid #c9c2b0; }
+
+/* ----- table specimen -------------------------------------------------------- */
+
+.ledger {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.ledger caption {
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-weight: bold;
+  font-size: 14px;
+  text-align: left;
+  padding-bottom: 6px;
+  caption-side: top;
+}
+.ledger th, .ledger td {
+  border: 1px solid #1a1a18;
+  padding: 6px 10px;
+  text-align: left;
+}
+.ledger thead th {
+  background: #1a1a18;
+  color: #f4f0e6;
+}
+.ledger tbody tr:nth-child(2) td {
+  background: #ece6d6;
+}
+.ledger .total td {
+  border-top: 3px solid #a64b2a;
+  font-weight: bold;
+}
+
+/* A second small table: separate borders + column/row background layers. */
+.matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 14px;
+  font-size: 12px;
+}
+.matrix td {
+  width: 64px;
+  height: 30px;
+  padding: 3px 6px;
+  border: 1px solid #c9c2b0;
+}
+.matrix col.hi { background: #f0e6c4; }
+.matrix tr.stripe { background: #ece6d6; }
+
+/* ----- positioning + overflow + z-index -------------------------------------- */
+
+.stage {
+  position: relative;
+  height: 168px;
+  background: #e6e0d2;
+  border: 1px solid #c9c2b0;
+  padding: 10px;
+}
+
+/* A pinned badge in the top-right corner (absolute against the relative stage). */
+.stage .badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 56px;
+  height: 56px;
+  background: #d9a521;
+  border: 2px solid #1a1a18;
+}
+.stage .badge img { display: block; width: 52px; height: 52px; }
+
+/* A relatively-nudged tag that overlaps following content at paint time. */
+.stage .nudge {
+  position: relative;
+  top: 14px;
+  left: 18px;
+  width: 120px;
+  height: 40px;
+  background: #a64b2a;
+}
+
+/* Overflow clip: an oversized child cut to the padding box. */
+.window {
+  overflow: hidden;
+  width: 130px;
+  height: 80px;
+  border: 8px solid #3a4a5a;
+  margin-top: 14px;
+}
+.window .oversized {
+  width: 320px;
+  height: 320px;
+  background: #d9a521;
+}
+
+/* z-index stack: three overlapping absolute boxes, higher z on top. */
+.zstack {
+  position: relative;
+  height: 130px;
+  margin-top: 14px;
+}
+.zstack .z {
+  position: absolute;
+  width: 90px;
+  height: 90px;
+  border: 2px solid #1a1a18;
+}
+.zstack .z1 { left: 0;   top: 0;   background: #a64b2a; z-index: 1; }
+.zstack .z2 { left: 36px; top: 22px; background: #3a4a5a; z-index: 2; }
+.zstack .z3 { left: 72px; top: 44px; background: #d9a521; z-index: 3; }
+
+/* ----- images ---------------------------------------------------------------- */
+
+.gallery {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+.gallery figure {
+  margin: 0;
+  width: 150px;
+  border: 1px solid #c9c2b0;
+  background: #ffffff;
+  padding: 6px;
+}
+.gallery .fit {
+  display: block;
+  width: 138px;
+  height: 92px;
+  background: #ece6d6;
+}
+.gallery .contain { object-fit: contain; }
+.gallery .cover   { object-fit: cover; }
+.gallery .none    { object-fit: none; object-position: right bottom; }
+.gallery figcaption {
+  font-family: "Inconsolata", monospace;
+  font-size: 11px;
+  color: #3a4a5a;
+  margin-top: 4px;
+}
+
+/* ----- colophon -------------------------------------------------------------- */
+
+.colophon {
+  border-top: 3px solid #1a1a18;
+  margin-top: 24px;
+  padding-top: 12px;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 12px;
+  color: #3a4a5a;
+}
