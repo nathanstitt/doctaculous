@@ -9,7 +9,8 @@ import "github.com/nathanstitt/doctaculous/pkg/css"
 // later sub-projects need more defaults.
 const uaSource = `
 html, body, div, p, section, article, header, footer, nav, main, aside,
-ul, ol, blockquote, pre, form, figure, figcaption, hr, h1, h2, h3, h4, h5, h6 {
+ul, ol, blockquote, pre, form, figure, figcaption, hr, fieldset, legend,
+h1, h2, h3, h4, h5, h6 {
 	display: block;
 }
 li { display: list-item; }

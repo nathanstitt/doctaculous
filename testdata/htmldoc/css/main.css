@@ -384,6 +384,30 @@ body {
   margin-top: 4px;
 }
 
+/* ----- forms ----------------------------------------------------------------- */
+
+.signup {
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 13px;
+  color: #1a1a18;
+}
+.signup label {
+  display: block;
+  margin-bottom: 12px;
+}
+.signup .choices {
+  border: 1px solid #c9c2b0;
+  background: #f0e6c4;
+  padding: 10px 12px;
+  margin: 0 0 14px 0;
+}
+.signup .choices label {
+  margin-bottom: 6px;
+}
+.signup .actions {
+  margin-top: 4px;
+}
+
 /* ----- colophon -------------------------------------------------------------- */
 
 .colophon {

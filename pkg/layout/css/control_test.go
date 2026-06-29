@@ -411,7 +411,7 @@ func TestControlPaintChrome(t *testing.T) {
 	cbEmpty := renderControlItems(t, `<body><input type=checkbox></body>`)
 	paintedChecked := countKind(cbChecked, layout.GlyphKind) + countKind(cbChecked, layout.BackgroundKind)
 	paintedEmpty := countKind(cbEmpty, layout.GlyphKind) + countKind(cbEmpty, layout.BackgroundKind)
-	if !(paintedChecked > paintedEmpty) {
+	if paintedChecked <= paintedEmpty {
 		t.Errorf("checked checkbox should paint more than an empty one (the checkmark)")
 	}
 }

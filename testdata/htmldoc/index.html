@@ -254,6 +254,30 @@
     <p class="caption">The four&#8209;quadrant PNG makes orientation unambiguous:
       <em>contain</em> letterboxes the whole square, <em>cover</em> fills and crops, and
       <em>none</em> pins the unscaled image to the bottom&#8209;right.</p>
+  </section>
+
+  <!-- ===================== 9 · FORMS ===================== -->
+  <section class="section break">
+    <span class="kicker">09 / FORMS</span>
+    <h2>Form Controls</h2>
+    <p class="lede">Static, non&#8209;interactive native widgets &mdash; text fields,
+      buttons, checkboxes, radios, a textarea, and a select &mdash; sized and painted
+      with classic chrome.</p>
+
+    <form class="signup">
+      <label>Full name <input type="text" value="Ada Lovelace"></label>
+      <label>Email <input type="text" placeholder="you@example.com"></label>
+      <label>Password <input type="password" value="hunter2"></label>
+      <label>Notes <textarea>Notes go here.</textarea></label>
+      <fieldset class="choices">
+        <label><input type="checkbox" checked> Subscribe to updates</label>
+        <label><input type="checkbox"> Remember this device</label>
+        <label><input type="radio" checked> Contact by email</label>
+        <label><input type="radio"> Contact by phone</label>
+      </fieldset>
+      <label>Plan <select><option>Free</option><option selected>Pro</option><option>Team</option></select></label>
+      <div class="actions"><button>Save changes</button> <input type="submit" value="Submit"></div>
+    </form>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from
