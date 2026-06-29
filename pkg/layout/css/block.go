@@ -1028,7 +1028,9 @@ func establishesStackingContext(b *cssbox.Box) bool {
 // box's own dimensions as their defaults (auto width/height, no min/max, zero
 // margins/padding/borders — the last three already follow from the zero style).
 func isAnonymous(b *cssbox.Box) bool {
-	return b.Kind == cssbox.BoxAnonBlock || b.Kind == cssbox.BoxAnonInline
+	return b.Kind == cssbox.BoxAnonBlock || b.Kind == cssbox.BoxAnonInline ||
+		b.Kind == cssbox.BoxAnonFlexItem || b.Kind == cssbox.BoxAnonGridItem ||
+		b.Kind == cssbox.BoxAnonTablePart
 }
 
 // resolveContentWidth resolves the content-box width of block box b in a containing

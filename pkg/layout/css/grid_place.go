@@ -293,17 +293,19 @@ func autoPlace(p gcss.GridPlacement, dims gridDims, cursor *placeCursor, occ *oc
 	rowSpan := axisSpan(p.RowStart, p.RowEnd)
 
 	var flowSpan, crossSpan int
-	var flowExtent, crossLocked int
+	var flowExtent, crossLocked, flowLocked int
 	if columnFlow {
 		// Flow axis = rows; cross axis = columns.
 		flowSpan, crossSpan = rowSpan, colSpan
 		flowExtent = *rows
 		crossLocked = lockedLine(p.ColStart, p.ColEnd, dims.explicitCols)
+		flowLocked = lockedLine(p.RowStart, p.RowEnd, dims.explicitRows)
 	} else {
 		// Flow axis = columns; cross axis = rows.
 		flowSpan, crossSpan = colSpan, rowSpan
 		flowExtent = *cols
 		crossLocked = lockedLine(p.RowStart, p.RowEnd, dims.explicitRows)
+		flowLocked = lockedLine(p.ColStart, p.ColEnd, dims.explicitCols)
 	}
 	if flowSpan < 1 {
 		flowSpan = 1
@@ -338,6 +340,19 @@ func autoPlace(p gcss.GridPlacement, dims gridDims, cursor *placeCursor, occ *oc
 		crossPos = crossLocked
 		flowPos = 0
 	}
+	// An item with a definite line on the FLOW axis but auto on the cross axis (e.g.
+	// grid-column: 1 / 3 with an auto row, in row flow): pin the flow position to its
+	// locked flow line and search only the CROSS axis downward for a free band. Without
+	// this the item ignores its flow-axis start line and auto-flows freely, colliding
+	// with the auto-placed items around it. (crossLocked takes precedence — at most one
+	// axis is locked here, since a both-axes-definite item was handled in Pass 1.)
+	flowAxisLocked := crossLocked < 0 && flowLocked >= 0
+	if flowAxisLocked {
+		flowPos = flowLocked
+		if flowPos+flowSpan > flowExtent {
+			flowExtent = flowPos + flowSpan
+		}
+	}
 
 	// Bound the walk so the loop is provably finite. For the UNLOCKED path the cross
 	// axis never needs to exceed the highest occupied cross line plus this item's cross
@@ -352,6 +367,26 @@ func autoPlace(p gcss.GridPlacement, dims gridDims, cursor *placeCursor, occ *oc
 	crossBound := maxOccCross + crossSpan + flowExtent + 2
 
 	for crossPos <= crossBound {
+		if flowAxisLocked {
+			// Flow position is pinned to the locked flow line; only the cross axis is
+			// searched. If this band is occupied, advance to the next cross line.
+			area := bandArea(columnFlow, flowPos, flowSpan, crossPos, crossSpan)
+			if occ.free(area) {
+				grow(cols, rows, area)
+				if !dense {
+					if columnFlow {
+						cursor.row = flowPos + flowSpan
+						cursor.col = crossPos
+					} else {
+						cursor.col = flowPos + flowSpan
+						cursor.row = crossPos
+					}
+				}
+				return area
+			}
+			crossPos++
+			continue
+		}
 		if flowPos+flowSpan > flowExtent {
 			// No room left in this flow line: wrap to the next cross line.
 			if crossLocked >= 0 {

@@ -28,9 +28,12 @@ func flexItems(kids []*cssbox.Box) []*cssbox.Box {
 			return
 		}
 		item := &cssbox.Box{
-			Kind:       cssbox.BoxAnonFlexItem,
-			Display:    cssbox.DisplayBlock,
-			Formatting: cssbox.BlockFC,
+			Kind:    cssbox.BoxAnonFlexItem,
+			Display: cssbox.DisplayBlock,
+			// The run holds only inline-level content (text / inline boxes — block and
+			// replaced children flush separately), so the anon item establishes an INLINE
+			// formatting context; with BlockFC its text would never lay out (zero size).
+			Formatting: cssbox.InlineFC,
 			Children:   run,
 		}
 		out = append(out, item)
