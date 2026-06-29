@@ -509,6 +509,10 @@ func placeGridFragment(frag *Fragment, x, y, w, h float64) {
 		return
 	}
 	stretchCellFragment(frag, x, y, w, h) // sets X/Y/W/H + shifts children
+	// A grid item establishes an independent formatting context (CSS Grid §6). Mark the
+	// fragment a BFC so AppendItems flattens it atomically and emits its positioned
+	// layer — otherwise an abs/fixed descendant of a grid item is dropped at paint time.
+	frag.IsBFC = true
 }
 
 // layoutGridItem lays out one grid item's contents at its column-span width w, into its
@@ -523,6 +527,7 @@ func (e *Engine) layoutGridItem(ctx context.Context, it *cssbox.Box, w float64) 
 	natH := 0.0
 	if frag != nil {
 		natH = frag.H
+		consumePendingPositioned(frag, res.pendingPositioned)
 		e.resolveAbsolute(ctx, pos, frag, w, frag.H)
 	}
 	return frag, natH

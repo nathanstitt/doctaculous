@@ -434,6 +434,7 @@ func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxi
 		frag := res.frag
 		if frag != nil {
 			frag.H = usedMain
+			consumePendingPositioned(frag, res.pendingPositioned)
 			e.resolveAbsolute(ctx, pos, frag, lineCross, usedMain)
 		}
 		return frag, lineCross
@@ -445,6 +446,7 @@ func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxi
 	frag := res.frag
 	if frag != nil {
 		frag.H = lineCross
+		consumePendingPositioned(frag, res.pendingPositioned)
 		e.resolveAbsolute(ctx, pos, frag, usedMain, lineCross)
 	}
 	return frag, lineCross
@@ -647,6 +649,7 @@ func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis
 	cross := 0.0
 	if frag != nil {
 		cross = frag.H
+		consumePendingPositioned(frag, res.pendingPositioned)
 		e.resolveAbsolute(ctx, pos, frag, usedMain, frag.H)
 	}
 	return frag, cross
@@ -674,6 +677,7 @@ func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedM
 	if frag != nil {
 		// Pin the fragment height to the used main size (the flexed height).
 		frag.H = usedMain
+		consumePendingPositioned(frag, res.pendingPositioned)
 		e.resolveAbsolute(ctx, pos, frag, crossW, usedMain)
 	}
 	return frag, crossW
@@ -687,4 +691,10 @@ func placeFlexFragment(frag *Fragment, ax flexAxis, originMain, originCross, mai
 	}
 	x, y, w, h := ax.rect(originMain, originCross, mainPos, crossPos, mainSize, crossSize)
 	stretchCellFragment(frag, x, y, w, h) // reuse the table helper: sets X/Y/W/H + shifts children
+	// A flex item establishes an independent formatting context (CSS Flexbox §4). Mark
+	// the fragment a BFC so AppendItems flattens it atomically (decorations → floats →
+	// content → positioned), emitting its positioned layer — an abs/fixed descendant of
+	// a flex item is otherwise dropped at paint time (it is resolved onto the fragment's
+	// Positioned slice, which only the atomic AppendItems path emits).
+	frag.IsBFC = true
 }
