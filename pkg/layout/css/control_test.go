@@ -1,8 +1,10 @@
 package css
 
 import (
+	"context"
 	"testing"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
@@ -98,5 +100,63 @@ func TestControlText(t *testing.T) {
 	// empty select → empty string, no panic.
 	if got := controlText(firstElement(t, `<select></select>`, "select"), cssbox.CtrlSelect); got != "" {
 		t.Errorf("empty select text = %q, want empty", got)
+	}
+}
+
+// ctrlBox builds a minimal replaced control box with the given kind, attrs, and a
+// default 13px font (the UA control default), for sizing tests.
+func ctrlBox(kind cssbox.ControlKind, attrs map[string]string) *cssbox.Box {
+	st := gcss.ComputedStyle{
+		FontFamily: "sans-serif",
+		FontSizePt: 13,
+		Width:      gcss.Length{Unit: gcss.UnitAuto},
+		Height:     gcss.Length{Unit: gcss.UnitAuto},
+		MaxWidth:   gcss.Length{Unit: gcss.UnitAuto},
+		MaxHeight:  gcss.Length{Unit: gcss.UnitAuto},
+	}
+	if attrs == nil {
+		attrs = map[string]string{}
+	}
+	return &cssbox.Box{
+		Kind:     cssbox.BoxReplaced,
+		Display:  cssbox.DisplayInlineBlock,
+		Style:    st,
+		Replaced: &cssbox.ReplacedContent{Tag: "input", Control: kind, Attrs: attrs},
+	}
+}
+
+func TestControlIntrinsicSizeNonZero(t *testing.T) {
+	eng := New(nil, nil, nil)
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		box  *cssbox.Box
+	}{
+		{"text-size0", ctrlBox(cssbox.CtrlText, map[string]string{"size": "0"})},
+		{"text-bare", ctrlBox(cssbox.CtrlText, nil)},
+		{"button-empty", func() *cssbox.Box {
+			b := ctrlBox(cssbox.CtrlButton, nil)
+			b.Replaced.Text = ""
+			return b
+		}()},
+		{"textarea-bare", ctrlBox(cssbox.CtrlTextarea, nil)},
+		{"checkbox", ctrlBox(cssbox.CtrlCheckbox, nil)},
+		{"select-empty", ctrlBox(cssbox.CtrlSelect, nil)},
+	}
+	for _, c := range cases {
+		w, h := eng.controlIntrinsicSize(ctx, c.box)
+		if w <= 0 || h <= 0 {
+			t.Errorf("%s: intrinsic size = (%.1f, %.1f), want both > 0", c.name, w, h)
+		}
+	}
+}
+
+func TestControlIntrinsicSizeScalesWithChars(t *testing.T) {
+	eng := New(nil, nil, nil)
+	ctx := context.Background()
+	nw, _ := eng.controlIntrinsicSize(ctx, ctrlBox(cssbox.CtrlText, map[string]string{"size": "5"}))
+	ww, _ := eng.controlIntrinsicSize(ctx, ctrlBox(cssbox.CtrlText, map[string]string{"size": "40"}))
+	if !(ww > nw) {
+		t.Errorf("size=40 width %.1f should exceed size=5 width %.1f", ww, nw)
 	}
 }
