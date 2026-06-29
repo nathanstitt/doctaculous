@@ -386,26 +386,49 @@ body {
 
 /* ----- forms ----------------------------------------------------------------- */
 
+/* The form is a two-column GRID: a label column sized to its content and a field
+   column that takes the rest. Each field row contributes a .flabel + a control as
+   two grid items; the fieldset and the action bar span both columns. */
 .signup {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px 14px;
   font-family: "TeX Gyre Heros", sans-serif;
   font-size: 13px;
   color: #1a1a18;
 }
-.signup label {
-  display: block;
-  margin-bottom: 12px;
+
+/* Label cells: right-aligned against the field column for a tidy seam. */
+.signup .flabel {
+  text-align: right;
+  color: #3a4a5a;
 }
+
+/* The preferences fieldset spans both columns and lays its checkboxes/radios out
+   as a two-column GRID inside a tinted panel. (Grid, not flex-wrap, which the engine
+   renders single-line.) The legend spans both columns. */
 .signup .choices {
+  grid-column: 1 / 3;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
   border: 1px solid #c9c2b0;
   background: #f0e6c4;
-  padding: 10px 12px;
-  margin: 0 0 14px 0;
+  padding: 12px 14px;
+  margin: 0;
 }
-.signup .choices label {
-  margin-bottom: 6px;
+.signup .choices .legend {
+  grid-column: 1 / 3;
+  font-weight: bold;
+  color: #1a1a18;
+  margin-bottom: 2px;
 }
+
+/* The action bar spans both columns; buttons sit in a FLEX row with a gap. */
 .signup .actions {
-  margin-top: 4px;
+  grid-column: 1 / 3;
+  display: flex;
+  gap: 10px;
 }
 
 /* ----- colophon -------------------------------------------------------------- */
