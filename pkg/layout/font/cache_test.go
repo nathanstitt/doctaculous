@@ -191,3 +191,43 @@ func TestResolveLocalNoProviderFallsToURL(t *testing.T) {
 		t.Fatal("Resolve(X) miss, want the url() fallback after the local() skip")
 	}
 }
+
+// A font-family fallback list whose first name(s) resolve to nothing falls through
+// to a later candidate (here a generic keyword), instead of skipping the run. This
+// is the CSS font-family fallback behavior the cascade now preserves end to end.
+func TestResolveFallbackListSkipsUnresolvable(t *testing.T) {
+	c := NewFaceCache()
+	// Neither name is a bundled alias; "serif" terminates the chain with Termes.
+	if _, ok := c.Resolve("TeX Gyre Termes, Nonesuch, serif", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(list ending in serif) miss, want the generic-keyword fallback")
+	}
+	// With no resolvable candidate at all, the whole list misses (caller skips).
+	if _, ok := c.Resolve("Nonesuch One, Nonesuch Two", pkgfont.Style{}); ok {
+		t.Fatal("Resolve(all-unresolvable list) hit, want miss")
+	}
+}
+
+// A downloaded @font-face named later in the fallback list is used when the earlier
+// candidates do not resolve — the resolver tries @font-face per candidate, not just
+// for the first name.
+func TestResolveFallbackListReachesFontFace(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	loader := &countingLoader{inner: resource.MapLoader{"d.ttf": {Data: ttf}}}
+	faces := []gcss.FontFace{{Family: "Downloaded", Sources: []gcss.FontSource{{URL: "d.ttf"}}}}
+	c := NewFaceCacheWithFonts(faces, loader, nil, nil)
+	// "Nonesuch" has no bundled substitute and no @font-face; "Downloaded" does.
+	if _, ok := c.Resolve("Nonesuch, Downloaded, serif", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(list reaching @font-face) miss, want the downloaded face")
+	}
+	if got := atomic.LoadInt32(&loader.calls); got != 1 {
+		t.Fatalf("loader called %d times, want 1 (the Downloaded candidate fetched once)", got)
+	}
+	// The whole list string keys one cache entry: a repeat does not re-fetch.
+	c.Resolve("Nonesuch, Downloaded, serif", pkgfont.Style{})
+	if got := atomic.LoadInt32(&loader.calls); got != 1 {
+		t.Fatalf("loader called %d times after repeat, want 1 (list cached)", got)
+	}
+}

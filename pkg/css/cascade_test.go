@@ -328,10 +328,11 @@ func TestApplyDeclarationDegradationAndFamily(t *testing.T) {
 	if cs.MarginTop != (Length{12, UnitPx}) {
 		t.Errorf("margin-top = %v, want 12px preserved", cs.MarginTop)
 	}
-	// font-family: first family wins, quotes stripped, through applyDeclaration.
-	applyDeclaration(&cs, Declaration{Property: "font-family", Value: `"Helvetica Neue", Arial, sans-serif`})
-	if cs.FontFamily != "Helvetica Neue" {
-		t.Errorf("font-family = %q, want \"Helvetica Neue\"", cs.FontFamily)
+	// font-family: the full fallback list is preserved (quotes stripped, whitespace
+	// normalized, order kept) so the face resolver can try each candidate in turn.
+	applyDeclaration(&cs, Declaration{Property: "font-family", Value: `"Helvetica Neue", Arial , sans-serif`})
+	if cs.FontFamily != "Helvetica Neue, Arial, sans-serif" {
+		t.Errorf("font-family = %q, want %q", cs.FontFamily, "Helvetica Neue, Arial, sans-serif")
 	}
 	// A bare single family resolves to itself.
 	applyDeclaration(&cs, Declaration{Property: "font-family", Value: "Georgia"})

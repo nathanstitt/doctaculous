@@ -106,13 +106,15 @@ func Lookup(baseFont string) (Substitute, bool) {
 		return mono, true
 	case strings.HasPrefix(name, "times"),
 		strings.HasPrefix(name, "cambria"),
-		strings.HasPrefix(name, "georgia"):
+		strings.HasPrefix(name, "georgia"),
+		strings.HasPrefix(name, "texgyretermes"): // the bundled serif's own name
 		return termes, true
 	case strings.HasPrefix(name, "helvetica"),
 		strings.HasPrefix(name, "arial"),
 		strings.HasPrefix(name, "calibri"),
 		strings.HasPrefix(name, "segoeui"),
-		strings.HasPrefix(name, "verdana"):
+		strings.HasPrefix(name, "verdana"),
+		strings.HasPrefix(name, "texgyreheros"): // the bundled sans's own name
 		return heros, true
 	default:
 		return Substitute{}, false
