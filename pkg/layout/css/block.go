@@ -1255,6 +1255,9 @@ func shiftFragment(f *Fragment, dy float64) {
 	if f.Image != nil {
 		f.Image.CY += dy
 	}
+	if f.Control != nil {
+		f.Control.CY += dy
+	}
 	for _, c := range f.Children {
 		shiftFragment(c, dy)
 	}

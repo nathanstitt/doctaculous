@@ -300,6 +300,56 @@ func hasBorderStyle(items []layout.Item, s layout.BorderStyle) bool {
 	return false
 }
 
+// A control NOT at the page origin must paint its widget at its real position, not
+// at (0,0). Regression test: previously the control's paint coords were not shifted
+// when the fragment was repositioned, so every control painted at the top-left.
+func TestControlPaintShiftedToPosition(t *testing.T) {
+	// Two stacked block divs, each holding a text input; the second input's widget
+	// must paint well below the first (its background fill Y must be > the first's).
+	src := `<body style="margin:0">` +
+		`<div><input type="text" value="a"></div>` +
+		`<div><input type="text" value="b"></div>` +
+		`</body>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, 400)
+	var items []layout.Item
+	if frag != nil {
+		items = frag.AppendItems(items)
+	}
+	// Collect the Y of each control background fill (the field face is the widget's
+	// BackgroundKind item). There should be two, at clearly different Y positions.
+	var bgYs []float64
+	for _, it := range items {
+		if it.Kind == layout.BackgroundKind {
+			bgYs = append(bgYs, it.Rule.YPt)
+		}
+	}
+	if len(bgYs) < 2 {
+		t.Fatalf("expected >=2 background fills (one per field), got %d", len(bgYs))
+	}
+	// The two field fills must be at different Y (the second below the first), not
+	// both at the same top position.
+	maxY, minY := bgYs[0], bgYs[0]
+	for _, y := range bgYs {
+		if y > maxY {
+			maxY = y
+		}
+		if y < minY {
+			minY = y
+		}
+	}
+	if maxY-minY < 10 {
+		t.Errorf("control fills span only %.1f pt in Y (%v); the second field did not shift down — widgets overlap at the top", maxY-minY, bgYs)
+	}
+}
+
 func TestControlPaintChrome(t *testing.T) {
 	// Text field: a background fill + inset (sunken) borders.
 	tf := renderControlItems(t, `<body><input type=text value=hi></body>`)
