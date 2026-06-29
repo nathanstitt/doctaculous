@@ -629,15 +629,14 @@ that skip into real output.
    (**table-cell `vertical-align: baseline`** shared-row baseline is now **real** — resolved by the grid
    slice's baseline backport, was treated as top; one localized approximation remains, F8 — a rowspan cell
    whose spanned-into row grows from baseline does not re-grow, deferred (needs the cross-row re-solve the
-   design avoids)); the **six table background layers** (table → column-groups → columns → row-groups → rows →
-   cells — today cell + table backgrounds paint, but `<col>`/row-group background layering is not modeled — F2,
-   still open); and the **percentage-column basis is computed slightly differently in fixed (border-spacing
-   included) vs auto (excluded)** layout — only observable with `border-spacing > 0` plus percentage columns,
-   and off by the spacing amount (F6, still open). **Landed fidelity fixes:** **F3** `empty-cells:hide` (an
-   empty cell in separate-borders mode suppresses its border/background); **F4** a percentage `<col>` with no
-   originating cell reserves its width (verified already-correct, locked by test); **F5** the 3D border styles
-   `ridge`/`groove`/`outset`/`inset` now render as real bevels (new `BorderStyle` enum values + paint, shared
-   by collapse AND non-collapse borders — non-collapse previously rendered them as nothing); **F7**
+   design avoids)); **Landed fidelity fixes:** **F2** the six table background layers (table → column-groups → columns →
+   row-groups → rows → cells) now all paint — `<col>`/`<colgroup>`/`<tr>`/row-group backgrounds emit behind the
+   cells in CSS 17.5.1 order (`backgroundLayers`); **F3** `empty-cells:hide` (an empty cell in separate-borders
+   mode suppresses its border/background); **F4** a percentage `<col>` with no originating cell reserves its
+   width (verified already-correct, locked by test); **F5** the 3D border styles `ridge`/`groove`/`outset`/
+   `inset` now render as real bevels (new `BorderStyle` enum values + paint, shared by collapse AND non-collapse
+   borders — non-collapse previously rendered them as nothing); **F6** a percentage column width in fixed layout
+   now resolves against `contentW - border-spacing` (matching auto), no longer over-sized by the spacing; **F7**
    `buildCollapsedBorders` is now O(1) per neighbor (the occupancy scan retains a `cellMap`). Web-font fidelity follow-ups within the existing
    engine: **synthetic bold/oblique** (a `@font-face` family supplying only one weight/style falls back to
    the bundled substitute for the missing variant rather than algorithmically emboldening/slanting the

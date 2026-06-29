@@ -633,6 +633,28 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// Table background LAYERS (CSS 17.5.1, fidelity fix F2): a column background and
+		// row backgrounds paint behind the cells. Eyeball: column 1 has a blue tint behind
+		// all its cells; rows 1 and 3 have an orange tint; the cell text sits on top; where
+		// a tinted row crosses the tinted column, the ROW wins (rows paint after columns).
+		name:       "table-bg-layers",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  table { border-collapse: separate; border-spacing: 0; }
+  td { width: 50px; height: 22px; padding: 2px; }
+  col.hi { background: #aaccff; }
+  tr.stripe { background: #ffcc99; }
+</style></head><body>
+  <table>
+    <colgroup><col><col class="hi"><col></colgroup>
+    <tr class="stripe"><td>a1</td><td>b1</td><td>c1</td></tr>
+    <tr><td>a2</td><td>b2</td><td>c2</td></tr>
+    <tr class="stripe"><td>a3</td><td>b3</td><td>c3</td></tr>
+  </table>
+</body></html>`,
+	},
+	{
 		// The four 3D border styles (CSS, fidelity fix F5). Each box has a thick gray
 		// border in one 3D style. Eyeball the bevel: outset = raised (light top/left, dark
 		// bottom/right), inset = sunken (inverse), ridge = a raised ridge (outer light /

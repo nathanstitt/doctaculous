@@ -28,6 +28,12 @@ type tableGrid struct {
 	// in buildGrid; used by cellAt for O(1) neighbor lookups (collapse border solving)
 	// instead of a per-neighbor linear scan of cells.
 	cellMap [][]*gridCell
+	// colGroups / rowGroups record <colgroup>/<col-spanning> and row-group boxes with
+	// their column/row ranges, so their backgrounds paint as layers (CSS 17.5.1). Only
+	// groups with a visible background need to be retained, but they are collected
+	// unconditionally and filtered at paint time.
+	colGroups []gridSpan
+	rowGroups []gridSpan
 }
 
 // cellAt returns the cell occupying slot (r,c) — its origin or a span it covers — or nil
@@ -48,10 +54,18 @@ type gridRow struct {
 
 type gridCol struct {
 	hasWidth bool
-	width    float64 // specified/hint width (px) when hasWidth
-	pct      float64 // percentage width [0..100], or <0 when none
-	x        float64 // x-offset of the column's left edge in the table content box
-	min, max float64 // content min/max-content widths (auto layout)
+	width    float64     // specified/hint width (px) when hasWidth
+	pct      float64     // percentage width [0..100], or <0 when none
+	x        float64     // x-offset of the column's left edge in the table content box
+	min, max float64     // content min/max-content widths (auto layout)
+	box      *cssbox.Box // the <col> box (for its background), or nil for an implicit column
+}
+
+// gridSpan records a row-group or column-group box plus the half-open index range of
+// rows/columns it covers, so its background can be painted as one layer behind its cells.
+type gridSpan struct {
+	box        *cssbox.Box
+	start, end int // half-open [start,end) index into g.rows (row-group) or g.cols (col-group)
 }
 
 type gridCell struct {
@@ -79,11 +93,14 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 
 	// 1. Collect caption + column hints + rows (visual order).
 	var headRows, bodyRows, footRows []*cssbox.Box
+	// groupOfRow maps a row box to its row-group box (for the row-group background layer).
+	groupOfRow := map[*cssbox.Box]*cssbox.Box{}
 	collectRows := func(group *cssbox.Box) []*cssbox.Box {
 		var rows []*cssbox.Box
 		for _, c := range group.Children {
 			if c.Display == cssbox.DisplayTableRow {
 				rows = append(rows, c)
+				groupOfRow[c] = group
 			}
 		}
 		return rows
@@ -97,6 +114,7 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 		case cssbox.DisplayTableColumn:
 			g.addColumnHint(c)
 		case cssbox.DisplayTableColumnGroup:
+			start := len(g.cols)
 			cols := 0
 			for _, cc := range c.Children {
 				if cc.Display == cssbox.DisplayTableColumn {
@@ -106,6 +124,10 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 			}
 			if cols == 0 {
 				g.addColumnHintN(c, spanOf(c))
+			}
+			// Record the colgroup's column span for its background layer.
+			if len(g.cols) > start {
+				g.colGroups = append(g.colGroups, gridSpan{box: c, start: start, end: len(g.cols)})
 			}
 		case cssbox.DisplayTableHeaderGroup:
 			headRows = append(headRows, collectRows(c)...)
@@ -123,6 +145,20 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 	visualRows = append(visualRows, headRows...)
 	visualRows = append(visualRows, bodyRows...)
 	visualRows = append(visualRows, footRows...)
+
+	// Row-group spans: contiguous runs of visual rows sharing a row-group box (for the
+	// row-group background layer). visualRows keeps each group's rows contiguous.
+	for i := 0; i < len(visualRows); {
+		grp := groupOfRow[visualRows[i]]
+		j := i + 1
+		for j < len(visualRows) && groupOfRow[visualRows[j]] == grp {
+			j++
+		}
+		if grp != nil {
+			g.rowGroups = append(g.rowGroups, gridSpan{box: grp, start: i, end: j})
+		}
+		i = j
+	}
 
 	// 2. Occupancy scan: assign each cell to its origin slot. occupied[r][c] holds the
 	// *gridCell covering that slot (nil when free), retained on the grid as cellMap for
@@ -203,10 +239,10 @@ func (g *tableGrid) addColumnHint(cb *cssbox.Box) {
 	g.addColumnHintN(cb, spanOf(cb))
 }
 
-// addColumnHintN appends n columns carrying cb's width hint.
+// addColumnHintN appends n columns carrying cb's width hint (and box, for its background).
 func (g *tableGrid) addColumnHintN(cb *cssbox.Box, n int) {
 	for i := 0; i < n; i++ {
-		col := gridCol{pct: -1}
+		col := gridCol{pct: -1, box: cb}
 		if w, ok := specifiedFixedWidth(cb); ok {
 			col.hasWidth = true
 			col.width = w
@@ -440,6 +476,17 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		}
 	}
 
+	// CSS 17.5.1 background layers: paint column-group, column, row-group, and row
+	// backgrounds BEHIND the cells (the table's own background is painted by the table
+	// fragment; cell backgrounds are on the cell fragments). Each layer's rect is the
+	// union of the final positioned cells it covers, so it is correct after the
+	// vertical-align/baseline grow. Prepended (in back-to-front order) so they paint
+	// behind cells. Most tables have no such backgrounds → bg is empty → nothing added,
+	// keeping non-styled tables byte-identical.
+	if bg := g.backgroundLayers(); len(bg) > 0 {
+		children = append(bg, children...)
+	}
+
 	return interior{
 		children:         children,
 		contentHeight:    gridBottom,
@@ -448,6 +495,141 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		collapsedBorders: collapsedBorders,
 		intrinsicWidth:   tableContentW,
 	}
+}
+
+// backgroundLayers builds the table's column-group / column / row-group / row background
+// fragments (CSS 17.5.1), in back-to-front paint order, from the final positioned cells.
+// A layer is emitted only when its box has a visible (non-zero-alpha) background; the
+// rect is the union of the cells the layer covers (robust to the baseline grow). Cells
+// are looked up via cellMap, so a spanned-into slot still contributes to a row/column
+// layer. Returns nil when no layer has a background (the common case).
+func (g *tableGrid) backgroundLayers() []*Fragment {
+	var layers []*Fragment
+	// Column groups (painted first / furthest back).
+	for _, cg := range g.colGroups {
+		if r, ok := g.colsRect(cg.start, cg.end); ok {
+			if f := bgFragment(cg.box, r); f != nil {
+				layers = append(layers, f)
+			}
+		}
+	}
+	// Columns.
+	for ci := range g.cols {
+		if g.cols[ci].box == nil {
+			continue
+		}
+		if r, ok := g.colsRect(ci, ci+1); ok {
+			if f := bgFragment(g.cols[ci].box, r); f != nil {
+				layers = append(layers, f)
+			}
+		}
+	}
+	// Row groups.
+	for _, rg := range g.rowGroups {
+		if r, ok := g.rowsRect(rg.start, rg.end); ok {
+			if f := bgFragment(rg.box, r); f != nil {
+				layers = append(layers, f)
+			}
+		}
+	}
+	// Rows (painted last / closest to the cells).
+	for _, gr := range g.rows {
+		if gr.box == nil {
+			continue
+		}
+		if r, ok := g.rowBoxRect(gr); ok {
+			if f := bgFragment(gr.box, r); f != nil {
+				layers = append(layers, f)
+			}
+		}
+	}
+	return layers
+}
+
+// colsRect returns the page-space rect spanning columns [start,end) across all rows that
+// have a cell in those columns (the union of those cells' border boxes), and ok=false
+// when no cell occupies the range (nothing to paint behind).
+func (g *tableGrid) colsRect(start, end int) (rect, bool) {
+	var u rect
+	any := false
+	for _, gc := range g.cells {
+		if gc.frag == nil || gc.col >= end || gc.col+gc.colSpan <= start {
+			continue
+		}
+		u = unionRect(u, fragRect(gc.frag), any)
+		any = true
+	}
+	return u, any
+}
+
+// rowsRect returns the union border-box rect of every cell originating in rows [start,end).
+func (g *tableGrid) rowsRect(start, end int) (rect, bool) {
+	var u rect
+	any := false
+	for _, gc := range g.cells {
+		if gc.frag == nil || gc.row >= end || gc.row+gc.rowSpan <= start {
+			continue
+		}
+		u = unionRect(u, fragRect(gc.frag), any)
+		any = true
+	}
+	return u, any
+}
+
+// rowBoxRect returns the union border-box rect of the cells originating in gr.
+func (g *tableGrid) rowBoxRect(gr *gridRow) (rect, bool) {
+	var u rect
+	any := false
+	for _, gc := range gr.cells {
+		if gc.frag == nil {
+			continue
+		}
+		u = unionRect(u, fragRect(gc.frag), any)
+		any = true
+	}
+	return u, any
+}
+
+// bgFragment builds a background-only fragment covering r when box has a visible
+// (non-zero-alpha) background color, else nil. The fragment carries only Background +
+// Box (so the flatten emits one BackgroundKind item); it has no border or content.
+func bgFragment(box *cssbox.Box, r rect) *Fragment {
+	if box == nil {
+		return nil
+	}
+	bg := box.Style.BackgroundColor
+	if bg.A == 0 {
+		return nil
+	}
+	return &Fragment{X: r.x, Y: r.y, W: r.w, H: r.h, Background: bg, Box: box}
+}
+
+// fragRect returns f's border box as a rect.
+func fragRect(f *Fragment) rect { return rect{x: f.X, y: f.Y, w: f.W, h: f.H} }
+
+// unionRect returns the bounding rect of a and b; when hasA is false a is ignored and b
+// is returned (so the first element seeds the union).
+func unionRect(a, b rect, hasA bool) rect {
+	if !hasA {
+		return b
+	}
+	x0 := a.x
+	if b.x < x0 {
+		x0 = b.x
+	}
+	y0 := a.y
+	if b.y < y0 {
+		y0 = b.y
+	}
+	x1 := a.x + a.w
+	if b.x+b.w > x1 {
+		x1 = b.x + b.w
+	}
+	y1 := a.y + a.h
+	if b.y+b.h > y1 {
+		y1 = b.y + b.h
+	}
+	return rect{x: x0, y: y0, w: x1 - x0, h: y1 - y0}
 }
 
 // cellWidth returns the column-band width allocated to a cell: the sum of its spanned
@@ -479,7 +661,16 @@ func (gc *gridCell) rowBandHeight(g *tableGrid) float64 {
 // fills its container (width:auto), or grows to the column sum if larger. Auto columns
 // split the leftover equally.
 func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
-	used := contentW
+	// A percentage column width resolves against the width AVAILABLE TO COLUMNS — the
+	// table content width minus the total inter-column border-spacing — matching the auto
+	// layout path (solveAutoWidths). Using the full contentW here would over-size
+	// percentage columns by the spacing amount (the F6 fix; only observable with
+	// border-spacing > 0 + percentage columns).
+	spacing := g.spacingH * float64(len(g.cols)+1)
+	used := contentW - spacing
+	if used < 0 {
+		used = 0
+	}
 	if len(g.rows) > 0 {
 		for _, gc := range g.rows[0].cells {
 			if w, ok := specifiedFixedWidth(gc.box); ok {
@@ -515,8 +706,9 @@ func (e *Engine) solveFixedWidths(g *tableGrid, contentW float64) {
 			autoCount++
 		}
 	}
-	spacing := g.spacingH * float64(len(g.cols)+1)
-	remain := used - fixedSum - spacing
+	// used already excludes the inter-column spacing, so the remaining width for auto
+	// columns is just used - fixedSum (no second spacing subtraction).
+	remain := used - fixedSum
 	if remain < 0 {
 		remain = 0
 	}

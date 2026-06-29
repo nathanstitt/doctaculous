@@ -2,9 +2,11 @@ package css
 
 import (
 	"context"
+	"image/color"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -871,5 +873,76 @@ func TestPercentColumnWithNoCells(t *testing.T) {
 				t.Errorf("[%s] cell W = %.1f, want ~120 (col 1's 40%% reserved without a cell)", layout, cell.W)
 			}
 		})
+	}
+}
+
+// TestTableBackgroundLayers pins F2 (CSS 17.5.1 background layers): a column background and
+// a row background are emitted behind the cells, in CSS paint order (columns before rows,
+// so the row paints on top where they overlap). A 2x2 table with a background on column 1
+// (<col>) and on row 1 (<tr>). Mutation-verify: drop backgroundLayers() and neither bg
+// fragment is emitted.
+func TestTableBackgroundLayers(t *testing.T) {
+	src := `<table style="border-collapse:separate;border-spacing:0">
+<colgroup><col style="background:rgb(170,204,255)"><col></colgroup>
+<tr style="background:rgb(255,204,153)"><td>a</td><td>b</td></tr>
+<tr><td>c</td><td>d</td></tr></table>`
+	root := layoutTreeFor(t, src, 200, nil)
+	page := root.Page(200, root.Y+root.H)
+	colBg := color.RGBA{170, 204, 255, 255}
+	rowBg := color.RGBA{255, 204, 153, 255}
+	colIdx, rowIdx := -1, -1
+	for i := range page.Items {
+		if page.Items[i].Kind != layout.BackgroundKind {
+			continue
+		}
+		switch page.Items[i].Rule.Color {
+		case colBg:
+			if colIdx < 0 {
+				colIdx = i
+			}
+		case rowBg:
+			if rowIdx < 0 {
+				rowIdx = i
+			}
+		}
+	}
+	if colIdx < 0 {
+		t.Errorf("no column background emitted (F2)")
+	}
+	if rowIdx < 0 {
+		t.Errorf("no row background emitted (F2)")
+	}
+	if colIdx >= 0 && rowIdx >= 0 && colIdx > rowIdx {
+		t.Errorf("column bg (item %d) must paint BEFORE the row bg (item %d)", colIdx, rowIdx)
+	}
+}
+
+// TestFixedPercentColumnBasisExcludesSpacing pins F6: in fixed layout a percentage column
+// width resolves against the table content width MINUS the inter-column border-spacing
+// (matching auto layout), not the full content width. A 2-col fixed table, width 200,
+// border-spacing 10 (3 gaps = 30), col 0 = 50%. The 50% column must be 0.5×(200-30)=85,
+// not 0.5×200=100. Mutation-verify: revert `used = contentW - spacing` to `used = contentW`
+// and the column becomes 100.
+func TestFixedPercentColumnBasisExcludesSpacing(t *testing.T) {
+	src := `<table style="width:200px;table-layout:fixed;border-collapse:separate;border-spacing:10px">
+<tr><td style="width:50%">A</td><td>B</td></tr></table>`
+	root := layoutTreeFor(t, src, 400, nil)
+	var first *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if first == nil && f.Box != nil && f.Box.Display == cssbox.DisplayTableCell {
+			first = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if first == nil {
+		t.Fatal("no cell fragment")
+	}
+	// 50% of (200 - 30 spacing) = 85 (± a couple px for borders).
+	if first.W < 82 || first.W > 88 {
+		t.Errorf("fixed %% column W = %.1f, want ~85 (50%% of contentW-spacing); the F6 bug gives ~100", first.W)
 	}
 }

@@ -87,8 +87,13 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 ## F. HTML/CSS — tables
 
 - ☐ **F1. RTL/`direction`** (column order) — *covered by A1.*
-- ☐ **F2. Six background layers** (table → col-groups → cols → row-groups → rows → cells; today only cell+table
-  paint). *Medium.*
+- ☑ **F2. Six background layers** — *DONE.* Column-group, column, row-group, and row backgrounds now paint
+  behind the cells in CSS 17.5.1 order (table → col-groups → cols → row-groups → rows → cells). `gridCol` carries
+  its `<col>` box; `tableGrid` retains col-group/row-group spans; `backgroundLayers` emits a background fragment
+  per layer (rect = union of the layer's final positioned cells, robust to the baseline grow), prepended behind
+  the cells. Tests: `TestTableBackgroundLayers` (emission + paint order, mutation-verified) + the
+  `html-table-bg-layers` golden (eyeballed: column tint behind cells, row stripes on top where they overlap).
+  Non-styled tables stay byte-identical (no layer → nothing emitted).
 - ☑ **F3. `empty-cells` property** — *DONE.* `EmptyCells` added to `ComputedStyle` (inherited, parsed); in
   separate-borders mode an empty cell (`isEmptyCellFragment`) with `empty-cells:hide` has its background +
   border suppressed after layout (slot/sizing unchanged). Tests: `TestEmptyCellsHide…`/`…Show…`
@@ -103,8 +108,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   styles as nothing) and `borderStyleToLayout` (collapse — previously solid) map them. Tests:
   `TestPaintBorderOutset…`/`…Ridge…` (mutation-verified), `TestMapBorderStyle` updated, new
   `html-border-3d-styles` golden (eyeballed: outset/inset/ridge/groove bevels correct).
-- ☐ **F6. percentage-column basis differs fixed (incl. border-spacing) vs auto (excl.)** — off by the spacing
-  amount; only with `border-spacing>0` + % cols. *Small.*
+- ☑ **F6. percentage-column basis differs fixed vs auto** — *DONE.* `solveFixedWidths` now resolves a
+  percentage column width against `contentW - spacing` (the width available to columns), matching
+  `solveAutoWidths`, instead of the full `contentW` — so a % column is no longer over-sized by the
+  border-spacing amount. Test: `TestFixedPercentColumnBasisExcludesSpacing` (mutation-verified). Auto-column
+  distribution unchanged (the spacing was already subtracted there).
 - ☑ **F7. `buildCollapsedBorders` O(cells²)** — *DONE.* The occupancy scan now stores `*gridCell` per slot
   (retained as `tableGrid.cellMap`); `cellAt` is an O(1) map lookup instead of a per-neighbor linear scan.
   Behavior-preserving (byte-identical corpus).
