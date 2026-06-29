@@ -657,10 +657,11 @@ that skip into real output.
    Flexbox fidelity follow-ups within the existing engine: **multi-line flex** (`flex-wrap: wrap`/
    `wrap-reverse` + `align-content`, the big one — currently single-line `nowrap` with overflow);
    **RTL/`direction`** on a row (LTR only — logged; needs the general bidi support the engine lacks);
-   the **line cross size clamped to a definite container cross size** (today the line cross size is the
-   max item's cross size — so `align-items: center`/`flex-end` align within the tallest item's extent,
-   not the container's definite `height`/`width` when one is set; the `flex-align-center` reftest
-   reflects this); the **column `flex-basis: auto`/`content` height** (today uses the item's
+   (**fidelity fix H3:** the **line cross size is now the container's definite cross size** when set — for a
+   single-line container `flexCrossSize` returns the definite `height` (row) / `width` (column), so
+   `align-items: center`/`flex-end` align within the container's extent, not the tallest item's; the
+   `flex-align-center` golden + reftest reference were corrected to the browser-accurate offsets); the
+   **column `flex-basis: auto`/`content` height** (today uses the item's
    max-content width as the main-axis proxy — a documented approximation; exact column content height
    is the 9b refinement); and the **`flex-grow`/`shrink` scale factors for cross-axis gaps** (`row-gap`
    for `row*` is a no-op on a single line — correct per spec, but worth revisiting when multi-line
@@ -675,9 +676,10 @@ that skip into real output.
    (LTR only — logged; needs the general bidi support the engine lacks); the **row-track content-height
    width-proxy** (an `auto`/min/max-content ROW track sizes to content via `measureMaxContent`, which
    returns a WIDTH — the same documented approximation flexbox and tables carry for vertical content
-   sizing); the **conservative baseline-group extra** (`alignBaselineGroup` grows a row/line by the
-   largest downward shift, a safe upper bound that can slightly over-expand when a shifted item is shorter
-   than its baseline distance); a **rowspan cell whose *spanned-into* (not origin) row grows from baseline**
+   sizing); (**fidelity fix I5:** `alignBaselineGroup` now returns the **EXACT** baseline-group extra —
+   `max(bottom after shift) − max(bottom before shift)` — instead of the largest single shift, so a row/line is
+   no longer over-expanded when the most-shifted item is not the one reaching lowest); a **rowspan cell whose
+   *spanned-into* (not origin) row grows from baseline**
    does not re-grow (a localized approximation — the cross-row re-solve is out of scope); **`subgrid`**
    (parsed-and-ignored → `none`); and **`repeat(auto-fill/auto-fit)`** is supported but the
    auto-fit empty-track *collapse* is approximate. Multi-line/masonry are not in scope.

@@ -163,21 +163,36 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 - ☐ **H1. multi-line flex** (`flex-wrap: wrap`/`wrap-reverse` + `align-content`) — the big one. *Large.*
 - ☐ **H2. RTL/`direction`** on a row — *covered by A1.*
-- ☐ **H3. line cross size clamped to a definite container cross size** (today = max item's cross size). *Medium.*
-- ☐ **H4. column `flex-basis: auto`/`content` height** (max-content width proxy today). *Medium.*
+- ☑ **H3. line cross size clamped to a definite container cross size** — *DONE.* For a single-line flex
+  container the line cross size is now the container's DEFINITE inner cross size when set (`flexCrossSize`),
+  so `align-items:center`/`flex-end` align within the container's extent (e.g. a fixed row height), not the
+  tallest item's. (Floored at the max item so a too-small container doesn't clip an item.) Tests:
+  `TestFlexAlignCenterUsesDefiniteHeight` (mutation-verified); the `flex-align-center` golden + WPT reftest
+  reference corrected to the browser-accurate centered offsets (eyeballed); the column-stretch unit test
+  updated (an auto-width column item correctly stretches to the container width).
+- ☐ **H4. column `flex-basis: auto`/`content` height** (max-content width proxy today). *Deferred (Medium)* —
+  same vertical-content-measurement limitation as I4/D3.
 - ☐ **H5. `flex-grow`/`shrink` cross-axis gap factors** (revisit with multi-line). *Small (with H1).*
-- ☐ **H6. column-container `align-items: baseline`** still falls back to `flex-start`. *Medium.*
+- ☑ **H6. column-container `align-items: baseline`** — *CONFIRMED CORRECT (no fix).* CSS Flexbox §9.4.3:
+  baseline self-alignment in a column flex container resolves to `flex-start` (there is no cross-axis text
+  baseline). The engine already falls back to `flex-start` and logs it — spec-compliant, not a gap.
 
 ## I. HTML/CSS — grid
 
-- ☐ **I1. named-LINE placement** (`grid-column: start/end` referencing `[name]`s; today parsed-and-ignored). *Medium.*
+- ☐ **I1. named-LINE placement** (`grid-column: start/end` referencing `[name]`s; today parsed-and-ignored).
+  *Deferred (Medium)* — needs new machinery: the tokenizer doesn't emit bracket tokens, `TrackList` has no
+  named-line storage, and `placeItems` has no `LineName` resolution. 3+ interconnected changes.
 - ☐ **I2. flow-axis-locked auto-placement** (definite flow-axis line + auto cross axis honors span, ignores
-  start line). *Medium.*
+  start line). *Deferred (Small)* — a documented, non-overlapping simplification (`grid_place.go` scans the
+  locked line from 0 rather than continuing the sparse cursor); niche, intentional.
 - ☐ **I3. RTL/`direction`** — *covered by A1.*
 - ☐ **I4. row-track content-height width-proxy** (`measureMaxContent` returns WIDTH for a ROW track). *Medium*
   (shared root cause with H4, F-rowspan — vertical content sizing).
-- ☐ **I5. conservative baseline-group extra** (`alignBaselineGroup` over-expands when a shifted item is shorter
-  than its baseline distance). *Small.*
+- ☑ **I5. conservative baseline-group extra** — *DONE.* `alignBaselineGroup` now returns the EXACT extra cross
+  size (`max(bottom after shift) − max(bottom before shift)` over participants), not the largest single shift —
+  so a row/line is no longer over-expanded when the most-shifted item doesn't reach lowest. Tests:
+  `TestAlignBaselineGroupExactExtra` + the reaches-lowest guard (mutation-verified). Corpus byte-identical
+  (existing baseline tests have the tallest item also most-shifted, where the values coincide).
 - ☐ **I6. rowspan cell whose spanned-into row grows from baseline** — *same as F8.*
 - ☐ **I7. `subgrid`** (→ `none`). *Large.*
 - ☐ **I8. `repeat(auto-fill/auto-fit)` empty-track collapse approximate.** *Medium.*

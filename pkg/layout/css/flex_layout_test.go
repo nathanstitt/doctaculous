@@ -717,9 +717,11 @@ func TestFlexColumnAtNonZeroX(t *testing.T) {
 }
 
 func TestAlignStretchColumnGrowsAutoWidth(t *testing.T) {
-	// flex-direction:column, align-items:stretch (default). A narrow auto-WIDTH item and
-	// a definite 80px-wide item: the line cross size (width) is 80, so the auto-width item
-	// stretches to width 80. Exercises the column branch of stretchFlexItem.
+	// flex-direction:column, align-items:stretch (default). A narrow auto-WIDTH item and a
+	// definite 80px-wide item, in a block-level column flex container laid out at content
+	// width 300. The cross axis is the WIDTH, which is DEFINITE (300) for this container
+	// (H3), so the line cross size is 300 and the auto-width item stretches to fill it.
+	// Exercises the column branch of stretchFlexItem.
 	narrow := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
 		Style: gcss.ComputedStyle{Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Value: 30, Unit: gcss.UnitPx},
 			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
@@ -734,9 +736,10 @@ func TestAlignStretchColumnGrowsAutoWidth(t *testing.T) {
 	if len(frags) != 2 {
 		t.Fatalf("want 2 frags, got %d", len(frags))
 	}
-	// frags[0] is the narrow auto-width item; it should have stretched to the line cross width 80.
-	if frags[0].W != 80 {
-		t.Errorf("column stretch: auto-width item should grow to line cross width 80; got %v", frags[0].W)
+	// frags[0] is the narrow auto-width item; it stretches to the container's definite
+	// cross size (width) of 300, not just the widest item's 80.
+	if frags[0].W != 300 {
+		t.Errorf("column stretch: auto-width item should grow to the container cross width 300; got %v", frags[0].W)
 	}
 }
 
@@ -780,5 +783,50 @@ func TestFlexGapAndSpaceBetween(t *testing.T) {
 	}
 	if frags[0].X != 0 || frags[1].X != 250 {
 		t.Errorf("gap+space-between: want x0 and x250; got x%v and x%v", frags[0].X, frags[1].X)
+	}
+}
+
+// TestFlexAlignCenterUsesDefiniteHeight pins H3: align-items:center on a ROW flex
+// container with a DEFINITE height centers items within that height, not within the
+// tallest item's extent. A 100px-tall row with a 20px and a 40px item centers them at
+// y=40 and y=30 (within 100), not y=10/y=0 (within the 40px max item). Mutation-verify:
+// remove the flexCrossSize clamp and the 20px item centers at y=10.
+func TestFlexAlignCenterUsesDefiniteHeight(t *testing.T) {
+	src := `<div style="display:flex;align-items:center;height:100px">` +
+		`<div style="width:30px;height:20px;background:#a00">a</div>` +
+		`<div style="width:30px;height:40px;background:#0a0">b</div>` +
+		`</div>`
+	root := layoutTreeFor(t, src, 300, nil)
+	// Collect the two flex items (BFC children with the given heights).
+	var items []*Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f.H == 20 || f.H == 40 {
+			if f.W == 30 {
+				items = append(items, f)
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if len(items) != 2 {
+		t.Fatalf("want 2 flex items, got %d", len(items))
+	}
+	// Find the 20px item; its top should be ~40 (centered in 100), not ~10 (in 40).
+	var small *Fragment
+	for _, it := range items {
+		if it.H == 20 {
+			small = it
+		}
+	}
+	if small == nil {
+		t.Fatal("no 20px item")
+	}
+	// The flex container is at the body content top (Y 0). The 20px item centers at
+	// (100-20)/2 = 40 within the container.
+	if small.Y < 35 || small.Y > 45 {
+		t.Errorf("20px item Y = %.1f, want ~40 (centered in the 100px row); the H3 bug gives ~10", small.Y)
 	}
 }

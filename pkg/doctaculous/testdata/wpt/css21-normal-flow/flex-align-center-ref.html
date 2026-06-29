@@ -2,6 +2,8 @@
   body { margin: 0; position: relative; height: 100px; }
   .box { position: absolute; }
 </style></head><body>
-  <div class="box" style="left: 0; top: 20px; width: 50px; height: 30px; background: #224488;"></div>
-  <div class="box" style="left: 50px; top: 0; width: 50px; height: 70px; background: #884422;"></div>
+  <!-- align-items:center centers each item within the container's DEFINITE 100px cross
+       size (H3 fix): the 30px box at top (100-30)/2=35, the 70px box at (100-70)/2=15. -->
+  <div class="box" style="left: 0; top: 35px; width: 50px; height: 30px; background: #224488;"></div>
+  <div class="box" style="left: 50px; top: 15px; width: 50px; height: 70px; background: #884422;"></div>
 </body></html>
