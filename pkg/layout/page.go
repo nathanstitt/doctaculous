@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"image"
 	"image/color"
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -39,6 +40,29 @@ const (
 	BorderDouble
 )
 
+// ObjectFit is how a replaced element's image is fitted into its content box,
+// mirroring the CSS object-fit property. It is format-neutral (like BorderStyle):
+// the layout engine maps the CSS keyword onto it and the painter honors it.
+type ObjectFit int
+
+const (
+	// FitFill stretches the image to fill the content box exactly, ignoring the
+	// intrinsic aspect ratio (the CSS initial value).
+	FitFill ObjectFit = iota
+	// FitContain scales the image to the largest size that fits inside the content
+	// box while preserving aspect ratio, centered (letterboxed).
+	FitContain
+	// FitCover scales the image to the smallest size that covers the content box
+	// while preserving aspect ratio, centered; the overflow is clipped to the box.
+	FitCover
+	// FitNone uses the image's intrinsic size, centered in the content box and
+	// clipped to it.
+	FitNone
+	// FitScaleDown uses whichever of FitNone or FitContain yields the smaller image
+	// (intrinsic size unless it overflows, then contained).
+	FitScaleDown
+)
+
 // EdgeSide identifies which side of a box a border edge is on. It also tells the
 // painter whether a dashed/dotted run steps along X (top/bottom) or Y (left/right)
 // and which axis carries the edge's thickness.
@@ -68,6 +92,9 @@ const (
 	BackgroundKind
 	// BorderKind is one styled border edge (Item.Border is set).
 	BorderKind
+	// ImageKind is a decoded raster image drawn into a content box (Item.Image is
+	// set), e.g. an <img> replaced element.
+	ImageKind
 )
 
 // Item is one drawing primitive on a page. It is a small tagged union rather than
@@ -77,6 +104,7 @@ type Item struct {
 	Glyph  GlyphItem
 	Rule   RuleItem
 	Border BorderItem
+	Image  ImageItem
 }
 
 // GlyphItem is a glyph to fill. The outline is kept in raw em units (Y up, as the
@@ -106,4 +134,15 @@ type BorderItem struct {
 	Color              color.RGBA
 	Style              BorderStyle
 	Side               EdgeSide
+}
+
+// ImageItem is a decoded raster image to draw into a content box. The rectangle
+// (XPt,YPt,WPt,HPt) is the box's content box in page space (points, Y-down,
+// top-left origin); Fit selects how the image's intrinsic pixels map into that box
+// (object-fit). The painter composes the unit-square→content-box mapping with the
+// page→device matrix and calls render.Device.DrawImage. A nil Img draws nothing.
+type ImageItem struct {
+	Img                image.Image
+	XPt, YPt, WPt, HPt float64
+	Fit                ObjectFit
 }

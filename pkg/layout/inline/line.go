@@ -2,11 +2,21 @@ package inline
 
 // Line is a sequence of shaped glyphs that fit within an available width, plus
 // the metrics needed to place its baseline and advance the pen.
+//
+// AscentPt/DescentPt are the TEXT glyph maxima (used for "normal" line-height,
+// which applies a leading multiplier to the font metrics). AtomAscentPt/
+// AtomDescentPt are the maxima contributed by atomic inline boxes by where they
+// rest on the baseline (an atom reaches AtomicItem.BaselinePt above the baseline
+// and HeightPt-BaselinePt below it). They are kept separate so the baseline can be
+// placed below a tall atom (max of text and atom ascent) WITHOUT the line-height
+// leading multiplier being applied to the atom's box height — an atom contributes
+// its height directly, not scaled. A line with no atoms has zero atom maxima.
 type Line struct {
-	Glyphs              []Glyph
-	WidthPt             float64 // visible width, excludes trailing spaces
-	AscentPt, DescentPt float64 // maxima over the line's glyphs
-	LineGapPt           float64
+	Glyphs                      []Glyph
+	WidthPt                     float64 // visible width, excludes trailing spaces
+	AscentPt, DescentPt         float64 // text glyph maxima
+	AtomAscentPt, AtomDescentPt float64 // atomic-box maxima about the baseline
+	LineGapPt                   float64
 }
 
 // Align is a line's horizontal alignment within its available width — the core's
@@ -54,13 +64,26 @@ func Place(align Align, originX, availWidth, widthPt float64, spaceCount int, la
 }
 
 // MakeLine builds a Line from glyphs, computing visible width (trailing spaces
-// excluded) and max ascent/descent/line-gap.
+// excluded), the text glyph max ascent/descent/line-gap, and — separately — the
+// max ascent/descent contributed by atomic inline boxes (Atomic != nil). An atom
+// sits with its baseline AtomicItem.BaselinePt below its (margin-box) top, so it
+// reaches BaselinePt above the baseline and HeightPt-BaselinePt below it; recording
+// those in AtomAscentPt/AtomDescentPt lets the caller drop the baseline below a tall
+// atom (e.g. an image taller than the text) without scaling the atom's height by the
+// line-height leading multiplier (which applies to the font metrics only).
 func MakeLine(glyphs []Glyph) Line {
 	l := Line{Glyphs: glyphs, WidthPt: VisibleWidth(glyphs)}
-	// TODO: atomic glyphs carry AscentPt/DescentPt == 0, so AtomicItem.HeightPt/
-	// BaselinePt don't yet contribute here. When the CSS inline formatting context
-	// emits atomics, fold an atomic's height/baseline into the line-box metrics.
-	for _, g := range glyphs {
+	for i := range glyphs {
+		g := &glyphs[i]
+		if g.Atomic != nil {
+			if asc := g.Atomic.BaselinePt; asc > l.AtomAscentPt {
+				l.AtomAscentPt = asc
+			}
+			if desc := g.Atomic.HeightPt - g.Atomic.BaselinePt; desc > l.AtomDescentPt {
+				l.AtomDescentPt = desc
+			}
+			continue
+		}
 		if g.AscentPt > l.AscentPt {
 			l.AscentPt = g.AscentPt
 		}

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<!-- TEST: a block <img> sized 100x60 with object-fit:fill, whose source is a solid
+     #3366cc swatch (served via a MapLoader as swatch.png), renders the same pixels
+     as a <div> of the same size and background (see img-vs-div-ref.html). object-fit:
+     fill stretches the solid image to exactly fill the content box, so the result is
+     a solid 100x60 rectangle at the top-left. body{margin:0} keeps it flush. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #box { display: block; width: 100px; height: 60px; object-fit: fill; }
+</style>
+</head>
+<body>
+  <img id="box" src="swatch.png">
+</body>
+</html>

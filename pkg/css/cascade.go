@@ -65,6 +65,10 @@ type ComputedStyle struct {
 	MinWidth, MaxWidth   Length // MinWidth: UnitPx zero = no min; MaxWidth: UnitAuto = "none" (no max)
 	MinHeight, MaxHeight Length // same convention as the width pair
 	BoxSizing            string // "content-box" (default) | "border-box"
+
+	// ObjectFit is the replaced-element fitting mode (CSS object-fit):
+	// "fill" (default) | "contain" | "cover" | "none" | "scale-down".
+	ObjectFit string
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -245,6 +249,7 @@ func initialStyle() ComputedStyle {
 		MinHeight:   Length{Unit: UnitPx},   // CSS initial min-height is 0
 		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
 		BoxSizing:   "content-box",
+		ObjectFit:   "fill", // CSS initial object-fit
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
@@ -329,6 +334,11 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "content-box", "border-box":
 			cs.BoxSizing = d.Value
+		}
+	case "object-fit":
+		switch d.Value {
+		case "fill", "contain", "cover", "none", "scale-down":
+			cs.ObjectFit = d.Value
 		}
 	case "border-top-width":
 		setLength(&cs.BorderTopWidth, d.Value)

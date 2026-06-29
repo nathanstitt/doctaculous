@@ -11,6 +11,15 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
+// imageDest is a destination rectangle in page space (points, Y-down) into which a
+// replaced image's full pixel grid is drawn. For object-fit modes that scale
+// uniformly (contain/cover/none/scale-down) it may be larger or smaller than, and
+// offset from, the content box; the caller clips to the content box when it
+// overflows.
+type imageDest struct {
+	x, y, w, h float64
+}
+
 // PaintPage draws every item of page onto dev. mat maps page space (points,
 // Y-down, origin at the page's top-left) into device space (pixels); for a simple
 // rasterization it is a uniform scale of dpi/72.
@@ -28,6 +37,8 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 			paintRule(dev, &it.Rule, mat)
 		case layout.BorderKind:
 			paintBorder(dev, &it.Border, mat)
+		case layout.ImageKind:
+			paintImage(dev, &it.Image, mat)
 		}
 	}
 }
@@ -144,6 +155,117 @@ func paintBorder(dev render.Device, b *layout.BorderItem, mat render.Matrix) {
 			}
 		}
 	}
+}
+
+// paintImage draws a replaced-element image into its content box under the chosen
+// object-fit mapping. it.XPt,YPt,WPt,HPt is the content box in page space (points,
+// Y-down). The destination rectangle (after object-fit) maps the image's unit
+// square upright into page space:
+//
+//	Mimg = scale(destW, -destH) · translate(destX, destY+destH)
+//
+// At image-bottom (v=0) y = destY+destH; at image-top (v=1) y = destY. This matches
+// render.Device.DrawImage, which samples the source row from (1-v), so the image
+// renders upright. Mimg is then composed with mat (page→device). When the
+// destination overflows the content box (cover / oversized none), the content box is
+// pushed as a clip so only the box-sized region is painted.
+func paintImage(dev render.Device, it *layout.ImageItem, mat render.Matrix) {
+	if it.Img == nil || it.WPt <= 0 || it.HPt <= 0 {
+		return
+	}
+	b := it.Img.Bounds()
+	iw, ih := float64(b.Dx()), float64(b.Dy())
+	if iw <= 0 || ih <= 0 {
+		return
+	}
+
+	d := fitDest(it.Fit, it.XPt, it.YPt, it.WPt, it.HPt, iw, ih)
+	if d.w <= 0 || d.h <= 0 {
+		return
+	}
+
+	// Clip to the content box when the fitted image can extend beyond it (cover, or
+	// an oversized none/scale-down). fill/contain never overflow, so they skip the
+	// clip (and its save/restore cost).
+	clip := d.x < it.XPt-epsilon || d.y < it.YPt-epsilon ||
+		d.x+d.w > it.XPt+it.WPt+epsilon || d.y+d.h > it.YPt+it.HPt+epsilon
+	if clip {
+		dev.Save()
+		clipRect(dev, mat, it.XPt, it.YPt, it.XPt+it.WPt, it.YPt+it.HPt)
+	}
+
+	mImg := render.Scale(d.w, -d.h).Mul(render.Translate(d.x, d.y+d.h))
+	dev.DrawImage(it.Img, mImg.Mul(mat), 1, "")
+
+	if clip {
+		dev.Restore()
+	}
+}
+
+// epsilon guards the overflow comparison against float rounding so an
+// exactly-fitting image isn't needlessly clipped.
+const epsilon = 1e-6
+
+// fitDest computes the destination rectangle (page space) the image's full pixel
+// grid maps into, for content box (cx,cy,cw,ch) and intrinsic size (iw,ih), under
+// fit. fill stretches to the box; contain/cover scale uniformly by the min/max axis
+// ratio and center; none uses intrinsic size centered; scale-down picks the smaller
+// of none and contain. The result may exceed the content box (cover, oversized
+// none) — the caller clips.
+func fitDest(fit layout.ObjectFit, cx, cy, cw, ch, iw, ih float64) imageDest {
+	centered := func(w, h float64) imageDest {
+		return imageDest{x: cx + (cw-w)/2, y: cy + (ch-h)/2, w: w, h: h}
+	}
+	switch fit {
+	case layout.FitContain:
+		s := scaleRatio(cw/iw, ch/ih, true) // fit inside: the smaller ratio
+		return centered(iw*s, ih*s)
+	case layout.FitCover:
+		s := scaleRatio(cw/iw, ch/ih, false) // cover: the larger ratio
+		return centered(iw*s, ih*s)
+	case layout.FitNone:
+		return centered(iw, ih)
+	case layout.FitScaleDown:
+		// none unless it overflows the box, in which case contain (the smaller image).
+		s := scaleRatio(cw/iw, ch/ih, true)
+		if s >= 1 {
+			return centered(iw, ih) // intrinsic already fits: use none
+		}
+		return centered(iw*s, ih*s)
+	default: // FitFill
+		return imageDest{x: cx, y: cy, w: cw, h: ch}
+	}
+}
+
+// scaleRatio returns the smaller of a and b when min is true, else the larger —
+// the uniform scale factor for contain (min) and cover (max).
+func scaleRatio(a, b float64, min bool) float64 {
+	if min {
+		if a < b {
+			return a
+		}
+		return b
+	}
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// clipRect intersects the device clip with the axis-aligned page-space rectangle
+// [x0,x1]×[y0,y1], mapped through mat. Used to confine an object-fit:cover (or
+// oversized) image to its content box.
+func clipRect(dev render.Device, mat render.Matrix, x0, y0, x1, y1 float64) {
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	p := &render.Path{}
+	moveTo(p, mat, x0, y0)
+	lineTo(p, mat, x1, y0)
+	lineTo(p, mat, x1, y1)
+	lineTo(p, mat, x0, y1)
+	p.Close()
+	dev.PushClip(p, render.NonZero)
 }
 
 // transformPath returns a copy of src with every point mapped through m.

@@ -89,6 +89,26 @@ func TestInitialSizingDefaults(t *testing.T) {
 	if cs.BoxSizing != "content-box" {
 		t.Errorf("initial box-sizing = %q, want content-box", cs.BoxSizing)
 	}
+	if cs.ObjectFit != "fill" {
+		t.Errorf("initial object-fit = %q, want fill", cs.ObjectFit)
+	}
+}
+
+// TestApplyObjectFit: each valid object-fit keyword is accepted; an invalid one is
+// dropped and the default preserved.
+func TestApplyObjectFit(t *testing.T) {
+	for _, kw := range []string{"fill", "contain", "cover", "none", "scale-down"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "object-fit", Value: kw})
+		if cs.ObjectFit != kw {
+			t.Errorf("object-fit %q not applied, got %q", kw, cs.ObjectFit)
+		}
+	}
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "object-fit", Value: "stretch"}) // invalid
+	if cs.ObjectFit != "fill" {
+		t.Errorf("object-fit after invalid keyword = %q, want fill preserved", cs.ObjectFit)
+	}
 }
 
 func TestApplyMinMaxSizingAndBoxSizing(t *testing.T) {

@@ -100,9 +100,11 @@ const (
 	PosFixed
 )
 
-// ReplacedContent holds the facts about a replaced element. In this sub-project
-// it carries only the source facts (no decoded image); a later sub-project adds
-// the decoded image and intrinsic size.
+// ReplacedContent holds the facts about a replaced element. It carries only the
+// source facts (tag + attributes), never a decoded image: decoding is done at
+// layout time by the engine (which holds the resource loader and context), so the
+// box tree stays pure and read-only. The decoded image and intrinsic size live on
+// the layout output (the engine's fragment), not here.
 type ReplacedContent struct {
 	Tag   string            // e.g. "img"
 	Attrs map[string]string // src, width, height, alt, ...

@@ -317,7 +317,7 @@ func TestInlineBlockAtomics(t *testing.T) {
 			inlineBlockChild(50, 30),
 		},
 	}
-	e := New(nil, nil)
+	e := New(nil, nil, nil)
 	res := e.layoutBlock(context.Background(), ifc, 1000, 0, 0)
 	frag := res.frag
 
@@ -404,24 +404,38 @@ func TestInlineReplacedFromAttrs(t *testing.T) {
 		Style:      autoBlockStyle(),
 		Children: []*cssbox.Box{
 			{
-				Kind:     cssbox.BoxReplaced,
-				Display:  cssbox.DisplayInline,
-				Style:    gcss.ComputedStyle{Display: "inline", FontSizePt: 16, Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Unit: gcss.UnitAuto}},
+				Kind:    cssbox.BoxReplaced,
+				Display: cssbox.DisplayInline,
+				Style: gcss.ComputedStyle{
+					Display: "inline", FontSizePt: 16,
+					Width: gcss.Length{Unit: gcss.UnitAuto}, Height: gcss.Length{Unit: gcss.UnitAuto},
+					MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+				},
 				Replaced: &cssbox.ReplacedContent{Tag: "img", Attrs: map[string]string{"width": "40", "height": "20"}},
 			},
 		},
 	}
-	e := New(nil, nil)
+	e := New(nil, nil, nil)
 	lines, h, atomics := e.layoutInline(context.Background(), ifc, 1000, 0, 0)
-	// A replaced box has no own Fragment here (only inline-block builds one), so it
-	// contributes no atomic child fragment but still advances/sizes the line.
-	if len(atomics) != 0 {
-		t.Errorf("replaced atomics = %d, want 0 (no fragment for a bare replaced leaf)", len(atomics))
+	// A replaced box now builds its own border-box Fragment (carrying the decoded
+	// image, or nil for a placeholder when no image decodes — here there is no loader,
+	// so the image is nil but the box still reserves its attr-given 40x20 size).
+	if len(atomics) != 1 {
+		t.Fatalf("replaced atomics = %d, want 1 (the replaced box's fragment)", len(atomics))
+	}
+	frag := atomics[0]
+	if frag.W != 40 || frag.H != 20 {
+		t.Errorf("replaced fragment size = %vx%v, want 40x20 (from width/height attrs)", frag.W, frag.H)
+	}
+	if frag.Image == nil {
+		t.Errorf("replaced fragment has no Image content")
+	} else if frag.Image.Img != nil {
+		t.Errorf("replaced fragment image = %v, want nil (no loader, placeholder)", frag.Image.Img)
 	}
 	if len(lines) != 1 {
 		t.Fatalf("replaced lines = %d, want 1", len(lines))
 	}
-	// The line height covers the 20pt image (ascent fallback to atomic height).
+	// The line height covers the 20pt image (its atom ascent raises the line box).
 	if h < 20 {
 		t.Errorf("replaced inline height = %v, want >= 20", h)
 	}
