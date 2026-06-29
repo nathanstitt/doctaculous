@@ -89,13 +89,28 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 - ☐ **F1. RTL/`direction`** (column order) — *covered by A1.*
 - ☐ **F2. Six background layers** (table → col-groups → cols → row-groups → rows → cells; today only cell+table
   paint). *Medium.*
-- ☐ **F3. `empty-cells` property** (always `show`). *Small.*
-- ☐ **F4. percentage `<col>` width with no cells in its column.** *Small.*
-- ☐ **F5. 3D collapse border styles** (`ridge`/`groove`/`outset`/`inset` → `solid`). *Small–medium.*
+- ☑ **F3. `empty-cells` property** — *DONE.* `EmptyCells` added to `ComputedStyle` (inherited, parsed); in
+  separate-borders mode an empty cell (`isEmptyCellFragment`) with `empty-cells:hide` has its background +
+  border suppressed after layout (slot/sizing unchanged). Tests: `TestEmptyCellsHide…`/`…Show…`
+  (mutation-verified). Collapse mode unaffected (correct).
+- ☑ **F4. percentage `<col>` width with no cells** — *DONE (already correct).* A `<col width="N%">` reserves
+  its share in both auto and fixed layout even with no originating cell (verified by probe; `addColumnHint`
+  creates the column with its `pct` and the percentage-distribution path honors it). Locked by
+  `TestPercentColumnWithNoCells` (auto + fixed). No code change needed.
+- ☑ **F5. 3D collapse border styles** — *DONE.* New `BorderStyle` values `BorderOutset/Inset/Ridge/Groove`;
+  the paint layer renders them as bevels (`edge3DColor`: lit top/left, darkened bottom/right; ridge/groove
+  split the strip across its thickness). BOTH `mapBorderStyle` (normal borders — which previously rendered 3D
+  styles as nothing) and `borderStyleToLayout` (collapse — previously solid) map them. Tests:
+  `TestPaintBorderOutset…`/`…Ridge…` (mutation-verified), `TestMapBorderStyle` updated, new
+  `html-border-3d-styles` golden (eyeballed: outset/inset/ridge/groove bevels correct).
 - ☐ **F6. percentage-column basis differs fixed (incl. border-spacing) vs auto (excl.)** — off by the spacing
   amount; only with `border-spacing>0` + % cols. *Small.*
-- ☐ **F7. `buildCollapsedBorders` O(cells²)** → O(1) via `buildGrid`'s occupancy map. *Small (perf).*
-- ☐ **F8. rowspan cell whose *spanned-into* row grows from baseline does not re-grow.** *Small (localized).*
+- ☑ **F7. `buildCollapsedBorders` O(cells²)** — *DONE.* The occupancy scan now stores `*gridCell` per slot
+  (retained as `tableGrid.cellMap`); `cellAt` is an O(1) map lookup instead of a per-neighbor linear scan.
+  Behavior-preserving (byte-identical corpus).
+- ☐ **F8. rowspan cell whose *spanned-into* row grows from baseline does not re-grow.** *Deferred (localized).*
+  Needs the cross-row baseline re-solve the table design deliberately avoids; documented limitation in
+  `table.go`. Low value, high complexity — kept deferred.
 
 ## G. HTML/CSS — web fonts
 

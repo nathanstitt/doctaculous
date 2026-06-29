@@ -203,6 +203,55 @@ func TestPaintBorderDoubleLeavesGap(t *testing.T) {
 	}
 }
 
+// TestPaintBorderOutsetShadesBySide pins F5: an outset edge lights the top/left edges
+// (base color) and darkens the bottom/right edges (~half). Two strips, a top and a
+// bottom, of the same base color must paint different shades.
+func TestPaintBorderOutsetShadesBySide(t *testing.T) {
+	base := color.RGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff}
+	page := &layout.Page{WidthPt: 50, HeightPt: 50, Items: []layout.Item{
+		{Kind: layout.BorderKind, Border: layout.BorderItem{ // top edge
+			XPt: 5, YPt: 5, WPt: 40, HPt: 6,
+			Color: base, Style: layout.BorderOutset, Side: layout.EdgeTop,
+		}},
+		{Kind: layout.BorderKind, Border: layout.BorderItem{ // bottom edge
+			XPt: 5, YPt: 39, WPt: 40, HPt: 6,
+			Color: base, Style: layout.BorderOutset, Side: layout.EdgeBottom,
+		}},
+	}}
+	img := newRasterPage(50, 50, page)
+	// Top edge: lit → base color (0x80).
+	if got := img.RGBAAt(25, 8); !isColor(got, base, 2) {
+		t.Errorf("outset top = %v, want base %v (lit side)", got, base)
+	}
+	// Bottom edge: dark → ~half (0x40).
+	dark := color.RGBA{R: 0x40, G: 0x40, B: 0x40, A: 0xff}
+	if got := img.RGBAAt(25, 42); !isColor(got, dark, 2) {
+		t.Errorf("outset bottom = %v, want darkened %v (shadow side)", got, dark)
+	}
+}
+
+// TestPaintBorderRidgeSplitsThickness pins F5: a ridge edge splits the strip across its
+// thickness — the outer half is lit, the inner half dark (for a top edge). A 10px-thick
+// top strip [5,15] has its outer half [5,10) lit and inner half [10,15) dark.
+func TestPaintBorderRidgeSplitsThickness(t *testing.T) {
+	base := color.RGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff}
+	dark := color.RGBA{R: 0x40, G: 0x40, B: 0x40, A: 0xff}
+	page := &layout.Page{WidthPt: 50, HeightPt: 50, Items: []layout.Item{
+		{Kind: layout.BorderKind, Border: layout.BorderItem{
+			XPt: 5, YPt: 5, WPt: 40, HPt: 10,
+			Color: base, Style: layout.BorderRidge, Side: layout.EdgeTop,
+		}},
+	}}
+	img := newRasterPage(50, 50, page)
+	// Outer half (y≈7) lit; inner half (y≈12) dark.
+	if got := img.RGBAAt(25, 7); !isColor(got, base, 2) {
+		t.Errorf("ridge outer half = %v, want base %v (lit)", got, base)
+	}
+	if got := img.RGBAAt(25, 12); !isColor(got, dark, 2) {
+		t.Errorf("ridge inner half = %v, want dark %v", got, dark)
+	}
+}
+
 func TestPaintBorderDashedAlternates(t *testing.T) {
 	black := color.RGBA{A: 0xff}
 	// A top edge strip starting at x=5, 4px thick. Dash = gap = 3×4 = 12px, so the

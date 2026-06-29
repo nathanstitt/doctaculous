@@ -1181,6 +1181,14 @@ func mapBorderStyle(s string) layout.BorderStyle {
 		return layout.BorderDotted
 	case "double":
 		return layout.BorderDouble
+	case "outset":
+		return layout.BorderOutset
+	case "inset":
+		return layout.BorderInset
+	case "ridge":
+		return layout.BorderRidge
+	case "groove":
+		return layout.BorderGroove
 	default:
 		return layout.BorderNone
 	}

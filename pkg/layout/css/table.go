@@ -2,6 +2,7 @@ package css
 
 import (
 	"context"
+	"image/color"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
@@ -22,6 +23,20 @@ type tableGrid struct {
 	fixed    bool
 	spacingH float64
 	spacingV float64
+	// cellMap is the row-major occupancy grid: cellMap[row][col] is the *gridCell
+	// covering that slot (origin or spanned-into), or nil. Built by the occupancy scan
+	// in buildGrid; used by cellAt for O(1) neighbor lookups (collapse border solving)
+	// instead of a per-neighbor linear scan of cells.
+	cellMap [][]*gridCell
+}
+
+// cellAt returns the cell occupying slot (r,c) — its origin or a span it covers — or nil
+// when out of range / empty. O(1) via the occupancy map.
+func (g *tableGrid) cellAt(r, c int) *gridCell {
+	if r < 0 || r >= len(g.cellMap) || c < 0 || c >= len(g.cellMap[r]) {
+		return nil
+	}
+	return g.cellMap[r][c]
 }
 
 type gridRow struct {
@@ -109,11 +124,13 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 	visualRows = append(visualRows, bodyRows...)
 	visualRows = append(visualRows, footRows...)
 
-	// 2. Occupancy scan: assign each cell to its origin slot.
-	var occupied [][]bool
+	// 2. Occupancy scan: assign each cell to its origin slot. occupied[r][c] holds the
+	// *gridCell covering that slot (nil when free), retained on the grid as cellMap for
+	// O(1) neighbor lookups (cellAt).
+	var occupied [][]*gridCell
 	ensure := func(r, c int) {
 		for len(occupied) <= r {
-			occupied = append(occupied, make([]bool, len(g.cols)))
+			occupied = append(occupied, make([]*gridCell, len(g.cols)))
 		}
 		if c >= len(g.cols) {
 			grow := c + 1 - len(g.cols)
@@ -122,7 +139,7 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 			}
 			for ri := range occupied {
 				for len(occupied[ri]) < len(g.cols) {
-					occupied[ri] = append(occupied[ri], false)
+					occupied[ri] = append(occupied[ri], nil)
 				}
 			}
 		}
@@ -136,7 +153,7 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 			}
 			// Ensure column `col` exists before the skip loop reads occupied[ri][col].
 			ensure(ri, col)
-			for col < len(g.cols) && occupied[ri][col] {
+			for col < len(g.cols) && occupied[ri][col] != nil {
 				col++
 				ensure(ri, col)
 			}
@@ -154,13 +171,14 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 			for dr := 0; dr < rs; dr++ {
 				for dc := 0; dc < cs; dc++ {
 					ensure(ri+dr, col+dc)
-					occupied[ri+dr][col+dc] = true
+					occupied[ri+dr][col+dc] = gc
 				}
 			}
 			col += cs
 		}
 		g.rows = append(g.rows, gr)
 	}
+	g.cellMap = occupied
 
 	// 3. Clamp each cell's spans to the final grid extent.
 	for _, gc := range g.cells {
@@ -291,6 +309,19 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		}
 	}
 
+	// CSS empty-cells:hide (separate-borders mode only): an EMPTY cell paints no border
+	// or background. Suppress those after layout so the cell still reserves its grid slot
+	// (sizing is unchanged) but its decorations are cleared. In collapse mode empty-cells
+	// has no effect (collapsed borders are resolved table-wide), so this is skipped.
+	if !g.collapse {
+		for _, gc := range g.cells {
+			if gc.frag != nil && gc.box.Style.EmptyCells == "hide" && isEmptyCellFragment(gc.frag) {
+				gc.frag.Background = color.RGBA{}
+				gc.frag.Border = [4]BorderEdge{}
+			}
+		}
+	}
+
 	// Row natural heights = tallest non-spanning cell originating in the row.
 	for _, gr := range g.rows {
 		h := 0.0
@@ -398,16 +429,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	// collapsed grid lines (stored on the table fragment) don't double-paint.
 	var collapsedBorders []layout.BorderItem
 	if g.collapse {
-		cellAt := func(r, c int) *gridCell {
-			for i := 0; i < len(g.cells); i++ {
-				gc := g.cells[i]
-				if r >= gc.row && r < gc.row+gc.rowSpan && c >= gc.col && c < gc.col+gc.colSpan {
-					return gc
-				}
-			}
-			return nil
-		}
-		collapsedBorders = g.buildCollapsedBorders(cellAt)
+		collapsedBorders = g.buildCollapsedBorders(g.cellAt)
 		// In collapse mode the resolved grid edges replace per-cell borders: clear each
 		// cell fragment's own border so it does not double-paint.
 		for i := 0; i < len(g.cells); i++ {
@@ -543,6 +565,16 @@ func distributeAuto(cols []gridCol, idxs []int, budget float64) {
 		span := cols[ci].max - cols[ci].min
 		cols[ci].width = cols[ci].min + surplus*(span/flex)
 	}
+}
+
+// isEmptyCellFragment reports whether a cell fragment has no rendered content — no
+// inline lines (text), no block/atomic children, no replaced image, no floats, and no
+// positioned descendants. Used by CSS empty-cells:hide to decide whether a cell's border
+// and background are suppressed. A cell holding only collapsed whitespace produces no
+// line boxes, so it reads as empty (matching browsers).
+func isEmptyCellFragment(f *Fragment) bool {
+	return len(f.Lines) == 0 && len(f.Children) == 0 && f.Image == nil &&
+		len(f.Floats) == 0 && len(f.Positioned) == 0
 }
 
 // cellMinMax returns a cell's min-content and max-content BORDER-box widths: the

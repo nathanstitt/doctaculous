@@ -41,13 +41,17 @@ func TestResolveLen(t *testing.T) {
 
 func TestMapBorderStyle(t *testing.T) {
 	cases := map[string]layout.BorderStyle{
-		"solid":  layout.BorderSolid,
-		"dashed": layout.BorderDashed,
-		"dotted": layout.BorderDotted,
-		"double": layout.BorderDouble,
-		"none":   layout.BorderNone,
-		"":       layout.BorderNone,
-		"groove": layout.BorderNone, // unsupported -> none
+		"solid":   layout.BorderSolid,
+		"dashed":  layout.BorderDashed,
+		"dotted":  layout.BorderDotted,
+		"double":  layout.BorderDouble,
+		"outset":  layout.BorderOutset,
+		"inset":   layout.BorderInset,
+		"ridge":   layout.BorderRidge,
+		"groove":  layout.BorderGroove,
+		"none":    layout.BorderNone,
+		"":        layout.BorderNone,
+		"unknown": layout.BorderNone, // unrecognized -> none
 	}
 	for in, want := range cases {
 		if got := mapBorderStyle(in); got != want {

@@ -150,6 +150,9 @@ type ComputedStyle struct {
 	VerticalAlign string
 	// CaptionSide: "top" (initial) | "bottom". Inherited.
 	CaptionSide string
+	// EmptyCells: "show" (initial) | "hide". Inherited. In separate-borders mode, an
+	// empty cell with empty-cells:hide paints no border or background.
+	EmptyCells string
 	// Direction: "ltr" (initial) | "rtl". Inherited. Parsed but NOT acted on (RTL
 	// deferred); a non-ltr value on a table is logged by the layout engine.
 	Direction string
@@ -316,6 +319,7 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.BorderSpacingH = parent.BorderSpacingH
 	cs.BorderSpacingV = parent.BorderSpacingV
 	cs.CaptionSide = parent.CaptionSide
+	cs.EmptyCells = parent.EmptyCells
 	cs.Direction = parent.Direction
 	// table-layout and vertical-align are NOT inherited (per CSS).
 	return cs
@@ -372,6 +376,7 @@ func initialStyle() ComputedStyle {
 		TableLayout:    "auto",
 		VerticalAlign:  "baseline",
 		CaptionSide:    "top",
+		EmptyCells:     "show",
 		Direction:      "ltr",
 		// BorderSpacingH/V default to 0 (zero value).
 	}
@@ -501,6 +506,11 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "top", "bottom":
 			cs.CaptionSide = d.Value
+		}
+	case "empty-cells":
+		switch d.Value {
+		case "show", "hide":
+			cs.EmptyCells = d.Value
 		}
 	case "direction":
 		switch d.Value {

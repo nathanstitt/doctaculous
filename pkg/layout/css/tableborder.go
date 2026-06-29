@@ -89,10 +89,20 @@ func resolveCollapsedEdge(a, b collapsedBorder) collapsedBorder {
 }
 
 // borderStyleToLayout maps a CSS border-style string to a layout.BorderStyle for
-// painting. ridge/outset/groove/inset render as solid for now (3D styles not modeled).
+// painting. The 3D styles (ridge/outset/groove/inset) map to their layout styles and are
+// painted as bevels by the paint layer (shared with non-collapse borders via
+// mapBorderStyle).
 func borderStyleToLayout(style string) layout.BorderStyle {
 	switch style {
-	case "solid", "ridge", "outset", "groove", "inset":
+	case "outset":
+		return layout.BorderOutset
+	case "inset":
+		return layout.BorderInset
+	case "ridge":
+		return layout.BorderRidge
+	case "groove":
+		return layout.BorderGroove
+	case "solid":
 		return layout.BorderSolid
 	case "dashed":
 		return layout.BorderDashed

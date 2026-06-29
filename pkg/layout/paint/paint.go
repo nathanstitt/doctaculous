@@ -162,7 +162,47 @@ func paintBorder(dev render.Device, b *layout.BorderItem, mat render.Matrix) {
 				fillRect(dev, mat, x0, y, x1, end, b.Color)
 			}
 		}
+
+	case layout.BorderOutset, layout.BorderInset:
+		// 3D edge: fill the whole strip with the light or dark shade chosen by side.
+		// outset = top/left light, bottom/right dark; inset is the inverse.
+		light := b.Style == layout.BorderOutset
+		fillRect(dev, mat, x0, y0, x1, y1, edge3DColor(b.Color, b.Side, light))
+
+	case layout.BorderRidge, layout.BorderGroove:
+		// 3D ridge/groove: split the strip across its thickness into an outer and inner
+		// half, painting them with opposite light/dark shades. ridge = outer behaves
+		// like outset; groove is the inverse.
+		outerLight := b.Style == layout.BorderRidge
+		outer := edge3DColor(b.Color, b.Side, outerLight)
+		inner := edge3DColor(b.Color, b.Side, !outerLight)
+		if horizontal {
+			mid := (y0 + y1) / 2
+			fillRect(dev, mat, x0, y0, x1, mid, outer)
+			fillRect(dev, mat, x0, mid, x1, y1, inner)
+		} else {
+			mid := (x0 + x1) / 2
+			fillRect(dev, mat, x0, y0, mid, y1, outer)
+			fillRect(dev, mat, mid, y0, x1, y1, inner)
+		}
 	}
+}
+
+// edge3DColor returns the shade for a 3D border edge: the "light" side of the bevel
+// (top/left when raised) keeps the base color, the "dark" side is darkened to ~half.
+// light selects whether THIS edge is on the lit side (caller derives it from the style
+// and side). The top and left edges are lit when light is true; bottom and right edges
+// are the opposite, so the caller passes the already-resolved light flag and this only
+// flips it for bottom/right. (Matches browser bevels: a raised box lights top+left.)
+func edge3DColor(c color.RGBA, side layout.EdgeSide, light bool) color.RGBA {
+	// Bottom/right edges are the opposite face of the bevel from top/left.
+	if side == layout.EdgeBottom || side == layout.EdgeRight {
+		light = !light
+	}
+	if light {
+		return c
+	}
+	return color.RGBA{R: c.R / 2, G: c.G / 2, B: c.B / 2, A: c.A}
 }
 
 // paintImage draws a replaced-element image into its content box under the chosen

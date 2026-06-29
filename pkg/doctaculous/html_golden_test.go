@@ -632,6 +632,28 @@ var htmlGoldens = []struct {
   <p>before <span class="ib">BOX</span> after</p>
 </body></html>`,
 	},
+	{
+		// The four 3D border styles (CSS, fidelity fix F5). Each box has a thick gray
+		// border in one 3D style. Eyeball the bevel: outset = raised (light top/left, dark
+		// bottom/right), inset = sunken (inverse), ridge = a raised ridge (outer light /
+		// inner dark on top-left), groove = a carved groove (inverse of ridge). Before the
+		// fix these all painted as flat solid (or nothing for non-collapse borders).
+		name:       "border-3d-styles",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  div { width: 80px; height: 30px; margin: 8px; border: 12px gray; background: #dddddd; }
+  .outset { border-style: outset; }
+  .inset  { border-style: inset; }
+  .ridge  { border-style: ridge; }
+  .groove { border-style: groove; }
+</style></head><body>
+  <div class="outset"></div>
+  <div class="inset"></div>
+  <div class="ridge"></div>
+  <div class="groove"></div>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for
