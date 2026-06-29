@@ -189,13 +189,15 @@ These are noted here so the next session does not waste time re-checking what th
 - `pageH<=0` passthrough, strict-`>` exact-fit, page-`top`-from-first-block, recover-at-boundary — all verified
   correct.
 
-## Larger deferrals (NOT part of this fidelity pass — they are real future slices)
+## Larger deferrals 
 
-From CLAUDE.md "Pagination fidelity follow-ups" — these are genuine new work, out of scope for a
+From CLAUDE.md "Pagination fidelity follow-ups" — while these are genuine new work, they are not out of scope for a
 correctness/honesty pass: **mid-line / mid-table-row / mid-flex-or-grid-item splitting**; **widows/orphans**;
 **`break-inside: avoid` enforcement** (keep-together); **per-page distribution of absolute/fixed** content
 (today rides page 0; `fixed` does not repeat on every page); **`@page` size/margins/named pages**; **running
-headers/footers**. EPUB (sub-project 13) wants none of these to start.
+headers/footers**.
+
+Consider each of these to consider implementation now and ask user about them, outlining the effort and implications
 
 ---
 
