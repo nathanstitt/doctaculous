@@ -70,12 +70,11 @@ import "testing"
 
 // fakeNode is the in-test DOM used throughout pkg/css tests.
 type fakeNode struct {
-	tag      string
-	id       string
-	classes  []string
-	parent   *fakeNode
-	children []*fakeNode
-	attrs    map[string]string
+	tag     string
+	id      string
+	classes []string
+	parent  *fakeNode
+	attrs   map[string]string
 }
 
 func (n *fakeNode) Tag() string             { return n.tag }
@@ -358,6 +357,14 @@ Expected: FAIL — hashes/strings/numbers tokenize wrong (currently `#` is a Del
 
 - [ ] **Step 3: Write minimal implementation**
 
+**Ordering matters:** these cases MUST be inserted *before* the existing `case isNameStart(c)`.
+`isNameStart('-')` is true, so a `-`-prefixed number like `-1px` would otherwise be swallowed as an
+ident; placing the `c == '-' && next-is-digit/dot` case first makes `-1px` tokenize as a number.
+(A lone `-` followed by a non-name char still falls through to `isNameStart`→ident rather than the
+spec's `TokenDelim`; that is an accepted simplification — a bare `-` delimiter is not meaningful in
+the declaration/selector subset this engine parses, and `--custom-props` still work via the
+hyphen-then-hyphen ident path.)
+
 ```go
 // in pkg/css/token.go, extend next()'s switch BEFORE the isNameStart case:
 //	case c == '#':
@@ -368,8 +375,15 @@ Expected: FAIL — hashes/strings/numbers tokenize wrong (currently `#` is a Del
 //		return t.readString(c)
 //	case c == '-' && t.pos+1 < len(t.src) && (isDigit(t.src[t.pos+1]) || t.src[t.pos+1] == '.'):
 //		return t.readNumeric()
-//	case isDigit(c) || c == '.':
+//	case isDigit(c):
 //		return t.readNumeric()
+//	case c == '.' && t.pos+1 < len(t.src) && isDigit(t.src[t.pos+1]):
+//		return t.readNumeric()
+//
+// NOTE: digit and ".+digit" are SEPARATE cases on purpose. A combined
+// `case isDigit(c) || c == '.'` is wrong: a lone "." (a class-selector marker,
+// e.g. ".x") would then start a number instead of staying a TokenDelim that the
+// selector parser needs. A "." begins a number only when a digit follows.
 //
 // and add these helpers:
 
@@ -470,20 +484,63 @@ func TestTokenizeCommentsAndPunctuation(t *testing.T) {
 		}
 	}
 }
+
+// TestTokenizeCommentEdgeCases locks in graceful degradation for malformed
+// comments (project rule: degradation paths must be covered by a test).
+func TestTokenizeCommentEdgeCases(t *testing.T) {
+	if got := tokenKinds("/* no end"); len(got) != 0 {
+		t.Errorf("unterminated comment kinds = %v, want none (consumed to EOF)", got)
+	}
+	if got := tokenKinds("/*"); len(got) != 0 {
+		t.Errorf(`bare "/*" kinds = %v, want none`, got)
+	}
+	tz := newTokenizer("/")
+	tok := tz.next()
+	if tok.Kind != TokenDelim || tok.Text != "/" {
+		t.Errorf(`lone "/" = {%v %q}, want {Delim "/"}`, tok.Kind, tok.Text)
+	}
+	got := tokenKinds("/*a*//*b*/x") // consecutive comments all skipped
+	if len(got) != 1 || got[0] != TokenIdent {
+		t.Errorf(`"/*a*//*b*/x" kinds = %v, want [Ident]`, got)
+	}
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./pkg/css/ -run TestTokenizeCommentsAndPunctuation`
+Run: `go test ./pkg/css/ -run TestTokenize`
 Expected: FAIL — `:` `;` `{` `}` `(` `)` come back as Delim, and `/* */` is not skipped.
 
 - [ ] **Step 3: Write minimal implementation**
 
+Comment skipping must be ITERATIVE, not recursive. Restructure `next()` so its body sits inside a
+`for` loop and a comment is skipped with `continue` (NOT `t.skipComment(); return t.next()` — that
+recurses one stack frame per comment, so a pathological run of millions of `/**/` could exhaust the
+goroutine stack, a fatal error). Re-read `c := t.src[t.pos]` inside the loop after `skipComment`
+advances `pos`:
+
 ```go
-// in pkg/css/token.go next(), add these cases before the default:
-//	case c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*':
-//		t.skipComment()
-//		return t.next()
+func (t *tokenizer) next() Token {
+	for {
+		if t.pos >= len(t.src) {
+			return Token{Kind: TokenEOF}
+		}
+		c := t.src[t.pos]
+		if c == '/' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '*' {
+			t.skipComment()
+			continue
+		}
+		switch {
+		// ... all the existing cases (whitespace, comma, #, string, numerics,
+		//     isNameStart, default) — each returns, so the loop only re-iterates
+		//     after a comment is skipped — PLUS the six punctuation cases below.
+		}
+	}
+}
+```
+
+Add the six punctuation cases into that switch, before the `default`:
+```go
 //	case c == ':':
 //		t.pos++
 //		return Token{Kind: TokenColon, Text: ":"}
@@ -730,7 +787,7 @@ func parseColor(tz *tokenizer) (color.RGBA, bool) {
 	case TokenHash:
 		return parseHex(tok.Text)
 	case TokenIdent:
-		if tok.Text == "rgb" {
+		if strings.ToLower(tok.Text) == "rgb" { // function names are case-insensitive
 			return parseRGBFunc(tz)
 		}
 		c, ok := namedColors[strings.ToLower(tok.Text)]
@@ -1202,6 +1259,9 @@ type Declaration struct {
 // are skipped so one bad declaration cannot void the rest.
 func parseDeclarations(body string) []Declaration {
 	var out []Declaration
+	// NOTE: the body is split naively on ';'. A value containing a literal
+	// semicolon (e.g. a data: URI in url(...)) will be split incorrectly; that is
+	// an accepted limitation for the CSS subset this engine targets.
 	for _, chunk := range strings.Split(body, ";") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
@@ -1217,9 +1277,18 @@ func parseDeclarations(body string) []Declaration {
 			continue
 		}
 		important := false
-		if i := strings.LastIndex(strings.ToLower(val), "!important"); i >= 0 {
-			important = true
-			val = strings.TrimSpace(val[:i])
+		// Match !important only as the trailing whitespace-delimited token (suffix
+		// + preceding whitespace), case-insensitively, so "url(x!important.png)" is
+		// not falsely flagged. The suffix is ASCII, so cutting len(bang) bytes off
+		// the original value is safe even if an earlier rune case-folds to a
+		// different byte length — and the cut value keeps its original case.
+		const bang = "!important"
+		if strings.HasSuffix(strings.ToLower(val), bang) {
+			candidate := val[:len(val)-len(bang)]
+			if candidate == "" || isWhitespace(candidate[len(candidate)-1]) {
+				important = true
+				val = strings.TrimSpace(candidate)
+			}
 		}
 		if val == "" {
 			continue
@@ -1271,6 +1340,55 @@ func TestParseStylesheet(t *testing.T) {
 	}
 	if len(sheet.Rules[0].Declarations) != 2 {
 		t.Fatalf("rule[0] declarations = %d, want 2", len(sheet.Rules[0].Declarations))
+	}
+	// Guard against comment text leaking into the prelude: the selectors must
+	// actually match the intended elements (a count check alone would not catch
+	// "/* comment */ h1" parsing as a 4-part garbage selector).
+	h1 := &fakeNode{tag: "h1"}
+	title := &fakeNode{tag: "div", classes: []string{"title"}}
+	matchesAny := func(sels []Selector, n *fakeNode) bool {
+		for _, s := range sels {
+			if s.Matches(n) {
+				return true
+			}
+		}
+		return false
+	}
+	if !matchesAny(sheet.Rules[0].Selectors, h1) {
+		t.Errorf("rule[0] selectors do not match <h1>; comment likely leaked into the prelude")
+	}
+	if !matchesAny(sheet.Rules[0].Selectors, title) {
+		t.Errorf("rule[0] selectors do not match .title")
+	}
+}
+
+// TestParseStylesheetCommentBeforeSelector is a focused regression test for a
+// comment immediately preceding a rule's selector (it must not leak into the
+// prelude and inflate the selector into multiple whitespace-split parts).
+func TestParseStylesheetCommentBeforeSelector(t *testing.T) {
+	sheet := Parse("/* lead */ h1 { color: red }")
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	sel := sheet.Rules[0].Selectors[0]
+	if sel.Specificity() != (Specificity{0, 0, 1}) { // exactly one type selector (h1), not 4 parts
+		t.Fatalf("h1 selector specificity = %v, want {0 0 1} (comment must not leak into prelude)", sel.Specificity())
+	}
+	if !sel.Matches(&fakeNode{tag: "h1"}) {
+		t.Errorf("h1 selector does not match <h1>")
+	}
+}
+
+// TestParseDeclarationsCommentInBody verifies a /* */ comment inside a rule body
+// does not corrupt the property name (the body analog of the prelude comment-leak).
+func TestParseDeclarationsCommentInBody(t *testing.T) {
+	sheet := Parse("p { /* section */ color: red; /* end */ }")
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
+	}
+	decls := sheet.Rules[0].Declarations
+	if len(decls) != 1 || decls[0].Property != "color" || decls[0].Value != "red" {
+		t.Fatalf("got %+v, want one decl {color red}", decls)
 	}
 }
 ```
@@ -1338,16 +1456,22 @@ type ruleScanner struct {
 }
 
 func (s *ruleScanner) nextRule() (prelude, body string, ok bool) {
-	start := s.pos
+	// Build the prelude from the spans BETWEEN comments, so a comment before a
+	// rule's "{" does not leak into the selector text (otherwise "/* c */ h1"
+	// would parse as a 4-part garbage selector that matches nothing).
+	var b strings.Builder
+	spanStart := s.pos
 	for s.pos < len(s.src) {
 		switch {
 		case s.atComment():
+			b.WriteString(s.src[spanStart:s.pos]) // flush text before the comment
 			s.skipComment()
+			spanStart = s.pos // resume after the comment
 		case s.src[s.pos] == '{':
-			prelude = s.src[start:s.pos]
-			s.pos++ // consume {
+			b.WriteString(s.src[spanStart:s.pos]) // flush the final span
+			s.pos++                               // consume {
 			body = s.readBody()
-			return prelude, body, true
+			return b.String(), body, true
 		default:
 			s.pos++
 		}
@@ -1355,24 +1479,29 @@ func (s *ruleScanner) nextRule() (prelude, body string, ok bool) {
 	return "", "", false
 }
 
-// readBody returns the text up to the matching close brace, consuming it, and
-// handling one level of nesting (so an at-rule block like @media{ p{} } is fully
-// consumed even though we then discard it).
+// readBody returns the text up to the matching close brace, consuming it, with
+// /* */ comments stripped (so a comment before a property name does not corrupt
+// the declaration, the body analog of the prelude comment-leak). It depth-tracks
+// nested braces so an at-rule block like @media{ p{} } is fully consumed even
+// though Parse then discards it.
 func (s *ruleScanner) readBody() string {
-	start := s.pos
+	var b strings.Builder
+	spanStart := s.pos
 	depth := 0
 	for s.pos < len(s.src) {
 		switch {
 		case s.atComment():
+			b.WriteString(s.src[spanStart:s.pos]) // flush text before the comment
 			s.skipComment()
+			spanStart = s.pos // resume after the comment
 		case s.src[s.pos] == '{':
 			depth++
 			s.pos++
 		case s.src[s.pos] == '}':
 			if depth == 0 {
-				body := s.src[start:s.pos]
-				s.pos++ // consume }
-				return body
+				b.WriteString(s.src[spanStart:s.pos]) // flush the final span
+				s.pos++                               // consume }
+				return b.String()
 			}
 			depth--
 			s.pos++
@@ -1380,7 +1509,8 @@ func (s *ruleScanner) readBody() string {
 			s.pos++
 		}
 	}
-	return s.src[start:s.pos]
+	b.WriteString(s.src[spanStart:s.pos]) // unterminated body: flush what remains
+	return b.String()
 }
 
 func (s *ruleScanner) atComment() bool {
@@ -1992,13 +2122,24 @@ with the inline-style handling — a pure insertion, no other code in `Compute` 
 	if styleAttr, ok := n.Attr("style"); ok {
 		for _, d := range parseDeclarations(styleAttr) {
 			if d.Important {
-				important = append(important, matched{decl: d, spec: Specificity{IDs: 1 << 20}, order: order})
+				important = append(important, matched{decl: d, spec: Specificity{IDs: inlineImportantIDs}, order: order})
 				order++
 				continue
 			}
 			applyDeclaration(&cs, d)
 		}
 	}
+```
+
+where `inlineImportantIDs` is a package constant declared in cascade.go (an outsized specificity for
+inline `!important`, far above any reachable from parsed CSS):
+
+```go
+// inlineImportantIDs is the synthetic specificity IDs value given to inline
+// !important declarations. CSS places inline !important above all author
+// !important rules regardless of selector specificity; we model that with an IDs
+// count (2^20) far larger than any specificity reachable from parsed CSS.
+const inlineImportantIDs = 1 << 20
 ```
 
 This works because Task 13 deliberately deferred the `important` sort to *after* this marker, so the
