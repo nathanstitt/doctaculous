@@ -12,6 +12,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -194,24 +195,24 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 // or its content cannot be decoded, so the interpreter skips it gracefully. Per
 // the PDF spec a form without its own /Resources inherits the page's, so the
 // child pageResources falls back to this dict.
-func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, bool) {
+func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool) {
 	xobjs := r.doc.GetDict(r.dict["XObject"])
 	if xobjs == nil {
-		return nil, nil, render.Identity, false
+		return nil, nil, render.Identity, nil, false
 	}
 	s := r.doc.GetStream(xobjs[pdf.Name(name)])
 	if s == nil {
-		return nil, nil, render.Identity, false
+		return nil, nil, render.Identity, nil, false
 	}
 	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Form" {
-		return nil, nil, render.Identity, false
+		return nil, nil, render.Identity, nil, false
 	}
 	data, _, err := r.doc.DecodedStream(s)
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: form %q: %v", name, err)
 		}
-		return nil, nil, render.Identity, false
+		return nil, nil, render.Identity, nil, false
 	}
 
 	// A form's /Resources is optional; fall back to the page's so names resolve.
@@ -221,7 +222,106 @@ func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Mat
 	}
 	child := &pageResources{doc: r.doc, dict: childDict, logf: r.logf}
 
-	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), true
+	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), formBBox(r.doc, s.Dict["BBox"]), true
+}
+
+// formBBox reads a form XObject's /BBox [llx lly urx ury] into a normalized
+// [minX minY maxX maxY] rectangle, or nil when the array is absent or not 4 numbers
+// (degrade to no clip). The corners are normalized so min<=max regardless of the
+// array's corner order.
+func formBBox(doc *pdf.Document, o pdf.Object) *[4]float64 {
+	arr := doc.GetArray(o)
+	if len(arr) != 4 {
+		return nil
+	}
+	var v [4]float64
+	for i := range v {
+		v[i], _ = pdf.Number(doc.Resolve(arr[i]))
+	}
+	minX, maxX := v[0], v[2]
+	if minX > maxX {
+		minX, maxX = maxX, minX
+	}
+	minY, maxY := v[1], v[3]
+	if minY > maxY {
+		minY, maxY = maxY, minY
+	}
+	return &[4]float64{minX, minY, maxX, maxY}
+}
+
+// ColorSpace resolves a named /ColorSpace resource that is a Separation or DeviceN space
+// into a tint transform (parsing its tint-transform /Function and recording the alternate
+// space's component count), or ok=false for any other space (device/Pattern/ICCBased/…,
+// which the interpreter handles by component count). A malformed array, a /Function that
+// fails to parse, or an unrecognized alternate space degrades to ok=false (the prior
+// component-count approximation), never a crash.
+func (r *pageResources) ColorSpace(name string) (*content.TintTransform, bool) {
+	csDict := r.doc.GetDict(r.dict["ColorSpace"])
+	if csDict == nil {
+		return nil, false
+	}
+	arr := r.doc.GetArray(csDict[pdf.Name(name)])
+	if len(arr) < 4 {
+		return nil, false
+	}
+	family, _ := r.doc.GetName(arr[0])
+	if family != "Separation" && family != "DeviceN" {
+		return nil, false
+	}
+	// arr[2] = alternate space, arr[3] = tint transform function.
+	altComps := colorSpaceComponents(r.doc, arr[2])
+	if altComps == 0 {
+		return nil, false
+	}
+	fn, err := function.Parse(r.doc, arr[3])
+	if err != nil || fn == nil {
+		if r.logf != nil {
+			r.logf("raster: %s color space %q tint /Function: %v", family, name, err)
+		}
+		return nil, false
+	}
+	return &content.TintTransform{
+		Eval:           fn.Eval,
+		AlternateComps: altComps,
+	}, true
+}
+
+// colorSpaceComponents returns the number of color components of a color space object
+// (a /ColorSpace alternate space): a device-name space, or an array whose head names the
+// family. Returns 0 for an unrecognized space (the caller degrades). Recognizes the
+// common alternate spaces a Separation/DeviceN uses: DeviceGray/RGB/CMYK, CalGray/RGB,
+// Lab, and ICCBased (by its /N).
+func colorSpaceComponents(doc *pdf.Document, o pdf.Object) int {
+	if n, ok := doc.GetName(o); ok {
+		switch n {
+		case "DeviceGray", "G", "CalGray":
+			return 1
+		case "DeviceRGB", "RGB", "CalRGB", "Lab":
+			return 3
+		case "DeviceCMYK", "CMYK":
+			return 4
+		}
+		return 0
+	}
+	arr := doc.GetArray(o)
+	if len(arr) == 0 {
+		return 0
+	}
+	head, _ := doc.GetName(arr[0])
+	switch head {
+	case "CalGray":
+		return 1
+	case "CalRGB", "Lab":
+		return 3
+	case "ICCBased":
+		if st := doc.GetStream(arr[1]); st != nil {
+			if n, ok := doc.GetInt(st.Dict["N"]); ok {
+				return n
+			}
+		}
+		return 0
+	}
+	return 0
 }
 
 // Shading resolves a named /Shading resource and builds a shader for it. A
@@ -478,6 +578,12 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, fill render.FillColor,
 		if derr != nil {
 			return nil, fmt.Errorf("jpeg decode: %w", derr)
 		}
+		// Honor a non-identity /Decode array on the JPEG (the raw-sample path already
+		// does). The dominant case is an Adobe CMYK JPEG shipping /Decode [1 0 1 0 1 0 1 0]
+		// to invert; ignoring it renders inverted colors. Apply the remap in the image's
+		// NATIVE component space (CMYK before the RGB conversion; RGB otherwise) so the
+		// inversion matches the PDF's intent. 8 bpc is the only DCT depth.
+		decoded = applyDCTDecode(doc, decoded, s.Dict["Decode"])
 		base = toRGBA(decoded)
 	case "":
 		bpc, _ := doc.GetInt(s.Dict["BitsPerComponent"])
@@ -554,6 +660,65 @@ func decodeImageMask(data []byte, w, h int, inverted bool, fill render.FillColor
 		}
 	}
 	return img, nil
+}
+
+// applyDCTDecode applies a non-identity /Decode array to a decoded JPEG, in the
+// image's native component space, and returns the remapped image (the input unchanged
+// when /Decode is absent or the identity). A /Decode pair [min,max] maps a normalized
+// component s to min + s*(max-min) — so [1,0] inverts. For a CMYK JPEG (the dominant
+// case: Adobe files ship /Decode [1 0 1 0 1 0 1 0]) the four pairs remap C,M,Y,K before
+// the RGB conversion; for an RGB/grayscale JPEG the pairs remap the RGB(A) channels.
+// An unexpected pair count for the image's component model leaves the image unchanged.
+func applyDCTDecode(doc *pdf.Document, img image.Image, decodeObj pdf.Object) image.Image {
+	arr := doc.GetArray(decodeObj)
+	if len(arr) == 0 {
+		return img
+	}
+	dec := make([]float64, len(arr))
+	identity := true
+	for i, e := range arr {
+		v, _ := pdf.Number(doc.Resolve(e))
+		dec[i] = v
+		if (i%2 == 0 && v != 0) || (i%2 == 1 && v != 1) {
+			identity = false
+		}
+	}
+	if identity {
+		return img
+	}
+	// remap8 maps a 0..255 sample through the [min,max] pair for component c.
+	remap8 := func(s uint8, c int) uint8 {
+		lo, hi := dec[2*c], dec[2*c+1]
+		return clamp8f(lo + float64(s)/255*(hi-lo))
+	}
+	b := img.Bounds()
+	switch src := img.(type) {
+	case *image.CMYK:
+		if len(dec) != 8 {
+			return img // a 4-component decode is required for CMYK
+		}
+		out := image.NewCMYK(b)
+		copy(out.Pix, src.Pix)
+		for i := 0; i+3 < len(out.Pix); i += 4 {
+			out.Pix[i] = remap8(out.Pix[i], 0)
+			out.Pix[i+1] = remap8(out.Pix[i+1], 1)
+			out.Pix[i+2] = remap8(out.Pix[i+2], 2)
+			out.Pix[i+3] = remap8(out.Pix[i+3], 3)
+		}
+		return out
+	default:
+		if len(dec) != 6 {
+			return img // expect a 3-component (RGB) decode for non-CMYK JPEGs
+		}
+		out := toRGBA(img)
+		for i := 0; i+3 < len(out.Pix); i += 4 {
+			out.Pix[i] = remap8(out.Pix[i], 0)
+			out.Pix[i+1] = remap8(out.Pix[i+1], 1)
+			out.Pix[i+2] = remap8(out.Pix[i+2], 2)
+			// alpha (Pix[i+3]) is untouched by /Decode
+		}
+		return out
+	}
 }
 
 // imageDecodeArray reads a /Decode array into per-component [min,max] pairs in

@@ -130,17 +130,28 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 - ☐ **I7. `subgrid`** (→ `none`). *Large.*
 - ☐ **I8. `repeat(auto-fill/auto-fit)` empty-track collapse approximate.** *Medium.*
 
-## J. PDF — wrong output (not crashes; have triggers)
+## J. PDF — wrong output (not crashes; have triggers) — ALL DONE
 
-- ☐ **J1. Separation/DeviceN `scn` colors inverted** (`pkg/pdf/content/colorspace.go colorFromComponents`): a
-  spot color via `sc`/`scn` mapped by component count with no tint-transform `/Function`; a 1-comp tint 1.0
-  renders white. *Medium.* (Needs the tint `/Function` evaluated — the evaluator already exists.)
-- ☐ **J2. Form XObject `/BBox` clip never applied** (`xobject.go`+`page.go doXObject`): ISO 32000 §8.10.1 makes
-  the form BBox a mandatory clip. *Medium.*
-- ☐ **J3. DCTDecode (JPEG) ignores `/Decode`** (`pkg/render/raster/page.go` DCT path): Adobe CMYK JPEGs ship
-  `/Decode [1 0 …]` to invert. Raw-sample path honors `/Decode`; DCT path doesn't. *Small–medium.*
-- ☐ **J4. Text render modes 1/2/4/5/6 painted as fill** (`showtext.go`): stroke-only text renders filled; clip
-  modes don't contribute to the clip. *Low* (mode 0 dominates) — but it's a fidelity gap, so in scope.
+- ☑ **J1. Separation/DeviceN `scn` colors inverted** — *DONE.* A new `Resources.ColorSpace(name)` resolves a
+  named Separation/DeviceN space to a `TintTransform` (parsing the tint `/Function` + alternate-space component
+  count); the graphics state carries `fillTint`/`strokeTint` (set by `cs`/`CS`), and `sc`/`scn`/`SC`/`SCN`
+  evaluate the tint through it (`resolveColorN`) → alternate components → device color, instead of mistaking a
+  1-comp full-ink tint for gray (white). Tests: `TestSeparationTintTransform`/`…Stroke` (interpreter) +
+  `TestRenderSeparationColor` (end-to-end, real `function.Parse`); mutation-verified at both layers. New fixture
+  `gen.SeparationColorPDF`.
+- ☑ **J2. Form XObject `/BBox` clip never applied** — *DONE.* `Resources.Form` now also returns the `/BBox`;
+  `doXObject` clips to the BBox rectangle (all 4 corners through the form CTM, so rotation/skew are correct)
+  before running the form's content (`clipFormBBox`), per ISO 32000 §8.10.1. A missing/malformed BBox degrades
+  to no clip. Test: `TestRenderFormBBoxClip` (end-to-end, mutation-verified). New fixture `gen.FormBBoxClipPDF`.
+- ☑ **J3. DCTDecode (JPEG) ignores `/Decode`** — *DONE.* `applyDCTDecode` applies a non-identity `/Decode` to a
+  decoded JPEG in its native space (CMYK before the RGB conversion; RGB otherwise), so an Adobe CMYK JPEG's
+  `/Decode [1 0 …]` inverts correctly. Tests: `TestApplyDCTDecodeInvertsCMYK`/`…InvertsRGB`/`…IdentityUnchanged`
+  (mutation-verified).
+- ☑ **J4. Text render modes 1/2/4/5/6** — *DONE.* `drawGlyph` now honors the render mode: fill (0/2/4/6),
+  stroke (1/2/5/6 — strokes the glyph outline with the stroke color/line params), invisible (3), clip-only (7,
+  no paint). The CLIP accumulation of modes 4–7 is a documented deferral (glyph outlines are not gathered into
+  the text clip applied at ET; modes 4–6 still paint, 7 paints nothing — never crashes). Tests:
+  `TestShowTextStrokeMode`/`…FillStrokeMode`/`…ClipOnlyMode` (mutation-verified).
 
 ## K. PDF — feature gaps (TODO 1–4; "unsupported" → real output)
 

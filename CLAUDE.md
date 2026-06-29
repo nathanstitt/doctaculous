@@ -116,11 +116,15 @@ what is done vs. pending.
 - **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors), CCITTFax
   (Group 4 / Group 3 1D+2D, `pkg/pdf/filter/ccitt.go`). DCTDecode (JPEG) decoded at image-draw time.
 - **Content interpreter**: full path construction/painting, graphics state (`q/Q/cm/w/J/j/M/d`),
-  device color (`g/rg/k/cs/sc/scn`), clipping (`W/W*`), text operators, `Do` XObjects.
+  device color (`g/rg/k/cs/sc/scn`), **Separation/DeviceN spot color** (`sc`/`scn` mapped through the
+  tint-transform `/Function` to the alternate space — fidelity fix J1, via `Resources.ColorSpace`), clipping
+  (`W/W*`), text operators (incl. **text render modes** — fill/stroke/invisible/clip-only per `Tr`; fidelity
+  fix J4, with text-clip accumulation for modes 4–7 still deferred), `Do` XObjects.
 - **Fills**: nonzero and even-odd winding (the even-odd rasterizer is hand-rolled, dep-free).
 - **Strokes**: line joins (miter/round/bevel + miter limit), caps (butt/round/square), and dashes,
   via `github.com/srwiley/rasterx` (`pkg/render/raster/stroke.go`).
-- **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard.
+- **Form XObjects**: recursion with `/Matrix` composition, scoped `/Resources`, depth guard, and the mandatory
+  `/BBox` clip (ISO 32000 §8.10.1 — clipped to the BBox rectangle through the form CTM; fidelity fix J2).
 - **Fonts** (via `github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), symbolic subset
   TrueType (raw-code / code-as-GID glyph lookup), and non-embedded base-14 fonts via bundled
@@ -143,8 +147,9 @@ what is done vs. pending.
   (PatternType 1) remain pending (see TODO).
 - **Images**: raw samples in DeviceGray / DeviceRGB / DeviceCMYK / Indexed / ICCBased (by `/N`) at
   1/2/4/8/16 bpc, baseline JPEG (DCTDecode), grayscale `/SMask` soft-mask alpha, 1-bit `/ImageMask`
-  stencils painted in the fill color, `/Decode` arrays, and inline images (`BI`/`ID`/`EI`)
-  (`pkg/render/raster/image.go`, `page.go`).
+  stencils painted in the fill color, `/Decode` arrays (on BOTH the raw-sample AND the DCT/JPEG path — the
+  DCT path honors a non-identity `/Decode`, e.g. an Adobe CMYK JPEG's inverting `[1 0 …]`; fidelity fix J3),
+  and inline images (`BI`/`ID`/`EI`) (`pkg/render/raster/image.go`, `page.go`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: bounded worker pool sized to `GOMAXPROCS`; per-page recover so one bad page can't
   kill a batch (the PDF render path recovers in `raster.RenderPage`, returning the partially-painted page

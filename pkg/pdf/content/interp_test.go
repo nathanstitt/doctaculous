@@ -128,6 +128,48 @@ func TestCMYKColor(t *testing.T) {
 	}
 }
 
+// TestSeparationTintTransform pins J1: a Separation color set via scn must map its tint
+// through the tint-transform /Function, not be mistaken for gray. Here the tint transform
+// maps a 1-component tint t to CMYK (0,0,0,t) — so a full-ink tint of 1.0 is BLACK. Before
+// the fix, scn 1 under csOther treated 1 component as gray 1.0 = WHITE.
+func TestSeparationTintTransform(t *testing.T) {
+	// tint t -> CMYK (0,0,0,t): 4 alternate components.
+	tint := &TintTransform{
+		Eval:           func(in []float64) []float64 { return []float64{0, 0, 0, in[0]} },
+		AlternateComps: 4,
+	}
+	res := fakeRes{colorSpaces: map[string]*TintTransform{"Spot": tint}}
+	// Select the Separation space by name, then set full ink (scn 1) and fill.
+	dev := runContent(t, "/Spot cs 1 scn 0 0 10 10 re f", res)
+	if len(dev.fills) != 1 {
+		t.Fatalf("got %d fills, want 1", len(dev.fills))
+	}
+	if got := dev.fills[0].Color; got != (color.RGBA{0, 0, 0, 255}) {
+		t.Errorf("Separation full-ink fill = %v, want black (CMYK k=1); the J1 bug gave white", got)
+	}
+	// And a zero tint (no ink) maps to CMYK (0,0,0,0) = white.
+	dev2 := runContent(t, "/Spot cs 0 scn 0 0 10 10 re f", res)
+	if got := dev2.fills[0].Color; got != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("Separation no-ink fill = %v, want white", got)
+	}
+}
+
+// TestSeparationTintTransformStroke pins J1 for the stroke side (SCN + SC).
+func TestSeparationTintTransformStroke(t *testing.T) {
+	tint := &TintTransform{
+		Eval:           func(in []float64) []float64 { return []float64{0, 0, 0, in[0]} },
+		AlternateComps: 4,
+	}
+	res := fakeRes{colorSpaces: map[string]*TintTransform{"Spot": tint}}
+	dev := runContent(t, "/Spot CS 1 SCN 0 0 m 10 10 l S", res)
+	if len(dev.strokes) != 1 {
+		t.Fatalf("got %d strokes, want 1", len(dev.strokes))
+	}
+	if got := dev.strokes[0].Color; got != (color.RGBA{0, 0, 0, 255}) {
+		t.Errorf("Separation stroke = %v, want black", got)
+	}
+}
+
 // --- text + font ---
 
 type fakeFont struct{}
@@ -153,10 +195,11 @@ type constShader struct{ c color.RGBA }
 func (s constShader) ColorAt(float64, float64) (color.RGBA, bool) { return s.c, true }
 
 type fakeRes struct {
-	font     GlyphSource
-	extGS    map[string]ExtGStateParams
-	shadings map[string]render.Shader
-	patterns map[string]render.Shader
+	font        GlyphSource
+	extGS       map[string]ExtGStateParams
+	shadings    map[string]render.Shader
+	patterns    map[string]render.Shader
+	colorSpaces map[string]*TintTransform
 }
 
 func (r fakeRes) Font(name string) GlyphSource { return r.font }
@@ -166,8 +209,8 @@ func (r fakeRes) Image(name string, fill render.FillColor) (image.Image, bool) {
 func (r fakeRes) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (image.Image, bool) {
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
 }
-func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, bool) {
-	return nil, nil, render.Identity, false
+func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, *[4]float64, bool) {
+	return nil, nil, render.Identity, nil, false
 }
 func (r fakeRes) Shading(name string) (render.Shader, bool) {
 	s, ok := r.shadings[name]
@@ -180,6 +223,10 @@ func (r fakeRes) Pattern(name string) (render.Shader, render.Matrix, bool) {
 func (r fakeRes) ExtGState(name string) (ExtGStateParams, bool) {
 	p, ok := r.extGS[name]
 	return p, ok
+}
+func (r fakeRes) ColorSpace(name string) (*TintTransform, bool) {
+	t, ok := r.colorSpaces[name]
+	return t, ok
 }
 
 func TestShowText(t *testing.T) {
@@ -222,6 +269,44 @@ func TestShowTextInvisibleMode(t *testing.T) {
 	dev := runContent(t, "BT /F1 12 Tf 3 Tr (Hi) Tj ET", res)
 	if dev.glyphs != 0 {
 		t.Errorf("invisible text drew %d glyphs, want 0", dev.glyphs)
+	}
+}
+
+// TestShowTextStrokeMode pins J4: text render mode 1 STROKES each glyph (not fills).
+// Two glyphs ⇒ two strokes, zero fills. The stroke uses the stroke color (set by RG).
+// Mutation-verify: before the fix, mode 1 filled (glyphs==2, strokes==0).
+func TestShowTextStrokeMode(t *testing.T) {
+	res := fakeRes{font: fakeFont{}}
+	dev := runContent(t, "BT 1 0 0 RG /F1 12 Tf 1 Tr (Hi) Tj ET", res)
+	if dev.glyphs != 0 {
+		t.Errorf("stroke-mode text filled %d glyphs, want 0", dev.glyphs)
+	}
+	if len(dev.strokes) != 2 {
+		t.Fatalf("stroke-mode text produced %d strokes, want 2 (one per glyph)", len(dev.strokes))
+	}
+	if got := dev.strokes[0].Color; got != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("glyph stroke color = %v, want red (the stroke color)", got)
+	}
+}
+
+// TestShowTextFillStrokeMode pins J4 mode 2: fill AND stroke each glyph.
+func TestShowTextFillStrokeMode(t *testing.T) {
+	res := fakeRes{font: fakeFont{}}
+	dev := runContent(t, "BT /F1 12 Tf 2 Tr (Hi) Tj ET", res)
+	if dev.glyphs != 2 {
+		t.Errorf("fill+stroke text filled %d glyphs, want 2", dev.glyphs)
+	}
+	if len(dev.strokes) != 2 {
+		t.Errorf("fill+stroke text produced %d strokes, want 2", len(dev.strokes))
+	}
+}
+
+// TestShowTextClipOnlyMode pins J4 mode 7: clip-only paints nothing (no fill, no stroke).
+func TestShowTextClipOnlyMode(t *testing.T) {
+	res := fakeRes{font: fakeFont{}}
+	dev := runContent(t, "BT /F1 12 Tf 7 Tr (Hi) Tj ET", res)
+	if dev.glyphs != 0 || len(dev.strokes) != 0 {
+		t.Errorf("clip-only text painted (glyphs=%d strokes=%d), want 0/0", dev.glyphs, len(dev.strokes))
 	}
 }
 

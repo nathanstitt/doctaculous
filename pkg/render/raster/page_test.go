@@ -330,3 +330,109 @@ func hasDarkPixel(img interface {
 	}
 	return false
 }
+
+// invertDecode is the CMYK / RGB inverting /Decode arrays a producer ships to flip a
+// JPEG's stored samples ([1 0] per component).
+func decodeArray(pairs ...float64) pdf.Array {
+	a := make(pdf.Array, len(pairs))
+	for i, v := range pairs {
+		a[i] = pdf.Real(v)
+	}
+	return a
+}
+
+// TestApplyDCTDecodeInvertsCMYK pins J3 for the dominant case: an Adobe CMYK JPEG with
+// /Decode [1 0 1 0 1 0 1 0] must have its C,M,Y,K components inverted before the RGB
+// conversion. A nil *pdf.Document is fine — the decode array is a direct object.
+func TestApplyDCTDecodeInvertsCMYK(t *testing.T) {
+	src := image.NewCMYK(image.Rect(0, 0, 2, 1))
+	// Two pixels: (C,M,Y,K) = (10,20,30,40) and (200,150,100,50).
+	copy(src.Pix, []uint8{10, 20, 30, 40, 200, 150, 100, 50})
+	out := applyDCTDecode(nil, src, decodeArray(1, 0, 1, 0, 1, 0, 1, 0))
+	cmyk, ok := out.(*image.CMYK)
+	if !ok {
+		t.Fatalf("applyDCTDecode(CMYK) returned %T, want *image.CMYK", out)
+	}
+	want := []uint8{245, 235, 225, 215, 55, 105, 155, 205} // 255 - each
+	for i, w := range want {
+		if cmyk.Pix[i] != w {
+			t.Errorf("CMYK Pix[%d] = %d, want %d (inverted)", i, cmyk.Pix[i], w)
+		}
+	}
+}
+
+// TestApplyDCTDecodeInvertsRGB pins J3 for an RGB JPEG with /Decode [1 0 1 0 1 0]: the
+// R,G,B channels invert; alpha stays opaque.
+func TestApplyDCTDecodeInvertsRGB(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	src.Set(0, 0, color.RGBA{10, 20, 30, 255})
+	out := applyDCTDecode(nil, src, decodeArray(1, 0, 1, 0, 1, 0))
+	got := toRGBA(out).RGBAAt(0, 0)
+	if got != (color.RGBA{245, 235, 225, 255}) {
+		t.Errorf("RGB invert = %v, want {245 235 225 255}", got)
+	}
+}
+
+// TestApplyDCTDecodeIdentityUnchanged: an absent or identity /Decode leaves the image as-is.
+func TestApplyDCTDecodeIdentityUnchanged(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	src.Set(0, 0, color.RGBA{10, 20, 30, 255})
+	// Identity decode.
+	if out := applyDCTDecode(nil, src, decodeArray(0, 1, 0, 1, 0, 1)); out != image.Image(src) {
+		t.Errorf("identity /Decode should return the input image unchanged")
+	}
+	// Absent decode (nil object).
+	if out := applyDCTDecode(nil, src, nil); out != image.Image(src) {
+		t.Errorf("absent /Decode should return the input image unchanged")
+	}
+}
+
+// TestRenderFormBBoxClip pins J2: a form XObject's /BBox clips its content (ISO 32000
+// §8.10.1). The form's BBox is user (0,0)-(50,50) but it fills a 200x200 square; only the
+// BBox region may paint. At 72 DPI device y = 792 - userY. A point inside the BBox is
+// green; a point outside the BBox but inside the would-be square is white (clipped).
+// Mutation-verify: remove the clipFormBBox call and the outside point turns green.
+func TestRenderFormBBoxClip(t *testing.T) {
+	doc, err := pdf.Parse(gen.FormBBoxClipPDF())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, _ := doc.Page(0)
+	img, err := RenderPage(context.Background(), pg, Options{DPI: 72, Background: color.White})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inside the BBox: user (25,25) -> device (25, 767). Must be green.
+	in := img.RGBAAt(25, int(792-25))
+	if in.G < 200 || in.R > 60 || in.B > 60 {
+		t.Errorf("inside-BBox pixel = %v, want green (the form must paint inside its BBox)", in)
+	}
+	// Outside the BBox but inside the drawn 200x200 square: user (100,100) ->
+	// device (100, 692). Must be white (clipped away by the BBox).
+	out := img.RGBAAt(100, int(792-100))
+	if out.R < 250 || out.G < 250 || out.B < 250 {
+		t.Errorf("outside-BBox pixel = %v, want white (the /BBox must clip the form's paint)", out)
+	}
+}
+
+// TestRenderSeparationColor pins J1 end-to-end: a Separation spot color filled at full
+// ink (scn 1) must render the tint-transform's color (CMYK (0,1,1,0) = red), not white.
+// The rect is user (100,100)-(300,250); at 72 DPI device y = 792 - userY. Exercises the
+// real pageResources.ColorSpace (Separation array parse + function.Parse). Mutation: skip
+// the tint transform and the fill is white (gray 1.0), failing this.
+func TestRenderSeparationColor(t *testing.T) {
+	doc, err := pdf.Parse(gen.SeparationColorPDF())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, _ := doc.Page(0)
+	img, err := RenderPage(context.Background(), pg, Options{DPI: 72, Background: color.White})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Center of the rect: user (200,175) -> device (200, 617). Must be red.
+	got := img.RGBAAt(200, int(792-175))
+	if got.R < 200 || got.G > 60 || got.B > 60 {
+		t.Errorf("Separation full-ink fill = %v, want ~red (CMYK 0,1,1,0); the J1 bug rendered white", got)
+	}
+}
