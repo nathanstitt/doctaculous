@@ -6,6 +6,7 @@ import (
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/html"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -257,5 +258,66 @@ func TestControlUADefaultsInlineBlock(t *testing.T) {
 	}
 	if b.Display != cssbox.DisplayInlineBlock {
 		t.Errorf("input Display = %v, want DisplayInlineBlock (UA default)", b.Display)
+	}
+}
+
+// renderControlItems lays out a single control and returns its flattened paint items.
+func renderControlItems(t *testing.T, src string) []layout.Item {
+	t.Helper()
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	eng := New(nil, nil, nil)
+	frag := eng.layoutTree(context.Background(), root, 400)
+	var items []layout.Item
+	if frag != nil {
+		items = frag.AppendItems(items)
+	}
+	return items
+}
+
+func countKind(items []layout.Item, k layout.ItemKind) int {
+	n := 0
+	for _, it := range items {
+		if it.Kind == k {
+			n++
+		}
+	}
+	return n
+}
+
+func hasBorderStyle(items []layout.Item, s layout.BorderStyle) bool {
+	for _, it := range items {
+		if it.Kind == layout.BorderKind && it.Border.Style == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestControlPaintChrome(t *testing.T) {
+	// Text field: a background fill + inset (sunken) borders.
+	tf := renderControlItems(t, `<body><input type=text value=hi></body>`)
+	if countKind(tf, layout.BackgroundKind) == 0 || !hasBorderStyle(tf, layout.BorderInset) {
+		t.Errorf("text field: want a background + inset borders; got bg=%d inset=%v",
+			countKind(tf, layout.BackgroundKind), hasBorderStyle(tf, layout.BorderInset))
+	}
+	// Button: outset (raised) borders.
+	bt := renderControlItems(t, `<body><button>Go</button></body>`)
+	if !hasBorderStyle(bt, layout.BorderOutset) {
+		t.Errorf("button: want outset borders")
+	}
+	// Checked checkbox paints more than an empty one (the checkmark).
+	cbChecked := renderControlItems(t, `<body><input type=checkbox checked></body>`)
+	cbEmpty := renderControlItems(t, `<body><input type=checkbox></body>`)
+	paintedChecked := countKind(cbChecked, layout.GlyphKind) + countKind(cbChecked, layout.BackgroundKind)
+	paintedEmpty := countKind(cbEmpty, layout.GlyphKind) + countKind(cbEmpty, layout.BackgroundKind)
+	if !(paintedChecked > paintedEmpty) {
+		t.Errorf("checked checkbox should paint more than an empty one (the checkmark)")
 	}
 }

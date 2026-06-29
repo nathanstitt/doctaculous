@@ -2,11 +2,13 @@ package css
 
 import (
 	"context"
+	"image/color"
 	"strconv"
 	"strings"
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/html"
+	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -230,4 +232,213 @@ func max2(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// ControlContent is a form control's paint payload carried on a Fragment, painted
+// in the content box (CX,CY,CW,CH, page space, shifting with the fragment).
+type ControlContent struct {
+	Kind           cssbox.ControlKind
+	Text           string
+	Placeholder    bool
+	Checked        bool
+	Disabled       bool
+	Face           *font.Face
+	FontSizePt     float64
+	CX, CY, CW, CH float64
+}
+
+// classic-native chrome colors.
+var (
+	ctrlFieldBG  = color.RGBA{0xff, 0xff, 0xff, 0xff}
+	ctrlButtonBG = color.RGBA{0xdd, 0xdd, 0xdd, 0xff}
+	ctrlInk      = color.RGBA{0x10, 0x10, 0x10, 0xff}
+	ctrlGray     = color.RGBA{0x99, 0x99, 0x99, 0xff}
+	ctrlDisabled = color.RGBA{0xee, 0xee, 0xee, 0xff}
+)
+
+// controlContentFor builds the paint payload for control box b, given its content
+// box (cx,cy,w,h) in page space. The face is resolved synchronously.
+func (e *Engine) controlContentFor(b *cssbox.Box, cx, cy, w, h float64) *ControlContent {
+	face, _ := e.faces.Resolve(b.Style.FontFamily, styleFor(b))
+	cc := &ControlContent{
+		Kind:       b.Replaced.Control,
+		Face:       face,
+		FontSizePt: b.Style.FontSizePt,
+		CX:         cx, CY: cy, CW: w, CH: h,
+	}
+	_, cc.Checked = b.Replaced.Attrs["checked"]
+	_, cc.Disabled = b.Replaced.Attrs["disabled"]
+	switch cc.Kind {
+	case cssbox.CtrlButton, cssbox.CtrlTextarea, cssbox.CtrlSelect:
+		cc.Text = b.Replaced.Text
+	default:
+		if v, ok := b.Replaced.Attrs["value"]; ok && v != "" {
+			cc.Text = v
+		} else if p, ok := b.Replaced.Attrs["placeholder"]; ok {
+			cc.Text, cc.Placeholder = p, true
+		}
+	}
+	if cc.Kind == cssbox.CtrlPassword && !cc.Placeholder {
+		cc.Text = strings.Repeat("•", len([]rune(cc.Text)))
+	}
+	return cc
+}
+
+type ctrlAlign int
+
+const (
+	alignLeft ctrlAlign = iota
+	alignCenter
+)
+
+// append emits the control's chrome + text as paint items into dst, using only
+// existing item kinds.
+func (cc *ControlContent) append(dst []layout.Item, f *Fragment) []layout.Item {
+	fill := func(x, y, w, h float64, c color.RGBA) {
+		dst = append(dst, layout.Item{Kind: layout.BackgroundKind,
+			Rule: layout.RuleItem{XPt: x, YPt: y, WPt: w, HPt: h, Color: c}})
+	}
+	bevel := func(style layout.BorderStyle) {
+		for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
+			dst = append(dst, layout.Item{Kind: layout.BorderKind, Border: cc.edge(s, style)})
+		}
+	}
+	switch cc.Kind {
+	case cssbox.CtrlCheckbox, cssbox.CtrlRadio:
+		bg := ctrlFieldBG
+		if cc.Disabled {
+			bg = ctrlDisabled
+		}
+		fill(cc.CX, cc.CY, cc.CW, cc.CH, bg)
+		bevel(layout.BorderInset)
+		if cc.Checked {
+			ink := ctrlInk
+			if cc.Disabled {
+				ink = ctrlGray
+			}
+			if cc.Kind == cssbox.CtrlRadio {
+				d := cc.CW * 0.4
+				fill(cc.CX+(cc.CW-d)/2, cc.CY+(cc.CH-d)/2, d, d, ink)
+			} else if !cc.appendGlyphCentered(&dst, '✓', ink) {
+				t := cc.CW * 0.12
+				fill(cc.CX+cc.CW*0.2, cc.CY+cc.CH*0.5, cc.CW*0.25, t, ink)
+				fill(cc.CX+cc.CW*0.4, cc.CY+cc.CH*0.3, t, cc.CH*0.4, ink)
+			}
+		}
+		return dst
+	case cssbox.CtrlButton:
+		bg := ctrlButtonBG
+		if cc.Disabled {
+			bg = ctrlDisabled
+		}
+		fill(cc.CX, cc.CY, cc.CW, cc.CH, bg)
+		bevel(layout.BorderOutset)
+		cc.appendText(&dst, alignCenter)
+		return dst
+	default: // text/password/textarea/select fields
+		bg := ctrlFieldBG
+		if cc.Disabled {
+			bg = ctrlDisabled
+		}
+		fill(cc.CX, cc.CY, cc.CW, cc.CH, bg)
+		bevel(layout.BorderInset)
+		dst = append(dst, layout.Item{Kind: layout.ClipPushKind,
+			Rule: layout.RuleItem{XPt: cc.CX, YPt: cc.CY, WPt: cc.CW, HPt: cc.CH}})
+		cc.appendText(&dst, alignLeft)
+		dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
+		if cc.Kind == cssbox.CtrlSelect {
+			ink := ctrlInk
+			if cc.Disabled {
+				ink = ctrlGray
+			}
+			cc.appendTriangle(&dst, ink)
+		}
+		return dst
+	}
+}
+
+// edge returns one 1pt border strip for side s with the given 3D style, around the
+// control's border box (the content box CX/CY/CW/CH is already inset by ctrlBorder).
+func (cc *ControlContent) edge(s layout.EdgeSide, style layout.BorderStyle) layout.BorderItem {
+	x, y, w, h := cc.CX-ctrlBorder, cc.CY-ctrlBorder, cc.CW+2*ctrlBorder, cc.CH+2*ctrlBorder
+	bi := layout.BorderItem{Color: ctrlGray, Style: style, Side: s}
+	switch s {
+	case layout.EdgeTop:
+		bi.XPt, bi.YPt, bi.WPt, bi.HPt = x, y, w, ctrlBorder
+	case layout.EdgeBottom:
+		bi.XPt, bi.YPt, bi.WPt, bi.HPt = x, y+h-ctrlBorder, w, ctrlBorder
+	case layout.EdgeLeft:
+		bi.XPt, bi.YPt, bi.WPt, bi.HPt = x, y, ctrlBorder, h
+	case layout.EdgeRight:
+		bi.XPt, bi.YPt, bi.WPt, bi.HPt = x+w-ctrlBorder, y, ctrlBorder, h
+	}
+	return bi
+}
+
+// appendText emits cc.Text as a single baseline row of glyphs, left- or
+// center-aligned within the content box. A nil face or missing glyph is skipped.
+func (cc *ControlContent) appendText(dst *[]layout.Item, align ctrlAlign) {
+	if cc.Text == "" || cc.Face == nil {
+		return
+	}
+	ink := ctrlInk
+	if cc.Placeholder || cc.Disabled {
+		ink = ctrlGray
+	}
+	asc, _, _ := cc.Face.Metrics()
+	baseline := cc.CY + asc*cc.FontSizePt + ctrlPadY
+	width := 0.0
+	for _, r := range cc.Text {
+		if _, adv, ok := cc.Face.Glyph(r); ok {
+			width += adv * cc.FontSizePt
+		}
+	}
+	x := cc.CX + ctrlPadX
+	if align == alignCenter {
+		if extra := cc.CW - width; extra > 0 {
+			x = cc.CX + extra/2
+		}
+	}
+	for _, r := range cc.Text {
+		outline, adv, ok := cc.Face.Glyph(r)
+		if ok && outline != nil {
+			*dst = append(*dst, layout.Item{Kind: layout.GlyphKind,
+				Glyph: layout.GlyphItem{Outline: outline, XPt: x, YPt: baseline, SizePt: cc.FontSizePt, Color: ink}})
+		}
+		if ok {
+			x += adv * cc.FontSizePt
+		}
+	}
+}
+
+// appendGlyphCentered emits a single glyph centered in the content box; returns
+// false (drawing nothing) when the face lacks the glyph, so the caller can fall back.
+func (cc *ControlContent) appendGlyphCentered(dst *[]layout.Item, r rune, ink color.RGBA) bool {
+	if cc.Face == nil {
+		return false
+	}
+	outline, adv, ok := cc.Face.Glyph(r)
+	if !ok || outline == nil {
+		return false
+	}
+	asc, desc, _ := cc.Face.Metrics()
+	gw := adv * cc.FontSizePt
+	baseline := cc.CY + (cc.CH+(asc-desc)*cc.FontSizePt)/2
+	x := cc.CX + (cc.CW-gw)/2
+	*dst = append(*dst, layout.Item{Kind: layout.GlyphKind,
+		Glyph: layout.GlyphItem{Outline: outline, XPt: x, YPt: baseline, SizePt: cc.FontSizePt, Color: ink}})
+	return true
+}
+
+// appendTriangle emits a small downward triangle in the select's right-side box,
+// drawn as stacked strokes (a glyph-free approximation that always renders).
+func (cc *ControlContent) appendTriangle(dst *[]layout.Item, ink color.RGBA) {
+	boxX := cc.CX + cc.CW - ctrlSelectTri
+	cxp := boxX + ctrlSelectTri/2
+	cyp := cc.CY + cc.CH/2
+	for i := 0; i < 3; i++ {
+		half := float64(3 - i)
+		*dst = append(*dst, layout.Item{Kind: layout.BackgroundKind,
+			Rule: layout.RuleItem{XPt: cxp - half, YPt: cyp - 2 + float64(i), WPt: 2 * half, HPt: 1, Color: ink}})
+	}
 }
