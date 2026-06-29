@@ -1,8 +1,11 @@
 // Package resource defines the seam by which a document's external references
-// (stylesheets via <link>, images and fonts later) are resolved to bytes. The
-// library will ship an HTTP-backed loader for the public URL path in a later
-// sub-project; this package currently provides only hermetic loaders so no layer
-// below the public API touches the network and all tests stay offline.
+// (stylesheets via <link>, images, and fonts) are resolved to bytes. It provides
+// three implementations: MapLoader (in-memory, the primary hermetic loader for
+// tests), DirLoader (on-disk, for local fixtures), and HTTPLoader (HTTP(S) fetch
+// plus inline data: URI decoding, used by the public OpenURL path). Every loader
+// honors ctx cancellation and degrades an absent or failed ref to ErrNotFound so
+// the pipeline never panics on a missing sub-resource. The two hermetic loaders
+// touch no network; HTTPLoader's tests stay offline via httptest (loopback).
 package resource
 
 import (
