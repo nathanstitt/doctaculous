@@ -262,8 +262,9 @@ what is done vs. pending.
   context; an abs/fixed box also establishes a BFC. Box generation maps `position` (`positionOf`),
   forces `float:none` under `absolute`/`fixed` (CSS 9.7), and blockifies a positioned inline-level box
   (`applyBlockify`). The shared inline core is **untouched** (positioning needs no inline primitive).
-  Degrades gracefully: `z-index` is parsed but **not yet sorted on** (positioned boxes paint in document
-  order — full Appendix E negative/numeric z-index ordering deferred); an all-`auto`-offset abs box uses
+  Degrades gracefully: `z-index` is **now honored** — full Appendix E negative/numeric ordering within a
+  stacking context (positioned boxes sorted by (z-index, document order); negatives paint behind in-flow
+  content) — see the full-z-index-stacking bullet below; an all-`auto`-offset abs box uses
   a static-position approximation (containing-block top-left); `margin:auto` and abs `width:auto`
   shrink-to-fit stay approximate; and `position:relative` on any **inline-level box** (text-only inline
   or an inline-block/replaced atom) is a no-op — relative offset takes effect only on block-level boxes.
@@ -278,7 +279,8 @@ what is done vs. pending.
   interactions below). Clipping is expressed as two flat-stream `layout.Item` kinds
   (`ClipPushKind`/`ClipPopKind`) that `Fragment.AppendItems` brackets a clipping fragment's contents with
   (own background/border paint **outside** the bracket; CB-owned abs-pos descendants inside via a parallel
-  `PositionedClip` flag; a positioned descendant whose containing block is **outside** the box paints after
+  `PositionedInfo.CBOwned` flag — since renamed from `PositionedClip`, now also carrying the clip-escape
+  `ClipChain`; a positioned descendant whose containing block is **outside** the box paints after
   `ClipPop`, unclipped — CSS abs-pos clipping); `PaintPage` maps them onto the painter's existing
   `Save`/`PushClip`/`Restore` clip stack (the same one `object-fit:cover` uses), so clips **nest**.
   `scroll`/`auto` clip exactly like `hidden` (no scroll position or scrollbar chrome in the single-tall-page
@@ -287,12 +289,33 @@ what is done vs. pending.
   box's content height, CSS 10.6.7 — the `overflow:hidden` "clearfix"; restores the `float-row`
   golden/reftest 5a had to drop); and **sibling-BFC float avoidance** — a BFC box laid out next to an outer
   float shifts/narrows its border box past the float band, or drops below it when the band is too narrow
-  (CSS 9.5). Degrades gracefully: a **`position:relative` (or other positioned) descendant of a
-  *non-positioned* `overflow:hidden` box escapes the clip** (such a box is a BFC but not a stacking context,
-  so the descendant bubbles to a higher positioned layer — browsers clip it; deferred with full z-index);
-  `overflow-x`/`overflow-y` are not modeled (single shorthand only). Non-overflow pages stay byte-identical;
-  the shared inline core is **untouched**. See
+  (CSS 9.5). Degrades gracefully: a **`position:relative` descendant of a *non-positioned* `overflow:hidden`
+  box is now clipped** to that box (the clip rect rides the descendant's bubble to the ancestor's positioned
+  layer as a `PositionedInfo.ClipChain`; see the full-z-index-stacking bullet) — but two narrower clip-escape
+  sub-cases remain deferred: an **`absolute`/`fixed` descendant** whose containing block lies *beyond* an
+  intervening `overflow:hidden` box still paints unclipped by that box (it needs clip-ancestor threading
+  through layout — deferred to a follow-up 6b), and a **`position:relative` descendant of a *positioned*
+  `overflow:hidden` box** paints unclipped in the escaped band (it lands on the box's own positioned layer
+  with `CBOwned=false`; pre-existing 5c behavior, still deferred). A clip chain captured **inside a float**
+  is not re-translated by `placeFloat` (rare; logged). `overflow-x`/`overflow-y` are not modeled (single
+  shorthand only). Non-overflow pages stay byte-identical; the shared inline core is **untouched**. See
   `docs/superpowers/specs/2026-06-24-html-overflow-design.md`.
+- **HTML rendering — full z-index stacking** (`pkg/layout/css/fragment.go` sort/bands, `block.go`
+  clip-chain bubble; covered by `zindex_layout_test.go` item-stream order tests, the `html-zindex-*`
+  goldens, and the `zindex-negative`/`zindex-order`/`relative-clip-escape` WPT reftests): the positioned
+  layer is z-sorted into CSS 2.1 Appendix E bands — **negative-z paints behind in-flow content**, z:auto/0
+  in document order, positive-z last — via a stable `(z-index, document-order)` sort
+  (`sortedPositioned`/`appendBand`, `sort.SliceStable` over a fresh local copy so the shared fragment tree
+  stays read-only). All-`auto` pages are **byte-identical** to the prior document-order pass (the empty-band
+  identity), so the whole existing corpus is unchanged. Folds in the **relative clip-escape** fix: a
+  `position:relative` descendant of a *non-positioned* `overflow:hidden` box is clipped to that box even
+  though it paints in an ancestor's positioned layer (the clip rect rides the descendant's bubble as a
+  `PositionedInfo.ClipChain`, bracketing its item range in `appendBand`). The `Fragment` now retains its
+  source `cssbox.Box` (the z-index source, read — never mutated — at flatten time; motivated by future
+  SPA-snapshot re-flow). Deferred to **6b**: the *absolute/fixed* intervening-clip sub-case (needs new
+  clip-ancestor threading through layout) and the *positioned-clip-box* relative-escape sub-case (paints in
+  the escaped band); a float-internal clip chain is not re-translated (logged). See
+  `docs/superpowers/specs/2026-06-25-html-zindex-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -325,15 +348,14 @@ that skip into real output.
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**, and
    **positioning** (relative/absolute/fixed) are done — see the Done section). Roughly in order, each a
-   parse/layout slice with its own fixtures + golden/WPT tests: **full z-index stacking** (negative
-   `z-index` painting behind in-flow content, and numeric `z-index` ordering within a stacking context —
-   `z-index` is parsed now; the minimal stacking pass paints positioned boxes in document order, and the
-   positioned-layer loop in `AppendItems` is the seam this slice re-points at a z-sorted, sub-layered
-   order; **also fold in here**: clipping a `position:relative`/positioned descendant of a *non-positioned*
-   `overflow:hidden` box — today such a descendant bubbles past the clip to a higher positioned layer and
-   paints unclipped, because a non-positioned clipping box is a BFC but not a stacking context; the fix
-   needs the clip to reach an item range an ancestor's positioned phase emits, the same machinery this
-   slice reworks); **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
+   parse/layout slice with its own fixtures + golden/WPT tests: **the abs/fixed intervening-clip escape**
+   (sub-project 6b — full z-index stacking and the *relative* clip-escape landed; the remaining gap is an
+   `absolute`/`fixed` descendant whose containing block is an ancestor *beyond* an intervening
+   `overflow:hidden` box, which still paints unclipped by that box — the `ClipChain` flatten machinery
+   exists, but capturing the chain for an abs box needs clip-ancestor threading through layout that the
+   relative path did not; the *positioned-clip-box* relative-escape sub-case is grouped here too; see
+   `docs/superpowers/HANDOVER-subproject-6b-abs-clip-escape.md`); **tables**; **web fonts**
+   (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
    flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and

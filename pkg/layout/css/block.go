@@ -89,10 +89,10 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 		}
 		// The root is the outermost stacking context: consume any relative-positioned
 		// descendants that bubbled all the way up without a closer positioned ancestor.
-		for range res.pendingPositioned {
-			res.frag.PositionedClip = append(res.frag.PositionedClip, false)
+		for _, pp := range res.pendingPositioned {
+			res.frag.PositionedInfo = append(res.frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: pp.clipChain})
+			res.frag.Positioned = append(res.frag.Positioned, pp.frag)
 		}
-		res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 	}
 	// PASS 2: resolve abs/fixed boxes now that the page height and all ancestor
 	// fragments are final. An abs-pos box does NOT extend the page height in this
@@ -123,7 +123,7 @@ type blockResult struct {
 	// layoutBlockChildren collects each child's pendingPositioned into its own list, so
 	// a relative box under static ancestors bubbles up until a stacking-context
 	// ancestor (or the root, in layoutTree) consumes it. Read by the parent loop.
-	pendingPositioned []*Fragment
+	pendingPositioned []pendingPos
 }
 
 // posCBOwner names the containing block for absolutely-positioned descendants: the
@@ -144,6 +144,19 @@ type posCBOwner struct {
 type deferredAbs struct {
 	box *cssbox.Box
 	cb  posCBOwner // its containing-block owner
+}
+
+// pendingPos is a relatively-positioned descendant bubbling toward its nearest
+// stacking-context ancestor, plus the clip chain it has accumulated. clipChain holds
+// the padding-box rects of the non-positioned overflow≠visible boxes it has bubbled OUT
+// OF so far (outermost last appended, but stored outermost-first — see the prepend in
+// layoutBlock). When the entry lands on a holder's Positioned, clipChain becomes that
+// entry's PositionedInfo.ClipChain, so the descendant is clipped to those boxes even
+// though it paints in an ancestor's layer (CSS: every overflow≠visible ancestor between
+// a box and its containing block clips it).
+type pendingPos struct {
+	frag      *Fragment
+	clipChain []rect
 }
 
 // positionedContext accumulates deferred abs/fixed boxes during the in-flow pass for
@@ -330,10 +343,11 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	bubble := in.pendingPositioned
 	if establishesStackingContext(b) {
 		frag.IsStackingContext = true
-		for range in.pendingPositioned {
-			frag.PositionedClip = append(frag.PositionedClip, false)
+		frag.Box = b
+		for _, pp := range in.pendingPositioned {
+			frag.PositionedInfo = append(frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: pp.clipChain})
+			frag.Positioned = append(frag.Positioned, pp.frag)
 		}
-		frag.Positioned = append(frag.Positioned, in.pendingPositioned...)
 		bubble = nil
 		// Back-fill the CB owner of any abs/fixed descendant this box collected: their
 		// containing block is THIS box's content box, but its frag did not exist when
@@ -345,9 +359,30 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 				posCtx.deferred[j].cb.frag = frag
 			}
 		}
+	} else if frag.Clips {
+		// b is a NON-positioned (not a stacking context) overflow≠visible box: any
+		// relative descendant bubbling past it is clipped to b's padding box even though
+		// it will paint in an ancestor's layer (CSS). Prepend b's clip rect (already
+		// computed above as frag.ClipRect) to each still-bubbling entry's chain, so the
+		// outermost box ends up first as the entry rises. This is the relative-clip-escape
+		// fix; the abs/fixed intervening-clip analogue is deferred to 6b.
+		grown := make([]pendingPos, len(bubble))
+		for i, pp := range bubble {
+			grown[i] = pendingPos{frag: pp.frag, clipChain: prependRect(frag.ClipRect, pp.clipChain)}
+		}
+		bubble = grown
 	}
 
 	return blockResult{frag: frag, marginTop: marginTop, marginBottom: marginBottom, pendingPositioned: bubble}
+}
+
+// prependRect returns a new slice with r at the front of chain (outermost-first order).
+// A fresh slice is returned so sibling entries do not alias one backing array.
+func prependRect(r rect, chain []rect) []rect {
+	out := make([]rect, 0, len(chain)+1)
+	out = append(out, r)
+	out = append(out, chain...)
+	return out
 }
 
 // interior is the laid-out content of a block box in a local frame whose
@@ -369,7 +404,7 @@ type interior struct {
 	// pendingPositioned holds relative-positioned descendants laid out in this box's
 	// interior that have not yet found their stacking-context owner (bubbles up like
 	// bfcFloats, but for the positioned layer). layoutBlock consumes or re-bubbles it.
-	pendingPositioned []*Fragment
+	pendingPositioned []pendingPos
 }
 
 // layoutInterior lays out b's children into a local frame (content-box top at 0)
@@ -451,9 +486,9 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) interior {
 	var (
 		out               []*Fragment
-		pendingPositioned []*Fragment // relative descendants bubbling to the nearest stacking-context ancestor
-		prevBottom        float64     // previous in-flow sibling's reported bottom margin
-		prevBorder        float64     // previous in-flow sibling's border-box bottom (local Y)
+		pendingPositioned []pendingPos // relative descendants bubbling to the nearest stacking-context ancestor
+		prevBottom        float64      // previous in-flow sibling's reported bottom margin
+		prevBorder        float64      // previous in-flow sibling's border-box bottom (local Y)
 		leading           float64
 		trailing          float64
 		first             = true
@@ -571,11 +606,10 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 			res.frag.IsPositioned = true
 			res.frag.IsStackingContext = true
 			res.frag.RelOffsetX, res.frag.RelOffsetY = dx, dy
-			e.logZIndexUnsupported(child)
-			pendingPositioned = append(pendingPositioned, res.frag)
+			pendingPositioned = append(pendingPositioned, pendingPos{frag: res.frag})
 		}
-		// Bubble up any relative descendants the child did not consume (it is a static
-		// box, or itself a stacking context that bubbled nothing).
+		// Bubble up any relative descendants the child did not consume (already carrying
+		// their own clip chains from deeper clipping boxes).
 		pendingPositioned = append(pendingPositioned, res.pendingPositioned...)
 
 		prevBorder = res.frag.Y + res.frag.H
@@ -622,6 +656,7 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	dy := (fb.y + res.marginTop) - res.frag.Y
 	translateFragment(res.frag, dx, dy)
 	res.frag.IsFloat = true
+	res.frag.Box = child
 
 	// A relatively-positioned descendant of the float is IN FLOW (a normal entry in
 	// res.frag.Children), so translateFragment(res.frag, …) above ALREADY moved it by
@@ -632,10 +667,13 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	// float is itself a stacking context) are on res.frag.Positioned and stay there —
 	// also already moved by translateFragment. (Abs/fixed descendants are deferred to
 	// pass 2 and are not present on the fragment here.)
-	for range res.pendingPositioned {
-		res.frag.PositionedClip = append(res.frag.PositionedClip, false)
+	for _, pp := range res.pendingPositioned {
+		if len(pp.clipChain) > 0 {
+			e.logf("css layout: clip chain on a relative descendant inside a float is not re-translated (approximate)")
+		}
+		res.frag.PositionedInfo = append(res.frag.PositionedInfo, PositionedInfo{CBOwned: false, ClipChain: pp.clipChain})
+		res.frag.Positioned = append(res.frag.Positioned, pp.frag)
 	}
-	res.frag.Positioned = append(res.frag.Positioned, res.pendingPositioned...)
 
 	// A relatively-positioned float is placed at the float edge AND offset at paint
 	// time: stamp the offset on the float fragment so the Floats-layer translate
@@ -721,9 +759,9 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		if isAuto2(d.box.Style.Left, fs) && isAuto2(d.box.Style.Right, fs) {
 			e.logf("css layout: abs-pos box with no horizontal offset placed at its containing block's left (static-position approximation)")
 		}
-		e.logZIndexUnsupported(d.box)
 		frag.IsPositioned = true
 		frag.IsStackingContext = true
+		frag.Box = d.box
 		frag.RelOffsetX, frag.RelOffsetY = 0, 0 // abs/fixed bake position into coords
 
 		// Attach to the owning stacking context's Positioned layer: the root for a page
@@ -733,7 +771,8 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 			owner = d.cb.frag
 		}
 		if owner != nil {
-			owner.PositionedClip = append(owner.PositionedClip, !d.cb.isPage && d.cb.frag != nil && owner == d.cb.frag)
+			cbOwned := !d.cb.isPage && d.cb.frag != nil && owner == d.cb.frag
+			owner.PositionedInfo = append(owner.PositionedInfo, PositionedInfo{CBOwned: cbOwned})
 			owner.Positioned = append(owner.Positioned, frag)
 		}
 	}
@@ -847,17 +886,6 @@ func establishesNewBFC(b *cssbox.Box) bool {
 // includes opacity<1, transforms, etc. — none modeled yet.)
 func establishesStackingContext(b *cssbox.Box) bool {
 	return b.Position != cssbox.PosStatic
-}
-
-// logZIndexUnsupported emits a one-time-per-box debug note when a positioned box
-// carries a non-auto z-index, which the minimal stacking pass does NOT yet sort on
-// (positioned boxes paint in document order). Surfacing it keeps the degradation
-// visible per the design's degradation contract; full z-index ordering is a later
-// slice.
-func (e *Engine) logZIndexUnsupported(b *cssbox.Box) {
-	if !b.Style.ZIndexAuto {
-		e.logf("css layout: z-index:%d not yet honored (positioned boxes paint in document order)", b.Style.ZIndex)
-	}
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous

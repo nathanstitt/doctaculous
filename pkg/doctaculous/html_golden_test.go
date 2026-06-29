@@ -220,6 +220,75 @@ var htmlGoldens = []struct {
   <div class="wrap"><div class="sw a"></div><div class="sw b"></div><div class="sw c"></div></div>
 </body></html>`,
 	},
+	{
+		// Negative z-index: a box with z-index:-1 paints BEHIND in-flow content. The
+		// in-flow green block overlaps the (red) negative box; green must cover red.
+		name:       "zindex-negative",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .neg { position: relative; z-index: -1; width: 120px; height: 120px; background: #cc2222; }
+  .flow { width: 120px; height: 60px; background: #22aa22; margin-top: -60px; }
+</style></head><body>
+  <div class="neg"></div>
+  <div class="flow"></div>
+</body></html>`,
+	},
+	{
+		// Positive z-index ordering: three overlapping absolutely-positioned boxes with
+		// z-index 1/2/3; the higher z paints on top. Blue(3) over green(2) over red(1).
+		name:       "zindex-stack",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .wrap { position: relative; height: 160px; }
+  .box { position: absolute; width: 90px; height: 90px; }
+  .r { left: 10px;  top: 10px;  background: #cc2222; z-index: 1; }
+  .g { left: 40px;  top: 40px;  background: #22aa22; z-index: 2; }
+  .b { left: 70px;  top: 70px;  background: #2244cc; z-index: 3; }
+</style></head><body>
+  <div class="wrap">
+    <div class="box r"></div>
+    <div class="box g"></div>
+    <div class="box b"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// z-index inside a clip: an absolutely-positioned z-index box whose containing
+		// block is an overflow:hidden box is clipped to that box AND ordered by z against
+		// the clip's other content. The orange box spills past the clip edge but is cut.
+		name:       "zindex-clip",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .clip { position: relative; overflow: hidden; width: 100px; height: 100px; background: #dddddd; }
+  .under { position: absolute; left: 10px; top: 10px; width: 80px; height: 80px; background: #2244cc; z-index: 1; }
+  .over  { position: absolute; left: 40px; top: 40px; width: 120px; height: 120px; background: #ee8822; z-index: 2; }
+</style></head><body>
+  <div class="clip">
+    <div class="under"></div>
+    <div class="over"></div>
+  </div>
+</body></html>`,
+	},
+	{
+		// z-index ∘ float: a left float (step 4) and a positive-z positioned box (step 7)
+		// overlap; the positioned box paints OVER the float per Appendix E.
+		name:       "zindex-float",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .wrap { position: relative; height: 140px; }
+  .fl { float: left; width: 90px; height: 90px; background: #22aa22; }
+  .ov { position: absolute; left: 40px; top: 30px; width: 90px; height: 90px; background: #cc2222; z-index: 1; }
+</style></head><body>
+  <div class="wrap">
+    <div class="fl"></div>
+    <div class="ov"></div>
+  </div>
+</body></html>`,
+	},
 }
 
 // quadLoader serves a 40x40 four-quadrant PNG at "quad.png" (TL red, TR green, BL
