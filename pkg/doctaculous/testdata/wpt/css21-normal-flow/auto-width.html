@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<!-- TEST: an in-flow block with width:auto fills its containing block's content
+     width (CSS 2.1 section 10.3.3). With body{margin:0} the containing chain
+     (html -> body -> div) carries the full viewport width down, so the div is as
+     wide as the viewport (200px here). -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #box { height: 60px; background: #9933cc; }
+</style>
+</head>
+<body>
+  <div id="box"></div>
+</body>
+</html>

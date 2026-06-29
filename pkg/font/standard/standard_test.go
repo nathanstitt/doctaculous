@@ -21,6 +21,11 @@ func TestLookup(t *testing.T) {
 		{"Courier", "Inconsolata-Regular", true},
 		{"Courier-Bold", "Inconsolata-Regular", true},
 		{"CourierNew", "Inconsolata-Regular", true},
+		// Generic CSS family keywords.
+		{"serif", "TeXGyreTermes-Regular", true},
+		{"sans-serif", "TeXGyreHeros-Regular", true},
+		{"monospace", "Inconsolata-Regular", true},
+		{"cursive", "TeXGyreTermes-Regular", true},
 		{"Symbol", "", false},
 		{"ZapfDingbats", "", false},
 		{"SomeRandomFont", "", false},

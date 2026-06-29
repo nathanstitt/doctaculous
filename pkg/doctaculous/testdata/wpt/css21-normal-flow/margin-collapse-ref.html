@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!-- REFERENCE for margin-collapse.html. Same two divs, but the inter-sibling gap
+     is expressed WITHOUT relying on collapsing two equal margins: the first div
+     keeps margin-bottom:20px and the second div sets margin-top:0, so the sibling
+     gap is collapse(20,0)=20px — the same 20px the test produces by collapsing
+     20 against 20. Identical pixels iff the engine collapses adjacent margins. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #c { padding: 1px; background: #cccccc; }
+  .b { height: 40px; background: #3366cc; }
+  .first  { margin-top: 20px; margin-bottom: 20px; }
+  .second { margin-top: 0;    margin-bottom: 20px; }
+</style>
+</head>
+<body>
+  <div id="c">
+    <div class="b first"></div>
+    <div class="b second"></div>
+  </div>
+</body>
+</html>

@@ -61,6 +61,10 @@ type ComputedStyle struct {
 	BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle string
 
 	Width, Height Length // UnitAuto = "auto"
+
+	MinWidth, MaxWidth   Length // MinWidth: UnitPx zero = no min; MaxWidth: UnitAuto = "none" (no max)
+	MinHeight, MaxHeight Length // same convention as the width pair
+	BoxSizing            string // "content-box" (default) | "border-box"
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -236,6 +240,11 @@ func initialStyle() ComputedStyle {
 		TextAlign:   "left",
 		Width:       Length{Unit: UnitAuto},
 		Height:      Length{Unit: UnitAuto},
+		MinWidth:    Length{Unit: UnitPx},   // CSS initial min-width is 0
+		MaxWidth:    Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		MinHeight:   Length{Unit: UnitPx},   // CSS initial min-height is 0
+		MaxHeight:   Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		BoxSizing:   "content-box",
 		MarginTop:   Length{Unit: UnitPx},
 		MarginRight: Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
@@ -257,6 +266,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		if c, ok := parseColor(newTokenizer(d.Value)); ok {
 			cs.BackgroundColor = c
 		}
+	case "background":
+		// Color-only support for now; see applyBackground.
+		applyBackground(cs, d.Value)
 	case "font-family":
 		cs.FontFamily = firstFamily(d.Value)
 	case "font-size":
@@ -287,6 +299,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		setLength(&cs.MarginBottom, d.Value)
 	case "margin-left":
 		setLength(&cs.MarginLeft, d.Value)
+	case "margin":
+		applyBoxLengths(d.Value, parseMarginComponent,
+			&cs.MarginTop, &cs.MarginRight, &cs.MarginBottom, &cs.MarginLeft)
 	case "padding-top":
 		setLength(&cs.PaddingTop, d.Value)
 	case "padding-right":
@@ -295,10 +310,26 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		setLength(&cs.PaddingBottom, d.Value)
 	case "padding-left":
 		setLength(&cs.PaddingLeft, d.Value)
+	case "padding":
+		applyBoxLengths(d.Value, parsePaddingComponent,
+			&cs.PaddingTop, &cs.PaddingRight, &cs.PaddingBottom, &cs.PaddingLeft)
 	case "width":
 		setLength(&cs.Width, d.Value)
 	case "height":
 		setLength(&cs.Height, d.Value)
+	case "min-width":
+		setLength(&cs.MinWidth, d.Value)
+	case "max-width":
+		setMaxLength(&cs.MaxWidth, d.Value)
+	case "min-height":
+		setLength(&cs.MinHeight, d.Value)
+	case "max-height":
+		setMaxLength(&cs.MaxHeight, d.Value)
+	case "box-sizing":
+		switch d.Value {
+		case "content-box", "border-box":
+			cs.BoxSizing = d.Value
+		}
 	case "border-top-width":
 		setLength(&cs.BorderTopWidth, d.Value)
 	case "border-right-width":
@@ -331,6 +362,32 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		cs.BorderBottomStyle = d.Value
 	case "border-left-style":
 		cs.BorderLeftStyle = d.Value
+	case "border-width":
+		applyBoxLengths(d.Value, parseBorderWidthComponent,
+			&cs.BorderTopWidth, &cs.BorderRightWidth, &cs.BorderBottomWidth, &cs.BorderLeftWidth)
+	case "border-style":
+		applyBorderStyle(cs, d.Value)
+	case "border-color":
+		applyBorderColor(cs, d.Value)
+	case "border":
+		// width||style||color applied to all four sides.
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderTopWidth, &cs.BorderTopColor, &cs.BorderTopStyle},
+			borderSide{&cs.BorderRightWidth, &cs.BorderRightColor, &cs.BorderRightStyle},
+			borderSide{&cs.BorderBottomWidth, &cs.BorderBottomColor, &cs.BorderBottomStyle},
+			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
+	case "border-top":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderTopWidth, &cs.BorderTopColor, &cs.BorderTopStyle})
+	case "border-right":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderRightWidth, &cs.BorderRightColor, &cs.BorderRightStyle})
+	case "border-bottom":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderBottomWidth, &cs.BorderBottomColor, &cs.BorderBottomStyle})
+	case "border-left":
+		applyBorderSide(cs, d.Value,
+			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
 	}
 	// default: unsupported property — ignored on purpose.
 }
@@ -340,6 +397,17 @@ func setLength(dst *Length, val string) {
 	if l, ok := parseLength(newTokenizer(val).next()); ok {
 		*dst = l
 	}
+}
+
+// setMaxLength parses val as a max-* length and writes it to dst. The CSS keyword
+// "none" (no maximum) is stored as a UnitAuto length; other values parse as
+// ordinary lengths. Invalid values leave dst unchanged.
+func setMaxLength(dst *Length, val string) {
+	if val == "none" {
+		*dst = Length{Unit: UnitAuto}
+		return
+	}
+	setLength(dst, val)
 }
 
 // firstFamily returns the first family name from a font-family list, stripping

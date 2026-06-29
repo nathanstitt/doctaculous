@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!-- REFERENCE for box-sizing.html. The default box-sizing:content-box with a
+     100px content width plus the same 10px padding and 5px border produces the
+     identical 130px border box (100 + 2*10 + 2*5). The content height matches too
+     (50 + 2*10 + 2*5 = 80 border box). -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #box {
+    box-sizing: content-box;
+    width: 100px;
+    height: 50px;
+    padding: 10px;
+    border: 5px solid black;
+    background: #cc6633;
+  }
+</style>
+</head>
+<body>
+  <div id="box"></div>
+</body>
+</html>

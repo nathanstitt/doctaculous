@@ -77,6 +77,107 @@ func TestApplyDeclaration(t *testing.T) {
 	}
 }
 
+func TestInitialSizingDefaults(t *testing.T) {
+	cs := initialStyle()
+	// min-* initial is 0px; max-* initial is "none" (modeled UnitAuto).
+	if cs.MinWidth != (Length{0, UnitPx}) || cs.MinHeight != (Length{0, UnitPx}) {
+		t.Errorf("initial min-width/min-height = %v/%v, want 0px/0px", cs.MinWidth, cs.MinHeight)
+	}
+	if cs.MaxWidth.Unit != UnitAuto || cs.MaxHeight.Unit != UnitAuto {
+		t.Errorf("initial max-width/max-height = %v/%v, want none (UnitAuto)", cs.MaxWidth, cs.MaxHeight)
+	}
+	if cs.BoxSizing != "content-box" {
+		t.Errorf("initial box-sizing = %q, want content-box", cs.BoxSizing)
+	}
+}
+
+func TestApplyMinMaxSizingAndBoxSizing(t *testing.T) {
+	cs := initialStyle()
+	apply := func(prop, val string) { applyDeclaration(&cs, Declaration{Property: prop, Value: val}) }
+
+	// div { width: 50%; max-width: 300px; min-width: 100px; box-sizing: border-box; }
+	apply("width", "50%")
+	apply("max-width", "300px")
+	apply("min-width", "100px")
+	apply("box-sizing", "border-box")
+
+	if cs.Width != (Length{50, UnitPercent}) {
+		t.Errorf("width = %v, want {50 percent}", cs.Width)
+	}
+	if cs.MaxWidth != (Length{300, UnitPx}) {
+		t.Errorf("max-width = %v, want {300 px}", cs.MaxWidth)
+	}
+	if cs.MinWidth != (Length{100, UnitPx}) {
+		t.Errorf("min-width = %v, want {100 px}", cs.MinWidth)
+	}
+	if cs.BoxSizing != "border-box" {
+		t.Errorf("box-sizing = %q, want border-box", cs.BoxSizing)
+	}
+
+	// max-width: none yields the no-maximum sentinel (UnitAuto).
+	apply("max-width", "none")
+	if cs.MaxWidth.Unit != UnitAuto {
+		t.Errorf("max-width after none = %v, want none (UnitAuto)", cs.MaxWidth)
+	}
+
+	// min-height / max-height carry em units through unchanged.
+	apply("min-height", "2em")
+	apply("max-height", "10em")
+	if cs.MinHeight != (Length{2, UnitEm}) {
+		t.Errorf("min-height = %v, want {2 em}", cs.MinHeight)
+	}
+	if cs.MaxHeight != (Length{10, UnitEm}) {
+		t.Errorf("max-height = %v, want {10 em}", cs.MaxHeight)
+	}
+}
+
+func TestApplySizingDegradation(t *testing.T) {
+	// A malformed value leaves the default intact (the documented contract).
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "max-width", Value: "bogus"})
+	if cs.MaxWidth.Unit != UnitAuto {
+		t.Errorf("max-width after bogus = %v, want none (UnitAuto) preserved", cs.MaxWidth)
+	}
+	applyDeclaration(&cs, Declaration{Property: "min-width", Value: "-"})
+	if cs.MinWidth != (Length{0, UnitPx}) {
+		t.Errorf("min-width after bad value = %v, want 0px preserved", cs.MinWidth)
+	}
+	// An invalid box-sizing keyword is dropped, default preserved.
+	applyDeclaration(&cs, Declaration{Property: "box-sizing", Value: "padding-box"})
+	if cs.BoxSizing != "content-box" {
+		t.Errorf("box-sizing after invalid keyword = %q, want content-box preserved", cs.BoxSizing)
+	}
+}
+
+func TestSizingNotInherited(t *testing.T) {
+	// Parent sets min/max-width and box-sizing; the child has no sizing
+	// declarations and must reset to initial (these properties are NOT inherited).
+	src := `div { max-width: 300px; box-sizing: border-box; min-width: 50px; }`
+	sheet := Parse(src)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+
+	div := &fakeNode{tag: "div"}
+	child := &fakeNode{tag: "span", parent: div}
+
+	divStyle := r.ComputeRoot(div)
+	childStyle := r.Compute(child, divStyle) // parent's computed style is the inheritance base
+
+	// Sanity: the parent actually picked up the declarations.
+	if divStyle.MaxWidth != (Length{300, UnitPx}) || divStyle.BoxSizing != "border-box" {
+		t.Fatalf("parent sizing not applied: max-width=%v box-sizing=%q", divStyle.MaxWidth, divStyle.BoxSizing)
+	}
+	// Child resets to initial, not inherited.
+	if childStyle.MaxWidth.Unit != UnitAuto {
+		t.Errorf("child max-width = %v, want none/UnitAuto (initial, not inherited 300px)", childStyle.MaxWidth)
+	}
+	if childStyle.MinWidth != (Length{0, UnitPx}) {
+		t.Errorf("child min-width = %v, want 0px (initial, not inherited)", childStyle.MinWidth)
+	}
+	if childStyle.BoxSizing != "content-box" {
+		t.Errorf("child box-sizing = %q, want content-box (initial, not inherited)", childStyle.BoxSizing)
+	}
+}
+
 func TestApplyUnknownPropertyIgnored(t *testing.T) {
 	cs := initialStyle()
 	before := cs

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<!-- TEST: adjacent vertical margins collapse (CSS 2.1 section 8.3.1).
+     Two stacked divs each declare margin:20px 0. The gap between them is the
+     collapsed margin max(20,20)=20px, NOT 40px. The container has padding so the
+     children's margins do not collapse through it (keeping the geometry simple). -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #c { padding: 1px; background: #cccccc; }
+  .b { height: 40px; background: #3366cc; margin: 20px 0; }
+</style>
+</head>
+<body>
+  <div id="c">
+    <div class="b"></div>
+    <div class="b"></div>
+  </div>
+</body>
+</html>

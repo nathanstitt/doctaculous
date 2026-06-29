@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!-- REFERENCE for shorthand.html. The same box written entirely in longhands:
+     margin 10/20, border 2px solid black on all four sides, padding 5px all round.
+     Must produce identical pixels to the shorthand form. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #box {
+    margin-top: 10px; margin-right: 20px; margin-bottom: 10px; margin-left: 20px;
+    border-top-width: 2px; border-right-width: 2px;
+    border-bottom-width: 2px; border-left-width: 2px;
+    border-top-style: solid; border-right-style: solid;
+    border-bottom-style: solid; border-left-style: solid;
+    border-top-color: black; border-right-color: black;
+    border-bottom-color: black; border-left-color: black;
+    padding-top: 5px; padding-right: 5px; padding-bottom: 5px; padding-left: 5px;
+    width: 120px;
+    height: 30px;
+    background: #66cc66;
+  }
+</style>
+</head>
+<body>
+  <div id="box"></div>
+</body>
+</html>
