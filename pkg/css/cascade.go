@@ -13,6 +13,24 @@ import (
 // would need 2^20 id qualifiers — impossible in practice).
 const inlineImportantIDs = 1 << 20
 
+// Origin is a cascade origin. CSS orders declarations by origin first:
+// UA-normal < author-normal < author-important < UA-important. Origin is the
+// outermost cascade key, dominating specificity and source order.
+type Origin int
+
+const (
+	// OriginUA is the user-agent default stylesheet.
+	OriginUA Origin = iota
+	// OriginAuthor is page-supplied CSS: <style>, <link>, and style="".
+	OriginAuthor
+)
+
+// OriginSheet pairs a parsed stylesheet with its cascade origin.
+type OriginSheet struct {
+	Sheet  Stylesheet
+	Origin Origin
+}
+
 // ComputedStyle is the resolved style of one element: the normal-flow property
 // subset this sub-project supports, with every value concrete. Lengths remain in
 // their CSS unit here (px/pt/em/%); the layout engine resolves em/% to absolute
@@ -45,80 +63,118 @@ type ComputedStyle struct {
 	Width, Height Length // UnitAuto = "auto"
 }
 
-// Resolver computes the ComputedStyle of any node against a parsed stylesheet.
-// Build one per stylesheet with NewResolver; it is read-only after construction
-// and safe for concurrent use. logf may be nil.
+// Resolver computes the ComputedStyle of any node against parsed stylesheets
+// tagged by origin. Build one with NewResolver; it is read-only after
+// construction and safe for concurrent use. logf may be nil.
 type Resolver struct {
-	sheet Stylesheet
-	logf  func(string, ...any)
+	sheets []OriginSheet
+	logf   func(string, ...any)
 }
 
-// NewResolver builds a Resolver over a parsed stylesheet.
-func NewResolver(sheet Stylesheet, logf func(string, ...any)) *Resolver {
+// NewResolver builds a Resolver over origin-tagged stylesheets. Sheets may be
+// given in any order; the cascade applies origin/specificity/source-order rules.
+func NewResolver(sheets []OriginSheet, logf func(string, ...any)) *Resolver {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Resolver{sheet: sheet, logf: logf}
+	return &Resolver{sheets: sheets, logf: logf}
+}
+
+// ComputeRoot returns the ComputedStyle of a root element (one with no parent),
+// using the CSS initial values as the inheritance base. Box generation calls
+// this for the document root, then threads each result down to children via
+// Compute, so callers never need the CSS initial values themselves.
+func (r *Resolver) ComputeRoot(n Node) ComputedStyle {
+	return r.Compute(n, initialStyle())
 }
 
 // Compute returns node n's ComputedStyle. parentStyle is the already-computed
-// style of n's parent (use initialStyle() for the root). The cascade is: start
-// from the inheritance base, then apply every matching declaration in increasing
-// (specificity, source-order) order, with !important declarations applied last.
+// style of n's parent; for a root element (no parent) call ComputeRoot, which
+// supplies the CSS initial values as the base. The cascade orders matching
+// declarations by origin first (UA-normal < author-normal < author-important <
+// UA-important), then specificity, then source order, starting from the
+// inheritance base; !important declarations are applied last.
 func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	cs := inheritFrom(parentStyle)
 
 	type matched struct {
-		decl  Declaration
-		spec  Specificity
-		order int
+		decl   Declaration
+		origin Origin
+		spec   Specificity
+		order  int
 	}
 	var normal, important []matched
 
 	order := 0
-	for ri := range r.sheet.Rules {
-		rule := &r.sheet.Rules[ri]
-		spec, ok := bestMatch(rule.Selectors, n)
-		if !ok {
-			continue
-		}
-		for _, d := range rule.Declarations {
-			m := matched{decl: d, spec: spec, order: order}
-			if d.Important {
-				important = append(important, m)
-			} else {
-				normal = append(normal, m)
+	for si := range r.sheets {
+		origin := r.sheets[si].Origin
+		sheet := &r.sheets[si].Sheet
+		for ri := range sheet.Rules {
+			rule := &sheet.Rules[ri]
+			spec, ok := bestMatch(rule.Selectors, n)
+			if !ok {
+				continue
 			}
-			order++
+			for _, d := range rule.Declarations {
+				m := matched{decl: d, origin: origin, spec: spec, order: order}
+				if d.Important {
+					important = append(important, m)
+				} else {
+					normal = append(normal, m)
+				}
+				order++
+			}
 		}
 	}
 
-	less := func(a, b matched) bool {
-		if a.spec.Less(b.spec) {
-			return true
+	// normalRank/importantRank place each origin on the unified cascade ladder so
+	// the same comparison works for both passes:
+	//   UA-normal(0) < author-normal(1) < author-important(2) < UA-important(3)
+	normalRank := func(o Origin) int {
+		if o == OriginAuthor {
+			return 1
 		}
-		if b.spec.Less(a.spec) {
-			return false
-		}
-		return a.order < b.order // later source order wins, so sort ascending and apply in order
+		return 0 // UA
 	}
-	sort.SliceStable(normal, func(i, j int) bool { return less(normal[i], normal[j]) })
+	importantRank := func(o Origin) int {
+		if o == OriginUA {
+			return 3
+		}
+		return 2 // author
+	}
 
-	// 1. normal author rules, lowest to highest (specificity, then source order).
+	lessBy := func(rank func(Origin) int) func(a, b matched) bool {
+		return func(a, b matched) bool {
+			ra, rb := rank(a.origin), rank(b.origin)
+			if ra != rb {
+				return ra < rb
+			}
+			if a.spec.Less(b.spec) {
+				return true
+			}
+			if b.spec.Less(a.spec) {
+				return false
+			}
+			return a.order < b.order
+		}
+	}
+
+	// 1. normal declarations, lowest to highest.
+	sort.SliceStable(normal, func(i, j int) bool { return lessBy(normalRank)(normal[i], normal[j]) })
 	for _, m := range normal {
 		applyDeclaration(&cs, m.decl)
 	}
 
-	// 2. inline style="" attribute. Its normal declarations overlay all normal
-	//    rules regardless of their specificity; its !important declarations join
-	//    the important set with an outsized specificity so inline-important is the
-	//    strongest author origin (matching the CSS cascade origin order). Because
-	//    the `important` slice is sorted in step 3 (below, after this block), the
-	//    appended entries are included in that sort — no re-sorting needed.
+	// 2. inline style="" (author origin). Normal inline declarations overlay all
+	//    normal rules; inline !important joins the important set with an outsized
+	//    specificity and author origin.
 	if styleAttr, ok := n.Attr("style"); ok {
 		for _, d := range parseDeclarations(styleAttr) {
 			if d.Important {
-				important = append(important, matched{decl: d, spec: Specificity{IDs: inlineImportantIDs}, order: order})
+				important = append(important, matched{
+					decl: d, origin: OriginAuthor,
+					spec: Specificity{IDs: inlineImportantIDs}, order: order,
+				})
 				order++
 				continue
 			}
@@ -126,9 +182,8 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 		}
 	}
 
-	// 3. !important declarations overlay last so they always win. Sorting happens
-	//    here — after the inline block so inline-important is included.
-	sort.SliceStable(important, func(i, j int) bool { return less(important[i], important[j]) })
+	// 3. important declarations overlay last.
+	sort.SliceStable(important, func(i, j int) bool { return lessBy(importantRank)(important[i], important[j]) })
 	for _, m := range important {
 		applyDeclaration(&cs, m.decl)
 	}

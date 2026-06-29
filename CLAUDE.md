@@ -23,13 +23,15 @@ next.
 backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 
 **Reflowable documents** (DOCX today; HTML/EPUB next) share a second pipeline that meets the PDF
-pipeline at `render.Device`: `pkg/docx` parse → `pkg/docx/style` cascade → `pkg/docx/lower` lower to
-a **format-neutral box model** (`pkg/layout/box`) → `pkg/layout` reflow engine (line-break + flow +
-paginate) → `pkg/layout/paint` → the same `render.Device`/`pkg/render/raster`. The box model is the
-contract between frontends and engine: a new reflow format (HTML, EPUB) is just a parse+lower
-frontend producing `box.Document`; it never touches line-breaking or pagination. Font outlines for
-both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces for reflow);
-`pkg/layout/font` caches them.
+pipeline at `render.Device`. During the HTML-rendering program there are **two box models**: the
+existing **flat** model (`pkg/layout/box.Document` — DOCX's `pkg/docx` parse → `pkg/docx/style`
+cascade → `pkg/docx/lower` → `pkg/layout` reflow engine → `pkg/layout/paint`), and a new **recursive,
+format-neutral** model (`pkg/layout/cssbox`) that the forthcoming CSS layout engine consumes. A reflow
+frontend is a parse+lower step producing one of these box models (DOCX → `box.Document` today; HTML →
+`cssbox` via `pkg/html` + `pkg/css` + `pkg/layout/css`); it never touches line-breaking or pagination.
+These converge late: a dedicated sub-project re-points DOCX lowering onto `cssbox` and retires the flat
+model, so one recursive engine drives every reflow format. Font outlines for both pipelines come from
+`pkg/font` (`pkg/font/family.go` exposes named-family faces for reflow); `pkg/layout/font` caches them.
 
 The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML/EPUB)
 must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
@@ -163,6 +165,20 @@ what is done vs. pending.
   This is the first landed slice of the HTML reflow frontend (sub-project 1 of the HTML-rendering
   roadmap); it is consumed by box generation next. Unsupported selectors/properties degrade
   gracefully (skipped). See `docs/superpowers/specs/2026-06-23-html-rendering-design.md`.
+- **HTML frontend — parse + box generation** (`pkg/html`, `pkg/layout/cssbox`, `pkg/layout/css`,
+  `pkg/resource`; unit-tested by structural assertions, no rendering yet): parse HTML via
+  `golang.org/x/net/html` into an owned DOM implementing the `pkg/css` `Node` interface, collect
+  `<style>`/`<link>`/inline `style=""`, and generate a recursive `cssbox` tree by driving the CSS
+  cascade per element. Includes a minimal user-agent default stylesheet, cascaded below author rules
+  via a new origin-aware cascade in `pkg/css` (`Origin`/`OriginSheet`, plus `ComputeRoot` for the root
+  base); anonymous-box fixups (inline-in-block wrapping and block-in-inline splitting); whitespace
+  collapsing/stripping; and `display:none` pruning. Recognized-but-unimplemented display modes
+  (flex/grid/table) are preserved on the box (the layout engine does the block fallback later);
+  genuinely unknown display values normalize to block. `<img>` becomes a replaced leaf box (no
+  decoding yet). External `<link>` stylesheets resolve through a `pkg/resource.ResourceLoader` seam
+  with hermetic in-memory/testdata loaders (no HTTP yet). This is the second landed slice of the HTML
+  reflow frontend (sub-project 2); layout + paint of the box tree is next. See
+  `docs/superpowers/specs/2026-06-23-html-box-generation-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -192,12 +208,13 @@ that skip into real output.
    PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
    content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
    fixes bold/italic fidelity).
-6. **New reflow frontends** — **HTML** (`golang.org/x/net/html` + a small CSS subset → `box.Document`,
-   `OpenHTML`) and **EPUB** (ZIP + OPF spine reusing the HTML frontend per chapter, `OpenEPUB`). These
-   validate the neutral-engine design: each is only a parse+lower step; the engine, paint, and raster
-   are reused unchanged. The CSS parse+cascade layer (`pkg/css`) is the first landed slice of the HTML
-   frontend (tokenizer + parser + selector matching + cascade → `ComputedStyle`; see the Done section);
-   box generation that consumes it and the `golang.org/x/net/html` parse step come next.
+6. **New reflow frontends** — **HTML** and **EPUB** (ZIP + OPF spine reusing the HTML frontend per
+   chapter, `OpenEPUB`). These validate the neutral-engine design: each is only a parse+lower step; the
+   engine, paint, and raster are reused unchanged. The CSS parse+cascade layer (`pkg/css`) and the HTML
+   parse + box-generation layer (`pkg/html`, `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/resource`) are
+   the first landed slices of the HTML frontend (see the Done section); the **CSS layout engine** that
+   turns the `cssbox` tree into positioned fragments and paints it — plus the `OpenHTML`/`OpenURL`
+   public API — comes next.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
