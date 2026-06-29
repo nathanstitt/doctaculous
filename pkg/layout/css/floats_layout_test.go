@@ -552,3 +552,120 @@ func TestFloatedInlineBlockifies(t *testing.T) {
 		t.Fatalf("blockified floated inline not placed as a float (Floats=%d)", len(frag.Floats))
 	}
 }
+
+// TestOverflowEnclosesFloats: an overflow:hidden box whose ONLY children are floats
+// grows to enclose them (content height = the floats' bottom), instead of collapsing
+// to zero height.
+func TestOverflowEnclosesFloats(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	f1 := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 60, Unit: gcss.UnitPx}})
+	f1.Float = cssbox.FloatLeft
+	f2 := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 80, Unit: gcss.UnitPx}})
+	f2.Float = cssbox.FloatLeft
+
+	wrap := blockBox(gcss.ComputedStyle{Display: "block", Overflow: "hidden"}, f1, f2)
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, wrap)
+
+	frag := eng.layoutTree(context.Background(), root, 200)
+	if len(frag.Children) != 1 {
+		t.Fatalf("want 1 child (the wrapper), got %d", len(frag.Children))
+	}
+	wrapFrag := frag.Children[0]
+	if wrapFrag.H < 80-1e-6 || wrapFrag.H > 80+1e-6 {
+		t.Errorf("overflow:hidden wrapper H = %v, want 80 (encloses its floats)", wrapFrag.H)
+	}
+}
+
+// TestInlineBlockNoFloatsHeightUnchanged: the enclosure change must NOT alter a BFC
+// box that has no floats. An inline-block with a fixed-height in-flow child keeps its
+// content-derived height (the float enclosure is a no-op: maxBottom()==0).
+func TestInlineBlockNoFloatsHeightUnchanged(t *testing.T) {
+	eng := New(nil, nil, nil)
+	child := blockBox(gcss.ComputedStyle{Display: "block",
+		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
+	ib := blockBox(gcss.ComputedStyle{Display: "block"}, child)
+	ib.Display = cssbox.DisplayInlineBlock
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, ib)
+	frag := eng.layoutTree(context.Background(), root, 200)
+	ibFrag := frag.Children[0]
+	if ibFrag.H < 30-1e-6 || ibFrag.H > 30+1e-6 {
+		t.Errorf("inline-block (no floats) H = %v, want 30 (enclosure is a no-op)", ibFrag.H)
+	}
+}
+
+// TestBFCSiblingShiftsPastFloat: an overflow:hidden box (a BFC) following a left float
+// is shifted right to the float's right edge (its border box does not overlap the
+// float's margin box), instead of starting at the content-box left under the float.
+func TestBFCSiblingShiftsPastFloat(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	floated := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 80, Unit: gcss.UnitPx}})
+	floated.Float = cssbox.FloatLeft
+
+	bfc := blockBox(gcss.ComputedStyle{Display: "block", Overflow: "hidden",
+		Width:  gcss.Length{Value: 80, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, floated, bfc)
+	frag := eng.layoutTree(context.Background(), root, 300)
+
+	if len(frag.Children) != 1 {
+		t.Fatalf("want 1 in-flow child (the BFC), got %d", len(frag.Children))
+	}
+	bfcFrag := frag.Children[0]
+	if bfcFrag.X < 60-1e-6 {
+		t.Errorf("BFC sibling X = %v, want >= 60 (shifted past the float)", bfcFrag.X)
+	}
+}
+
+// TestNonBFCSiblingUnchangedByFloat: a NORMAL (non-BFC) block following a left float
+// keeps its border box at the content-box left (full width slides under the float);
+// only its inline content narrows. Border-left stays 0.
+func TestNonBFCSiblingUnchangedByFloat(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	floated := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 60, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 80, Unit: gcss.UnitPx}})
+	floated.Float = cssbox.FloatLeft
+
+	normal := blockBox(gcss.ComputedStyle{Display: "block",
+		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, floated, normal)
+	frag := eng.layoutTree(context.Background(), root, 300)
+	normalFrag := frag.Children[0]
+	if normalFrag.X > 1e-6 {
+		t.Errorf("non-BFC sibling X = %v, want 0 (border box slides under the float)", normalFrag.X)
+	}
+}
+
+// TestBFCSiblingDropsBelowFloatWhenTooWide: a BFC sibling too wide to fit beside the
+// float in the remaining band drops BELOW the float (its Y is at/under the float
+// bottom), rather than overlapping it.
+func TestBFCSiblingDropsBelowFloatWhenTooWide(t *testing.T) {
+	eng := New(nil, nil, nil)
+
+	floated := blockBox(gcss.ComputedStyle{Display: "block",
+		Width:  gcss.Length{Value: 200, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 50, Unit: gcss.UnitPx}})
+	floated.Float = cssbox.FloatLeft
+
+	bfc := blockBox(gcss.ComputedStyle{Display: "block", Overflow: "hidden",
+		Width:  gcss.Length{Value: 150, Unit: gcss.UnitPx},
+		Height: gcss.Length{Value: 30, Unit: gcss.UnitPx}})
+
+	root := blockBox(gcss.ComputedStyle{Display: "block"}, floated, bfc)
+	frag := eng.layoutTree(context.Background(), root, 300)
+	bfcFrag := frag.Children[0]
+	if bfcFrag.Y < 50-1e-6 {
+		t.Errorf("BFC sibling Y = %v, want >= 50 (dropped below the float)", bfcFrag.Y)
+	}
+}

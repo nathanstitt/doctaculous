@@ -182,3 +182,16 @@ func TestOverlapBoundaryHalfOpen(t *testing.T) {
 		t.Errorf("leftEdge just inside float = %v, want 60", l)
 	}
 }
+
+// TestMaxBottom: maxBottom returns the largest float bottom (y+h), or 0 for no floats.
+func TestMaxBottom(t *testing.T) {
+	c := newCtx(0, 200)
+	if got := c.maxBottom(); got != 0 {
+		t.Errorf("maxBottom (no floats) = %v, want 0", got)
+	}
+	c.place(cssbox.FloatLeft, 50, 40, 0) // bottom 40
+	c.place(cssbox.FloatLeft, 50, 70, 0) // stacks beside; bottom 70
+	if got := c.maxBottom(); got != 70 {
+		t.Errorf("maxBottom = %v, want 70", got)
+	}
+}

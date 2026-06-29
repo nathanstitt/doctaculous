@@ -151,15 +151,6 @@ var htmlGoldens = []struct {
   <div class="cap">A cleared caption sits below the float.</div>
 </body></html>`,
 	},
-	// NOTE: the planned "float-row" golden (a body whose ONLY children are three
-	// left-floated swatches) is intentionally omitted. Per CSS 2.1, floats do not
-	// extend the height of a non-BFC parent, and the body here establishes no BFC,
-	// so a float-only body has zero in-flow content height and the page collapses to
-	// a degenerate 1×1 bitmap (paints nothing). That matches the float model the
-	// geometry tests lock down (TestFloatPlacedOutOfFlow: a float consumes no
-	// vertical space). The multi-float "two-on-a-row-then-wrap" behavior is covered
-	// instead by pkg/layout/css/floats_test.go (TestPlaceStacksThenWraps stacking/wrap
-	// geometry) and is visible in the float-figure golden's figure placement.
 	{
 		// position:relative shifts a box at paint time WITHOUT moving its neighbors:
 		// three stacked block boxes, the middle (green) one relatively offset
@@ -194,6 +185,39 @@ var htmlGoldens = []struct {
   .pin { position: absolute; top: 0; right: 0; width: 40px; height: 40px; background: #cc3333; }
 </style></head><body>
   <div class="box">Container text<div class="pin"></div></div>
+</body></html>`,
+	},
+	{
+		// overflow:hidden clips an oversized child to the box's padding box. A 120x70
+		// box with a 12px border and overflow:hidden contains a child that is far taller
+		// and wider; eyeball that the child (green) is cut at the padding-box edge while
+		// the box's own border (navy) paints at full size around it.
+		name:       "overflow-hidden",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .clip { width: 120px; height: 70px; border: 12px solid #002255; overflow: hidden; }
+  .big { width: 300px; height: 300px; background: #33aa33; }
+</style></head><body>
+  <div class="clip"><div class="big"></div></div>
+</body></html>`,
+	},
+	{
+		// Float-height enclosure (the overflow:hidden "clearfix"): three left-floated
+		// swatches inside an overflow:hidden wrapper. Eyeball that the wrapper has real
+		// height (encloses the floats) and shows the three swatches in a row — the case
+		// 5a had to drop because a non-BFC float-only body collapsed to a 1x1 page.
+		name:       "float-row",
+		viewportPx: 240,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .wrap { overflow: hidden; background: #eeeeee; }
+  .sw { float: left; width: 60px; height: 60px; }
+  .a { background: #cc3333; }
+  .b { background: #33aa33; }
+  .c { background: #3355cc; }
+</style></head><body>
+  <div class="wrap"><div class="sw a"></div><div class="sw b"></div><div class="sw c"></div></div>
 </body></html>`,
 	},
 }

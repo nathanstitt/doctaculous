@@ -67,6 +67,27 @@ type Fragment struct {
 	// is skipped in the in-flow passes (IsPositioned) so it paints exactly once.
 	// In the minimal cut these paint in document order (no z-index sort).
 	Positioned []*Fragment
+
+	// Clips marks a fragment whose box has overflow ≠ visible: the stacking pass
+	// brackets its contents (descendant decorations, floats, in-flow content, and the
+	// CB-owned subset of its positioned layer) with a ClipPush(ClipRect)/ClipPop pair,
+	// so they paint clipped to the padding box. The fragment's OWN background/border
+	// paint OUTSIDE the bracket (a box does not clip its own border box). A clipping
+	// fragment is always a BFC (overflow≠visible establishes one), so AppendItems
+	// reaches it via the IsStackingContext||IsBFC branch.
+	Clips bool
+	// ClipRect is the clip rectangle when Clips is true: the padding box (the border
+	// box deflated by the border widths), in page space. Zero when !Clips.
+	ClipRect rect
+	// PositionedClip parallels Positioned: PositionedClip[i] reports whether
+	// Positioned[i]'s containing block is THIS fragment, so a clipping fragment wraps
+	// that entry inside its clip (CSS clips a positioned descendant only when the box
+	// is also its containing block). An entry that merely bubbled through this fragment
+	// (its CB is an ancestor) has PositionedClip[i]=false and paints OUTSIDE the
+	// bracket. len(PositionedClip) == len(Positioned) when set; a nil slice means "no
+	// entry is CB-owned" (read defensively in the positioned loop). Only consulted on a
+	// clipping fragment.
+	PositionedClip []bool
 }
 
 // ImageContent is a decoded replaced-element image carried on a Fragment. CX,CY,
@@ -139,32 +160,41 @@ type GlyphFragment struct {
 // pass — keep it intact when extending this.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 	if f.IsStackingContext || f.IsBFC {
-		// Stacking context (root / positioned box) OR a BFC (inline-block / float): paint
-		// in CSS 2.1 Appendix E order — own decorations are emitted by the in-flow
-		// decoration walker starting at f; floats; in-flow content; then the positioned
-		// layer. (A plain BFC that is not a stacking context has an empty Positioned
-		// slice, so the positioned phase is a no-op and the order reduces to the prior
-		// 3-phase sequence — preserving byte-identical output for non-positioned pages.)
-		dst = f.appendDecorations(dst) // in-flow backgrounds + borders (skip floats, nested BFCs, positioned)
-		for _, fl := range f.Floats {  // the float layer
+		if f.Clips {
+			// Clipping context: own decorations paint UNCLIPPED, then a clip bracket wraps
+			// the children's decorations, the float layer, the in-flow content, and the
+			// CB-owned subset of the positioned layer. Escaped positioned descendants (CB
+			// outside this box) paint AFTER ClipPop, unclipped.
+			dst = f.appendSelfDecorations(dst) // own bg + border — outside the clip
+			dst = append(dst, layout.Item{Kind: layout.ClipPushKind, Rule: layout.RuleItem{
+				XPt: f.ClipRect.x, YPt: f.ClipRect.y, WPt: f.ClipRect.w, HPt: f.ClipRect.h,
+			}})
+			dst = f.appendChildDecorations(dst) // children's bg/border — clipped
+			for _, fl := range f.Floats {       // the float layer — clipped
+				start := len(dst)
+				dst = fl.AppendItems(dst)
+				if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
+					translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
+				}
+			}
+			dst = f.appendContent(dst) // in-flow inline content + images — clipped
+			dst = f.appendPositioned(dst, true)
+			dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
+			dst = f.appendPositioned(dst, false)
+			return dst
+		}
+		// Non-clipping stacking context / BFC: the prior 4-phase order (decorations →
+		// floats → in-flow content → positioned layer), unchanged.
+		dst = f.appendDecorations(dst)
+		for _, fl := range f.Floats {
 			start := len(dst)
 			dst = fl.AppendItems(dst)
-			// A positioned float (float:left; position:relative) carries a relative
-			// offset; apply it to the float's emitted range, exactly like the positioned
-			// layer below. A non-positioned float has zero offset, so this is a guarded
-			// no-op — preserving byte-identical output for non-positioned float pages.
 			if fl.RelOffsetX != 0 || fl.RelOffsetY != 0 {
 				translateItems(dst, start, fl.RelOffsetX, fl.RelOffsetY)
 			}
 		}
-		dst = f.appendContent(dst)        // in-flow inline content + images (skip floats, positioned)
-		for _, pf := range f.Positioned { // the positioned layer (document order; minimal z-index)
-			start := len(dst)
-			dst = pf.AppendItems(dst)
-			if pf.RelOffsetX != 0 || pf.RelOffsetY != 0 {
-				translateItems(dst, start, pf.RelOffsetX, pf.RelOffsetY)
-			}
-		}
+		dst = f.appendContent(dst)
+		dst = f.appendPositioned(dst, false)
 		return dst
 	}
 	// Non-BFC, non-stacking fragment: paint self, then recurse (normal tree order),
@@ -183,11 +213,41 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 	return dst
 }
 
+// appendPositioned emits the fragment's positioned layer (each entry painted fully via
+// its own AppendItems, with a relatively-positioned entry's RelOffset applied over its
+// emitted range). It paints positioned descendants in document order (the minimal
+// z-index cut).
+//
+// onlyCBOwned selects which subset to emit, and is only meaningful when f.Clips:
+//   - f.Clips == false: the whole layer is emitted in one call; onlyCBOwned is ignored.
+//     This is the non-clipping path and is byte-identical to the prior single loop.
+//   - f.Clips == true: the clipping path calls this TWICE — once with onlyCBOwned=true
+//     (inside the clip bracket: entries whose containing block IS f, PositionedClip[i]
+//     true) and once with onlyCBOwned=false (after ClipPop: the escaped entries, whose
+//     CB is an ancestor). So CB-owned descendants are clipped and escaped ones are not.
+//
+// A missing/short PositionedClip entry counts as not-CB-owned (false), the safe default.
+func (f *Fragment) appendPositioned(dst []layout.Item, onlyCBOwned bool) []layout.Item {
+	for i, pf := range f.Positioned {
+		if f.Clips {
+			owned := i < len(f.PositionedClip) && f.PositionedClip[i]
+			if owned != onlyCBOwned {
+				continue
+			}
+		}
+		start := len(dst)
+		dst = pf.AppendItems(dst)
+		if pf.RelOffsetX != 0 || pf.RelOffsetY != 0 {
+			translateItems(dst, start, pf.RelOffsetX, pf.RelOffsetY)
+		}
+	}
+	return dst
+}
+
 // appendDecorations recurses the in-flow subtree emitting only backgrounds and
-// borders, skipping floated subtrees (painted in the float layer) and NESTED BFC
-// subtrees (an inline-block / new-BFC box paints as a single atom in the content
-// phase via its own AppendItems — its internal block/float/inline layering is
-// self-contained, so it must not be flattened into this BFC's decoration layer).
+// borders: this fragment's own, then its children's (skipping floated, nested-BFC,
+// and positioned subtrees — see appendChildDecorations). It is the decoration-phase
+// entry for a non-clipping context root.
 //
 // f itself may be a float here: a float establishes its own BFC, so its AppendItems
 // takes the IsBFC branch and calls this on the float as the decoration-phase root of
@@ -196,11 +256,18 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 // not in this in-flow recursion), not to f itself.
 func (f *Fragment) appendDecorations(dst []layout.Item) []layout.Item {
 	dst = f.appendSelfDecorations(dst)
+	return f.appendChildDecorations(dst)
+}
+
+// appendChildDecorations recurses ONLY f's children's backgrounds/borders (not f's
+// own), skipping floated subtrees (painted in the float layer), NESTED BFC subtrees
+// (an inline-block / new-BFC box paints as a single atom in the content phase via its
+// own AppendItems), and positioned subtrees (painted in the stacking context's
+// positioned layer). A clipping fragment calls this between its ClipPush and ClipPop
+// so its children's decorations are clipped while its own (already emitted) are not.
+func (f *Fragment) appendChildDecorations(dst []layout.Item) []layout.Item {
 	for _, c := range f.Children {
 		if c.IsFloat || c.IsBFC || c.IsPositioned {
-			// A floated child paints in the BFC root's float layer; a nested BFC child
-			// paints whole in the content phase (atomic); a positioned child paints in the
-			// stacking context's positioned layer. Skip all three here.
 			continue
 		}
 		dst = c.appendDecorations(dst)

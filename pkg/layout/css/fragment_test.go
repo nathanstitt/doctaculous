@@ -226,3 +226,136 @@ func TestPage(t *testing.T) {
 		t.Errorf("page.Items = %+v, want %+v (== AppendItems(nil))", page.Items, want)
 	}
 }
+
+// TestAppendItemsClipBracketsContents: a clipping fragment emits ClipPush(padding box)
+// AFTER its own background/border and before its children's content, and ClipPop after
+// the content. Its own background is OUTSIDE the bracket.
+func TestAppendItemsClipBracketsContents(t *testing.T) {
+	child := &Fragment{X: 5, Y: 5, W: 90, H: 200, Background: color.RGBA{2, 2, 2, 255}}
+	clip := &Fragment{
+		X: 0, Y: 0, W: 100, H: 50, Background: color.RGBA{1, 1, 1, 255},
+		IsBFC: true, IsStackingContext: true, Clips: true,
+		ClipRect: rect{x: 0, y: 0, w: 100, h: 50},
+		Children: []*Fragment{child},
+	}
+	items := clip.AppendItems(nil)
+	if len(items) != 4 {
+		t.Fatalf("got %d items, want 4 (own bg, push, child bg, pop)", len(items))
+	}
+	if items[0].Kind != layout.BackgroundKind || items[0].Rule.Color != (color.RGBA{1, 1, 1, 255}) {
+		t.Errorf("item[0] = %v, want clip's own background (outside the bracket)", items[0].Kind)
+	}
+	if items[1].Kind != layout.ClipPushKind {
+		t.Errorf("item[1] = %v, want ClipPushKind", items[1].Kind)
+	}
+	if items[2].Kind != layout.BackgroundKind || items[2].Rule.Color != (color.RGBA{2, 2, 2, 255}) {
+		t.Errorf("item[2] = %v, want child background (inside the bracket)", items[2].Kind)
+	}
+	if items[3].Kind != layout.ClipPopKind {
+		t.Errorf("item[3] = %v, want ClipPopKind", items[3].Kind)
+	}
+}
+
+// TestAppendItemsClipRectIsPaddingBox: the ClipPush rect carries the fragment's
+// ClipRect (its padding box).
+func TestAppendItemsClipRectIsPaddingBox(t *testing.T) {
+	clip := &Fragment{
+		X: 0, Y: 0, W: 100, H: 50, IsBFC: true, IsStackingContext: true, Clips: true,
+		ClipRect: rect{x: 5, y: 6, w: 90, h: 38},
+		Children: []*Fragment{{X: 5, Y: 6, W: 90, H: 100, Background: color.RGBA{2, 2, 2, 255}}},
+	}
+	items := clip.AppendItems(nil)
+	var push *layout.Item
+	for i := range items {
+		if items[i].Kind == layout.ClipPushKind {
+			push = &items[i]
+			break
+		}
+	}
+	if push == nil {
+		t.Fatal("no ClipPushKind emitted")
+	}
+	if push.Rule.XPt != 5 || push.Rule.YPt != 6 || push.Rule.WPt != 90 || push.Rule.HPt != 38 {
+		t.Errorf("clip rect = (%v,%v,%v,%v), want (5,6,90,38)", push.Rule.XPt, push.Rule.YPt, push.Rule.WPt, push.Rule.HPt)
+	}
+}
+
+// TestAppendItemsNonClippingByteIdentical: a non-clipping fragment emits NO clip items.
+func TestAppendItemsNonClippingByteIdentical(t *testing.T) {
+	child := &Fragment{X: 0, Y: 20, W: 100, H: 30, Background: color.RGBA{1, 1, 1, 255}}
+	root := &Fragment{X: 0, Y: 0, W: 100, H: 60, Background: color.RGBA{2, 2, 2, 255}, IsBFC: true, IsStackingContext: true, Children: []*Fragment{child}}
+	items := root.AppendItems(nil)
+	for i := range items {
+		if items[i].Kind == layout.ClipPushKind || items[i].Kind == layout.ClipPopKind {
+			t.Fatalf("non-clipping fragment emitted a clip item at %d", i)
+		}
+	}
+	if len(items) != 2 {
+		t.Errorf("got %d items, want 2 (root bg, child bg) — no clip items", len(items))
+	}
+}
+
+// TestAppendItemsClipWrapsCBOwnedPositioned: an abs-pos descendant whose CB IS the
+// clipping box (PositionedClip[i]=true) paints INSIDE the bracket; one whose CB is
+// outside (PositionedClip[i]=false) paints OUTSIDE (after ClipPop).
+func TestAppendItemsClipWrapsCBOwnedPositioned(t *testing.T) {
+	owned := &Fragment{X: 0, Y: 0, W: 10, H: 10, Background: color.RGBA{7, 7, 7, 255}, IsPositioned: true, IsStackingContext: true}
+	escaped := &Fragment{X: 0, Y: 0, W: 10, H: 10, Background: color.RGBA{8, 8, 8, 255}, IsPositioned: true, IsStackingContext: true}
+	clip := &Fragment{
+		X: 0, Y: 0, W: 100, H: 50, IsBFC: true, IsStackingContext: true, Clips: true,
+		ClipRect:       rect{x: 0, y: 0, w: 100, h: 50},
+		Positioned:     []*Fragment{owned, escaped},
+		PositionedClip: []bool{true, false},
+	}
+	items := clip.AppendItems(nil)
+	idx := map[string]int{}
+	for i := range items {
+		switch {
+		case items[i].Kind == layout.ClipPushKind:
+			idx["push"] = i
+		case items[i].Kind == layout.ClipPopKind:
+			idx["pop"] = i
+		case items[i].Kind == layout.BackgroundKind && items[i].Rule.Color == (color.RGBA{7, 7, 7, 255}):
+			idx["owned"] = i
+		case items[i].Kind == layout.BackgroundKind && items[i].Rule.Color == (color.RGBA{8, 8, 8, 255}):
+			idx["escaped"] = i
+		}
+	}
+	if idx["push"] >= idx["owned"] || idx["owned"] >= idx["pop"] {
+		t.Errorf("owned positioned bg not inside the bracket: push=%d owned=%d pop=%d", idx["push"], idx["owned"], idx["pop"])
+	}
+	if idx["escaped"] <= idx["pop"] {
+		t.Errorf("escaped positioned bg not after ClipPop: escaped=%d pop=%d", idx["escaped"], idx["pop"])
+	}
+}
+
+// TestAppendItemsClipNests: a clipping fragment inside a clipping fragment nests its
+// bracket (inner push between outer push and outer pop).
+func TestAppendItemsClipNests(t *testing.T) {
+	inner := &Fragment{
+		X: 10, Y: 10, W: 50, H: 20, IsBFC: true, IsStackingContext: true, Clips: true,
+		ClipRect: rect{x: 10, y: 10, w: 50, h: 20},
+		Children: []*Fragment{{X: 10, Y: 10, W: 200, H: 200, Background: color.RGBA{3, 3, 3, 255}}},
+	}
+	outer := &Fragment{
+		X: 0, Y: 0, W: 100, H: 50, IsBFC: true, IsStackingContext: true, Clips: true,
+		ClipRect: rect{x: 0, y: 0, w: 100, h: 50},
+		Children: []*Fragment{inner},
+	}
+	items := outer.AppendItems(nil)
+	var pushes, pops []int
+	for i := range items {
+		if items[i].Kind == layout.ClipPushKind {
+			pushes = append(pushes, i)
+		}
+		if items[i].Kind == layout.ClipPopKind {
+			pops = append(pops, i)
+		}
+	}
+	if len(pushes) != 2 || len(pops) != 2 {
+		t.Fatalf("got %d pushes / %d pops, want 2/2 (nested clips)", len(pushes), len(pops))
+	}
+	if pushes[0] >= pushes[1] || pushes[1] >= pops[0] || pops[0] >= pops[1] {
+		t.Errorf("clips not nested: pushes=%v pops=%v", pushes, pops)
+	}
+}

@@ -239,9 +239,10 @@ what is done vs. pending.
   unchanged). The float context is queried in a BFC-root-relative band frame (`bandOriginY`); the
   shift helpers carry a fragment's `Floats` so a repositioned nested BFC moves its floats. Degrades
   gracefully: an overflow-wide float overflows the edge (no spin), `float:auto` width approximates the
-  resolved width, a floated inline-level box is blockified (CSS 9.7), and floats do not cross a nested
-  BFC boundary. Not yet modeled: a parent **enclosing** its floats' height (a float-only block has zero
-  content height) — deferred with the overflow slice. See
+  resolved width, and a floated inline-level box is blockified (CSS 9.7). A parent **enclosing** its
+  floats' height and a sibling BFC **shortening past** an outer float (the two float interactions a
+  non-BFC parent did not yet handle here) landed with the overflow slice (an `overflow≠visible` box
+  establishes the BFC both need — see the overflow bullet below). See
   `docs/superpowers/specs/2026-06-24-html-floats-design.md`.
 - **HTML rendering — positioning (relative / absolute / fixed)** (`pkg/layout/css/positioning.go`,
   extended `block.go`/`fragment.go`/`build.go`, `pkg/css` `position`/`top`/`right`/`bottom`/`left`/
@@ -268,6 +269,30 @@ what is done vs. pending.
   or an inline-block/replaced atom) is a no-op — relative offset takes effect only on block-level boxes.
   Non-positioned pages stay byte-identical (the existing goldens/reftests are unchanged). See
   `docs/superpowers/specs/2026-06-24-html-positioning-design.md`.
+- **HTML rendering — overflow clipping + deferred float interactions** (`pkg/css` `overflow`, extended
+  `pkg/layout/css/block.go`/`floats.go`/`fragment.go`, `pkg/layout` `ClipPushKind`/`ClipPopKind`,
+  `pkg/layout/paint`; covered by clip-geometry + adversarial clip-vs-stacking + flag-combination + float
+  unit tests, a paint raster clip test, the `html-overflow-hidden`/`html-float-row` goldens, and the
+  `overflow-hidden`/`float-row` WPT reftests): `overflow: hidden/scroll/auto` clips a box's content to its
+  **padding box**, and **`overflow≠visible` establishes a BFC** (the trigger for the two float
+  interactions below). Clipping is expressed as two flat-stream `layout.Item` kinds
+  (`ClipPushKind`/`ClipPopKind`) that `Fragment.AppendItems` brackets a clipping fragment's contents with
+  (own background/border paint **outside** the bracket; CB-owned abs-pos descendants inside via a parallel
+  `PositionedClip` flag; a positioned descendant whose containing block is **outside** the box paints after
+  `ClipPop`, unclipped — CSS abs-pos clipping); `PaintPage` maps them onto the painter's existing
+  `Save`/`PushClip`/`Restore` clip stack (the same one `object-fit:cover` uses), so clips **nest**.
+  `scroll`/`auto` clip exactly like `hidden` (no scroll position or scrollbar chrome in the single-tall-page
+  model; logged). Two float interactions land with it: **float-height enclosure** — a BFC box (incl.
+  `overflow:hidden`) grows to enclose its floats (`floatContext.maxBottom()` folded into an auto-height BFC
+  box's content height, CSS 10.6.7 — the `overflow:hidden` "clearfix"; restores the `float-row`
+  golden/reftest 5a had to drop); and **sibling-BFC float avoidance** — a BFC box laid out next to an outer
+  float shifts/narrows its border box past the float band, or drops below it when the band is too narrow
+  (CSS 9.5). Degrades gracefully: a **`position:relative` (or other positioned) descendant of a
+  *non-positioned* `overflow:hidden` box escapes the clip** (such a box is a BFC but not a stacking context,
+  so the descendant bubbles to a higher positioned layer — browsers clip it; deferred with full z-index);
+  `overflow-x`/`overflow-y` are not modeled (single shorthand only). Non-overflow pages stay byte-identical;
+  the shared inline core is **untouched**. See
+  `docs/superpowers/specs/2026-06-24-html-overflow-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -304,9 +329,11 @@ that skip into real output.
    `z-index` painting behind in-flow content, and numeric `z-index` ordering within a stacking context —
    `z-index` is parsed now; the minimal stacking pass paints positioned boxes in document order, and the
    positioned-layer loop in `AppendItems` is the seam this slice re-points at a z-sorted, sub-layered
-   order); **overflow clipping** (`overflow:hidden/scroll/auto`, plus the deferred float interactions: a
-   block **enclosing** its floats' height, and floats intruding across an `overflow≠visible` BFC
-   boundary); **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
+   order; **also fold in here**: clipping a `position:relative`/positioned descendant of a *non-positioned*
+   `overflow:hidden` box — today such a descendant bubbles past the clip to a higher positioned layer and
+   paints unclipped, because a non-positioned clipping box is a BFC but not a stacking context; the fix
+   needs the clip to reach an item range an ancestor's positioned phase emits, the same machinery this
+   slice reworks); **tables**; **web fonts** (`@font-face` + WOFF/WOFF2); **flexbox** then **grid** (today
    flex/grid/table fall back to block normal flow); **`OpenURL` + the HTTP `ResourceLoader`** (network
    fetching behind the existing seam, which currently has only hermetic loaders — also serves remote
    `<img src>` URLs); **pagination / CSS paged media** (the default stays a single tall image); and

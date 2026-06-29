@@ -54,13 +54,8 @@ var wptReftests = []struct {
 	{"float-left", 200, "a left float paints at the container's top-left, independent of the following in-flow block", nil},
 	{"abs-pos", 240, "an absolute box at top/left inside a relative container == a static box at the same coords", nil},
 	{"relative-offset", 240, "a relative offset == the same box placed at the shifted position with margins", nil},
-	// NOTE: the planned "float-row" reftest (float version vs an inline-block version,
-	// two-on-a-row-then-wrap) is intentionally dropped. The float test page's body
-	// holds ONLY floats, which (per CSS 2.1) do not extend a non-BFC parent's height,
-	// so it renders a 1×1 page; the inline-block reference renders 200×30. Their
-	// bounds differ, so they cannot be a pixel-equivalent reftest pair. The
-	// multi-float row layout is covered by pkg/layout/css/floats_test.go
-	// (TestPlaceStacksThenWraps stacking/wrap geometry) instead.
+	{"overflow-hidden", 200, "an overflow:hidden box clips an oversized child to its box (== a box authored to fit)", nil},
+	{"float-row", 200, "an overflow:hidden wrapper encloses its floats (== an explicit-height row of the same swatches)", nil},
 }
 
 // swatchColor is the solid color shared by the img-vs-div reftest's image and the
