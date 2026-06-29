@@ -153,6 +153,65 @@ func TestControlIntrinsicSizeNonZero(t *testing.T) {
 	}
 }
 
+// buildControlBox parses src, builds the cssbox tree, and returns the first
+// BoxReplaced whose Replaced.Control != CtrlNone (depth-first), or nil.
+func buildControlBox(t *testing.T, src string) *cssbox.Box {
+	t.Helper()
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var find func(b *cssbox.Box) *cssbox.Box
+	find = func(b *cssbox.Box) *cssbox.Box {
+		if b == nil {
+			return nil
+		}
+		if b.Kind == cssbox.BoxReplaced && b.Replaced != nil && b.Replaced.Control != cssbox.CtrlNone {
+			return b
+		}
+		for _, c := range b.Children {
+			if r := find(c); r != nil {
+				return r
+			}
+		}
+		return nil
+	}
+	return find(root)
+}
+
+func TestBuildControlBoxes(t *testing.T) {
+	// A checkbox becomes a replaced leaf with no children.
+	cb := buildControlBox(t, `<body><input type=checkbox checked></body>`)
+	if cb == nil || cb.Replaced.Control != cssbox.CtrlCheckbox {
+		t.Fatalf("checkbox not generated as a control replaced box")
+	}
+	if len(cb.Children) != 0 {
+		t.Errorf("control box has %d children, want 0 (leaf)", len(cb.Children))
+	}
+	if _, ok := cb.Replaced.Attrs["checked"]; !ok {
+		t.Errorf("checked attribute not snapshotted")
+	}
+	// A button carries its label and generates no child boxes (no leakage).
+	bt := buildControlBox(t, `<body><button>Go</button></body>`)
+	if bt == nil || bt.Replaced.Text != "Go" || len(bt.Children) != 0 {
+		t.Errorf("button box = %+v, want Text=Go and no children", bt)
+	}
+	// A select carries the selected option text and no children.
+	sl := buildControlBox(t, `<body><select><option>A</option><option selected>B</option></select></body>`)
+	if sl == nil || sl.Replaced.Text != "B" || len(sl.Children) != 0 {
+		t.Errorf("select box = %+v, want Text=B and no children", sl)
+	}
+	// type=hidden generates no box at all.
+	hid := buildControlBox(t, `<body><input type=hidden value=x></body>`)
+	if hid != nil {
+		t.Errorf("hidden input generated a box, want none")
+	}
+}
+
 func TestControlIntrinsicSizeScalesWithChars(t *testing.T) {
 	eng := New(nil, nil, nil)
 	ctx := context.Background()

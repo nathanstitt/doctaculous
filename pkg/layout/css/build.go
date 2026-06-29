@@ -121,6 +121,20 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 		b.ColSpan = attrSpan(e, "span")
 	}
 
+	if kind, skip := classifyControl(e.Tag(), elemAttrs(e)); kind != cssbox.CtrlNone || skip {
+		if skip {
+			return nil // <input type=hidden>: no box
+		}
+		b.Kind = cssbox.BoxReplaced
+		b.Replaced = &cssbox.ReplacedContent{
+			Tag:     e.Tag(),
+			Attrs:   controlAttrSnapshot(e),
+			Control: kind,
+			Text:    controlText(e, kind),
+		}
+		return b // controls are leaves — no child boxes (prevents text leakage)
+	}
+
 	if replacedTags[e.Tag()] {
 		b.Kind = cssbox.BoxReplaced
 		b.Replaced = &cssbox.ReplacedContent{Tag: e.Tag(), Attrs: attrSnapshot(e)}
@@ -176,6 +190,27 @@ func attrSpan(e *html.Element, name string) int {
 		return 1
 	}
 	return n
+}
+
+// elemAttrs returns the attributes classifyControl consults (currently just type).
+func elemAttrs(e *html.Element) map[string]string {
+	m := map[string]string{}
+	if v, ok := e.Attr("type"); ok {
+		m["type"] = v
+	}
+	return m
+}
+
+// controlAttrSnapshot copies the attributes a form control's sizing/paint consults.
+func controlAttrSnapshot(e *html.Element) map[string]string {
+	out := map[string]string{}
+	for _, k := range []string{"type", "value", "placeholder", "checked", "disabled",
+		"size", "cols", "rows", "width", "height"} {
+		if v, ok := e.Attr(k); ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // attrSnapshot copies the relevant attributes of a replaced element.
