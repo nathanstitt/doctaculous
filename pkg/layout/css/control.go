@@ -316,7 +316,7 @@ const (
 
 // append emits the control's chrome + text as paint items into dst, using only
 // existing item kinds.
-func (cc *ControlContent) append(dst []layout.Item, f *Fragment) []layout.Item {
+func (cc *ControlContent) append(dst []layout.Item) []layout.Item {
 	fill := func(x, y, w, h float64, c color.RGBA) {
 		dst = append(dst, layout.Item{Kind: layout.BackgroundKind,
 			Rule: layout.RuleItem{XPt: x, YPt: y, WPt: w, HPt: h, Color: c}})

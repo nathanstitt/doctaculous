@@ -767,13 +767,13 @@ func distributeAuto(cols []gridCol, idxs []int, budget float64) {
 }
 
 // isEmptyCellFragment reports whether a cell fragment has no rendered content — no
-// inline lines (text), no block/atomic children, no replaced image, no floats, and no
-// positioned descendants. Used by CSS empty-cells:hide to decide whether a cell's border
-// and background are suppressed. A cell holding only collapsed whitespace produces no
-// line boxes, so it reads as empty (matching browsers).
+// inline lines (text), no block/atomic children, no replaced image, no form control,
+// no floats, and no positioned descendants. Used by CSS empty-cells:hide to decide
+// whether a cell's border and background are suppressed. A cell holding only collapsed
+// whitespace produces no line boxes, so it reads as empty (matching browsers).
 func isEmptyCellFragment(f *Fragment) bool {
 	return len(f.Lines) == 0 && len(f.Children) == 0 && f.Image == nil &&
-		len(f.Floats) == 0 && len(f.Positioned) == 0
+		f.Control == nil && len(f.Floats) == 0 && len(f.Positioned) == 0
 }
 
 // cellMinMax returns a cell's min-content and max-content BORDER-box widths: the

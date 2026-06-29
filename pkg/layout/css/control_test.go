@@ -350,6 +350,26 @@ func TestControlPaintShiftedToPosition(t *testing.T) {
 	}
 }
 
+// TestControlCellNotTreatedEmpty asserts that isEmptyCellFragment returns false for a
+// fragment that has only f.Control set (regression: the guard was missing f.Control == nil).
+// A cell whose only content is a form control would be misclassified as empty, causing
+// empty-cells:hide to suppress its border and background.
+func TestControlCellNotTreatedEmpty(t *testing.T) {
+	// A genuinely empty fragment — all nil/zero — is empty.
+	empty := &Fragment{}
+	if !isEmptyCellFragment(empty) {
+		t.Error("bare empty fragment should be treated as empty")
+	}
+
+	// A fragment with only Control set must NOT be empty (regression guard).
+	withControl := &Fragment{
+		Control: &ControlContent{Kind: 1}, // any non-nil ControlContent
+	}
+	if isEmptyCellFragment(withControl) {
+		t.Error("fragment with f.Control set must not be treated as empty (isEmptyCellFragment missing f.Control==nil check)")
+	}
+}
+
 func TestButtonLabelSources(t *testing.T) {
 	// <button>Go</button> → label "Go" (2 glyphs).
 	btnEl := renderControlItems(t, `<body><button>Go</button></body>`)

@@ -402,7 +402,7 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 		})
 	}
 	if f.Control != nil {
-		dst = f.Control.append(dst, f)
+		dst = f.Control.append(dst)
 	}
 	return dst
 }
