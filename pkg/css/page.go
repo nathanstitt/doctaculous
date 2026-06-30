@@ -347,6 +347,20 @@ func applyPageDecls(up *UsedPage, decls []Declaration) {
 	}
 }
 
+// ComputeMarginBox resolves an @page margin box's declarations into a ComputedStyle,
+// applying them over the CSS initial style (then over a provided base for inheritance —
+// font/color of the page context). It is the styling source for a running header/footer:
+// the layout engine reads FontFamily / FontSizePt / Color / TextAlign from the result.
+// Properties the margin box does not set keep base's value (so a footer inherits the
+// document font/color when base carries them).
+func (s Stylesheet) ComputeMarginBox(decls []Declaration, base ComputedStyle) ComputedStyle {
+	cs := base
+	for _, d := range decls {
+		applyDeclaration(&cs, d)
+	}
+	return cs
+}
+
 // lastDecl returns the value of the last declaration with the given property (the one
 // the cascade keeps), and whether any was present.
 func lastDecl(decls []Declaration, prop string) (string, bool) {
