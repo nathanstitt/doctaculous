@@ -19,16 +19,37 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 	if !g.used.HasRule || len(g.used.MarginBoxes) == 0 {
 		return items
 	}
+	// First pass: resolve each box's text + measure its width (for edge distribution).
+	type mbItem struct {
+		slot  gcss.MarginBoxSlot
+		text  string
+		decls []gcss.Declaration
+		width float64
+	}
+	var items2 []mbItem
+	boxW := map[gcss.MarginBoxSlot]float64{}
 	for _, mb := range g.used.MarginBoxes {
 		text := resolveMarginContent(mb.Content, pageIndex+1, pageCount)
 		if text == "" {
-			continue // no content (or an unsupported content value → empty, logged below)
+			continue
 		}
-		r := marginBoxRect(mb.Slot, g)
+		cs := gcss.Stylesheet{}.ComputeMarginBox(mb.Decls, marginBoxBaseStyle())
+		run := inline.Run{Text: text, Family: cs.FontFamily, Bold: cs.Bold, Italic: cs.Italic, SizePt: cs.FontSizePt, Color: cs.Color}
+		glyphs := inline.Shape(e.faces, []inline.Run{run}, e.logf)
+		w := 0.0
+		if len(glyphs) > 0 {
+			w = inline.MakeLine(glyphs).WidthPt
+		}
+		boxW[mb.Slot] = w
+		items2 = append(items2, mbItem{slot: mb.Slot, text: text, decls: mb.Decls, width: w})
+	}
+	// Second pass: place each box in its distributed rect.
+	for _, it := range items2 {
+		r := marginBoxRectShared(it.slot, g, boxW)
 		if r.w <= 0 || r.h <= 0 {
-			continue // a degenerate band (zero margin on that side) — nothing to draw
+			continue
 		}
-		items = e.appendMarginText(items, text, mb.Decls, r)
+		items = e.appendMarginText(items, it.text, it.decls, r)
 	}
 	return items
 }
@@ -166,6 +187,58 @@ func marginBoxRect(slot gcss.MarginBoxSlot, g pageGeom) marginRect {
 		return marginRect{x: g.pageW - mR, y: g.pageH - mB, w: mR, h: mB}
 	}
 	return marginRect{}
+}
+
+// marginBoxRectShared computes a margin box's rect, distributing each edge's three
+// boxes (left/center/right) within the edge band by their measured content widths
+// (CSS Paged Media §8.3.1): the leading box pins to the leading corner, the trailing
+// box to the trailing corner, the center box centers. boxW maps a present slot to its
+// laid-out content width (in points); a slot absent from boxW reserves no space. Corner
+// slots delegate to marginBoxRect (their geometry is unaffected by siblings).
+func marginBoxRectShared(slot gcss.MarginBoxSlot, g pageGeom, boxW map[gcss.MarginBoxSlot]float64) marginRect {
+	band := marginBoxRect(slot, g) // full-span band for this slot's edge (or the corner rect)
+	lead, center, trail, horizontal, ok := edgeTriple(slot)
+	if !ok {
+		return band // a corner: unchanged
+	}
+	w := boxW[slot]
+	switch {
+	case horizontal:
+		switch slot {
+		case lead:
+			return marginRect{x: band.x, y: band.y, w: band.w, h: band.h}
+		case trail:
+			return marginRect{x: band.x + band.w - w, y: band.y, w: band.w, h: band.h}
+		case center:
+			return marginRect{x: band.x + (band.w-w)/2, y: band.y, w: band.w, h: band.h}
+		}
+	default: // vertical edge: distribute along Y
+		switch slot {
+		case lead:
+			return marginRect{x: band.x, y: band.y, w: band.w, h: band.h}
+		case trail:
+			return marginRect{x: band.x, y: band.y + band.h - w, w: band.w, h: band.h}
+		case center:
+			return marginRect{x: band.x, y: band.y + (band.h-w)/2, w: band.w, h: band.h}
+		}
+	}
+	return band
+}
+
+// edgeTriple returns the three slots of slot's edge (lead, center, trail), whether the
+// edge is horizontal (top/bottom) vs vertical (left/right), and ok=false for a corner.
+func edgeTriple(slot gcss.MarginBoxSlot) (lead, center, trail gcss.MarginBoxSlot, horizontal, ok bool) {
+	switch slot {
+	case gcss.MarginTopLeft, gcss.MarginTopCenter, gcss.MarginTopRight:
+		return gcss.MarginTopLeft, gcss.MarginTopCenter, gcss.MarginTopRight, true, true
+	case gcss.MarginBottomLeft, gcss.MarginBottomCenter, gcss.MarginBottomRight:
+		return gcss.MarginBottomLeft, gcss.MarginBottomCenter, gcss.MarginBottomRight, true, true
+	case gcss.MarginLeftTop, gcss.MarginLeftMiddle, gcss.MarginLeftBottom:
+		return gcss.MarginLeftTop, gcss.MarginLeftMiddle, gcss.MarginLeftBottom, false, true
+	case gcss.MarginRightTop, gcss.MarginRightMiddle, gcss.MarginRightBottom:
+		return gcss.MarginRightTop, gcss.MarginRightMiddle, gcss.MarginRightBottom, false, true
+	}
+	return 0, 0, 0, false, false
 }
 
 // appendMarginText lays out text on a single line within rect r (the margin box),

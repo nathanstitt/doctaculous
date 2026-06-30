@@ -53,6 +53,19 @@ var pagedMediaGoldens = []struct {
   <p>word word word word word word word word word word word word word word word word word word word word word word word word word word word word</p>
 </body></html>`,
 	},
+	{
+		name:    "page-three-headers",
+		wantPgs: 1,
+		html: `<!DOCTYPE html><html><head><style>
+  @page {
+    size: 400px 240px; margin: 40px;
+    @top-left { content: "L"; color:#333 }
+    @top-center { content: "CENTER"; color:#333 }
+    @top-right { content: "R"; color:#333 }
+  }
+  body { margin: 0 }
+</style></head><body><div style="height:160px;background:#cccccc">x</div></body></html>`,
+	},
 }
 
 // TestHTMLPagedMediaGolden renders @page-driven paginated documents end to end (via

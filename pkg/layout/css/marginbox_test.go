@@ -87,6 +87,37 @@ func TestMarginBoxRect(t *testing.T) {
 	}
 }
 
+func TestMarginBoxRectThreeAcrossTopEdge(t *testing.T) {
+	// Page 300x200, margins 20 all sides ⇒ content 260x160 at (20,20). The top edge
+	// band is y in [0,20), x in [20,280) (width 260). With all three top boxes present
+	// and ~60pt-wide content each, left pins to x=20, right pins to x=280-60=220, center
+	// sits at 20+(260-60)/2=120.
+	g := pageGeom{pageW: 300, pageH: 200, marginL: 20, marginT: 20, contentW: 260, contentH: 160}
+	widths := map[gcss.MarginBoxSlot]float64{
+		gcss.MarginTopLeft:   60,
+		gcss.MarginTopCenter: 60,
+		gcss.MarginTopRight:  60,
+	}
+	l := marginBoxRectShared(gcss.MarginTopLeft, g, widths)
+	c := marginBoxRectShared(gcss.MarginTopCenter, g, widths)
+	r := marginBoxRectShared(gcss.MarginTopRight, g, widths)
+	if l.x != 20 {
+		t.Errorf("top-left x = %.1f, want 20 (pinned left)", l.x)
+	}
+	if c.x < 119 || c.x > 121 {
+		t.Errorf("top-center x = %.1f, want ~120 (centered)", c.x)
+	}
+	if r.x < 219 || r.x > 221 {
+		t.Errorf("top-right x = %.1f, want ~220 (pinned right)", r.x)
+	}
+	// A lone center box (no left/right) still centers in the full band.
+	only := map[gcss.MarginBoxSlot]float64{gcss.MarginTopCenter: 60}
+	c2 := marginBoxRectShared(gcss.MarginTopCenter, g, only)
+	if c2.x < 119 || c2.x > 121 {
+		t.Errorf("lone top-center x = %.1f, want ~120", c2.x)
+	}
+}
+
 // TestMarginBoxPageCounterEndToEnd renders a 3-page document with a bottom-center page
 // counter and asserts each page paints glyphs in its bottom margin band (the footer).
 func TestMarginBoxPageCounterEndToEnd(t *testing.T) {
