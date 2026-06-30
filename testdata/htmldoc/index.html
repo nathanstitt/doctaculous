@@ -364,6 +364,34 @@ newline is kept.</p>
     <p class="caption">The inner list's <code>counter-reset</code> opens a new scope;
       <code>counters(list-item, ".")</code> would join them as 1.1, 1.2 &mdash; here the
       default per-list numbering restarts each level.</p>
+  </section>
+
+  <!-- ===================== 12 · BACKGROUNDS ===================== -->
+  <section class="section break">
+    <span class="kicker">12 / BACKGROUNDS</span>
+    <h2>Background Images</h2>
+    <p class="lede">A tiled texture, a cover hero, and a positioned badge &mdash;
+      <code>background-image</code> with repeat, size and position.</p>
+
+    <h4>Tiled texture (<code>repeat</code>)</h4>
+    <div class="bg-tiled">
+      <p>A small seamless tile repeats to fill the panel. The text sits on top of the
+        background, which paints behind the content and inside the padding box.</p>
+    </div>
+
+    <div class="cols2">
+      <div>
+        <h4><code>cover</code>, centered</h4>
+        <div class="bg-cover"></div>
+        <p class="caption">The photo scales to cover the box, cropping the overflow.</p>
+      </div>
+      <div>
+        <h4>Positioned badge</h4>
+        <div class="bg-badge"></div>
+        <p class="caption">A single icon, <code>no-repeat</code>, pinned bottom-right
+          over a tint.</p>
+      </div>
+    </div>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from

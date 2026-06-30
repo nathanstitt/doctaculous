@@ -114,6 +114,11 @@ const (
 	// ImageKind is a decoded raster image drawn into a content box (Item.Image is
 	// set), e.g. an <img> replaced element.
 	ImageKind
+	// BackgroundImageKind is a CSS background image painted behind a box's content
+	// (Item.BgImage is set): positioned, optionally tiled, and clipped to the
+	// background-clip box. Distinct from ImageKind, which has content-box/object-fit
+	// semantics; a background has its own origin/clip/position/repeat model.
+	BackgroundImageKind
 	// ClipPushKind pushes a clip rectangle (Item.Rule carries the rect; Color is
 	// unused). The painter saves the clip state and intersects the active clip with
 	// the rect, so subsequent items paint clipped until the matching ClipPopKind.
@@ -129,11 +134,12 @@ const (
 // Item is one drawing primitive on a page. It is a small tagged union rather than
 // an interface so a page's items live in one contiguous slice.
 type Item struct {
-	Kind   ItemKind
-	Glyph  GlyphItem
-	Rule   RuleItem
-	Border BorderItem
-	Image  ImageItem
+	Kind    ItemKind
+	Glyph   GlyphItem
+	Rule    RuleItem
+	Border  BorderItem
+	Image   ImageItem
+	BgImage BackgroundImageItem
 }
 
 // GlyphItem is a glyph to fill. The outline is kept in raw em units (Y up, as the
@@ -179,4 +185,48 @@ type ImageItem struct {
 	// They shift the fitted image within the content box for fits that leave free space
 	// (contain / none / scale-down); fill ignores them.
 	PosX, PosY float64
+}
+
+// BgSizeKind selects how a CSS background image's painted (tile) size is computed. It
+// is the layout-local mirror of the css BackgroundSizeKind (layout must not import
+// css), mapped when the item is built.
+type BgSizeKind int
+
+const (
+	// BgSizeAuto: each axis is the image's intrinsic size (a single explicit axis
+	// scales the other to preserve the intrinsic ratio).
+	BgSizeAuto BgSizeKind = iota
+	// BgSizeCover: scale (preserving ratio) to cover the origin box.
+	BgSizeCover
+	// BgSizeContain: scale (preserving ratio) to fit inside the origin box.
+	BgSizeContain
+	// BgSizeExplicit: each axis from the resolved W/H below (≤0 = auto for that axis).
+	BgSizeExplicit
+)
+
+// BackgroundImageItem is a CSS background image to paint behind a box's content (CSS
+// Backgrounds 3). All rects are page space (points, Y-down, top-left origin). The
+// painter computes the painted tile size from SizeKind + SizeW/SizeH and the intrinsic
+// size, places the first tile from the position within the origin box, tiles along
+// RepeatX/RepeatY, and clips every tile to the clip box. A nil Img draws nothing.
+type BackgroundImageItem struct {
+	Img                    image.Image
+	IntrinsicW, IntrinsicH float64 // decoded pixel size, > 0
+
+	// Origin box: where the image is sized and positioned (background-origin box).
+	OriginX, OriginY, OriginW, OriginH float64
+	// Clip box: the paint area every tile is confined to (background-clip box).
+	ClipX, ClipY, ClipW, ClipH float64
+
+	SizeKind     BgSizeKind
+	SizeW, SizeH float64 // for BgSizeExplicit: resolved px per axis (≤0 = auto)
+
+	// Background-position per axis: Pos*Frac is the percentage as a fraction [0,1]
+	// (resolved against origin − tile size) when Pos*IsPct; otherwise Pos*Px is an
+	// absolute offset (px) from the origin box's leading edge.
+	PosXFrac, PosYFrac   float64
+	PosXPx, PosYPx       float64
+	PosXIsPct, PosYIsPct bool
+
+	RepeatX, RepeatY bool
 }

@@ -740,6 +740,41 @@ line area</textarea></div>
   <div><input type="text" value="disabled" disabled></div>
 </body></html>`,
 	},
+	{
+		// background-image tiling: the quad PNG repeats across a tall box (background
+		// color shows nowhere since the tile fully covers). Eyeball: a regular grid of
+		// the four-quadrant tile, top-left aligned.
+		name:       "bg-tiled",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .panel { height: 160px; background: #eee url(quad.png); }
+</style></head><body><div class="panel"></div></body></html>`,
+		loader: quadLoader(),
+	},
+	{
+		// background-size: cover, no-repeat: the 40x40 tile scales (preserving ratio) to
+		// cover the 200x120 box, clipped to it. Eyeball: one enlarged quad filling the
+		// box, the four colors in their corners (cover crops the longer axis).
+		name:       "bg-cover",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .hero { height: 120px; background: url(quad.png) no-repeat center / cover; }
+</style></head><body><div class="hero"></div></body></html>`,
+		loader: quadLoader(),
+	},
+	{
+		// background-position bottom-right, no-repeat, over a colored box. Eyeball: a
+		// single quad tile in the bottom-right corner; the rest is the #cde fill.
+		name:       "bg-position",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .badge { height: 120px; background: #cde url(quad.png) no-repeat bottom right; }
+</style></head><body><div class="badge"></div></body></html>`,
+		loader: quadLoader(),
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for

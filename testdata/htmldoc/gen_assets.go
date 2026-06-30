@@ -22,6 +22,26 @@ func main() {
 	must(writePNG("img/quad.png", quad(64)))
 	must(writeJPEG("img/photo.jpg", gradientDisc(160, 120)))
 	must(writeGIF("img/icon.gif", monogram(48)))
+	must(writePNG("img/tile.png", weave(32)))
+}
+
+// weave is a small seamless tile for background-image: a faint diagonal hatch in the
+// showcase's parchment palette so it tiles into a subtle paper texture. Seamless
+// because the hatch period divides the tile size.
+func weave(size int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	base := color.RGBA{0xf0, 0xe6, 0xc4, 0xff}  // parchment
+	hatch := color.RGBA{0xe2, 0xd2, 0xa0, 0xff} // a shade darker
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			c := base
+			if (x+y)%8 == 0 || (x-y+size)%8 == 0 { // two crossing diagonals
+				c = hatch
+			}
+			img.SetRGBA(x, y, c)
+		}
+	}
+	return img
 }
 
 // quad is a four-quadrant square: an orientation tell-tale (TL ink, TR gold, BL

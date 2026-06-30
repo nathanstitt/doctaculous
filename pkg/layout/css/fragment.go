@@ -24,14 +24,15 @@ import (
 // stage already consumes. The flatten is a pure read of the tree; it never mutates
 // it, preserving the read-only-after-layout contract.
 type Fragment struct {
-	X, Y, W, H float64         // the BORDER box rectangle in page space
-	Background color.RGBA      // zero-alpha => no background fill
-	Border     [4]BorderEdge   // indexed by layout.EdgeSide (EdgeTop, EdgeRight, EdgeBottom, EdgeLeft)
-	Lines      []LineFragment  // inline content (set for a box establishing an inline formatting context)
-	Children   []*Fragment     // child box fragments (block children; atomic inline boxes)
-	Image      *ImageContent   // decoded replaced-element image (set for a replaced box), painted in the content box
-	Control    *ControlContent // form-control widget (set for a control replaced box), painted in the content box
-	DebugTag   string          // optional label for test lookup; not used in paint
+	X, Y, W, H float64                 // the BORDER box rectangle in page space
+	Background color.RGBA              // zero-alpha => no background fill
+	Border     [4]BorderEdge           // indexed by layout.EdgeSide (EdgeTop, EdgeRight, EdgeBottom, EdgeLeft)
+	Lines      []LineFragment          // inline content (set for a box establishing an inline formatting context)
+	Children   []*Fragment             // child box fragments (block children; atomic inline boxes)
+	Image      *ImageContent           // decoded replaced-element image (set for a replaced box), painted in the content box
+	Control    *ControlContent         // form-control widget (set for a control replaced box), painted in the content box
+	BgImage    *BackgroundImageContent // decoded CSS background image (set when the box has a decodable background-image), painted behind content
+	DebugTag   string                  // optional label for test lookup; not used in paint
 
 	// Box is the source cssbox.Box this fragment was produced from, retained so the
 	// flatten/paint stage can read style-driven paint facts that are not pre-resolved
@@ -142,6 +143,28 @@ type ImageContent struct {
 	// PosX, PosY are the object-position as fractions of the content box's free space
 	// (0.5/0.5 = centered, the default). See layout.ImageItem.
 	PosX, PosY float64
+}
+
+// BackgroundImageContent is a fragment's resolved CSS background image plus the
+// geometry the painter needs, all in page-space points. The origin box is where the
+// image is sized and positioned (background-origin); the clip box is the paint area it
+// is confined to (background-clip) — the two differ when the properties differ. It is
+// flattened into a layout.BackgroundImageItem in paint order (behind the box's
+// content, after its background color, before its border).
+type BackgroundImageContent struct {
+	Img                                image.Image
+	IntrinsicW, IntrinsicH             float64
+	OriginX, OriginY, OriginW, OriginH float64
+	ClipX, ClipY, ClipW, ClipH         float64
+
+	SizeKind     layout.BgSizeKind
+	SizeW, SizeH float64 // resolved px per axis for BgSizeExplicit (≤0 = auto)
+
+	PosXFrac, PosYFrac   float64
+	PosXPx, PosYPx       float64
+	PosXIsPct, PosYIsPct bool
+
+	RepeatX, RepeatY bool
 }
 
 // BorderEdge is one side of a fragment's border box. A zero edge (Width == 0 or
@@ -364,6 +387,24 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 			Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Color: f.Background},
 		})
 	}
+	// Background image paints after the background color and before the border (CSS
+	// Backgrounds 3 paint order).
+	if bg := f.BgImage; bg != nil && bg.Img != nil {
+		dst = append(dst, layout.Item{
+			Kind: layout.BackgroundImageKind,
+			BgImage: layout.BackgroundImageItem{
+				Img:        bg.Img,
+				IntrinsicW: bg.IntrinsicW, IntrinsicH: bg.IntrinsicH,
+				OriginX: bg.OriginX, OriginY: bg.OriginY, OriginW: bg.OriginW, OriginH: bg.OriginH,
+				ClipX: bg.ClipX, ClipY: bg.ClipY, ClipW: bg.ClipW, ClipH: bg.ClipH,
+				SizeKind: bg.SizeKind, SizeW: bg.SizeW, SizeH: bg.SizeH,
+				PosXFrac: bg.PosXFrac, PosYFrac: bg.PosYFrac,
+				PosXPx: bg.PosXPx, PosYPx: bg.PosYPx,
+				PosXIsPct: bg.PosXIsPct, PosYIsPct: bg.PosYIsPct,
+				RepeatX: bg.RepeatX, RepeatY: bg.RepeatY,
+			},
+		})
+	}
 	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
 		e := f.Border[s]
 		if e.Width <= 0 || e.Style == layout.BorderNone {
@@ -450,6 +491,11 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 		case layout.ImageKind:
 			dst[i].Image.XPt += dx
 			dst[i].Image.YPt += dy
+		case layout.BackgroundImageKind:
+			dst[i].BgImage.OriginX += dx
+			dst[i].BgImage.OriginY += dy
+			dst[i].BgImage.ClipX += dx
+			dst[i].BgImage.ClipY += dy
 		case layout.ClipPushKind:
 			// A clip established by the offset box itself (overflow≠visible) or by an
 			// overflow box inside its subtree rides the paint-time offset with the content

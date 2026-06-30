@@ -46,6 +46,16 @@ type ComputedStyle struct {
 	Color           color.RGBA
 	BackgroundColor color.RGBA // zero-alpha means transparent / not set
 
+	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
+	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
+	BackgroundImage    string
+	BackgroundRepeat   string         // "repeat" (initial) | "repeat-x" | "repeat-y" | "no-repeat"
+	BackgroundPosition BackgroundPos  // initial 0% 0% (top-left)
+	BackgroundSize     BackgroundSize // initial auto
+	BackgroundOrigin   string         // "padding-box" (initial) | "border-box" | "content-box"
+	BackgroundClip     string         // "border-box" (initial) | "padding-box" | "content-box"
+	BackgroundAttach   string         // "scroll" (initial) | "fixed" (degraded to scroll)
+
 	FontFamily string
 	FontSizePt float64 // resolved to an absolute size (px treated 1:1 as pt for now)
 	Bold       bool
@@ -351,36 +361,41 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 func initialStyle() ComputedStyle {
 	black := color.RGBA{0, 0, 0, 255}
 	return ComputedStyle{
-		Display:           "inline",
-		Color:             black,
-		FontFamily:        "serif",
-		FontSizePt:        16,
-		LineHeight:        Length{Unit: UnitAuto},
-		TextAlign:         "left",
-		WhiteSpace:        "normal",
-		ListStyleType:     "disc",
-		ListStylePosition: "outside",
-		Width:             Length{Unit: UnitAuto},
-		Height:            Length{Unit: UnitAuto},
-		MinWidth:          Length{Unit: UnitPx},   // CSS initial min-width is 0
-		MaxWidth:          Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
-		MinHeight:         Length{Unit: UnitPx},   // CSS initial min-height is 0
-		MaxHeight:         Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
-		BoxSizing:         "content-box",
-		ObjectFit:         "fill", // CSS initial object-fit
-		ObjectPositionX:   0.5,    // CSS initial object-position: 50% 50%
-		ObjectPositionY:   0.5,
-		Overflow:          "visible", // CSS initial overflow
-		Float:             "none",    // CSS initial float
-		Clear:             "none",    // CSS initial clear
-		Position:          "static",  // CSS initial position
-		Top:               Length{Unit: UnitAuto},
-		Right:             Length{Unit: UnitAuto},
-		Bottom:            Length{Unit: UnitAuto},
-		Left:              Length{Unit: UnitAuto},
-		ZIndexAuto:        true, // CSS initial z-index is auto
-		MarginTop:         Length{Unit: UnitPx},
-		MarginRight:       Length{Unit: UnitPx},
+		Display:            "inline",
+		Color:              black,
+		FontFamily:         "serif",
+		FontSizePt:         16,
+		LineHeight:         Length{Unit: UnitAuto},
+		TextAlign:          "left",
+		WhiteSpace:         "normal",
+		ListStyleType:      "disc",
+		ListStylePosition:  "outside",
+		BackgroundRepeat:   "repeat",
+		BackgroundPosition: initialBackgroundPosition(),
+		BackgroundOrigin:   "padding-box",
+		BackgroundClip:     "border-box",
+		BackgroundAttach:   "scroll",
+		Width:              Length{Unit: UnitAuto},
+		Height:             Length{Unit: UnitAuto},
+		MinWidth:           Length{Unit: UnitPx},   // CSS initial min-width is 0
+		MaxWidth:           Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		MinHeight:          Length{Unit: UnitPx},   // CSS initial min-height is 0
+		MaxHeight:          Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		BoxSizing:          "content-box",
+		ObjectFit:          "fill", // CSS initial object-fit
+		ObjectPositionX:    0.5,    // CSS initial object-position: 50% 50%
+		ObjectPositionY:    0.5,
+		Overflow:           "visible", // CSS initial overflow
+		Float:              "none",    // CSS initial float
+		Clear:              "none",    // CSS initial clear
+		Position:           "static",  // CSS initial position
+		Top:                Length{Unit: UnitAuto},
+		Right:              Length{Unit: UnitAuto},
+		Bottom:             Length{Unit: UnitAuto},
+		Left:               Length{Unit: UnitAuto},
+		ZIndexAuto:         true, // CSS initial z-index is auto
+		MarginTop:          Length{Unit: UnitPx},
+		MarginRight:        Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
 		FlexDirection:  "row",
 		FlexWrap:       "nowrap",
@@ -423,8 +438,37 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		if c, ok := parseColor(newTokenizer(d.Value)); ok {
 			cs.BackgroundColor = c
 		}
+	case "background-image":
+		if ref, ok := parseBackgroundImage(d.Value); ok {
+			cs.BackgroundImage = ref
+		}
+	case "background-repeat":
+		switch strings.ToLower(strings.TrimSpace(d.Value)) {
+		case "repeat", "repeat-x", "repeat-y", "no-repeat":
+			cs.BackgroundRepeat = strings.ToLower(strings.TrimSpace(d.Value))
+		}
+	case "background-position":
+		if p, ok := parseBackgroundPosition(d.Value); ok {
+			cs.BackgroundPosition = p
+		}
+	case "background-size":
+		if s, ok := parseBackgroundSize(d.Value); ok {
+			cs.BackgroundSize = s
+		}
+	case "background-origin":
+		if v, ok := normalizeBoxValue(d.Value); ok {
+			cs.BackgroundOrigin = v
+		}
+	case "background-clip":
+		if v, ok := normalizeBoxValue(d.Value); ok {
+			cs.BackgroundClip = v
+		}
+	case "background-attachment":
+		switch strings.ToLower(strings.TrimSpace(d.Value)) {
+		case "scroll", "local", "fixed":
+			cs.BackgroundAttach = strings.ToLower(strings.TrimSpace(d.Value))
+		}
 	case "background":
-		// Color-only support for now; see applyBackground.
 		applyBackground(cs, d.Value)
 	case "font":
 		// The `font` shorthand: [style||variant||weight]? size[/line-height] family.

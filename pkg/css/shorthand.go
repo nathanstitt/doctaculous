@@ -518,19 +518,103 @@ func applyGridShorthand(cs *ComputedStyle, val string) {
 	applyGridTemplate(cs, v)
 }
 
-// applyBackground expands the (currently color-only) `background` shorthand. The
-// full background shorthand (image/position/repeat/size/attachment) is future
-// work; ComputedStyle only carries BackgroundColor today. Behavior: scan the
-// components and set BackgroundColor to the first one that parses as a color;
-// non-color components (url(), gradients, position keywords) are ignored. If no
-// component is a color the declaration is dropped, leaving BackgroundColor intact.
+// applyBackground expands the `background` shorthand into its longhands. It is a
+// single-layer parser (no comma-separated layers): it resets every background
+// longhand to its initial (per the shorthand's reset semantics) and then classifies
+// each space-separated component — color, url() image, repeat keyword, attachment
+// keyword, origin/clip box keyword, or a position[/size] group. A component it cannot
+// classify is ignored (so a gradient or unsupported token degrades without dropping
+// the whole declaration). `background: none` / an all-unrecognized value still resets
+// the longhands, matching the shorthand resetting the image to none.
+//
+// background-origin and background-clip share box keywords: the first box keyword sets
+// origin (and clip, which defaults to it), a second sets clip — matching CSS.
 func applyBackground(cs *ComputedStyle, value string) {
-	for _, comp := range splitComponents(value) {
-		if c, ok := parseColor(newTokenizer(comp)); ok {
-			cs.BackgroundColor = c
-			return
+	// Reset longhands to initial (the shorthand sets every sub-property — including the
+	// color: `background: url(x)` with no color resets background-color to transparent).
+	cs.BackgroundColor = color.RGBA{}
+	cs.BackgroundImage = ""
+	cs.BackgroundRepeat = "repeat"
+	cs.BackgroundPosition = initialBackgroundPosition()
+	cs.BackgroundSize = BackgroundSize{}
+	cs.BackgroundOrigin = "padding-box"
+	cs.BackgroundClip = "border-box"
+	cs.BackgroundAttach = "scroll"
+
+	// A "<position> / <size>" group is separated by a top-level slash. Split it off the
+	// whole value first (the slash may be its own component or attached to a keyword),
+	// then parse the size part and feed the position part through the component scan.
+	posPart, sizePart := splitBackgroundSlash(value)
+	if sizePart != "" {
+		if s, ok := parseBackgroundSize(sizePart); ok {
+			cs.BackgroundSize = s
 		}
 	}
+
+	boxSeen := 0
+	var posParts []string // position components accumulated, parsed at the end
+	for _, comp := range splitComponents(posPart) {
+		lc := strings.ToLower(comp)
+		switch lc {
+		case "none":
+			cs.BackgroundImage = ""
+		case "repeat", "repeat-x", "repeat-y", "no-repeat":
+			cs.BackgroundRepeat = lc
+		case "scroll", "fixed", "local":
+			cs.BackgroundAttach = lc
+		case "border-box", "padding-box", "content-box":
+			if boxSeen == 0 {
+				cs.BackgroundOrigin = lc
+				cs.BackgroundClip = lc
+			} else {
+				cs.BackgroundClip = lc
+			}
+			boxSeen++
+		default:
+			if ref, ok := parseBackgroundImage(comp); ok && ref != "" {
+				cs.BackgroundImage = ref
+			} else if c, ok := parseColor(newTokenizer(comp)); ok {
+				cs.BackgroundColor = c
+			} else {
+				// Likely a position keyword/length; defer to the position parser.
+				posParts = append(posParts, comp)
+			}
+		}
+	}
+	if len(posParts) > 0 {
+		if p, ok := parseBackgroundPosition(strings.Join(posParts, " ")); ok {
+			cs.BackgroundPosition = p
+		}
+	}
+}
+
+// splitBackgroundSlash splits a `background` value at the top-level slash that
+// separates the position from the size (position / size). It returns the text before
+// the slash and the text after; if there is no top-level slash, sizePart is "". The
+// scan ignores a slash inside parentheses or quotes (url()/data URIs).
+func splitBackgroundSlash(value string) (posPart, sizePart string) {
+	depth := 0
+	var quote byte
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			if depth > 0 {
+				depth--
+			}
+		case c == '/' && depth == 0:
+			return strings.TrimSpace(value[:i]), strings.TrimSpace(value[i+1:])
+		}
+	}
+	return value, ""
 }
 
 // parseObjectPosition parses a CSS object-position value into (x, y) fractions of the

@@ -473,6 +473,31 @@ body {
   margin: 6px 0;
 }
 
+/* ----- backgrounds ----------------------------------------------------------- */
+
+/* A tiled paper texture behind body copy, with padding so the text clears the edge. */
+.bg-tiled {
+  background-image: url(../img/tile.png);
+  border: 1px solid #c9c2b0;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.bg-tiled p { margin: 0; }
+
+/* The photo scaled to cover a fixed box (cropping the overflow), no repeat. */
+.bg-cover {
+  height: 130px;
+  background: #1a1a18 url(../img/photo.jpg) no-repeat center / cover;
+  border: 1px solid #c9c2b0;
+}
+
+/* A single icon pinned to the bottom-right corner over a tint. */
+.bg-badge {
+  height: 130px;
+  background: #f0e6c4 url(../img/icon.gif) no-repeat bottom right;
+  border: 1px solid #c9c2b0;
+}
+
 /* ----- colophon -------------------------------------------------------------- */
 
 .colophon {
