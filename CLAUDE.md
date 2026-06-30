@@ -723,13 +723,23 @@ what is done vs. pending.
   the shared inline core are **untouched** (the line splitter partitions *already-placed* lines; margin-box text
   reuses the inline core read-only). **Byte-identical:** a document with no `@page` rule rendered without
   `WithPageSize`/`WithDefaultPaged` is one tall page exactly as before (the whole existing corpus is unchanged); an
-  `@page` rule is **inert** until pagination is requested. Degrades gracefully (no panic, logged where useful):
-  mid-table-row / mid-flex-item / mid-grid-item splits and a block mixing block-children-and-inline-lines are NOT
-  line-split (whole-block placement, overflow if too tall — `lineSplittable` gates to pure-inline blocks); a
-  `break-inside:avoid` block taller than a page overflows; `string()`/`element()`/`string-set` and counter styles
-  beyond decimal in margin boxes resolve to empty/decimal (deferred); `@page` `marks`/`bleed` ignored. This
-  completes sub-project 6's roadmap — **the last non-fidelity HTML slice**. See
-  `docs/superpowers/specs/2026-06-30-html-paged-media-design.md`.
+  `@page` rule is **inert** until pagination is requested. A **follow-up pass then implemented every item the
+  initial slice deferred** (see `docs/paged-media-deferral-signoffs.md` + the `2026-06-30-{crop-marks,named-page-
+  reflow,running-elements}.md` sub-plans): **counter() styles** (roman/alpha/leading-zero) and **per-edge margin-box
+  distribution** in margin boxes; **`@page marks`/`bleed`** (crop + cross registration marks drawn in a real bleed
+  band, the page bitmap grown to the media box); **`string-set` + `string()`** running headers with the full GCPM
+  **first/last/start** position keywords; **`break-*: avoid` chains** (not just pairwise); **mid-box fragmentation** —
+  a block mixing block-children-and-inline-lines splits at child boundaries, a **table** breaks between rows, a
+  **column-flex / multi-row grid** breaks between item rows; **named-page multi-width reflow** (a `page: name`
+  section laid out at its own `@page` width, stitched into the page stream); and **`position: running()` +
+  `content: element()`** — a live styled element relocated into a `@page` margin box and painted (formatted markup,
+  not just text) on every page. Remaining gaps are **signed sub-deferrals** (each in the ledger, owner-approved):
+  mid-CELL table content + mid-ITEM flex/grid content splitting (a single over-tall row/item/line is genuinely
+  indivisible → overflows), positioned/float distribution within a different-width named-page run, and the
+  `string()`/`element()` position keywords beyond the running value. This completes sub-project 6's roadmap —
+  **the last non-fidelity HTML slice, with full CSS Paged Media fidelity**. See
+  `docs/superpowers/specs/2026-06-30-html-paged-media-design.md` and the four sub-plans under
+  `docs/superpowers/plans/2026-06-30-*`.
 
 ### TODO (roughly priority order — pick these up next)
 
