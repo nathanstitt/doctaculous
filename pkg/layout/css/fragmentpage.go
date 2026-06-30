@@ -9,14 +9,15 @@ import (
 // pagination: it must carry no break-inside: avoid, and EITHER establish an inline
 // formatting context with at least two lines (a pure-inline paragraph, line-split by
 // splitBlockForPage), hold at least one in-flow block child (a mixed block+inline
-// container, split at a child boundary by splitMixedBlock), or be a table (split between
-// rows by splitTableForPage). Floats/positioned children are out of flow and do not by
+// container, split at a child boundary by splitMixedBlock), be a table (split between rows
+// by splitTableForPage), or be a flex/grid container (split between item rows by
+// splitFlexGridForPage). Floats/positioned children are out of flow and do not by
 // themselves make a block splittable. break-inside: avoid disqualifies every shape.
 func lineSplittable(b *Fragment) bool {
 	if b == nil || keptInsideAvoid(b) {
 		return false
 	}
-	return len(b.Lines) >= 2 || hasInFlowBlockChild(b) || isTableFragment(b)
+	return len(b.Lines) >= 2 || hasInFlowBlockChild(b) || isTableFragment(b) || isFlexOrGridFragment(b)
 }
 
 // isTableFragment reports whether f is a table fragment (its box is display:table), so the
@@ -26,17 +27,27 @@ func isTableFragment(f *Fragment) bool {
 }
 
 // splitAnyBlockForPage splits b for the page, choosing the splitter by b's content shape:
-// a table breaks between rows, a block with in-flow block children breaks at child
-// boundaries, and a pure-inline block line-splits. (The flex/grid arm is added by its own
-// task.)
+// a table breaks between rows, a column-flex/grid breaks between item rows, a block with
+// in-flow block children breaks at child boundaries, and a pure-inline block line-splits.
 func splitAnyBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) splitResult {
 	if isTableFragment(b) {
 		return splitTableForPage(b, pageBottom)
+	}
+	if isFlexOrGridFragment(b) {
+		return splitFlexGridForPage(b, pageBottom)
 	}
 	if hasInFlowBlockChild(b) {
 		return splitMixedBlock(b, pageBottom, widows, orphans)
 	}
 	return splitBlockForPage(b, pageBottom, widows, orphans)
+}
+
+// isFlexOrGridFragment reports whether f is a flex or grid container fragment (its box is
+// display:flex or display:grid), so the bucketer routes it to the between-item-rows
+// splitter. inline-flex/inline-grid containers flow as inline atoms (not top-level blocks),
+// so they are not bucketed and need not be matched here.
+func isFlexOrGridFragment(f *Fragment) bool {
+	return f != nil && f.Box != nil && (f.Box.Display == cssbox.DisplayFlex || f.Box.Display == cssbox.DisplayGrid)
 }
 
 // hasInFlowBlockChild reports whether f has at least one in-flow (non-float,

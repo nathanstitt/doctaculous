@@ -13,7 +13,8 @@ log lines and fails if any lacks a signed row here.
 
 | # | Deferred item | Why deferred | Signed off by | Date |
 |---|---|---|---|---|
-| _none yet_ | | | | |
+| 1 | MID-CELL table content splitting | Tables break between ROWS (a row rides one page); a single row taller than a page overflows whole, and a cell's inline content is not split across pages | Nathan | 2026-06-30 |
+| 2 | SINGLE-LINE flex / one-row grid + MID-ITEM splitting | A single-line flex row or one-row grid (items share a band) overflows whole — genuinely indivisible; a flex/grid ITEM's own content is not split across pages | Nathan | 2026-06-30 |
 
 ## Resolved — implemented, NOT deferred
 
