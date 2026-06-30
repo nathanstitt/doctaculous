@@ -53,6 +53,7 @@ var wptReftests = []struct {
 	{"img-vs-div", 200, "a solid <img> sized W×H equals a <div> of the same size and background", solidSwatchLoader()},
 	{"bg-image-vs-color", 200, "a tiled solid background-image equals the same box with that background-color", solidSwatchLoader()},
 	{"link-pseudo", 200, "an <a href> styled by a:link (color + underline) equals a <span> with the same color + text-decoration", nil},
+	{"bgcolor-attr", 200, "a table colored with the legacy bgcolor attribute equals the same table colored with CSS background-color", nil},
 	{"block-img", 200, "a display:block <img> breaks out of inline flow onto its own line (== the inline-block then the img as a sized block div)", solidSwatchLoader()},
 	{"float-left", 200, "a left float paints at the container's top-left, independent of the following in-flow block", nil},
 	{"abs-pos", 240, "an absolute box at top/left inside a relative container == a static box at the same coords", nil},

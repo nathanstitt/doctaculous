@@ -416,6 +416,38 @@ newline is kept.</p>
       <a class="seen" href="https://example.com">this link</a> stays the unvisited
       style &mdash; and a bare anchor with no <code>href</code>,
       <a>like this</a>, is not a link at all.</p>
+  </section>
+
+  <!-- ============== 14 · LEGACY PRESENTATIONAL ATTRIBUTES ============== -->
+  <section class="section break">
+    <span class="kicker">14 / LEGACY ATTRIBUTES</span>
+    <h2>Presentational Attributes</h2>
+    <p class="lede">Pre&#8209;CSS styling via HTML attributes &mdash;
+      <code>bgcolor</code>, <code>align</code>, <code>cellpadding</code>,
+      <code>border</code>, <code>&lt;font&gt;</code> &mdash; mapped to CSS as
+      below&#8209;cascade hints (real CSS still wins).</p>
+
+    <p>The kind of table the early web was built from: colored rows, padded bordered
+      cells, and aligned columns, all set with attributes rather than a stylesheet.</p>
+
+    <table bgcolor="#efe9d8" cellpadding="6" cellspacing="0" border="1" width="100%">
+      <tr bgcolor="#3a4a5a">
+        <th align="left"><font color="#ffffff">Component</font></th>
+        <th align="left"><font color="#ffffff">Language</font></th>
+        <th align="right"><font color="#ffffff">Lines</font></th>
+      </tr>
+      <tr><td>Parser</td><td>Go</td><td align="right">4,210</td></tr>
+      <tr><td>Layout engine</td><td>Go</td><td align="right">11,930</td></tr>
+      <tr><td>Rasterizer</td><td>Go</td><td align="right">6,740</td></tr>
+    </table>
+
+    <p>An obsolete <code>&lt;font&gt;</code> still works:
+      <font color="#b03a2e" size="5">large red text</font>, and an
+      <code>&lt;ol type="I" start="3"&gt;</code> numbers with the attribute:</p>
+    <ol type="I" start="3">
+      <li>Third in Roman</li>
+      <li>Fourth in Roman</li>
+    </ol>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from

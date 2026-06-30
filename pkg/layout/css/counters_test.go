@@ -83,6 +83,22 @@ func TestListNumberingIgnoresInterItemWhitespace(t *testing.T) {
 	}
 }
 
+// The legacy <ol start> and <li value> attributes set the marker numbers via the
+// presentational-hint → counter mechanism. start=N begins at N; a mid-list value=M
+// renumbers that item to M and the following sibling continues from it.
+func TestLegacyListNumberAttributes(t *testing.T) {
+	// <ol start=3> → 3, 4, 5
+	got := markers(buildTree(t, `<body><ol start="3"><li>a</li><li>b</li><li>c</li></ol></body>`))
+	if len(got) != 3 || got[0] != "3. " || got[1] != "4. " || got[2] != "5. " {
+		t.Errorf("ol start=3 markers = %q, want 3.,4.,5.", got)
+	}
+	// <li value=5> renumbers mid-list: 1, 5, 6
+	got2 := markers(buildTree(t, `<body><ol><li>a</li><li value="5">b</li><li>c</li></ol></body>`))
+	if len(got2) != 3 || got2[0] != "1. " || got2[1] != "5. " || got2[2] != "6. " {
+		t.Errorf("li value=5 markers = %q, want 1.,5.,6.", got2)
+	}
+}
+
 // content: counters(item, ".") on nested ordered lists joins the scope chain.
 func TestCountersNestedJoin(t *testing.T) {
 	// A counter-reset on a box opens a new scope for its descendants; counters() joins

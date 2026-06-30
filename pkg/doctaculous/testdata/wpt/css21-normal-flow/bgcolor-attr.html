@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<!-- TEST: a table colored entirely with the legacy bgcolor attribute (on the table and
+     a row) renders the same pixels as the reference, which colors the identical table
+     with CSS background-color (see bgcolor-attr-ref.html). This pins that the bgcolor
+     presentational hint maps to background-color. cellspacing=0 + matching cell sizes
+     keep the two grids identical. body{margin:0}. -->
+<html>
+<head><style>
+  body { margin: 0; }
+  table { border-collapse: collapse; }
+  td { width: 80px; height: 30px; padding: 0; }
+</style></head>
+<body>
+  <table bgcolor="#ddeeff" cellspacing="0">
+    <tr bgcolor="#3366cc"><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+  </table>
+</body>
+</html>

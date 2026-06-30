@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<!-- REFERENCE for bgcolor-attr.html. The identical table colored with CSS
+     background-color instead of the bgcolor attribute. The bgcolor hint maps to
+     background-color at a cascade tier below author CSS, so with no competing author
+     background rules the two render pixel-identically. -->
+<html>
+<head><style>
+  body { margin: 0; }
+  table { border-collapse: collapse; background-color: #ddeeff; }
+  td { width: 80px; height: 30px; padding: 0; }
+  tr.head { background-color: #3366cc; }
+</style></head>
+<body>
+  <table>
+    <tr class="head"><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+  </table>
+</body>
+</html>
