@@ -17,15 +17,15 @@ func TestFormatCounter(t *testing.T) {
 		{1, "lower-latin", "a"}, {1, "upper-latin", "A"}, // aliases
 		{0, "lower-roman", "0"},   // roman has no 0 → decimal fallback
 		{-3, "upper-roman", "-3"}, // negative → decimal fallback
-		{5, "disc", "•"},     // bullet glyphs ignore the value
+		{5, "disc", "•"},          // bullet glyphs ignore the value
 		{5, "circle", "◦"},
 		{5, "square", "▪"},
 		{5, "none", ""},
 		{5, "bogus", "5"}, // unknown numeric-ish → decimal
 	}
 	for _, c := range cases {
-		if got := formatCounter(c.val, c.style); got != c.want {
-			t.Errorf("formatCounter(%d, %q) = %q, want %q", c.val, c.style, got, c.want)
+		if got := FormatCounter(c.val, c.style); got != c.want {
+			t.Errorf("FormatCounter(%d, %q) = %q, want %q", c.val, c.style, got, c.want)
 		}
 	}
 }

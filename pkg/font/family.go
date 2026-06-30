@@ -60,7 +60,11 @@ func LoadStandard(family string, style Style) (*Face, bool) {
 func (f *Face) Glyph(r rune) (outline *render.Path, advanceEm float64, ok bool) {
 	gid, ok := f.gidForRune(r)
 	if !ok {
-		return nil, 0, false
+		// The face has no glyph for r. If r is a list-marker bullet, synthesize its
+		// geometry so the marker renders anyway (the bundled substitutes lack ▪ and
+		// other bullet code points); browsers likewise paint markers as shapes, not
+		// font glyphs. Any other missing rune is skipped by the caller.
+		return syntheticBullet(r)
 	}
 	adv, _ := f.prog.advanceEm(gid)
 	return f.prog.outline(gid), adv, true

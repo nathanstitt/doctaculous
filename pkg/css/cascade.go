@@ -59,6 +59,15 @@ type ComputedStyle struct {
 	// behaviors by WhiteSpaceFlags (collapse spaces, preserve newlines, wrap).
 	WhiteSpace string
 
+	// List + counter properties. ListStyleType/ListStylePosition are inherited
+	// (initial "disc"/"outside"); the counter ops and Content are not inherited.
+	ListStyleType     string        // "disc" | "circle" | "square" | "decimal" | "lower-roman" | ... | "none"
+	ListStylePosition string        // "outside" | "inside"
+	CounterReset      []CounterOp   // counter-reset name+value pairs (default value 0)
+	CounterIncrement  []CounterOp   // counter-increment name+value pairs (default value 1)
+	CounterSet        []CounterOp   // counter-set name+value pairs (default value 0)
+	Content           []ContentPart // parsed `content` pieces we render (strings + counter()/counters())
+
 	MarginTop, MarginRight, MarginBottom, MarginLeft     Length
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft Length
 
@@ -325,6 +334,8 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.LineHeight = parent.LineHeight
 	cs.TextAlign = parent.TextAlign
 	cs.WhiteSpace = parent.WhiteSpace
+	cs.ListStyleType = parent.ListStyleType
+	cs.ListStylePosition = parent.ListStylePosition
 	cs.BorderCollapse = parent.BorderCollapse
 	cs.BorderSpacingH = parent.BorderSpacingH
 	cs.BorderSpacingV = parent.BorderSpacingV
@@ -340,34 +351,36 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 func initialStyle() ComputedStyle {
 	black := color.RGBA{0, 0, 0, 255}
 	return ComputedStyle{
-		Display:         "inline",
-		Color:           black,
-		FontFamily:      "serif",
-		FontSizePt:      16,
-		LineHeight:      Length{Unit: UnitAuto},
-		TextAlign:       "left",
-		WhiteSpace:      "normal",
-		Width:           Length{Unit: UnitAuto},
-		Height:          Length{Unit: UnitAuto},
-		MinWidth:        Length{Unit: UnitPx},   // CSS initial min-width is 0
-		MaxWidth:        Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
-		MinHeight:       Length{Unit: UnitPx},   // CSS initial min-height is 0
-		MaxHeight:       Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
-		BoxSizing:       "content-box",
-		ObjectFit:       "fill", // CSS initial object-fit
-		ObjectPositionX: 0.5,    // CSS initial object-position: 50% 50%
-		ObjectPositionY: 0.5,
-		Overflow:        "visible", // CSS initial overflow
-		Float:           "none",    // CSS initial float
-		Clear:           "none",    // CSS initial clear
-		Position:        "static",  // CSS initial position
-		Top:             Length{Unit: UnitAuto},
-		Right:           Length{Unit: UnitAuto},
-		Bottom:          Length{Unit: UnitAuto},
-		Left:            Length{Unit: UnitAuto},
-		ZIndexAuto:      true, // CSS initial z-index is auto
-		MarginTop:       Length{Unit: UnitPx},
-		MarginRight:     Length{Unit: UnitPx},
+		Display:           "inline",
+		Color:             black,
+		FontFamily:        "serif",
+		FontSizePt:        16,
+		LineHeight:        Length{Unit: UnitAuto},
+		TextAlign:         "left",
+		WhiteSpace:        "normal",
+		ListStyleType:     "disc",
+		ListStylePosition: "outside",
+		Width:             Length{Unit: UnitAuto},
+		Height:            Length{Unit: UnitAuto},
+		MinWidth:          Length{Unit: UnitPx},   // CSS initial min-width is 0
+		MaxWidth:          Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		MinHeight:         Length{Unit: UnitPx},   // CSS initial min-height is 0
+		MaxHeight:         Length{Unit: UnitAuto}, // models CSS "none" (no maximum)
+		BoxSizing:         "content-box",
+		ObjectFit:         "fill", // CSS initial object-fit
+		ObjectPositionX:   0.5,    // CSS initial object-position: 50% 50%
+		ObjectPositionY:   0.5,
+		Overflow:          "visible", // CSS initial overflow
+		Float:             "none",    // CSS initial float
+		Clear:             "none",    // CSS initial clear
+		Position:          "static",  // CSS initial position
+		Top:               Length{Unit: UnitAuto},
+		Right:             Length{Unit: UnitAuto},
+		Bottom:            Length{Unit: UnitAuto},
+		Left:              Length{Unit: UnitAuto},
+		ZIndexAuto:        true, // CSS initial z-index is auto
+		MarginTop:         Length{Unit: UnitPx},
+		MarginRight:       Length{Unit: UnitPx},
 		// remaining margins/paddings default to zero px (the zero value of Length is {0,UnitPx})
 		FlexDirection:  "row",
 		FlexWrap:       "nowrap",
@@ -443,6 +456,23 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "normal", "nowrap", "pre", "pre-wrap", "pre-line":
 			cs.WhiteSpace = d.Value
 		}
+	case "list-style-type":
+		cs.ListStyleType = strings.TrimSpace(d.Value)
+	case "list-style-position":
+		switch d.Value {
+		case "outside", "inside":
+			cs.ListStylePosition = d.Value
+		}
+	case "list-style":
+		applyListStyleShorthand(cs, d.Value)
+	case "counter-reset":
+		cs.CounterReset = parseCounterOps(d.Value, 0)
+	case "counter-increment":
+		cs.CounterIncrement = parseCounterOps(d.Value, 1)
+	case "counter-set":
+		cs.CounterSet = parseCounterOps(d.Value, 0)
+	case "content":
+		cs.Content = parseContent(d.Value)
 	case "margin-top":
 		setLength(&cs.MarginTop, d.Value)
 	case "margin-right":

@@ -181,4 +181,25 @@ type Box struct {
 	// (which never set these) are unaffected.
 	ColSpan int
 	RowSpan int
+
+	// Marker is the list-item marker (bullet or number) for a DisplayListItem box,
+	// resolved at box generation from the box's list-style-type and the CSS counter
+	// engine. nil for a non-list-item box or list-style-type:none. It records the
+	// resolved marker for inspection/tests; the marker is actually rendered by
+	// prepending its text as the item's leading inline child (see resolveCounters).
+	Marker *MarkerContent
+}
+
+// MarkerContent is a list item's resolved marker. Text is the already-formatted
+// marker string including its trailing space (e.g. "• " or "2. ").
+//
+// Outside records the list-style-position (true = "outside", the default; false =
+// "inside"). It is not yet consumed by layout: both positions currently render the
+// marker as the item's leading inline text, which — combined with the UA list
+// padding-left indent — reads as the default outside (gutter) marker. Honoring
+// "inside" (marker inline with no gutter) and a precise outside marker box is a
+// layout follow-up; Outside carries the parsed value for when that lands.
+type MarkerContent struct {
+	Text    string
+	Outside bool
 }
