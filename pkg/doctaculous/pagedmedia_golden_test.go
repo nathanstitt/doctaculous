@@ -98,6 +98,31 @@ var pagedMediaGoldens = []struct {
   body { margin: 0 }
 </style></head><body><div style="height:180px;background:#bcd6f0">trim box content</div></body></html>`,
 	},
+	{
+		// Table fragmentation BETWEEN rows: a 7-row table (each row ~40px tall) is taller
+		// than the 200px content height (280 - 2*40), so it splits at a row boundary across
+		// two pages — a whole number of rows on each page, NEVER a row cut in half. Eyeball:
+		// page 0 holds the first run of rows (each cell fully drawn), page 1 the remainder;
+		// the split falls cleanly on a row boundary.
+		name:    "table-rows",
+		wantPgs: 2,
+		html: `<!DOCTYPE html><html><head><style>
+  @page { size: 320px 280px; margin: 40px }
+  body { margin: 0 }
+  table { border-collapse: collapse; width: 100% }
+  td { border: 1px solid #555; height: 32px; padding: 4px; background: #eef }
+</style></head><body>
+  <table>
+    <tr><td>row 1 alpha</td><td>row 1 beta</td></tr>
+    <tr><td>row 2 alpha</td><td>row 2 beta</td></tr>
+    <tr><td>row 3 alpha</td><td>row 3 beta</td></tr>
+    <tr><td>row 4 alpha</td><td>row 4 beta</td></tr>
+    <tr><td>row 5 alpha</td><td>row 5 beta</td></tr>
+    <tr><td>row 6 alpha</td><td>row 6 beta</td></tr>
+    <tr><td>row 7 alpha</td><td>row 7 beta</td></tr>
+  </table>
+</body></html>`,
+	},
 }
 
 // TestHTMLPagedMediaGolden renders @page-driven paginated documents end to end (via

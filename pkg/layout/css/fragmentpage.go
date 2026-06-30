@@ -2,26 +2,37 @@ package css
 
 import (
 	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
 // lineSplittable reports whether a top-level block fragment can be fragmented for
 // pagination: it must carry no break-inside: avoid, and EITHER establish an inline
 // formatting context with at least two lines (a pure-inline paragraph, line-split by
-// splitBlockForPage) OR hold at least one in-flow block child (a mixed block+inline
-// container, split at a child boundary by splitMixedBlock). Floats/positioned children
-// are out of flow and do not by themselves make a block splittable. break-inside: avoid
-// disqualifies either shape.
+// splitBlockForPage), hold at least one in-flow block child (a mixed block+inline
+// container, split at a child boundary by splitMixedBlock), or be a table (split between
+// rows by splitTableForPage). Floats/positioned children are out of flow and do not by
+// themselves make a block splittable. break-inside: avoid disqualifies every shape.
 func lineSplittable(b *Fragment) bool {
 	if b == nil || keptInsideAvoid(b) {
 		return false
 	}
-	return len(b.Lines) >= 2 || hasInFlowBlockChild(b)
+	return len(b.Lines) >= 2 || hasInFlowBlockChild(b) || isTableFragment(b)
+}
+
+// isTableFragment reports whether f is a table fragment (its box is display:table), so the
+// bucketer routes it to the between-rows table splitter.
+func isTableFragment(f *Fragment) bool {
+	return f != nil && f.Box != nil && f.Box.Display == cssbox.DisplayTable
 }
 
 // splitAnyBlockForPage splits b for the page, choosing the splitter by b's content shape:
-// a block with in-flow block children breaks at child boundaries, and a pure-inline block
-// line-splits. (Table and flex/grid arms are added by their own tasks.)
+// a table breaks between rows, a block with in-flow block children breaks at child
+// boundaries, and a pure-inline block line-splits. (The flex/grid arm is added by its own
+// task.)
 func splitAnyBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) splitResult {
+	if isTableFragment(b) {
+		return splitTableForPage(b, pageBottom)
+	}
 	if hasInFlowBlockChild(b) {
 		return splitMixedBlock(b, pageBottom, widows, orphans)
 	}
