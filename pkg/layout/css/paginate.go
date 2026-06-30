@@ -388,25 +388,37 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		forcedBefore, forcedAfter := effectiveBreaks(b)
 		overflow := len(cur.blocks) > 0 && (b.Y+b.H)-cur.top > pageH
 		// break-*: avoid keep-together (CSS Fragmentation §4.2): when an UNFORCED
-		// (overflow) break would land between the previous block and b, but the pair is
+		// (overflow) break would land between the previous block and b, but that join is
 		// bound by break-after: avoid (on the previous block) or break-before: avoid (on
-		// b), keep them together by carrying the previous block onto b's new page —
-		// provided the pair (previous block + b) then fits a page (else the avoid is
-		// dropped, logged, and the plain overflow break stands). A forced break always
-		// wins over avoid (CSS), so this applies only to overflow. The keep is PAIRWISE
-		// (just the previous block, the dominant heading+paragraph case); a longer avoid
-		// chain is approximated to the pair (documented bound).
+		// b), keep them together by carrying the previous block — AND any further
+		// avoid-bound blocks immediately preceding it (the maximal contiguous avoid-bound
+		// run ending at the previous block) — onto b's new page, provided the whole run
+		// plus b then fits a page (else the avoid is dropped, logged, and the plain
+		// overflow break stands). A forced break always wins over avoid (CSS), so this
+		// applies only to overflow. The keep is CHAIN-AWARE: a run of length 1 is the
+		// pairwise heading+paragraph case; a longer chain (e.g. heading + sub-heading +
+		// paragraph) moves whole. At least one block is always left on the current page
+		// (runStart >= 1), so this never empties the page it breaks from.
 		if overflow && !forcedBefore && len(cur.blocks) >= 2 && prevBlock != nil && breakAvoidBetween(prevBlock, b) {
-			prev := cur.blocks[len(cur.blocks)-1]
-			if fitsPair(prev, b, pageH) {
-				cur.blocks = cur.blocks[:len(cur.blocks)-1] // remove prev from this page
-				buckets = append(buckets, cur)
-				// Start the next page with prev (unforced break ⇒ retain its top margin).
-				cur = pageBucket{top: prev.Y - usedTopMargin(prev, cbWidth)}
-				cur.blocks = append(cur.blocks, prev)
-				overflow = false // b now joins prev's page below
-			} else {
-				logf("css pagination: break-*: avoid could not keep blocks together (pair exceeds a page); breaking anyway")
+			// Collect the maximal contiguous run at the end of cur whose internal joins are
+			// all avoid-bound AND whose last member is avoid-bound to b (already true).
+			runStart := len(cur.blocks) - 1
+			for runStart > 0 && breakAvoidBetween(cur.blocks[runStart-1], cur.blocks[runStart]) {
+				runStart--
+			}
+			// Leave at least one block on the current page (else this becomes a plain move).
+			if runStart >= 1 {
+				run := cur.blocks[runStart:]
+				if fitsRunWith(run, b, pageH) {
+					moved := append([]*Fragment(nil), run...)
+					cur.blocks = cur.blocks[:runStart]
+					buckets = append(buckets, cur)
+					cur = pageBucket{top: moved[0].Y - usedTopMargin(moved[0], cbWidth)}
+					cur.blocks = append(cur.blocks, moved...)
+					overflow = false
+				} else {
+					logf("css pagination: break-*: avoid chain could not be kept together (exceeds a page); breaking")
+				}
 			}
 		}
 		// Widows/orphans line splitting on an OVERFLOW of an already-occupied page (CSS
@@ -552,12 +564,13 @@ func isAvoidBreak(v string) bool {
 	return v == "avoid" || v == "avoid-page"
 }
 
-// fitsPair reports whether two adjacent blocks fit together on one pageH-tall page,
-// measured from the first block's border-box top to the second's border-box bottom.
-// Used to decide whether a break-*: avoid keep-together is feasible (if the pair is
-// itself taller than a page, the avoid is dropped and the break stands).
-func fitsPair(a, b *Fragment, pageH float64) bool {
-	return (b.Y+b.H)-a.Y <= pageH
+// fitsRunWith reports whether a contiguous run of blocks plus a trailing block b fits on
+// one pageH-tall page (first block's top to b's bottom).
+func fitsRunWith(run []*Fragment, b *Fragment, pageH float64) bool {
+	if len(run) == 0 {
+		return b.H <= pageH
+	}
+	return (b.Y+b.H)-run[0].Y <= pageH
 }
 
 // keptInsideAvoid reports whether a block carries break-inside: avoid / avoid-page,

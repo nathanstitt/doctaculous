@@ -90,6 +90,26 @@ func TestBreakAvoidDroppedWhenPairTooTall(t *testing.T) {
 	}
 }
 
+// TestBreakAvoidChainOfThree: blocks 1,2,3 are avoid-chained (1 break-after:avoid,
+// 2 break-after:avoid). A boundary that would split between 2 and 3 must carry the whole
+// 1-2-3 chain to the next page when it fits.
+func TestBreakAvoidChainOfThree(t *testing.T) {
+	const w = 400
+	blocks := measuredBlockHeights(t, blocksWithStyles(60, "", "break-after:avoid", "break-after:avoid", ""), w)
+	if len(blocks) != 4 {
+		t.Fatalf("want 4 blocks, got %d", len(blocks))
+	}
+	bh := blocks[0].H
+	// Page fits ~3.5 blocks; without keep, page 0 = {0,1,2}, page 1 = {3}. Block 3 is
+	// chained to 2 (and 2 to 1), so the chain 1-2-3 (3 blocks) moves together: page 0 =
+	// {0}, page 1 = {1,2,3}.
+	pageH := 3*bh + bh/2
+	got := bucketBlocks(blocks, pageH, w, nolog)
+	if len(got) != 2 || len(got[0].blocks) != 1 || len(got[1].blocks) != 3 {
+		t.Fatalf("chain keep wrong: %d pages sizes %v, want {1},{3}", len(got), bucketSizes(got))
+	}
+}
+
 func nolog(string, ...any) {}
 
 func bucketSizes(bs []pageBucket) []int {
