@@ -123,6 +123,23 @@ var pagedMediaGoldens = []struct {
   </table>
 </body></html>`,
 	},
+	{
+		// Named-page reflow: a portrait document with a `.land` section that selects
+		// @page land { size: landscape }. Page 0 (portrait) holds the intro at the narrow
+		// width; page 1 (landscape) holds the wide section reflowed to the wider content
+		// box. Eyeball: page 1 is WIDER than page 0, and its block fills the wide width.
+		name:    "named-page",
+		wantPgs: 2,
+		html: `<!DOCTYPE html><html><head><style>
+  @page { size: 300px 240px; margin: 20px }
+  @page land { size: 460px 240px; margin: 20px }
+  .land { page: land }
+  div { margin: 0 }
+</style></head><body>
+  <div style="height:160px;background:#f0c0c0">Portrait intro section</div>
+  <div class="land" style="height:160px;background:#c0c0f0">Landscape wide section</div>
+</body></html>`,
+	},
 }
 
 // TestHTMLPagedMediaGolden renders @page-driven paginated documents end to end (via
