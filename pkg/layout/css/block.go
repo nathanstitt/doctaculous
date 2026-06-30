@@ -75,6 +75,16 @@ func (e *Engine) Layout(ctx context.Context, root *cssbox.Box, viewportW float64
 		}
 	}()
 
+	// CSS background propagation: lift the root/body background onto the page canvas
+	// (set on the returned Pages below) and clear it from the source box so it is not
+	// painted twice. Must run before layoutTree builds the fragments.
+	canvasBG := propagateCanvasBackground(root)
+	defer func() {
+		if pages != nil {
+			pages.CanvasBackground = canvasBG
+		}
+	}()
+
 	frag := e.layoutTree(ctx, root, viewportW)
 	if frag == nil {
 		return &layout.Pages{Pages: []layout.Page{{WidthPt: viewportW, HeightPt: 0}}}, nil

@@ -12,6 +12,12 @@ import (
 // shared across the per-page render fan-out without locks.
 type Pages struct {
 	Pages []Page
+	// CanvasBackground is the page canvas fill propagated from the document's root
+	// background (CSS background propagation: the <html> background, else the <body>
+	// background). A zero (transparent) value means no propagation — the renderer
+	// uses its own default (RasterOptions.Background, else white). It applies to
+	// every page. Set by the CSS layout engine; left zero by DOCX.
+	CanvasBackground color.RGBA
 }
 
 // Page is one laid-out page: its size in points plus the primitives to draw,

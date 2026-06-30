@@ -74,9 +74,15 @@ func (r *reflowRenderer) renderPage(_ context.Context, index int, opts RasterOpt
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, pxW, pxH))
+	// Canvas fill precedence: a CSS-propagated root/body background (the browser's
+	// background-propagation rule, set by the layout engine) wins; else the caller's
+	// RasterOptions.Background; else opaque white.
 	bg := opts.Background
 	if bg == nil {
 		bg = color.White
+	}
+	if cb := r.pages.CanvasBackground; cb.A != 0 {
+		bg = cb
 	}
 	fillBackground(img, bg)
 

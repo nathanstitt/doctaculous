@@ -27,13 +27,23 @@ import (
 // deferral. The html/body wrapper's border/background is fragmented per page.
 func (e *Engine) LayoutPaged(ctx context.Context, root *cssbox.Box, viewportW, pageH float64) (pages *layout.Pages, err error) {
 	if pageH <= 0 {
-		return e.Layout(ctx, root, viewportW)
+		return e.Layout(ctx, root, viewportW) // handles canvas-background propagation itself
 	}
 	defer func() {
 		if r := recover(); r != nil {
 			e.logf("css layout: recovered from panic: %v", r)
 			pages = &layout.Pages{Pages: []layout.Page{{WidthPt: viewportW, HeightPt: pageH}}}
 			err = nil
+		}
+	}()
+
+	// CSS background propagation: lift the root/body background onto every page's
+	// canvas (set on the returned Pages below) and clear it from the source box.
+	// Must run before layoutTree.
+	canvasBG := propagateCanvasBackground(root)
+	defer func() {
+		if pages != nil {
+			pages.CanvasBackground = canvasBG
 		}
 	}()
 
