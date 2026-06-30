@@ -689,6 +689,47 @@ what is done vs. pending.
   presentational attributes; **Hacker News now renders with its `#f6f6ef` bgcolor + orange header** (the original
   white-page bug). See `docs/superpowers/specs/2026-06-30-html-presentational-attributes-design.md` and
   `docs/presentational-attributes-audit.md`.
+- **HTML rendering — CSS Paged Media (`@page` + `break-inside` + widows/orphans + running headers/footers)**
+  (`pkg/css/page.go` + `pagesize.go` (new: `@page` capture + `ResolvePage` + `ComputeMarginBox`), `pkg/css`
+  `page`/`break-inside`/`widows`/`orphans` on `ComputedStyle`, `pkg/layout/css/pagemodel.go` + `fragmentpage.go`
+  + `marginbox.go` (new), extended `pkg/layout/css/paginate.go`/`build.go`, `pkg/doctaculous`
+  `WithDefaultPaged()`; covered by `page_test.go`/`pagemodel_test.go`/`fragmentpage_test.go`/`keepwithnext_test.go`/
+  `widows_integration_test.go`/`marginbox_test.go`/`pagedmedia_test.go`, the `html-page-margins-p{0,1}` +
+  `html-widows-orphans-p{0,1}` goldens, and the `@page`-driven htmldoc showcase footer): the bounded pagination
+  slice (sub-project 12: `WithPageSize` + between-block breaks + forced `break-before`/`break-after`) is completed
+  to **full CSS Paged Media**. Pieces: **`@page` rule capture** (`pkg/css`: `@page`/`@page :first|:left|:right|
+  :blank`/named `@page name` and the nested 16 margin boxes parsed into `Stylesheet.Pages`, mirroring the
+  `@font-face` side-table precedent — a dedicated body parser splits page-box declarations from nested margin-box
+  blocks; `ResolvePage(i, name, blank)` cascades the matching rules into a `UsedPage` — size keyword `A4`/`letter`/
+  … + `portrait`/`landscape`, `margin` shorthand/longhands in the engine's 96dpi px-as-pt scalar via a dedicated
+  `parseAbsLengthPx` resolving `cm`/`mm`/`in`/`pt`/`pc`, and the margin-box content); the `page`/`break-inside`/
+  `widows`/`orphans` properties on `ComputedStyle` (widows/orphans initial 2, inherited; read only by the
+  pagination pass); **page geometry from `@page`** (`LayoutPagedDoc`/`paginateDoc` + `WithDefaultPaged()` — the
+  document lays out at page 0's content-box width and each page's content is inset into the `@page` margin box via
+  `translateFragment`; precedence: explicit `WithPageSize` size > `@page size` > Letter fallback, with `@page`
+  margins/margin-boxes always applied; `@page` rules aggregated from every author sheet via
+  `BuildWithFontsAndPages`, like `@font-face`); **`break-inside`/`break-*: avoid` keep-together** (a pairwise keep
+  carrying the previous block onto the next block's page when an unforced break would split a `break-after:avoid` /
+  `break-before:avoid` pair that fits a page); **widows/orphans via mid-block line fragmentation** (`fragmentpage.go`
+  — the structural piece sub-project 12 deferred: `splitBlockForPage` cuts a pure-inline-content block at a line
+  boundary, clamping the cut so ≥orphans lines stay and ≥widows carry over, moving the block whole when it is too
+  short (`n < widows+orphans`); head/tail are shallow `Fragment` clones sharing read-only glyph outlines with the
+  break-side border/padding suppressed (`box-decoration-break: slice`); the bucketer splits both an overflow of an
+  occupied page and a too-tall block leading a fresh page, queuing the tail so it splits again — **iterative across
+  N pages**; page-space-only, no relayout); and **running headers/footers** (`marginbox.go` — the `@page` margin
+  boxes with `content:` resolve per page: `"literal"`, `counter(page)`, `counter(pages)`, and their concatenation,
+  laid out through the shared inline core, styled by cascading the box's declarations via `ComputeMarginBox`, and
+  emitted as `GlyphItem`s in the computed margin-band rect). The `render.Device` seam, the PDF/DOCX pipelines, and
+  the shared inline core are **untouched** (the line splitter partitions *already-placed* lines; margin-box text
+  reuses the inline core read-only). **Byte-identical:** a document with no `@page` rule rendered without
+  `WithPageSize`/`WithDefaultPaged` is one tall page exactly as before (the whole existing corpus is unchanged); an
+  `@page` rule is **inert** until pagination is requested. Degrades gracefully (no panic, logged where useful):
+  mid-table-row / mid-flex-item / mid-grid-item splits and a block mixing block-children-and-inline-lines are NOT
+  line-split (whole-block placement, overflow if too tall — `lineSplittable` gates to pure-inline blocks); a
+  `break-inside:avoid` block taller than a page overflows; `string()`/`element()`/`string-set` and counter styles
+  beyond decimal in margin boxes resolve to empty/decimal (deferred); `@page` `marks`/`bleed` ignored. This
+  completes sub-project 6's roadmap — **the last non-fidelity HTML slice**. See
+  `docs/superpowers/specs/2026-06-30-html-paged-media-design.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -732,10 +773,10 @@ that skip into real output.
    **link pseudo-classes** (`:link`/`:visited` + general pseudo-class parsing + `text-decoration: underline`),
    and the **legacy presentational-attribute hints** (`bgcolor`/`text`/`align`/`valign`/`width`/`height`/
    `cellspacing`/`cellpadding`/`border`/`<font>`/`nowrap`/`background`/`<ol type/start>`/`<li value>`/`<body link>`
-   mapped to CSS at a cascade tier below author CSS — HN now renders with its `bgcolor`) are done — see the
-   Done section). The one remaining non-fidelity slice is **CSS paged media** (`@page` size/margins/named pages,
-   `break-inside`, widows/orphans, running headers/footers — the bounded pagination slice ships `WithPageSize` +
-   between-block breaks + forced `break-before`/`break-after`, deferring these). **(EPUB is out of scope — see
+   mapped to CSS at a cascade tier below author CSS — HN now renders with its `bgcolor`), and **CSS paged media**
+   (`@page` size/margins + named-page selectors, `break-inside`, **widows/orphans via mid-block line
+   fragmentation**, and running headers/footers via `@page` margin boxes with page counters) are done — see the
+   Done section. **Every non-fidelity HTML slice is now landed.** **(EPUB is out of scope — see
    the out-of-scope note at the bottom.)** Positioning — landed fidelity fixes:
    **C2** abs `width:auto` **shrink-to-fit** (`min(max(min-content, available), max-content)` via
    `absShrinkToFitWidth`, threaded into both placement and interior layout — a right-anchored box's left edge
