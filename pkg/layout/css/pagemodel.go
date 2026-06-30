@@ -2,6 +2,7 @@ package css
 
 import (
 	"context"
+	"math"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
@@ -143,16 +144,28 @@ func (e *Engine) LayoutPagedDoc(ctx context.Context, root *cssbox.Box, cfg Paged
 		}
 	}()
 
-	// The layout width is page 0's content-box width: the document lays out once at
-	// that width, then each page's blocks are inset by their own @page margins. (Pages
-	// almost always share a size; a per-page size change via named pages reflows only
-	// its inset, not the layout width — a documented bound.)
+	// Lay out once at the default width to discover the top-level block list + each
+	// block's resolved page name (the cssbox tree is the same regardless of width, so the
+	// run grouping is width-independent; only the per-run geometry differs).
 	g0 := cfg.resolvePageGeom(0, "", false)
-	frag := e.layoutTree(ctx, root, g0.contentW)
-	if frag == nil {
+	base := e.layoutTree(ctx, root, g0.contentW)
+	if base == nil {
 		return &layout.Pages{Pages: []layout.Page{{WidthPt: g0.pageW, HeightPt: g0.pageH}}}, nil
 	}
-	return e.paginateDoc(frag, cfg), nil
+	body := bodyFragment(base)
+	if body == nil || len(body.Children) == 0 {
+		// No top-level blocks: single page (with margin boxes), as paginateDoc did.
+		page := base.Page(g0.pageW, g0.pageH)
+		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1, pageStrings{})
+		return &layout.Pages{Pages: []layout.Page{page}}, nil
+	}
+	runs := groupRuns(body.Children)
+	// Fast path: a single run at the default name ⇒ the existing single-width pipeline,
+	// byte-identical. (groupRuns returns one run named "" when no block sets `page`.)
+	if len(runs) == 1 && runs[0].name == "" {
+		return e.paginateDoc(base, cfg), nil
+	}
+	return e.paginateRuns(ctx, root, base, cfg, runs), nil
 }
 
 // paginateDoc fragments the laid-out root fragment into pages whose size and content
@@ -200,4 +213,110 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	}
 	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn)
 	return &layout.Pages{Pages: pages}
+}
+
+// runBucket is a bucket plus the page geometry its run resolved to (size/margins/
+// marginboxes for that run's named page), so the global assembly can size + inset + chrome
+// each page correctly even though pages come from different runs.
+type runBucket struct {
+	bucket pageBucket
+	geom   pageGeom
+}
+
+// paginateRuns paginates a document whose top-level blocks resolve to more than one
+// named page (different content widths). It lays the document out once per DISTINCT run
+// content width, takes each run's block fragments from the layout matching its width,
+// buckets each run against its own page geometry, then assembles + numbers all pages
+// globally (so counter(page)/string() are document-wide).
+func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragment, cfg PagedConfig, runs []pageRun) *layout.Pages {
+	// Cache one full-document layout per distinct content width.
+	layoutByWidth := map[float64]*Fragment{}
+	bodyByWidth := map[float64][]*Fragment{}
+	getLayout := func(name string) (geom pageGeom, blocks []*Fragment) {
+		geom = cfg.resolvePageGeom(0, name, false)
+		w := geom.contentW
+		if _, ok := layoutByWidth[w]; !ok {
+			var frag *Fragment
+			if math.Abs(w-contentWidth(bodyFragment(base), cfgFallback(cfg))) < 0.01 {
+				frag = base // reuse the base layout when the width matches it
+			} else {
+				frag = e.layoutTree(ctx, root, w)
+			}
+			layoutByWidth[w] = frag
+			bodyByWidth[w] = nil
+			if b := bodyFragment(frag); b != nil {
+				bodyByWidth[w] = b.Children
+			}
+		}
+		return geom, bodyByWidth[w]
+	}
+
+	var all []runBucket
+	for _, r := range runs {
+		geom, blocks := getLayout(r.name)
+		// Take this run's blocks BY INDEX from the matching-width layout. The cssbox tree
+		// is identical across widths, so body.Children indices align run-for-run.
+		if r.end > len(blocks) {
+			continue // defensive: layout produced fewer blocks (shouldn't happen)
+		}
+		runBlocks := blocks[r.start:r.end]
+		cb := contentWidth(bodyFragment(layoutByWidth[geom.contentW]), geom.contentW)
+		bks := bucketBlocks(runBlocks, geom.contentH, cb, e.logf)
+		for _, bk := range bks {
+			all = append(all, runBucket{bucket: bk, geom: geom})
+		}
+	}
+	if len(all) == 0 {
+		g0 := cfg.resolvePageGeom(0, "", false)
+		return &layout.Pages{Pages: []layout.Page{{WidthPt: g0.pageW, HeightPt: g0.pageH}}}
+	}
+
+	// Global string snapshots over the concatenated bucket list.
+	buckets := make([]pageBucket, len(all))
+	for i := range all {
+		buckets[i] = all[i].bucket
+	}
+	snaps := buildStringSnapshots(buckets)
+
+	pages := make([]layout.Page, 0, len(all))
+	for i := range all {
+		bk := all[i].bucket
+		g := all[i].geom
+		// Shift this bucket's blocks to local Y 0 (each run's blocks are in their own
+		// layout's page space).
+		shiftFragments(bk.blocks, -bk.top)
+		// Build a minimal page root carrying just this bucket's blocks. We synthesize a
+		// shallow body wrapper so AppendItems flattens the blocks; the per-run base body
+		// is reused for its box/styling.
+		pageRoot := *base
+		runBody := *bodyFragment(layoutByWidth[g.contentW])
+		runBody.Children = bk.blocks
+		runBody.Positioned, runBody.PositionedInfo, runBody.Floats = nil, nil, nil
+		children := make([]*Fragment, len(base.Children))
+		copy(children, base.Children)
+		children[len(children)-1] = &runBody
+		pageRoot.Children = children
+		pageRoot.Positioned, pageRoot.PositionedInfo, pageRoot.Floats = nil, nil, nil
+
+		dx, dy := g.marginL+g.bleed, g.marginT+g.bleed
+		if dx != 0 || dy != 0 {
+			translateFragment(&pageRoot, dx, dy)
+		}
+		pg := pageRoot.Page(g.mediaW(), g.mediaH())
+		before := len(pg.Items)
+		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(all), snaps[i])
+		if g.bleed != 0 {
+			translateItems(pg.Items, before, g.bleed, g.bleed)
+		}
+		pg.Items = appendCropMarks(pg.Items, g)
+		pages = append(pages, pg)
+	}
+	return &layout.Pages{Pages: pages}
+}
+
+// cfgFallback returns the content width the base layout was built at (page 0 default
+// content width), used to detect when a run's width matches the base layout so it can be
+// reused instead of re-laid-out.
+func cfgFallback(cfg PagedConfig) float64 {
+	return cfg.resolvePageGeom(0, "", false).contentW
 }
