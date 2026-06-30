@@ -366,9 +366,32 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 	}
 	var buckets []pageBucket
 	var cur pageBucket
-	for _, b := range blocks {
+	for bi, b := range blocks {
 		forcedBefore, forcedAfter := effectiveBreaks(b)
 		overflow := len(cur.blocks) > 0 && (b.Y+b.H)-cur.top > pageH
+		// break-*: avoid keep-together (CSS Fragmentation §4.2): when an UNFORCED
+		// (overflow) break would land between the previous block and b, but the pair is
+		// bound by break-after: avoid (on the previous block) or break-before: avoid (on
+		// b), keep them together by carrying the previous block onto b's new page —
+		// provided the pair (previous block + b) then fits a page (else the avoid is
+		// dropped, logged, and the plain overflow break stands). A forced break always
+		// wins over avoid (CSS), so this applies only to overflow, and only when the
+		// previous block is not itself the page's sole block forced to break before it.
+		// The keep is PAIRWISE (just the previous block, the dominant heading+paragraph
+		// case); a longer avoid chain is approximated to the pair (documented bound).
+		if overflow && !forcedBefore && len(cur.blocks) >= 2 && breakAvoidBetween(blocks[bi-1], b) {
+			prev := cur.blocks[len(cur.blocks)-1]
+			if fitsPair(prev, b, pageH) {
+				cur.blocks = cur.blocks[:len(cur.blocks)-1] // remove prev from this page
+				buckets = append(buckets, cur)
+				// Start the next page with prev (unforced break ⇒ retain its top margin).
+				cur = pageBucket{top: prev.Y - usedTopMargin(prev, cbWidth)}
+				cur.blocks = append(cur.blocks, prev)
+				overflow = false // b now joins prev's page below
+			} else {
+				logf("css pagination: break-*: avoid could not keep blocks together (pair exceeds a page); breaking anyway")
+			}
+		}
 		// Close the current page only if it already has content: a forced-before on
 		// the first block (cur empty) is a no-op, not a leading empty page.
 		if (forcedBefore || overflow) && len(cur.blocks) > 0 {
@@ -434,6 +457,38 @@ func wrapperDecorationTop(f *Fragment, fallback float64) float64 {
 		}
 	}
 	return fallback
+}
+
+// breakAvoidBetween reports whether a break between block prev and block b is
+// discouraged by an avoid hint: break-after: avoid / avoid-page on prev, or
+// break-before: avoid / avoid-page on b (CSS Fragmentation §4.2). The bucketer uses it
+// to keep the pair on one page when an unforced break would otherwise split them.
+func breakAvoidBetween(prev, b *Fragment) bool {
+	return isAvoidBreak(breakAfter(prev)) || isAvoidBreak(breakBefore(b))
+}
+
+// isAvoidBreak reports whether a break-before/after value asks to avoid a break here
+// ("avoid" / "avoid-page"). Other values (forced, auto, "") are not avoid.
+func isAvoidBreak(v string) bool {
+	return v == "avoid" || v == "avoid-page"
+}
+
+// fitsPair reports whether two adjacent blocks fit together on one pageH-tall page,
+// measured from the first block's border-box top to the second's border-box bottom.
+// Used to decide whether a break-*: avoid keep-together is feasible (if the pair is
+// itself taller than a page, the avoid is dropped and the break stands).
+func fitsPair(a, b *Fragment, pageH float64) bool {
+	return (b.Y+b.H)-a.Y <= pageH
+}
+
+// keptInsideAvoid reports whether a block carries break-inside: avoid / avoid-page,
+// asking the paginator to keep its content on one page (so the line-level splitter
+// must not split it). A nil Box reads as not-avoid.
+func keptInsideAvoid(f *Fragment) bool {
+	if f == nil || f.Box == nil {
+		return false
+	}
+	return isAvoidBreak(f.Box.Style.BreakInside)
 }
 
 // effectiveBreaks returns a top-level block's effective forced break-before / break-after,
