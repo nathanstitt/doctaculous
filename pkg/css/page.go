@@ -205,8 +205,10 @@ type UsedPage struct {
 	WidthPt, HeightPt                                float64
 	MarginTop, MarginRight, MarginBottom, MarginLeft float64
 	MarginBoxes                                      []UsedMarginBox
-	HasSize                                          bool // an explicit `size` was resolved
-	HasRule                                          bool // at least one @page rule matched
+	HasSize                                          bool    // an explicit `size` was resolved
+	HasRule                                          bool    // at least one @page rule matched
+	Marks                                            string  // CSS `marks`: "crop", "cross", or "crop cross" (lowercased); "" = none
+	Bleed                                            float64 // CSS `bleed` in the px-as-pt scalar (the trim→media-box inset on each side)
 }
 
 // ResolvePage returns the UsedPage for the zero-based page index i (page 1 == i 0)
@@ -342,6 +344,15 @@ func applyPageDecls(up *UsedPage, decls []Declaration) {
 		case "margin-left":
 			if v, ok := parseAbsLengthPx(d.Value); ok {
 				up.MarginLeft = v
+			}
+		case "marks":
+			up.Marks = strings.ToLower(strings.TrimSpace(d.Value))
+		case "bleed":
+			// `bleed: auto` (the initial) means 6pt when marks are present; an explicit
+			// length sets the bleed directly. We store an explicit length; auto stays 0
+			// (the paginator synthesizes a default inset when marks are set with no bleed).
+			if v, ok := parseAbsLengthPx(d.Value); ok {
+				up.Bleed = v
 			}
 		}
 	}

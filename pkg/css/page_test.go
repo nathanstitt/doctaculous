@@ -233,3 +233,19 @@ func TestPageBreakWidowsOrphansCascade(t *testing.T) {
 		t.Errorf("widows=junk = %d, want 2 (kept initial)", c.Widows)
 	}
 }
+
+func TestParsePageMarksBleed(t *testing.T) {
+	ss := Parse(`@page { size: A4; marks: crop cross; bleed: 6pt }`)
+	up := ss.ResolvePage(0, "", false)
+	if up.Marks != "crop cross" {
+		t.Errorf("Marks = %q, want \"crop cross\"", up.Marks)
+	}
+	if up.Bleed < 7.9 || up.Bleed > 8.1 { // 6pt → 8px @96
+		t.Errorf("Bleed = %.2f, want ~8 (6pt)", up.Bleed)
+	}
+	// Defaults: no marks/bleed ⇒ empty/zero.
+	none := Parse(`@page { size: A4 }`).ResolvePage(0, "", false)
+	if none.Marks != "" || none.Bleed != 0 {
+		t.Errorf("defaults = %q/%.2f, want \"\"/0", none.Marks, none.Bleed)
+	}
+}
