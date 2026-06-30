@@ -347,6 +347,7 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		DebugTag:   debugTag(b),
 	}
 	frag.Box = b
+	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
 	if len(in.collapsedBorders) > 0 {
 		frag.Collapsed = in.collapsedBorders
 	}
@@ -1314,6 +1315,12 @@ func shiftFragmentExtras(f *Fragment, dx, dy float64) {
 	if f.Clips {
 		f.ClipRect.x += dx
 		f.ClipRect.y += dy
+	}
+	if f.BgImage != nil {
+		f.BgImage.OriginX += dx
+		f.BgImage.OriginY += dy
+		f.BgImage.ClipX += dx
+		f.BgImage.ClipY += dy
 	}
 	for i := range f.Collapsed {
 		f.Collapsed[i].XPt += dx

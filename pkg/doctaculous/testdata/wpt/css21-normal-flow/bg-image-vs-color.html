@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<!-- TEST: a 100x60 block whose background-image is a solid #3366cc swatch (served via
+     a MapLoader as swatch.png), tiled with the default background-repeat. Because the
+     swatch is a single solid color, tiling it across the box fills the box uniformly,
+     so the result is a solid 100x60 #3366cc rectangle at the top-left — pixel-identical
+     to a box with background-color:#3366cc (see bg-image-vs-color-ref.html). This pins
+     the background-image decode + tile + paint path against the background-color path.
+     body{margin:0} keeps it flush. -->
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  #box { width: 100px; height: 60px; background-image: url(swatch.png); }
+</style>
+</head>
+<body>
+  <div id="box"></div>
+</body>
+</html>

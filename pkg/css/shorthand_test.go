@@ -217,13 +217,15 @@ func TestBackgroundShorthandFindsColorAmongComponents(t *testing.T) {
 	}
 }
 
-func TestBackgroundShorthandNoColorPreserved(t *testing.T) {
-	// No color component: BackgroundColor is left at its prior value.
+func TestBackgroundShorthandNoColorResets(t *testing.T) {
+	// The `background` shorthand sets every sub-property, so a value with no color
+	// component resets background-color to its initial (transparent) per CSS shorthand
+	// reset semantics — it does NOT preserve a previously-set color.
 	cs := initialStyle()
 	applyOne(&cs, "background-color", "green")
 	applyOne(&cs, "background", "url(x.png) no-repeat")
-	if cs.BackgroundColor != (color.RGBA{0, 128, 0, 255}) {
-		t.Errorf("background with no color = %v, want green preserved", cs.BackgroundColor)
+	if cs.BackgroundColor != (color.RGBA{}) {
+		t.Errorf("background with no color = %v, want transparent (reset)", cs.BackgroundColor)
 	}
 }
 
