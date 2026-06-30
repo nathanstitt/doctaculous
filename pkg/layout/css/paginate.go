@@ -180,20 +180,26 @@ func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPa
 		// positioned shift is needed.
 		shiftFragments(bk.blocks, -bk.top)
 
-		// Inset the page's content by the @page margins: translate the whole page
-		// subtree (wrapper + blocks + positioned + floats) right by marginL and down by
-		// marginT, so content sits inside the margin box. The page itself stays full
-		// pageW × pageH. A zero margin (WithPageSize / no @page rule) is a no-op, keeping
-		// that path byte-identical.
-		if g.marginL != 0 || g.marginT != 0 {
-			translateFragment(&pageRoot, g.marginL, g.marginT)
+		// Content is inset by the @page margins AND, when bleeding, shifted inward by the
+		// bleed so the trim box sits at (bleed,bleed) within the larger media-box bitmap.
+		dx, dy := g.marginL+g.bleed, g.marginT+g.bleed
+		if dx != 0 || dy != 0 {
+			translateFragment(&pageRoot, dx, dy)
 		}
-
-		pg := pageRoot.Page(g.pageW, g.pageH)
-		// Emit this page's @page margin boxes (running headers/footers) over the
-		// content. Resolved per page so counter(page)/counter(pages)/string() are
-		// correct; a no-op when the page has no margin boxes (see marginbox.go).
+		// The page bitmap is the MEDIA box (trim + bleed all sides); with no bleed this is
+		// the trim box, byte-identical to before.
+		pg := pageRoot.Page(g.mediaW(), g.mediaH())
+		// Margin boxes (running headers/footers) are positioned in the trim-box frame, so
+		// they too must shift by the bleed. appendMarginBoxes computes rects from g (trim
+		// frame); shift the items it adds by (bleed,bleed). Simplest: append them, then
+		// translate only the newly-added items by the bleed.
+		before := len(pg.Items)
 		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets))
+		if g.bleed != 0 {
+			translateItems(pg.Items, before, g.bleed, g.bleed)
+		}
+		// Registration marks draw in the bleed band, in MEDIA-box coordinates (no shift).
+		pg.Items = appendCropMarks(pg.Items, g)
 		pages = append(pages, pg)
 	}
 	return pages

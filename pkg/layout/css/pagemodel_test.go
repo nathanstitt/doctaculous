@@ -136,3 +136,41 @@ func TestResolvePageGeomBleed(t *testing.T) {
 		t.Errorf("bleed = %.1f, want 10", g.bleed)
 	}
 }
+
+func TestPagedDocBleedShiftsAndMarks(t *testing.T) {
+	src := `<html><head><style>
+		@page { size: 200px 200px; bleed: 10px; marks: crop }
+	</style></head><body>
+		<div style="height:120px;margin:0;background:rgb(7,7,7)">x</div>
+	</body></html>`
+	cfg := pagedConfigFor(`@page { size: 200px 200px; bleed: 10px; marks: crop }`, 200, 200, false)
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPagedDoc(context.Background(), root, cfg)
+	if err != nil {
+		t.Fatalf("LayoutPagedDoc: %v", err)
+	}
+	p := pages.Pages[0]
+	// The page bitmap is the MEDIA box: 220x220 (trim 200 + 2*10 bleed).
+	if p.WidthPt != 220 || p.HeightPt != 220 {
+		t.Errorf("page size = %.0fx%.0f, want 220x220 (media box)", p.WidthPt, p.HeightPt)
+	}
+	// The content block is shifted by (bleed,bleed) = (10,10): its background paints at x≥10.
+	bg := firstBackground(p.Items, color.RGBA{7, 7, 7, 255})
+	if bg == nil {
+		t.Fatalf("content background not found")
+	}
+	if bg.XPt < 9.5 || bg.YPt < 9.5 {
+		t.Errorf("content at (%.1f,%.1f), want shifted by bleed (≥10,≥10)", bg.XPt, bg.YPt)
+	}
+	// Crop marks present: ≥8 black hairline rules.
+	black := color.RGBA{0, 0, 0, 255}
+	marks := 0
+	for _, it := range p.Items {
+		if it.Kind == layout.BackgroundKind && it.Rule.Color == black && it.Rule.HPt <= 1 || (it.Kind == layout.BackgroundKind && it.Rule.Color == black && it.Rule.WPt <= 1) {
+			marks++
+		}
+	}
+	if marks < 8 {
+		t.Errorf("crop mark rules = %d, want ≥8", marks)
+	}
+}
