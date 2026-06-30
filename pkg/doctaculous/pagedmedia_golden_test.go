@@ -66,6 +66,19 @@ var pagedMediaGoldens = []struct {
   body { margin: 0 }
 </style></head><body><div style="height:160px;background:#cccccc">x</div></body></html>`,
 	},
+	{
+		// @page bleed + crop marks: the page bitmap is the media box (trim 300x220 + 16px
+		// bleed on each side => 332x252); content sits inside the trim box; thin black crop
+		// marks point at the four trim corners in the bleed band, and cross marks straddle
+		// the edge midpoints. Eyeball: 8 corner marks + 4 edge crosses, content inset, a
+		// white bleed margin around a single page.
+		name:    "page-crop-marks",
+		wantPgs: 1,
+		html: `<!DOCTYPE html><html><head><style>
+  @page { size: 300px 220px; margin: 20px; bleed: 16px; marks: crop cross }
+  body { margin: 0 }
+</style></head><body><div style="height:180px;background:#bcd6f0">trim box content</div></body></html>`,
+	},
 }
 
 // TestHTMLPagedMediaGolden renders @page-driven paginated documents end to end (via
