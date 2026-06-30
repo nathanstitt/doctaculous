@@ -32,9 +32,19 @@ func Build(ctx context.Context, doc *html.Document, loader resource.ResourceLoad
 
 // BuildWithFonts is Build plus the aggregated @font-face rules collected from every
 // origin sheet (UA + <style> + <link>), so the caller can hand them to the face
-// cache. It never panics on malformed input: a recover at the entry boundary
-// returns whatever tree was built so far (and the faces collected so far).
+// cache. It discards the aggregated @page rules (see BuildWithFontsAndPages). It never
+// panics on malformed input: a recover at the entry boundary returns whatever tree was
+// built so far (and the faces collected so far).
 func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) (root *cssbox.Box, faces []gcss.FontFace, err error) {
+	root, faces, _, err = BuildWithFontsAndPages(ctx, doc, loader, logf)
+	return root, faces, err
+}
+
+// BuildWithFontsAndPages is BuildWithFonts plus the aggregated @page rules collected
+// from every origin sheet (so the caller can resolve paged-media geometry). The @page
+// rules are returned as a single Stylesheet (only its Pages are populated) ready for
+// ResolvePage. Like BuildWithFonts it never panics on malformed input.
+func BuildWithFontsAndPages(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) (root *cssbox.Box, faces []gcss.FontFace, pages gcss.Stylesheet, err error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -49,7 +59,7 @@ func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.Res
 	}()
 
 	var sheets []gcss.OriginSheet
-	sheets, faces = assembleSheets(ctx, doc, loader, logf)
+	sheets, faces, pages.Pages = assembleSheets(ctx, doc, loader, logf)
 	resolver := gcss.NewResolver(sheets, logf)
 
 	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root))
@@ -58,26 +68,29 @@ func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.Res
 		// Degrade to an empty block root rather than falling through to the
 		// panic-recover path via normalize(nil); the result is a renderable
 		// empty document.
-		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, faces, nil
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, faces, pages, nil
 	}
 	resolveCounters(root) // list-item markers + CSS counter()/counters() content (counters.go)
 	normalize(root)       // anonymous-box fixups + whitespace handling (anon.go)
 	fixupTables(root)     // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
 	fixupFlex(root)       // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
 	fixupGrid(root)       // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
-	return root, faces, nil
+	return root, faces, pages, nil
 }
 
-// assembleSheets returns the origin-ordered sheets AND the aggregated @font-face
-// rules across all of them (UA + <style> + resolvable <link>). Font faces are
-// collected here because this is where every sheet is parsed.
-func assembleSheets(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) ([]gcss.OriginSheet, []gcss.FontFace) {
+// assembleSheets returns the origin-ordered sheets AND the aggregated @font-face and
+// @page rules across all of them (UA + <style> + resolvable <link>). Faces and pages
+// are collected here because this is where every sheet is parsed.
+func assembleSheets(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) ([]gcss.OriginSheet, []gcss.FontFace, []gcss.PageRule) {
 	sheets := []gcss.OriginSheet{{Sheet: html.UAStylesheet, Origin: gcss.OriginUA}}
 	var faces []gcss.FontFace
+	var pages []gcss.PageRule
 	faces = append(faces, html.UAStylesheet.FontFaces...)
+	pages = append(pages, html.UAStylesheet.Pages...)
 	for _, s := range doc.StyleSheets {
 		sheets = append(sheets, gcss.OriginSheet{Sheet: s, Origin: gcss.OriginAuthor})
 		faces = append(faces, s.FontFaces...)
+		pages = append(pages, s.Pages...)
 	}
 	if loader != nil {
 		for _, ref := range doc.LinkRefs {
@@ -89,9 +102,10 @@ func assembleSheets(ctx context.Context, doc *html.Document, loader resource.Res
 			parsed := gcss.Parse(string(data))
 			sheets = append(sheets, gcss.OriginSheet{Sheet: parsed, Origin: gcss.OriginAuthor})
 			faces = append(faces, parsed.FontFaces...)
+			pages = append(pages, parsed.Pages...)
 		}
 	}
-	return sheets, faces
+	return sheets, faces, pages
 }
 
 // generate recursively builds the box for element e (whose computed style is cs)

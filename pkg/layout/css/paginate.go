@@ -115,8 +115,25 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// later page paints on that page rather than riding page 0.
 	perPageFloats := splitFloatsByPage(root, buckets)
 
+	// Uniform geometry: every page is viewportW × pageH with no content inset (the
+	// WithPageSize path; @page margins/sizes are applied by paginateDoc's geomFn).
+	geomFn := func(int, pageBucket) pageGeom {
+		return pageGeom{pageW: viewportW, pageH: pageH, contentW: viewportW, contentH: pageH}
+	}
+	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn)
+	return &layout.Pages{Pages: pages}
+}
+
+// assemblePages builds one layout.Page per bucket: it shallow-clones the root/body
+// wrapper for the page, assigns the page's positioned + float layers, fragments the
+// wrapper's own border/background into the page's local frame, shifts the page's blocks
+// to local Y 0, optionally insets the content by the page's @page margins (geomFn), and
+// flattens. geomFn(i, bucket) returns page i's size and content box; a zero marginL/
+// marginT (the WithPageSize path) is byte-identical to the un-inset behavior.
+func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPagePos []pagePositioned, perPageFloats [][]*Fragment, geomFn func(int, pageBucket) pageGeom) []layout.Page {
 	pages := make([]layout.Page, 0, len(buckets))
 	for i, bk := range buckets {
+		g := geomFn(i, bk)
 		// Shallow-clone the root/body wrapper so each page can carry its own block
 		// list without mutating the shared tree. The block fragments themselves are
 		// the original pointers — each belongs to exactly one page, so shifting them
@@ -163,9 +180,23 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 		// positioned shift is needed.
 		shiftFragments(bk.blocks, -bk.top)
 
-		pages = append(pages, pageRoot.Page(viewportW, pageH))
+		// Inset the page's content by the @page margins: translate the whole page
+		// subtree (wrapper + blocks + positioned + floats) right by marginL and down by
+		// marginT, so content sits inside the margin box. The page itself stays full
+		// pageW × pageH. A zero margin (WithPageSize / no @page rule) is a no-op, keeping
+		// that path byte-identical.
+		if g.marginL != 0 || g.marginT != 0 {
+			translateFragment(&pageRoot, g.marginL, g.marginT)
+		}
+
+		pg := pageRoot.Page(g.pageW, g.pageH)
+		// Emit this page's @page margin boxes (running headers/footers) over the
+		// content. Resolved per page so counter(page)/counter(pages)/string() are
+		// correct; a no-op when the page has no margin boxes (see marginbox.go).
+		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets))
+		pages = append(pages, pg)
 	}
-	return &layout.Pages{Pages: pages}
+	return pages
 }
 
 // pageBucket is one page's worth of top-level block fragments plus the page-space Y
