@@ -32,7 +32,7 @@ func rasterizeCmd(args []string) error {
 		pageSize = fs.String("page-size", "", "HTML page size: \"letter\" to paginate, empty for one tall page (HTML only)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx|.html> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx|.html|URL> [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	// Go's flag package stops at the first non-flag argument, so reorder the
@@ -112,23 +112,45 @@ func rasterizeCmd(args []string) error {
 	return nil
 }
 
-// openDocument opens the input by format, dispatching on file extension: .docx
-// goes through the reflow pipeline, .html/.htm through the HTML pipeline (with an
-// optional page size — "letter" paginates, empty is one tall page), and everything
-// else is treated as PDF. pageSize is ignored for non-HTML inputs.
+// openDocument opens the input by format. An http(s):// URL is fetched and rendered
+// as HTML (the URL check comes first, before the extension switch, so a URL ending
+// in e.g. .pdf is still treated as a web page). Otherwise it dispatches on file
+// extension: .docx goes through the reflow pipeline, .html/.htm through the HTML
+// pipeline, and everything else is treated as PDF. The HTML page size (pageSize —
+// "letter" paginates, empty is one tall page) applies to the URL and HTML paths and
+// is ignored for PDF/DOCX.
 func openDocument(input, pageSize string) (*doctaculous.Document, error) {
+	if isHTTPURL(input) {
+		return doctaculous.OpenURL(input, htmlOpts(pageSize)...)
+	}
 	switch strings.ToLower(filepath.Ext(input)) {
 	case ".docx":
 		return doctaculous.OpenDOCX(input)
 	case ".html", ".htm":
-		var opts []doctaculous.HTMLOption
-		if pageSize == "letter" {
-			opts = append(opts, doctaculous.WithPageSize(doctaculous.LetterWidthPt, doctaculous.LetterHeightPt))
-		}
-		return doctaculous.OpenHTMLFile(input, opts...)
+		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize)...)
 	default:
 		return doctaculous.Open(input)
 	}
+}
+
+// isHTTPURL reports whether input is an http:// or https:// URL (the CLI fetches
+// these as web pages via OpenURL). The check is a simple scheme-prefix test — a
+// bare path or a file:// URL is not matched (OpenURL rejects non-http(s) schemes
+// anyway).
+func isHTTPURL(input string) bool {
+	return strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
+}
+
+// htmlOpts builds the HTML layout options shared by the URL and local-HTML paths:
+// pageSize "letter" paginates onto US-Letter pages; any other value (incl. empty)
+// renders a single tall page.
+func htmlOpts(pageSize string) []doctaculous.HTMLOption {
+	if pageSize == "letter" {
+		return []doctaculous.HTMLOption{
+			doctaculous.WithPageSize(doctaculous.LetterWidthPt, doctaculous.LetterHeightPt),
+		}
+	}
+	return nil
 }
 
 // resolvePages converts the --pages/--page flags into zero-based, in-range page
