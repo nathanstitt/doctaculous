@@ -364,9 +364,17 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 	if len(blocks) == 0 {
 		return []pageBucket{{top: 0}}
 	}
+	// work is a mutable copy: a widows/orphans line split replaces the current block
+	// with its head (placed) and inserts its tail as the next item to process (so a tail
+	// that itself overflows splits again — iterative). prevBlock tracks the last block
+	// placed (for the break-*: avoid pairwise keep), since indexing into a mutating
+	// slice for blocks[bi-1] is unsafe.
+	work := append([]*Fragment(nil), blocks...)
 	var buckets []pageBucket
 	var cur pageBucket
-	for bi, b := range blocks {
+	var prevBlock *Fragment
+	for i := 0; i < len(work); i++ {
+		b := work[i]
 		forcedBefore, forcedAfter := effectiveBreaks(b)
 		overflow := len(cur.blocks) > 0 && (b.Y+b.H)-cur.top > pageH
 		// break-*: avoid keep-together (CSS Fragmentation §4.2): when an UNFORCED
@@ -375,11 +383,10 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		// b), keep them together by carrying the previous block onto b's new page —
 		// provided the pair (previous block + b) then fits a page (else the avoid is
 		// dropped, logged, and the plain overflow break stands). A forced break always
-		// wins over avoid (CSS), so this applies only to overflow, and only when the
-		// previous block is not itself the page's sole block forced to break before it.
-		// The keep is PAIRWISE (just the previous block, the dominant heading+paragraph
-		// case); a longer avoid chain is approximated to the pair (documented bound).
-		if overflow && !forcedBefore && len(cur.blocks) >= 2 && breakAvoidBetween(blocks[bi-1], b) {
+		// wins over avoid (CSS), so this applies only to overflow. The keep is PAIRWISE
+		// (just the previous block, the dominant heading+paragraph case); a longer avoid
+		// chain is approximated to the pair (documented bound).
+		if overflow && !forcedBefore && len(cur.blocks) >= 2 && prevBlock != nil && breakAvoidBetween(prevBlock, b) {
 			prev := cur.blocks[len(cur.blocks)-1]
 			if fitsPair(prev, b, pageH) {
 				cur.blocks = cur.blocks[:len(cur.blocks)-1] // remove prev from this page
@@ -391,6 +398,25 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 			} else {
 				logf("css pagination: break-*: avoid could not keep blocks together (pair exceeds a page); breaking anyway")
 			}
+		}
+		// Widows/orphans line splitting on an OVERFLOW of an already-occupied page (CSS
+		// Fragmentation §4): when an unforced break would push a line-splittable block
+		// whole to the next page but PART of it fits on the current page, split it at a
+		// line boundary BEFORE closing the page (so the head fills the rest of this page).
+		// splitBlockForPage honors widows/orphans and may decline (move whole), in which
+		// case we fall through to the normal page-close + whole-block placement. A forced
+		// break is not line-split.
+		if overflow && !forcedBefore && len(cur.blocks) > 0 && lineSplittable(b) {
+			res := splitBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			if res.head != nil && res.tail != nil {
+				cur.blocks = append(cur.blocks, res.head)
+				buckets = append(buckets, cur)
+				cur = pageBucket{top: res.tail.Y} // tail's top edge is suppressed → flush
+				queueTail(&work, i, res.tail)
+				prevBlock = res.head
+				continue
+			}
+			// res.head==nil ⇒ move whole (widows/orphans can't be met): fall through.
 		}
 		// Close the current page only if it already has content: a forced-before on
 		// the first block (cur empty) is a no-op, not a leading empty page.
@@ -416,13 +442,30 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 			if overflow && !forcedBefore {
 				cur.top = b.Y - usedTopMargin(b, cbWidth)
 			}
-			// A block taller than a page on an otherwise-empty page cannot be split in
-			// this slice: keep it, it overflows the page bottom (clipped by the bitmap).
-			if b.H > pageH {
-				logf("css pagination: block taller than page (%.0fpt > %.0fpt); overflowing, not splitting", b.H, pageH)
+		}
+		// Widows/orphans line splitting of a block LEADING a fresh page that is itself
+		// taller than a whole page (the iterative case — a tail that still overflows, or a
+		// paragraph taller than a page). The head fills this page; the tail is queued.
+		if !forcedBefore && len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
+			res := splitBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			if res.head != nil && res.tail != nil {
+				cur.blocks = append(cur.blocks, res.head)
+				buckets = append(buckets, cur)
+				cur = pageBucket{top: res.tail.Y}
+				queueTail(&work, i, res.tail)
+				prevBlock = res.head
+				continue
 			}
+			// res.head==nil (can't satisfy minimums while leading the page): place whole,
+			// it overflows.
+		}
+		// A block taller than a page that could not be (line-)split overflows its page
+		// (clipped by the bitmap) — the documented degradation.
+		if len(cur.blocks) == 0 && b.H > pageH {
+			logf("css pagination: block taller than page (%.0fpt > %.0fpt); overflowing, not splitting", b.H, pageH)
 		}
 		cur.blocks = append(cur.blocks, b)
+		prevBlock = b
 		if forcedAfter {
 			buckets = append(buckets, cur)
 			cur = pageBucket{}
@@ -437,6 +480,32 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		buckets = append(buckets, pageBucket{top: 0})
 	}
 	return buckets
+}
+
+// queueTail inserts a split block's tail into the work slice at index i+1 so the
+// bucketing loop processes it as the very next block (it leads the next page and may
+// split again — making the splitter iterative across an arbitrary number of pages).
+func queueTail(work *[]*Fragment, i int, tail *Fragment) {
+	*work = append(*work, nil)
+	copy((*work)[i+2:], (*work)[i+1:])
+	(*work)[i+1] = tail
+}
+
+// widowsOf / orphansOf read a block fragment's widows / orphans count (CSS, inherited,
+// initial 2). A nil Box reads as the initial 2 so a synthetic block still gets the
+// default protection.
+func widowsOf(f *Fragment) int {
+	if f == nil || f.Box == nil || f.Box.Style.Widows < 1 {
+		return 2
+	}
+	return f.Box.Style.Widows
+}
+
+func orphansOf(f *Fragment) int {
+	if f == nil || f.Box == nil || f.Box.Style.Orphans < 1 {
+		return 2
+	}
+	return f.Box.Style.Orphans
 }
 
 // wrapperDecorationTop returns f's border-box top (f.Y) when f paints a decoration that
