@@ -2,7 +2,6 @@ package css
 
 import (
 	"image/color"
-	"strconv"
 	"strings"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
@@ -36,8 +35,10 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 
 // resolveMarginContent resolves an @page margin box `content` value to a string for the
 // given 1-based page number and total page count. It supports a sequence of components:
-// a quoted "literal", counter(page), counter(pages), and counter(page, decimal) (only
-// the decimal style; other styles fall back to decimal). Components are concatenated.
+// a quoted "literal", counter(page), counter(pages), and counter(page|pages, <style>)
+// where <style> is any list-style the css.FormatCounter helper handles (decimal,
+// decimal-leading-zero, lower/upper-roman, lower/upper-alpha; an unknown style falls back
+// to decimal). Components are concatenated.
 // An unsupported component (e.g. string(), element(), attr()) contributes nothing — the
 // running-string descriptors are a documented deferral (see the design doc). An empty or
 // `normal`/`none` value yields "".
@@ -52,15 +53,20 @@ func resolveMarginContent(content string, page, pages int) string {
 		case len(comp) >= 2 && (comp[0] == '"' || comp[0] == '\''):
 			b.WriteString(unquote(comp))
 		case strings.HasPrefix(comp, "counter("):
-			name := strings.TrimSuffix(strings.TrimPrefix(comp, "counter("), ")")
-			// counter(page) / counter(pages) [, style] — only the name's first token
-			// matters; an optional style argument is ignored (decimal).
-			arg := strings.TrimSpace(strings.SplitN(name, ",", 2)[0])
-			switch arg {
+			inner := strings.TrimSuffix(strings.TrimPrefix(comp, "counter("), ")")
+			parts := strings.SplitN(inner, ",", 2)
+			name := strings.TrimSpace(parts[0])
+			style := "decimal"
+			if len(parts) == 2 {
+				if s := strings.TrimSpace(parts[1]); s != "" {
+					style = s
+				}
+			}
+			switch name {
 			case "page":
-				b.WriteString(strconv.Itoa(page))
+				b.WriteString(gcss.FormatCounter(page, style))
 			case "pages":
-				b.WriteString(strconv.Itoa(pages))
+				b.WriteString(gcss.FormatCounter(pages, style))
 			}
 		default:
 			// string(...) / element(...) / attr(...) / unknown: contribute nothing

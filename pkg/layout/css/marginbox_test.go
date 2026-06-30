@@ -33,6 +33,27 @@ func TestResolveMarginContent(t *testing.T) {
 	}
 }
 
+func TestResolveMarginContentCounterStyle(t *testing.T) {
+	cases := []struct {
+		content    string
+		page, npag int
+		want       string
+	}{
+		{`counter(page, lower-roman)`, 4, 9, "iv"},
+		{`counter(page, upper-roman)`, 4, 9, "IV"},
+		{`counter(pages, upper-alpha)`, 1, 3, "C"},
+		{`counter(page, decimal-leading-zero)`, 7, 9, "07"},
+		{`"p. " counter(page, lower-roman)`, 2, 5, "p. ii"},
+		{`counter(page, bogus-style)`, 5, 9, "5"}, // unknown style → decimal fallback
+	}
+	for _, c := range cases {
+		got := resolveMarginContent(c.content, c.page, c.npag)
+		if got != c.want {
+			t.Errorf("resolveMarginContent(%q,%d,%d) = %q, want %q", c.content, c.page, c.npag, got, c.want)
+		}
+	}
+}
+
 func TestSplitContentComponents(t *testing.T) {
 	got := splitContentComponents(`"Page " counter(page) " of " counter(pages)`)
 	want := []string{`"Page "`, `counter(page)`, `" of "`, `counter(pages)`}
