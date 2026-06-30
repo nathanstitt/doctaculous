@@ -31,6 +31,11 @@ type PagedConfig struct {
 	FallbackH    float64
 	ExplicitSize bool
 	Pages        gcss.Stylesheet
+	// Running holds the document's out-of-flow running elements (CSS GCPM
+	// position:running(name)), keyed by name. A @page margin box whose content is
+	// element(name) re-paints Running[name] on every page. Empty/nil when no element
+	// uses running() — the byte-identical path (element() never fires).
+	Running map[string]*cssbox.Box
 }
 
 // pageGeom is one page's resolved geometry: the full page rect size and the content
@@ -156,7 +161,7 @@ func (e *Engine) LayoutPagedDoc(ctx context.Context, root *cssbox.Box, cfg Paged
 	if body == nil || len(body.Children) == 0 {
 		// No top-level blocks: single page (with margin boxes), as paginateDoc did.
 		page := base.Page(g0.pageW, g0.pageH)
-		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1, pageStrings{})
+		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1, pageStrings{}, cfg.Running)
 		return &layout.Pages{Pages: []layout.Page{page}}, nil
 	}
 	runs := groupRuns(body.Children)
@@ -180,7 +185,7 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	body := bodyFragment(root)
 	if body == nil || len(body.Children) == 0 {
 		page := root.Page(g0.pageW, g0.pageH)
-		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1, pageStrings{})
+		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1, pageStrings{}, cfg.Running)
 		return &layout.Pages{Pages: []layout.Page{page}}
 	}
 
@@ -211,7 +216,7 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	geomFn := func(i int, _ pageBucket) pageGeom {
 		return cfg.resolvePageGeom(i, "", false)
 	}
-	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn)
+	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn, cfg.Running)
 	return &layout.Pages{Pages: pages}
 }
 
@@ -304,7 +309,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		}
 		pg := pageRoot.Page(g.mediaW(), g.mediaH())
 		before := len(pg.Items)
-		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(all), snaps[i])
+		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(all), snaps[i], cfg.Running)
 		if g.bleed != 0 {
 			translateItems(pg.Items, before, g.bleed, g.bleed)
 		}

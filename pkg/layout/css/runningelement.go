@@ -38,12 +38,25 @@ func (e *Engine) placeRunningElement(items []layout.Item, frag *Fragment, r marg
 	return frag.AppendItems(items)
 }
 
-// placeRunningElementBox captures the running element box fresh (at the margin-box
-// content width r.w) and places it into rect r. Re-capturing per call — rather than
-// deep-cloning a shared fragment — keeps the captured fragment from being corrupted
-// across pages (translateFragment/AppendItems mutate), and layout of a small header is
-// idempotent and cheap. This is the per-page-safe entry the margin-box loop uses.
+// placeRunningElementBox captures the running element box fresh (at band width r.w) and
+// places it CENTERED within rect r (horizontally and vertically). Re-capturing per call —
+// rather than deep-cloning a shared fragment — keeps the captured fragment from being
+// corrupted across pages (translateFragment/AppendItems mutate), and layout of a small
+// header is idempotent and cheap. This is the per-page-safe entry the margin-box loop
+// uses. A fragment wider/taller than the band pins to the band's top-left (clamped) rather
+// than spilling negatively.
 func (e *Engine) placeRunningElementBox(ctx context.Context, items []layout.Item, box *cssbox.Box, r marginRect) []layout.Item {
 	frag := e.captureRunningElement(ctx, box, r.w)
-	return e.placeRunningElement(items, frag, r)
+	if frag == nil {
+		return items
+	}
+	dx := r.x
+	if frag.W < r.w {
+		dx = r.x + (r.w-frag.W)/2
+	}
+	dy := r.y
+	if frag.H < r.h {
+		dy = r.y + (r.h-frag.H)/2
+	}
+	return e.placeRunningElement(items, frag, marginRect{x: dx, y: dy, w: r.w, h: r.h})
 }

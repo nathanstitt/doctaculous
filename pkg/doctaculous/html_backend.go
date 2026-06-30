@@ -196,7 +196,7 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 		return nil, fmt.Errorf("doctaculous: parse html: %w", err)
 	}
 	ctx := context.Background()
-	root, fontFaces, pageRules, err := layoutcss.BuildWithFontsAndPages(ctx, doc, cfg.loader, cfg.logf)
+	root, fontFaces, pageRules, running, err := layoutcss.BuildWithFontsPagesRunning(ctx, doc, cfg.loader, cfg.logf)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
 	}
@@ -208,6 +208,7 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 		FallbackH:    cfg.pageHeightPt,
 		ExplicitSize: cfg.explicitSize,
 		Pages:        pageRules,
+		Running:      running,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)

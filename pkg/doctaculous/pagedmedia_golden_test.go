@@ -140,6 +140,25 @@ var pagedMediaGoldens = []struct {
   <div class="land" style="height:160px;background:#c0c0f0">Landscape wide section</div>
 </body></html>`,
 	},
+	{
+		// CSS GCPM running ELEMENT: a styled <div> (border + background, not just text) is
+		// position:running(brand) and re-placed into the @top-center margin box on every
+		// page via content: element(brand). Eyeball: a bordered, colored header band with
+		// text appears centered in the top margin of BOTH pages (formatted markup, not a
+		// plain string), identical on both, and the .brand div does NOT appear in the body.
+		name:    "running-element",
+		wantPgs: 2,
+		html: `<!DOCTYPE html><html><head><style>
+  @page { size: 360px 240px; margin: 48px 20px; @top-center { content: element(brand) } }
+  body { margin: 0 }
+  .brand { position: running(brand); background: #224488; color: #fff; border: 2px solid #112244; width: 200px }
+  .blk { height: 180px }
+</style></head><body>
+  <div class="brand">DOCTACULOUS</div>
+  <div class="blk" style="background:#fdd">page one</div>
+  <div class="blk" style="background:#dfd">page two</div>
+</body></html>`,
+	},
 }
 
 // TestHTMLPagedMediaGolden renders @page-driven paginated documents end to end (via

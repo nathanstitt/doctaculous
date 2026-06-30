@@ -1,11 +1,13 @@
 package css
 
 import (
+	"context"
 	"image/color"
 	"strings"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
 
@@ -13,22 +15,38 @@ import (
 // headers/footers) to its item list, AFTER the page content so they paint over the
 // margin band. g carries the page geometry (size + margins + the resolved UsedPage);
 // pageIndex is the zero-based page number and pageCount the total — both feed the page
-// counters counter(page) / counter(pages). It is a no-op when the page has no @page
-// rule or no margin boxes (the common case → byte-identical).
-func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, pageCount int, ps pageStrings) []layout.Item {
+// counters counter(page) / counter(pages). running holds the document's out-of-flow
+// running elements (CSS GCPM) keyed by name, so a box whose content is element(name)
+// paints the captured running element instead of text; nil/empty when none exist. It is
+// a no-op when the page has no @page rule or no margin boxes (the common case →
+// byte-identical).
+func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, pageCount int, ps pageStrings, running map[string]*cssbox.Box) []layout.Item {
 	if !g.used.HasRule || len(g.used.MarginBoxes) == 0 {
 		return items
 	}
-	// First pass: resolve each box's text + measure its width (for edge distribution).
+	// First pass: resolve each box's content (text OR an element() reference) + measure
+	// its width (for edge distribution). An element() box reserves the FULL band width
+	// (its placement centers within the band), so it pins to the lead corner.
 	type mbItem struct {
-		slot  gcss.MarginBoxSlot
-		text  string
-		decls []gcss.Declaration
-		width float64
+		slot    gcss.MarginBoxSlot
+		text    string
+		element string // running-element name when content is element(name); "" otherwise
+		decls   []gcss.Declaration
+		width   float64
 	}
 	var items2 []mbItem
 	boxW := map[gcss.MarginBoxSlot]float64{}
 	for _, mb := range g.used.MarginBoxes {
+		// content: element(name) — paint the captured running element (formatted markup),
+		// not text. An element() reference with no captured running element for the name is
+		// dropped (graceful), exactly like an empty text box.
+		if name := marginElementName(mb.Content); name != "" {
+			if running[name] == nil {
+				continue
+			}
+			items2 = append(items2, mbItem{slot: mb.Slot, element: name, decls: mb.Decls})
+			continue
+		}
 		text := resolveMarginContentWithStrings(mb.Content, pageIndex+1, pageCount, ps)
 		if text == "" {
 			continue
@@ -45,6 +63,18 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 	}
 	// Second pass: place each box in its distributed rect.
 	for _, it := range items2 {
+		if it.element != "" {
+			// An element() box centers within its edge's FULL band (the raw slot rect, not
+			// the text-shrink distribution): the running element is a self-contained block
+			// laid out at the band width, then centered by appendMarginElement. This matches
+			// the single-box-per-edge model (one centered/edge box per side).
+			r := marginBoxRect(it.slot, g)
+			if r.w <= 0 || r.h <= 0 {
+				continue
+			}
+			items = e.appendMarginElement(items, running[it.element], r)
+			continue
+		}
 		r := marginBoxRectShared(it.slot, g, boxW)
 		if r.w <= 0 || r.h <= 0 {
 			continue
@@ -52,6 +82,30 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 		items = e.appendMarginText(items, it.text, it.decls, r)
 	}
 	return items
+}
+
+// marginElementName returns the name from a `content: element(name)` value (lowercased
+// so it matches a running()-element name), or "" if the content is not an element()
+// reference.
+func marginElementName(content string) string {
+	c := strings.TrimSpace(content)
+	if !strings.HasPrefix(c, "element(") || !strings.HasSuffix(c, ")") {
+		return ""
+	}
+	name := strings.TrimSpace(c[len("element(") : len(c)-1])
+	if name == "" {
+		return ""
+	}
+	return strings.ToLower(name)
+}
+
+// appendMarginElement places the captured running element box centered within band rect
+// r. It delegates to placeRunningElementBox, which re-captures the fragment fresh per call
+// so the shared box is never corrupted across pages. The capture is a self-contained leaf
+// layout, so it uses a background context (the document-level context already gated the
+// main layout).
+func (e *Engine) appendMarginElement(items []layout.Item, box *cssbox.Box, r marginRect) []layout.Item {
+	return e.placeRunningElementBox(context.Background(), items, box, r)
 }
 
 // resolveMarginContent resolves an @page margin box `content` value to a string for the

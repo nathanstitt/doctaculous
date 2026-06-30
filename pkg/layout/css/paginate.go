@@ -120,7 +120,9 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	geomFn := func(int, pageBucket) pageGeom {
 		return pageGeom{pageW: viewportW, pageH: pageH, contentW: viewportW, contentH: pageH}
 	}
-	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn)
+	// nil running map: this path (WithPageSize, no @page rule) has no margin boxes, so
+	// appendMarginBoxes early-returns and element() never fires.
+	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn, nil)
 	return &layout.Pages{Pages: pages}
 }
 
@@ -130,7 +132,7 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 // to local Y 0, optionally insets the content by the page's @page margins (geomFn), and
 // flattens. geomFn(i, bucket) returns page i's size and content box; a zero marginL/
 // marginT (the WithPageSize path) is byte-identical to the un-inset behavior.
-func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPagePos []pagePositioned, perPageFloats [][]*Fragment, geomFn func(int, pageBucket) pageGeom) []layout.Page {
+func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPagePos []pagePositioned, perPageFloats [][]*Fragment, geomFn func(int, pageBucket) pageGeom, running map[string]*cssbox.Box) []layout.Page {
 	// Per-page CSS running-string snapshots (for string() in @page margin boxes),
 	// computed once: each page's value carried-in / first-set / last-set, from the
 	// blocks bucketed up to and including that page.
@@ -198,7 +200,7 @@ func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPa
 		// frame); shift the items it adds by (bleed,bleed). Simplest: append them, then
 		// translate only the newly-added items by the bleed.
 		before := len(pg.Items)
-		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets), snaps[i])
+		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets), snaps[i], running)
 		if g.bleed != 0 {
 			translateItems(pg.Items, before, g.bleed, g.bleed)
 		}
