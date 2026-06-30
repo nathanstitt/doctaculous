@@ -113,18 +113,56 @@ func TestLineSplittableGuards(t *testing.T) {
 	if lineSplittable(b) {
 		t.Errorf("break-inside:avoid block must not be line-splittable")
 	}
-	// A block child (in flow) disqualifies.
-	b2 := makeLineBlock(0, 10, 4, 2, 2)
+	// A block with an in-flow block child IS splittable now (mixed block+inline split at a
+	// child boundary via splitMixedBlock), even with fewer than two lines of its own.
+	b2 := &Fragment{Y: 0, H: 10, Box: &cssbox.Box{Kind: cssbox.BoxBlock}}
 	b2.Children = []*Fragment{{Y: 5, H: 5}}
-	if lineSplittable(b2) {
-		t.Errorf("block with an in-flow block child must not be line-splittable")
+	if !lineSplittable(b2) {
+		t.Errorf("block with an in-flow block child should be splittable (mixed split)")
 	}
-	// A single-line block is not splittable.
+	// break-inside: avoid still disqualifies a mixed block.
+	b2avoid := &Fragment{Y: 0, H: 10, Box: &cssbox.Box{Kind: cssbox.BoxBlock}}
+	b2avoid.Box.Style.BreakInside = "avoid"
+	b2avoid.Children = []*Fragment{{Y: 5, H: 5}}
+	if lineSplittable(b2avoid) {
+		t.Errorf("break-inside:avoid mixed block must not be splittable")
+	}
+	// A single-line block with no in-flow block child is not splittable.
 	if lineSplittable(makeLineBlock(0, 10, 1, 2, 2)) {
 		t.Errorf("single-line block must not be line-splittable")
+	}
+	// A block whose only children are out-of-flow (a float) is not splittable on that
+	// basis (its in-flow content is its lines, which here number fewer than two).
+	bFloat := makeLineBlock(0, 10, 1, 2, 2)
+	bFloat.Children = []*Fragment{{Y: 5, H: 5, IsFloat: true}}
+	if lineSplittable(bFloat) {
+		t.Errorf("single-line block with only a float child must not be splittable")
 	}
 	// A plain multi-line block IS splittable.
 	if !lineSplittable(makeLineBlock(0, 10, 4, 2, 2)) {
 		t.Errorf("plain multi-line block should be line-splittable")
+	}
+}
+
+// A mixed block: a 4-line paragraph fragment child, then a block child, both in flow.
+// Splitting at the boundary after the paragraph keeps the paragraph on page 0 and moves
+// the block child to page 1.
+func TestSplitMixedBlock(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	box.Style = gcss.ComputedStyle{Widows: 1, Orphans: 1}
+	parent := &Fragment{Y: 0, H: 80, Box: box}
+	para := makeLineBlock(0, 10, 4, 1, 1) // 4 lines at y 0..40
+	child := &Fragment{Y: 40, H: 40, Box: &cssbox.Box{Kind: cssbox.BoxBlock}}
+	parent.Children = []*Fragment{para, child}
+	// Page bottom at 45 ⇒ the paragraph (ends 40) fits, the child (40..80) doesn't.
+	res := splitMixedBlock(parent, 45, 1, 1)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a mixed split, got head=%v tail=%v", res.head, res.tail)
+	}
+	if len(res.head.Children) != 1 || res.head.Children[0] != para {
+		t.Errorf("head should hold the paragraph only")
+	}
+	if len(res.tail.Children) != 1 || res.tail.Children[0] != child {
+		t.Errorf("tail should hold the block child only")
 	}
 }

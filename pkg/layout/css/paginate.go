@@ -429,7 +429,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		// case we fall through to the normal page-close + whole-block placement. A forced
 		// break is not line-split.
 		if overflow && !forcedBefore && len(cur.blocks) > 0 && lineSplittable(b) {
-			res := splitBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
@@ -469,7 +469,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		// taller than a whole page (the iterative case — a tail that still overflows, or a
 		// paragraph taller than a page). The head fills this page; the tail is queued.
 		if !forcedBefore && len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
-			res := splitBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)

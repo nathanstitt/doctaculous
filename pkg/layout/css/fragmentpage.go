@@ -4,24 +4,87 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 )
 
-// lineSplittable reports whether a top-level block fragment can be fragmented at a line
-// boundary for widows/orphans: it must establish an inline formatting context (have
-// Lines), carry no break-inside: avoid, and hold no block child fragments interleaved
-// with its lines (a pure-inline-content block — the dominant paragraph case). A block
-// mixing block children and lines (an anonymous-block fixup) is NOT line-split here; it
-// falls back to whole-block placement (overflow if too tall), because the post-pass does
-// not re-derive block/line interleave order. Floats/positioned children are out of flow
-// and do not disqualify the block (its in-flow content is still pure inline).
+// lineSplittable reports whether a top-level block fragment can be fragmented for
+// pagination: it must carry no break-inside: avoid, and EITHER establish an inline
+// formatting context with at least two lines (a pure-inline paragraph, line-split by
+// splitBlockForPage) OR hold at least one in-flow block child (a mixed block+inline
+// container, split at a child boundary by splitMixedBlock). Floats/positioned children
+// are out of flow and do not by themselves make a block splittable. break-inside: avoid
+// disqualifies either shape.
 func lineSplittable(b *Fragment) bool {
-	if b == nil || len(b.Lines) < 2 || keptInsideAvoid(b) {
+	if b == nil || keptInsideAvoid(b) {
 		return false
 	}
-	for _, c := range b.Children {
+	return len(b.Lines) >= 2 || hasInFlowBlockChild(b)
+}
+
+// splitAnyBlockForPage splits b for the page, choosing the splitter by b's content shape:
+// a block with in-flow block children breaks at child boundaries, and a pure-inline block
+// line-splits. (Table and flex/grid arms are added by their own tasks.)
+func splitAnyBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) splitResult {
+	if hasInFlowBlockChild(b) {
+		return splitMixedBlock(b, pageBottom, widows, orphans)
+	}
+	return splitBlockForPage(b, pageBottom, widows, orphans)
+}
+
+// hasInFlowBlockChild reports whether f has at least one in-flow (non-float,
+// non-positioned) child fragment — i.e. a block-level child interleaved with f's content.
+func hasInFlowBlockChild(f *Fragment) bool {
+	for _, c := range f.Children {
 		if !c.IsFloat && !c.IsPositioned {
-			return false // an in-flow block child interleaves with the lines
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+// splitMixedBlock splits a block that holds in-flow block children at a CHILD boundary:
+// children whose bottom is fully above pageBottom stay in the head; the rest go to the
+// tail (its Y moved to the first kept child, top border suppressed). A child straddling
+// the boundary is NOT recursively split here (it rides the tail whole). widows/orphans
+// apply to the parent's own lines (rare in a mixed block; not separately enforced).
+// Returns {head:parent} if all children fit, {tail:parent} if none fit.
+func splitMixedBlock(parent *Fragment, pageBottom float64, widows, orphans int) splitResult {
+	inflow := inFlowChildren(parent)
+	if len(inflow) == 0 {
+		return splitBlockForPage(parent, pageBottom, widows, orphans) // pure-inline fallback
+	}
+	k := 0
+	for i, c := range inflow {
+		if c.Y+c.H <= pageBottom+0.5 {
+			k = i + 1
+		} else {
+			break
+		}
+	}
+	if k >= len(inflow) {
+		return splitResult{head: parent}
+	}
+	if k == 0 {
+		return splitResult{tail: parent}
+	}
+	head := *parent
+	tail := *parent
+	head.Children = append([]*Fragment(nil), inflow[:k]...)
+	tail.Children = append([]*Fragment(nil), inflow[k:]...)
+	head.H = inflow[k-1].Y + inflow[k-1].H - parent.Y
+	tail.Y = inflow[k].Y
+	tail.H = (parent.Y + parent.H) - tail.Y
+	head.Border[layout.EdgeBottom] = BorderEdge{}
+	tail.Border[layout.EdgeTop] = BorderEdge{}
+	return splitResult{head: &head, tail: &tail}
+}
+
+// inFlowChildren returns f's in-flow (non-float, non-positioned) child fragments.
+func inFlowChildren(f *Fragment) []*Fragment {
+	var out []*Fragment
+	for _, c := range f.Children {
+		if !c.IsFloat && !c.IsPositioned {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // splitResult is the outcome of attempting to split a block across a page boundary.
