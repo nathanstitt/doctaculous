@@ -83,12 +83,26 @@ func BuildWithFontsPagesRunning(ctx context.Context, doc *html.Document, loader 
 		// empty document.
 		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, faces, pages, running, nil
 	}
-	resolveCounters(root) // list-item markers + CSS counter()/counters() content (counters.go)
-	normalize(root)       // anonymous-box fixups + whitespace handling (anon.go)
-	fixupTables(root)     // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
-	fixupFlex(root)       // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
-	fixupGrid(root)       // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
+	finalizeBoxTree(root)
+	// Running elements were pulled out of the tree before the fixups ran (they are not
+	// in root), so finalize each captured subtree independently — it is laid out on its
+	// own at capture time and needs the same anonymous-box/whitespace/counter passes.
+	for _, rb := range running {
+		finalizeBoxTree(rb)
+	}
 	return root, faces, pages, running, nil
+}
+
+// finalizeBoxTree applies the post-generation box-tree passes (counters, anonymous-box
+// fixups, whitespace handling, table/flex/grid anonymous-item insertion) to a built
+// subtree. It runs on the document root and, separately, on each out-of-flow running
+// element (which is removed from the root before these passes).
+func finalizeBoxTree(b *cssbox.Box) {
+	resolveCounters(b) // list-item markers + CSS counter()/counters() content (counters.go)
+	normalize(b)       // anonymous-box fixups + whitespace handling (anon.go)
+	fixupTables(b)     // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
+	fixupFlex(b)       // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
+	fixupGrid(b)       // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
 }
 
 // assembleSheets returns the origin-ordered sheets AND the aggregated @font-face and
