@@ -75,6 +75,41 @@ func (pc PagedConfig) resolvePageGeom(i int, name string, blank bool) pageGeom {
 	return g
 }
 
+// pageRun is a maximal consecutive run of top-level blocks sharing a resolved page
+// name (and therefore a content width). start/end are indices into body.Children
+// (half-open [start,end)).
+type pageRun struct {
+	name       string
+	start, end int
+}
+
+// blockPageName returns a block fragment's resolved CSS `page` name ("" = the default,
+// un-named page). A nil Box reads as default.
+func blockPageName(f *Fragment) string {
+	if f == nil || f.Box == nil {
+		return ""
+	}
+	return f.Box.Style.Page
+}
+
+// groupRuns partitions blocks into maximal consecutive runs sharing a page name. A page
+// name change between adjacent blocks starts a new run (CSS GCPM: a `page` change forces
+// a break). Returns one run spanning everything when all blocks share a name (the common
+// single-width case).
+func groupRuns(blocks []*Fragment) []pageRun {
+	var runs []pageRun
+	for i := 0; i < len(blocks); {
+		name := blockPageName(blocks[i])
+		j := i + 1
+		for j < len(blocks) && blockPageName(blocks[j]) == name {
+			j++
+		}
+		runs = append(runs, pageRun{name: name, start: i, end: j})
+		i = j
+	}
+	return runs
+}
+
 // LayoutPagedDoc lays out root paginated per a PagedConfig: it resolves the page size
 // and margins from the document's @page rules (combined with any API override) and
 // fragments the document into pages, placing each page's content inside the @page
