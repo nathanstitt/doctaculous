@@ -143,6 +143,11 @@ type ComputedStyle struct {
 	Widows  int
 	Orphans int
 
+	// StringSet is the CSS `string-set` assignments on this box (CSS GCPM): name→value
+	// builders read in document order to feed the page-margin string() function.
+	// Not inherited; initial nil. Read only by the pagination pass's string snapshot.
+	StringSet []StringSetEntry
+
 	// Float is the CSS float value: "none" (default) | "left" | "right". Not
 	// inherited. The box generator maps it to cssbox.FloatKind.
 	Float string
@@ -645,6 +650,8 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		} else {
 			cs.Page = strings.ToLower(d.Value)
 		}
+	case "string-set":
+		cs.StringSet = parseStringSet(d.Value)
 	case "widows":
 		if n, err := strconv.Atoi(strings.TrimSpace(d.Value)); err == nil && n >= 1 {
 			cs.Widows = n
