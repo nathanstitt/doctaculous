@@ -192,8 +192,18 @@ type LineFragment struct {
 type GlyphFragment struct {
 	Outline *render.Path
 	X       float64
-	SizePt  float64
-	Color   color.RGBA
+	// AdvancePt is the glyph's horizontal advance in page-space points. It sizes a
+	// text-decoration underline span: the span's right edge is the last glyph's
+	// X+AdvancePt (the visible glyph extent is approximated by the pen advance —
+	// adequate for underlines). The CSS engine always sets it; a zero value would
+	// shorten an underline's trailing edge by the last glyph's width.
+	AdvancePt float64
+	SizePt    float64
+	Color     color.RGBA
+	// Underline marks a glyph whose box has text-decoration: underline; consecutive
+	// underlined glyphs on a line are painted with one underline rule (see
+	// appendSelfContent).
+	Underline bool
 }
 
 // AppendItems appends f's drawing primitives, and its descendants', to dst in CSS 2.1
@@ -415,6 +425,49 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	return dst
 }
 
+// appendUnderlines emits text-decoration:underline rules for one line: one thin
+// RuleKind rectangle per contiguous run of underlined glyphs, spanning the run's
+// x-extent (pen origin of the first glyph to pen-end of the last), positioned just
+// below the baseline. Thickness and offset scale with the run's glyph size (≈0.07em
+// thick, ≈0.12em below the baseline) — a simple, browser-plausible underline. Emitted
+// after the glyphs (an underline sits below the ink, so order doesn't matter).
+func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
+	i := 0
+	for i < len(ln.Glyphs) {
+		if g := &ln.Glyphs[i]; !g.Underline || g.Outline == nil {
+			i++
+			continue
+		}
+		// Start of an underlined run: extend over consecutive underlined glyphs.
+		x0 := ln.Glyphs[i].X
+		x1 := ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
+		size := ln.Glyphs[i].SizePt
+		// The underline is drawn in the glyph's own color. CSS paints a propagated
+		// underline in the DECORATING ancestor's color, which diverges only when a
+		// descendant overrides color without re-declaring decoration (a narrow case the
+		// engine does not yet thread the decorating color through — deferred).
+		col := ln.Glyphs[i].Color
+		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].Underline && ln.Glyphs[i].Outline != nil; i++ {
+			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
+			if ln.Glyphs[i].SizePt > size {
+				size = ln.Glyphs[i].SizePt // a span uses its tallest glyph's metrics
+			}
+		}
+		thickness := size * 0.07
+		if thickness < 1 {
+			thickness = 1
+		}
+		yTop := ln.BaselineY + size*0.12
+		if x1 > x0 {
+			dst = append(dst, layout.Item{
+				Kind: layout.RuleKind,
+				Rule: layout.RuleItem{XPt: x0, YPt: yTop, WPt: x1 - x0, HPt: thickness, Color: col},
+			})
+		}
+	}
+	return dst
+}
+
 // appendSelfContent emits this fragment's own inline line glyphs then its replaced
 // image (no recursion).
 func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
@@ -430,6 +483,7 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY, SizePt: g.SizePt, Color: g.Color},
 			})
 		}
+		dst = appendUnderlines(dst, ln)
 	}
 	if f.Image != nil && f.Image.Img != nil {
 		dst = append(dst, layout.Item{

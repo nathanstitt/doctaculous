@@ -164,3 +164,30 @@ func TestBackgroundShorthandBoxKeywords(t *testing.T) {
 }
 
 func rgbaOf(r, g, b uint8) color.RGBA { return color.RGBA{R: r, G: g, B: b, A: 255} }
+
+// (text-decoration lives in the same value/cascade area; tested here for convenience.)
+func TestTextDecorationParsing(t *testing.T) {
+	cs := initialStyle()
+	if cs.TextDecorationLine != "none" {
+		t.Errorf("initial text-decoration = %q, want none", cs.TextDecorationLine)
+	}
+	applyDeclaration(&cs, Declaration{Property: "text-decoration", Value: "underline"})
+	if cs.TextDecorationLine != "underline" {
+		t.Errorf("text-decoration:underline = %q", cs.TextDecorationLine)
+	}
+	// The shorthand may carry color/style too; the underline keyword still wins.
+	cs2 := initialStyle()
+	applyDeclaration(&cs2, Declaration{Property: "text-decoration", Value: "underline red solid"})
+	if cs2.TextDecorationLine != "underline" {
+		t.Errorf("text-decoration shorthand = %q, want underline", cs2.TextDecorationLine)
+	}
+	// none clears it; an unsupported-only line (line-through) reads as none.
+	applyDeclaration(&cs, Declaration{Property: "text-decoration-line", Value: "none"})
+	if cs.TextDecorationLine != "none" {
+		t.Errorf("text-decoration-line:none = %q", cs.TextDecorationLine)
+	}
+	applyDeclaration(&cs, Declaration{Property: "text-decoration", Value: "line-through"})
+	if cs.TextDecorationLine != "none" {
+		t.Errorf("unsupported line-through = %q, want none", cs.TextDecorationLine)
+	}
+}

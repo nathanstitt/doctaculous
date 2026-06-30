@@ -41,6 +41,11 @@ type Run struct {
 	// collapsed whitespace for the non-preserving modes, so Text arrives pre-collapsed
 	// there.
 	WhiteSpace string
+	// Underline marks a run whose text has text-decoration: underline. It is carried
+	// opaquely onto each shaped glyph (Glyph.Underline) for the engine to paint; the
+	// shaper itself does nothing with it. The zero value (false) is the historical
+	// behavior, so a caller (e.g. the DOCX engine) that never sets it is unaffected.
+	Underline bool
 }
 
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
@@ -79,6 +84,10 @@ type Glyph struct {
 	// opportunity, so a nowrap inline span stays on one line even inside a wrapping
 	// block.
 	NoWrap bool
+	// Underline carries the run's text-decoration: underline onto the glyph, for the
+	// engine's line emitter to paint as an underline rule. The shaper does not act on
+	// it. Zero (false) for callers that don't set Run.Underline (e.g. DOCX).
+	Underline bool
 }
 
 // Color is the package's own RGBA so the public glyph type carries no image/color
@@ -129,7 +138,7 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 			spaceAdv = sa * r.SizePt
 		}
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
-		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap}
+		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline}
 		for _, rn := range r.Text {
 			switch {
 			case rn == '\n' && preserveNL:

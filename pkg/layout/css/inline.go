@@ -116,8 +116,9 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 				}
 			case g.Outline != nil:
 				emitted = append(emitted, GlyphFragment{
-					Outline: g.Outline, X: x, SizePt: g.SizePt,
-					Color: color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
+					Color:     color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+					Underline: g.Underline,
 				})
 			}
 			x += g.Advance
@@ -180,6 +181,7 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				SizePt:     child.Style.FontSizePt,
 				Color:      child.Style.Color,
 				WhiteSpace: child.Style.WhiteSpace,
+				Underline:  child.Style.TextDecorationLine == "underline",
 			})
 		case child.Kind == cssbox.BoxReplaced:
 			// A replaced inline (e.g. <img>, including an inline-block <img>) sizes via

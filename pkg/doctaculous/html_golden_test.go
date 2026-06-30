@@ -775,6 +775,27 @@ line area</textarea></div>
 </style></head><body><div class="badge"></div></body></html>`,
 		loader: quadLoader(),
 	},
+	{
+		// Link pseudo-classes: a default <a href> is the UA blue + underline; an
+		// author a:link color overrides the color (underline kept); text-decoration:none
+		// drops the underline; a bare <a> (no href) and a :visited rule stay inert.
+		// Eyeball: line 1 link blue+underlined, line 2 link rust+underlined, line 3 link
+		// blue not underlined, line 4 "not a link" plain black, line 5 link blue+underlined.
+		name:       "link",
+		viewportPx: 320,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 8px; font-family: sans-serif; font-size: 16px; }
+  a.custom:link { color: #b03a2e; }
+  a.plain:link { text-decoration: none; }
+  a.vis:visited { color: #008000; }
+</style></head><body>
+  <p>Default: <a href="/a">a link</a>.</p>
+  <p>Custom: <a class="custom" href="/b">read more</a>.</p>
+  <p>No underline: <a class="plain" href="/c">plain</a>.</p>
+  <p>Bare: <a>not a link</a>.</p>
+  <p>Visited rule inert: <a class="vis" href="/e">still blue</a>.</p>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for

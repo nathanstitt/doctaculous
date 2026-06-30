@@ -27,6 +27,19 @@ type Length struct {
 	Unit  LengthUnit
 }
 
+// parseTextDecorationLine extracts the supported text-decoration line from a value
+// (the longhand or the shorthand). It returns "underline" if the underline keyword is
+// present, else "none" — other line keywords (overline/line-through) and the color/
+// style/thickness tokens are not modeled, so a value without "underline" reads as none.
+func parseTextDecorationLine(value string) string {
+	for _, f := range strings.Fields(strings.ToLower(value)) {
+		if f == "underline" {
+			return "underline"
+		}
+	}
+	return "none"
+}
+
 // parseLength interprets a single token as a length. A unitless 0 is a valid
 // zero length; the "auto" keyword yields UnitAuto. ok is false for tokens that
 // are not lengths (e.g. a color keyword).

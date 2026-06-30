@@ -392,6 +392,30 @@ newline is kept.</p>
           over a tint.</p>
       </div>
     </div>
+  </section>
+
+  <!-- ===================== 13 · LINKS ===================== -->
+  <section class="section break">
+    <span class="kicker">13 / LINKS</span>
+    <h2>Links</h2>
+    <p class="lede">The link pseudo-classes: a UA default, an author
+      <code>a:link</code> color, an underline opt-out, and an inert
+      <code>:visited</code> rule.</p>
+
+    <p>Body copy with a <a href="https://example.com">default hyperlink</a> &mdash;
+      blue and underlined, the user-agent style for an unvisited link.</p>
+
+    <p>A <a class="cta" href="https://example.com">call-to-action link</a> recolored
+      with <code>a:link { color }</code>, keeping its underline.</p>
+
+    <p>A <a class="bare" href="https://example.com">borderless link</a> with
+      <code>text-decoration: none</code> &mdash; colored but not underlined.</p>
+
+    <p class="caption">A <code>:visited</code> rule is parsed but never matches in a
+      static render (no browsing history), so
+      <a class="seen" href="https://example.com">this link</a> stays the unvisited
+      style &mdash; and a bare anchor with no <code>href</code>,
+      <a>like this</a>, is not a link at all.</p>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from

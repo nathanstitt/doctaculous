@@ -64,6 +64,13 @@ type ComputedStyle struct {
 
 	TextAlign string // "left" | "right" | "center" | "justify"
 
+	// TextDecorationLine is the supported subset of CSS text-decoration: "none"
+	// (initial) or "underline". Modeled as inherited (like Color) so it propagates to
+	// inline descendants of a decorating box — the pragmatic approximation the engine
+	// uses for text styling. Other keywords (overline/line-through/colors/styles) are
+	// not modeled (parsed-and-ignored). Painted by the CSS inline formatting context.
+	TextDecorationLine string
+
 	// WhiteSpace is the CSS white-space property: "normal" | "nowrap" | "pre" |
 	// "pre-wrap" | "pre-line". Inherited; initial "normal". Decomposed into three
 	// behaviors by WhiteSpaceFlags (collapse spaces, preserve newlines, wrap).
@@ -343,6 +350,7 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Italic = parent.Italic
 	cs.LineHeight = parent.LineHeight
 	cs.TextAlign = parent.TextAlign
+	cs.TextDecorationLine = parent.TextDecorationLine
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.ListStyleType = parent.ListStyleType
 	cs.ListStylePosition = parent.ListStylePosition
@@ -367,6 +375,7 @@ func initialStyle() ComputedStyle {
 		FontSizePt:         16,
 		LineHeight:         Length{Unit: UnitAuto},
 		TextAlign:          "left",
+		TextDecorationLine: "none",
 		WhiteSpace:         "normal",
 		ListStyleType:      "disc",
 		ListStylePosition:  "outside",
@@ -495,6 +504,10 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "left", "right", "center", "justify":
 			cs.TextAlign = d.Value
 		}
+	case "text-decoration", "text-decoration-line":
+		// Supported subset: underline / none. The shorthand may carry color/style/
+		// thickness tokens too; we scan for the line keyword. "none" clears it.
+		cs.TextDecorationLine = parseTextDecorationLine(d.Value)
 	case "white-space":
 		switch d.Value {
 		case "normal", "nowrap", "pre", "pre-wrap", "pre-line":

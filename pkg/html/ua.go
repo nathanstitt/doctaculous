@@ -47,6 +47,11 @@ th { font-weight: bold; }
 pre { white-space: pre; font-family: monospace; }
 code, kbd, samp { font-family: monospace; }
 
+/* Hyperlinks: the classic browser default — blue and underlined. Scoped to :link
+   (an <a> with href) so a bare named-anchor <a> is not styled. Author a/a:link rules
+   override this (it is the lowest, UA origin). */
+a:link { color: #0000ee; text-decoration: underline; }
+
 input, textarea, select, button {
 	display: inline-block;
 	font-size: 13px;
