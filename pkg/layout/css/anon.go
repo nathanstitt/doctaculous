@@ -3,6 +3,7 @@ package css
 import (
 	"strings"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -248,10 +249,24 @@ func wrapInlineRuns(children []*cssbox.Box) []*cssbox.Box {
 // blocks). Non-whitespace text has its internal whitespace runs collapsed to a
 // single space.
 func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box {
-	// First collapse internal whitespace in every text box.
+	// The CSS white-space of the containing element decides whether whitespace
+	// collapses: collapsing modes (normal/nowrap) squash runs (incl. newlines) to one
+	// space; pre-line collapses spaces/tabs but keeps newlines; preserving modes
+	// (pre/pre-wrap) keep everything (the shaper turns kept newlines into breaks and
+	// kept tabs into tab stops). A text box is anonymous and inherits, so the parent's
+	// value applies. The empty/normal default reproduces the prior collapse-everything.
+	collapseSpaces, preserveNewlines, _ := gcss.WhiteSpaceFlags(parent.Style.WhiteSpace)
 	for _, c := range children {
-		if c.Kind == cssbox.BoxText {
-			c.Text = collapseWS(c.Text)
+		if c.Kind != cssbox.BoxText {
+			continue
+		}
+		switch {
+		case collapseSpaces && !preserveNewlines:
+			c.Text = collapseWS(c.Text) // normal / nowrap
+		case collapseSpaces && preserveNewlines:
+			c.Text = collapseWSKeepNewlines(c.Text) // pre-line
+		default:
+			// pre / pre-wrap: keep the raw text verbatim.
 		}
 	}
 	// Then drop whitespace-only text boxes adjacent to block-level siblings (or at
@@ -260,10 +275,13 @@ func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box 
 	// is a block container and strips inter-block whitespace among its own children.
 	// The block-BOUNDARY test for the siblings (adjacentToBlock) uses the outer-level
 	// predicate instead, so an inline-block sibling is not a boundary.
+	// In a preserving mode (pre/pre-wrap) a whitespace-only text box is significant
+	// (e.g. a blank line in <pre>) and must NOT be dropped. Only collapse it away in
+	// collapsing modes.
 	parentIsBlockContainer := parent.Kind.IsBlockLevel()
 	var out []*cssbox.Box
 	for i, c := range children {
-		if c.Kind == cssbox.BoxText && isAllWS(c.Text) {
+		if collapseSpaces && c.Kind == cssbox.BoxText && isAllWS(c.Text) {
 			if parentIsBlockContainer && adjacentToBlock(children, i) {
 				continue // drop inter-block whitespace
 			}
@@ -302,6 +320,31 @@ func collapseWS(s string) string {
 		}
 		b.WriteRune(r)
 		inWS = false
+	}
+	return b.String()
+}
+
+// collapseWSKeepNewlines collapses runs of spaces/tabs to a single space but PRESERVES
+// each newline (white-space: pre-line). A run of horizontal whitespace around a newline
+// collapses so the newline stands alone; the shaper turns the kept '\n' into a hard
+// break. Consecutive newlines are preserved (blank lines survive in pre-line).
+func collapseWSKeepNewlines(s string) string {
+	var b strings.Builder
+	inSpace := false // currently in a run of collapsible spaces/tabs (not newlines)
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteByte('\n')
+			inSpace = false
+		case r == ' ' || r == '\t' || isWSRune(r):
+			if !inSpace {
+				b.WriteByte(' ')
+				inSpace = true
+			}
+		default:
+			b.WriteRune(r)
+			inSpace = false
+		}
 	}
 	return b.String()
 }

@@ -1,9 +1,12 @@
 package css
 
 import (
+	"context"
 	"image/color"
+	"strings"
 	"testing"
 
+	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -304,3 +307,59 @@ func kindName(k cssbox.BoxKind) string {
 }
 
 func quote(s string) string { return "\"" + s + "\"" }
+
+func TestCollapseWSKeepNewlines(t *testing.T) {
+	// Spaces/tabs collapse to one space; newlines are preserved; blank lines survive.
+	got := collapseWSKeepNewlines("a   b\t\tc\n\n  d")
+	if got != "a b c\n\n d" {
+		t.Errorf("collapseWSKeepNewlines = %q, want %q", got, "a b c\n\n d")
+	}
+}
+
+// firstText returns the first BoxText found under root (depth-first).
+func firstText(b *cssbox.Box) *cssbox.Box {
+	if b == nil {
+		return nil
+	}
+	if b.Kind == cssbox.BoxText {
+		return b
+	}
+	for _, c := range b.Children {
+		if t := firstText(c); t != nil {
+			return t
+		}
+	}
+	return nil
+}
+
+func TestWhiteSpaceCollapseGatedByProperty(t *testing.T) {
+	build := func(src string) *cssbox.Box {
+		doc, _ := html.Parse([]byte(src))
+		root, _ := Build(context.Background(), doc, nil, nil)
+		return root
+	}
+	// normal: internal whitespace (incl. the newline) collapses to single spaces.
+	n := firstText(build("<body><p>a   b\nc</p></body>"))
+	if n == nil || strings.Contains(n.Text, "\n") || strings.Contains(n.Text, "  ") {
+		t.Errorf("normal text = %q, want collapsed (no newline, no double space)", textOrNil(n))
+	}
+	// pre: raw whitespace (multiple spaces AND the newline) is preserved.
+	p := firstText(build(`<body><pre>a   b
+c</pre></body>`))
+	if p == nil || !strings.Contains(p.Text, "   ") || !strings.Contains(p.Text, "\n") {
+		t.Errorf("pre text = %q, want preserved spaces + newline", textOrNil(p))
+	}
+	// pre-line: spaces collapse but the newline survives.
+	pl := firstText(build(`<body><p style="white-space:pre-line">a   b
+c</p></body>`))
+	if pl == nil || strings.Contains(pl.Text, "   ") || !strings.Contains(pl.Text, "\n") {
+		t.Errorf("pre-line text = %q, want collapsed spaces but kept newline", textOrNil(pl))
+	}
+}
+
+func textOrNil(b *cssbox.Box) string {
+	if b == nil {
+		return "<nil>"
+	}
+	return b.Text
+}

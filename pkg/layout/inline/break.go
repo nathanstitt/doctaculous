@@ -89,8 +89,27 @@ func Break(glyphs []Glyph, maxWidthPt, firstWidthPt float64) []Line {
 // fixed-width path (DOCX and non-floated HTML). Driving BreakNext repeatedly at a
 // fixed width reproduces Break's lines.
 func BreakNext(glyphs []Glyph, widthPt float64) (line, rest []Glyph) {
+	return BreakNextWrap(glyphs, widthPt, true)
+}
+
+// BreakNextWrap is BreakNext with an explicit wrap flag. When wrap is false
+// (white-space: nowrap / pre), the line is NOT broken at the available width: it
+// extends to the next hard break (Break glyph) or the end of input, overflowing the
+// width (the caller's overflow handling, if any, clips it). When wrap is true it
+// behaves exactly like BreakNext. This is how the CSS inline formatting context honors
+// a non-wrapping white-space value.
+func BreakNextWrap(glyphs []Glyph, widthPt float64, wrap bool) (line, rest []Glyph) {
 	if len(glyphs) == 0 {
 		return nil, nil
+	}
+	if !wrap {
+		// No width breaking: consume up to (and through) the first hard break, else all.
+		for i := 0; i < len(glyphs); i++ {
+			if glyphs[i].Break {
+				return glyphs[:i], glyphs[i+1:]
+			}
+		}
+		return glyphs, nil
 	}
 	// Track VisibleWidth(glyphs[:i+1]) incrementally (O(1) per glyph) instead of
 	// re-summing each iteration, which made filling one line O(L²): total is the sum of
@@ -126,11 +145,13 @@ func BreakNext(glyphs []Glyph, widthPt float64) (line, rest []Glyph) {
 	return glyphs, nil
 }
 
-// lastSpaceBefore returns the index of the last space glyph at or before idx, or
-// -1 if none.
+// lastSpaceBefore returns the index of the last break-opportunity space at or before
+// idx, or -1 if none. A NoWrap space (from a white-space: nowrap/pre run) is a space
+// for width purposes but NOT a break opportunity, so it is skipped here — that keeps a
+// nowrap inline span unbroken even inside a wrapping block.
 func lastSpaceBefore(glyphs []Glyph, idx int) int {
 	for i := idx; i >= 0; i-- {
-		if glyphs[i].Space {
+		if glyphs[i].Space && !glyphs[i].NoWrap {
 			return i
 		}
 	}

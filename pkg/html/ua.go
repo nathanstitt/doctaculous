@@ -35,6 +35,10 @@ h5 { font-size: 13px; font-weight: bold; margin-top: 9px; margin-bottom: 9px; }
 h6 { font-size: 11px; font-weight: bold; margin-top: 7px; margin-bottom: 7px; }
 p, blockquote { margin-top: 16px; margin-bottom: 16px; }
 th { font-weight: bold; }
+/* Preformatted text preserves whitespace and uses a monospace family (CSS2.1 sample
+   UA sheet). pre-wrap on textarea so a long line still wraps inside the field. */
+pre { white-space: pre; font-family: monospace; }
+code, kbd, samp { font-family: monospace; }
 
 input, textarea, select, button {
 	display: inline-block;

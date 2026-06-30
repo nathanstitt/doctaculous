@@ -39,7 +39,7 @@ type OriginSheet struct {
 // this struct — they are retained on the Rule for later sub-projects.
 //
 // Inherited properties (CSS) are Color, FontFamily, FontSizePt, Bold, Italic,
-// LineHeight, and TextAlign; inheritFrom must be kept in sync with this set.
+// LineHeight, TextAlign, and WhiteSpace; inheritFrom must be kept in sync with this set.
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
@@ -53,6 +53,11 @@ type ComputedStyle struct {
 	LineHeight Length // UnitAuto = "normal"
 
 	TextAlign string // "left" | "right" | "center" | "justify"
+
+	// WhiteSpace is the CSS white-space property: "normal" | "nowrap" | "pre" |
+	// "pre-wrap" | "pre-line". Inherited; initial "normal". Decomposed into three
+	// behaviors by WhiteSpaceFlags (collapse spaces, preserve newlines, wrap).
+	WhiteSpace string
 
 	MarginTop, MarginRight, MarginBottom, MarginLeft     Length
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft Length
@@ -319,6 +324,7 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Italic = parent.Italic
 	cs.LineHeight = parent.LineHeight
 	cs.TextAlign = parent.TextAlign
+	cs.WhiteSpace = parent.WhiteSpace
 	cs.BorderCollapse = parent.BorderCollapse
 	cs.BorderSpacingH = parent.BorderSpacingH
 	cs.BorderSpacingV = parent.BorderSpacingV
@@ -340,6 +346,7 @@ func initialStyle() ComputedStyle {
 		FontSizePt:      16,
 		LineHeight:      Length{Unit: UnitAuto},
 		TextAlign:       "left",
+		WhiteSpace:      "normal",
 		Width:           Length{Unit: UnitAuto},
 		Height:          Length{Unit: UnitAuto},
 		MinWidth:        Length{Unit: UnitPx},   // CSS initial min-width is 0
@@ -430,6 +437,11 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "left", "right", "center", "justify":
 			cs.TextAlign = d.Value
+		}
+	case "white-space":
+		switch d.Value {
+		case "normal", "nowrap", "pre", "pre-wrap", "pre-line":
+			cs.WhiteSpace = d.Value
 		}
 	case "margin-top":
 		setLength(&cs.MarginTop, d.Value)
@@ -880,6 +892,33 @@ func cleanFamilyList(val string) string {
 		return val
 	}
 	return strings.Join(cleaned, ", ")
+}
+
+// WhiteSpaceFlags decomposes a CSS white-space value into its three independent
+// behaviors (CSS Text §3): whether runs of spaces/tabs collapse to one space,
+// whether newlines are preserved (as forced line breaks) rather than collapsed, and
+// whether lines wrap at the available width. An empty or unrecognized value maps to
+// "normal" (collapse spaces, collapse newlines, wrap) — the engine's prior behavior.
+//
+//	value     collapseSpaces  preserveNewlines  wrap
+//	normal    true            false             true
+//	nowrap    true            false             false
+//	pre       false           true              false
+//	pre-wrap  false           true              true
+//	pre-line  true            true              true
+func WhiteSpaceFlags(ws string) (collapseSpaces, preserveNewlines, wrap bool) {
+	switch ws {
+	case "nowrap":
+		return true, false, false
+	case "pre":
+		return false, true, false
+	case "pre-wrap":
+		return false, true, true
+	case "pre-line":
+		return true, true, true
+	default: // "normal" and any unknown value
+		return true, false, true
+	}
 }
 
 // splitComma splits a comma-separated CSS value list (e.g. a font-family list).
