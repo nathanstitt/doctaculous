@@ -132,3 +132,67 @@ func TestParseSelectorListSkipsMalformed(t *testing.T) {
 		t.Errorf("sels[1] specificity = %v, want {0 1 1} (p.intro)", sels[1].Specificity())
 	}
 }
+
+func TestPseudoClassParsing(t *testing.T) {
+	// a:link → captured pseudo, specificity (0,1,1) (one type + one pseudo-as-class).
+	sels := parseSelectorList("a:link")
+	if len(sels) != 1 {
+		t.Fatalf("a:link → %d selectors, want 1", len(sels))
+	}
+	if got := sels[0].Specificity(); got != (Specificity{0, 1, 1}) {
+		t.Errorf("a:link specificity = %v, want {0 1 1}", got)
+	}
+	if p := sels[0].parts[0]; len(p.pseudos) != 1 || p.pseudos[0] != "link" {
+		t.Errorf("a:link pseudos = %v, want [link]", p.pseudos)
+	}
+	// Multiple pseudos compound.
+	if s := parseSelectorList("a:link:hover"); len(s) != 1 || len(s[0].parts[0].pseudos) != 2 {
+		t.Errorf("a:link:hover pseudos = %v", s)
+	}
+	// The universal type with a pseudo: "*:link" is (0,1,0) — the * adds no type
+	// specificity — and its pseudo is captured.
+	if s := parseSelectorList("*:link"); len(s) != 1 || s[0].Specificity() != (Specificity{0, 1, 0}) {
+		t.Errorf("*:link = %v specificity %v, want {0 1 0}", s, s[0].Specificity())
+	}
+	// Pseudo-elements and functional pseudos drop the selector.
+	for _, dropped := range []string{"div::before", "p:before", "a:not(.x)", "li:nth-child(2)", "a:"} {
+		if s := parseSelectorList(dropped); len(s) != 0 {
+			t.Errorf("%q should be dropped, got %d selectors", dropped, len(s))
+		}
+	}
+	// A dropped selector in a group leaves the others.
+	if s := parseSelectorList("a:link, p::before, span"); len(s) != 2 {
+		t.Errorf("group with a pseudo-element → %d selectors, want 2", len(s))
+	}
+}
+
+func TestPseudoClassMatching(t *testing.T) {
+	linked := &fakeNode{tag: "a", attrs: map[string]string{"href": "/x"}}
+	bare := &fakeNode{tag: "a"} // no href
+	span := &fakeNode{tag: "span"}
+
+	match := func(sel string, n *fakeNode) bool {
+		s := parseSelectorList(sel)
+		if len(s) == 0 {
+			t.Fatalf("%q parsed to nothing", sel)
+		}
+		return s[0].Matches(n)
+	}
+	// :link matches a hyperlink with href, not a bare <a> or a non-link.
+	if !match("a:link", linked) {
+		t.Error("a:link should match <a href>")
+	}
+	if match("a:link", bare) {
+		t.Error("a:link should NOT match <a> without href")
+	}
+	if match(":link", span) {
+		t.Error(":link should NOT match <span>")
+	}
+	// :visited matches nothing (no history); dynamic pseudos match nothing (static).
+	if match("a:visited", linked) {
+		t.Error("a:visited should match nothing")
+	}
+	if match("a:hover", linked) {
+		t.Error("a:hover should match nothing in a static render")
+	}
+}

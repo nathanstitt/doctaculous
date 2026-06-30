@@ -20,11 +20,12 @@ func (s Specificity) Less(o Specificity) bool {
 }
 
 // simpleSelector matches a single element: an optional type, plus any number of
-// class and id qualifiers. A universal "*" sets neither type nor qualifiers.
+// class, id, and pseudo-class qualifiers. A universal "*" sets none of them.
 type simpleSelector struct {
 	tag     string // "" means any (universal or qualifier-only)
 	id      string
 	classes []string
+	pseudos []string // pseudo-class names, lowercased (e.g. "link", "hover"); no leading ":"
 }
 
 // Selector is a sequence of simpleSelectors joined by descendant combinators,
@@ -42,6 +43,7 @@ func (s Selector) Specificity() Specificity {
 			sp.IDs++
 		}
 		sp.Classes += len(p.classes)
+		sp.Classes += len(p.pseudos) // a pseudo-class counts at the class level (CSS)
 		if p.tag != "" {
 			sp.Types++
 		}
@@ -94,7 +96,43 @@ func (ss simpleSelector) matches(n Node) bool {
 			return false
 		}
 	}
+	for _, p := range ss.pseudos {
+		if !matchPseudoClass(p, n) {
+			return false
+		}
+	}
 	return true
+}
+
+// matchPseudoClass reports whether pseudo-class p (lowercased, no ":") matches n in
+// this static, history-less renderer:
+//   - "link" matches a hyperlink (a/area/link with a non-empty href). With no browsing
+//     history, every hyperlink is unvisited, so :link is "is a link".
+//   - "visited" matches nothing (no history; also the standard privacy stance).
+//   - every other recognized dynamic/state pseudo (hover/focus/active/target/checked/…)
+//     matches nothing in a static render, so its rule is inert.
+//
+// An unmatched pseudo makes the simple selector fail, which is exactly what makes a
+// :hover or :visited rule simply not apply — the correct static behavior.
+func matchPseudoClass(p string, n Node) bool {
+	switch p {
+	case "link":
+		return isHyperlink(n)
+	default:
+		// "visited" and all dynamic/state pseudo-classes: never match statically.
+		return false
+	}
+}
+
+// isHyperlink reports whether n is a hyperlink element with an href: <a>, <area>, or
+// <link> carrying a non-empty href attribute (CSS :link/:visited apply only to these).
+func isHyperlink(n Node) bool {
+	switch n.Tag() {
+	case "a", "area", "link":
+		href, ok := n.Attr("href")
+		return ok && href != ""
+	}
+	return false
 }
 
 func hasClass(have []string, want string) bool {
@@ -137,7 +175,11 @@ func parseOneSelector(src string) (Selector, bool) {
 	return sel, true
 }
 
-// parseSimple parses one compound simple selector like "div.intro#lead" or "*".
+// parseSimple parses one compound simple selector like "div.intro#lead", "a:link", or
+// "*". Pseudo-classes (:name) are captured; pseudo-elements (::name or the legacy
+// :before/:after/:first-line/:first-letter) and functional pseudos (:name(...)) cause
+// the whole selector to be dropped (ok=false) so the rule never falsely matches — its
+// other comma-separated selectors are unaffected (parseSelectorList isolates each).
 func parseSimple(f string) (simpleSelector, bool) {
 	var ss simpleSelector
 	if f == "*" {
@@ -146,17 +188,29 @@ func parseSimple(f string) (simpleSelector, bool) {
 	if f == "" {
 		return simpleSelector{}, false
 	}
+	// A '(' also ends a name fragment so a functional pseudo (:not(...), :nth-child(...))
+	// is detected rather than mis-split on inner . / # / : characters.
+	isMarker := func(c byte) bool { return c == '.' || c == '#' || c == ':' || c == '(' }
 	i := 0
 	// leading type selector
-	for i < len(f) && f[i] != '.' && f[i] != '#' {
+	for i < len(f) && !isMarker(f[i]) {
 		i++
 	}
 	ss.tag = strings.ToLower(f[:i])
+	if ss.tag == "*" {
+		ss.tag = "" // the universal type: matches any element, zero type specificity
+	}
 	for i < len(f) {
 		marker := f[i]
+		if marker == '(' {
+			return simpleSelector{}, false // functional pseudo / unexpected '(': drop
+		}
 		i++
+		if marker == ':' && i < len(f) && f[i] == ':' {
+			return simpleSelector{}, false // pseudo-element (::name): drop the selector
+		}
 		start := i
-		for i < len(f) && f[i] != '.' && f[i] != '#' {
+		for i < len(f) && !isMarker(f[i]) {
 			i++
 		}
 		name := f[start:i]
@@ -168,7 +222,24 @@ func parseSimple(f string) (simpleSelector, bool) {
 			ss.classes = append(ss.classes, name)
 		case '#':
 			ss.id = name
+		case ':':
+			lower := strings.ToLower(name)
+			if isLegacyPseudoElement(lower) {
+				return simpleSelector{}, false // :before/:after/… as pseudo-element: drop
+			}
+			ss.pseudos = append(ss.pseudos, lower)
 		}
 	}
 	return ss, true
+}
+
+// isLegacyPseudoElement reports whether name (lowercased) is one of the four pseudo-
+// elements that also accept the single-colon legacy syntax. Treating them as pseudo-
+// elements (dropping the selector) avoids matching them as if they were pseudo-classes.
+func isLegacyPseudoElement(name string) bool {
+	switch name {
+	case "before", "after", "first-line", "first-letter":
+		return true
+	}
+	return false
 }

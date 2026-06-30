@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<!-- TEST: an <a href> styled by an author a:link rule (red, underlined) renders the
+     same pixels as a plain <span> with the equivalent color + text-decoration (see
+     link-pseudo-ref.html). This pins that :link matches a hyperlink and that the
+     link's color/underline come through. body{margin:0} and a fixed font keep the two
+     glyph layouts identical. -->
+<html>
+<head>
+<style>
+  body { margin: 0; font-family: sans-serif; font-size: 16px; }
+  a:link { color: #cc0000; text-decoration: underline; }
+</style>
+</head>
+<body><a href="/x">linked</a></body>
+</html>

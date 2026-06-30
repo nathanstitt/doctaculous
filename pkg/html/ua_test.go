@@ -1,10 +1,14 @@
 package html
 
 import (
+	"image/color"
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/css"
 )
+
+// cssColor builds an opaque RGBA for comparing computed colors.
+func cssColor(r, g, b uint8) color.RGBA { return color.RGBA{R: r, G: g, B: b, A: 255} }
 
 // uaStyle builds a resolver from the UA sheet alone and computes a tag's style.
 func uaStyle(tag string) css.ComputedStyle {
@@ -82,16 +86,38 @@ func TestUAHeadingSizes(t *testing.T) {
 	}
 }
 
+// TestUALinkDefault: an <a href> gets the classic blue underlined link style via the
+// UA a:link rule; a bare <a> (no href) does not match :link and stays unstyled.
+func TestUALinkDefault(t *testing.T) {
+	linked := &fakeElem{tag: "a", attrs: map[string]string{"href": "/x"}}
+	cs := css.NewResolver([]css.OriginSheet{{Sheet: UAStylesheet, Origin: css.OriginUA}}, nil).ComputeRoot(linked)
+	if cs.Color != (cssColor(0x00, 0x00, 0xee)) {
+		t.Errorf("a:link color = %+v, want #0000ee", cs.Color)
+	}
+	if cs.TextDecorationLine != "underline" {
+		t.Errorf("a:link text-decoration = %q, want underline", cs.TextDecorationLine)
+	}
+	bare := &fakeElem{tag: "a"} // no href → not :link
+	cs2 := css.NewResolver([]css.OriginSheet{{Sheet: UAStylesheet, Origin: css.OriginUA}}, nil).ComputeRoot(bare)
+	if cs2.TextDecorationLine == "underline" {
+		t.Error("bare <a> (no href) should not get the link underline")
+	}
+}
+
 // fakeElem is a minimal css.Node for UA-sheet tests (no real DOM needed).
 type fakeElem struct {
 	tag     string
 	id      string
 	classes []string
 	parent  css.Node
+	attrs   map[string]string
 }
 
-func (f *fakeElem) Tag() string                { return f.tag }
-func (f *fakeElem) ID() string                 { return f.id }
-func (f *fakeElem) Classes() []string          { return f.classes }
-func (f *fakeElem) Parent() css.Node           { return f.parent }
-func (f *fakeElem) Attr(string) (string, bool) { return "", false }
+func (f *fakeElem) Tag() string       { return f.tag }
+func (f *fakeElem) ID() string        { return f.id }
+func (f *fakeElem) Classes() []string { return f.classes }
+func (f *fakeElem) Parent() css.Node  { return f.parent }
+func (f *fakeElem) Attr(k string) (string, bool) {
+	v, ok := f.attrs[k]
+	return v, ok
+}

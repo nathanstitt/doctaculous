@@ -498,6 +498,15 @@ body {
   border: 1px solid #c9c2b0;
 }
 
+/* ----- links ----------------------------------------------------------------- */
+
+/* A recolored call-to-action link (keeps the UA underline). */
+a.cta:link { color: #b03a2e; }
+/* A link with the underline removed. */
+a.bare:link { text-decoration: none; color: #2e6da4; }
+/* An inert :visited rule (never matches in a static render). */
+a.seen:visited { color: #6a9a3a; }
+
 /* ----- colophon -------------------------------------------------------------- */
 
 .colophon {
