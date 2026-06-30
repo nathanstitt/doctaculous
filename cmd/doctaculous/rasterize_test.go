@@ -1,6 +1,10 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -82,5 +86,51 @@ func TestReorderArgs(t *testing.T) {
 	want := []string{"--out", "o.png", "--dpi", "150", "in.pdf"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestIsHTTPURL(t *testing.T) {
+	cases := map[string]bool{
+		"http://example.com":    true,
+		"https://example.com/p": true,
+		"https://x/file.pdf":    true, // a URL ending in .pdf is still a URL
+		"page.html":             false,
+		"in.pdf":                false,
+		"/abs/path.html":        false,
+		"file:///etc/hosts":     false,
+		"ftp://host/x":          false,
+		"":                      false,
+		"httpsomething.html":    false, // not an http(s):// scheme
+	}
+	for input, want := range cases {
+		if got := isHTTPURL(input); got != want {
+			t.Errorf("isHTTPURL(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
+// TestRasterizeCmdURL drives the rasterize subcommand end to end against a loopback
+// HTTP server serving HTML, proving an http:// URL input is fetched (OpenURL) and
+// rendered to a PNG. Hermetic via net/http/httptest.
+func TestRasterizeCmdURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body style="margin:0">` +
+			`<p style="color:black">Hello from a URL</p></body></html>`))
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "page-%d.png")
+	if err := rasterizeCmd([]string{srv.URL, "--out", out, "--pages", "all", "--dpi", "72"}); err != nil {
+		t.Fatalf("rasterizeCmd(URL): %v", err)
+	}
+	// A single tall page (no --page-size) → page-1.png must exist and be non-empty.
+	got := filepath.Join(filepath.Dir(out), "page-1.png")
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("expected rendered %s: %v", got, err)
+	}
+	if info.Size() == 0 {
+		t.Errorf("rendered %s is empty", got)
 	}
 }
