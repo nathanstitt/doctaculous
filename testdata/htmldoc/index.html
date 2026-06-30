@@ -311,6 +311,59 @@ newline is kept.</p>
     <div class="nowrapbox"><span style="white-space:nowrap">This single line never wraps no matter how narrow the box is &mdash; it just runs straight off the right edge and is clipped.</span></div>
     <p class="caption">The clip box (<code>overflow:hidden</code>) cuts the overflowing
       line at its edge.</p>
+  </section>
+
+  <!-- ===================== 11 · LISTS ===================== -->
+  <section class="section break">
+    <span class="kicker">11 / LISTS</span>
+    <h2>Lists &amp; Counters</h2>
+    <p class="lede">Bullets and numbers, nested marker rotation, the numbering styles,
+      and CSS counters.</p>
+
+    <div class="cols2">
+      <div>
+        <h4>Unordered (nested)</h4>
+        <ul>
+          <li>Disc at the top level</li>
+          <li>Another item
+            <ul>
+              <li>Circle one level in
+                <ul><li>Square two levels in</li></ul>
+              </li>
+            </ul>
+          </li>
+          <li>Back to disc</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Ordered styles</h4>
+        <ol>
+          <li>Decimal one</li>
+          <li>Decimal two</li>
+        </ol>
+        <ol style="list-style-type:lower-alpha">
+          <li>Lower-alpha</li>
+          <li>Lower-alpha</li>
+        </ol>
+        <ol style="list-style-type:upper-roman">
+          <li>Roman</li>
+          <li>Roman</li>
+          <li>Roman</li>
+          <li>Roman</li>
+        </ol>
+      </div>
+    </div>
+
+    <h4>Nested numbering with <code>counters()</code></h4>
+    <ol class="outline">
+      <li>First section
+        <ol><li>Subsection</li><li>Subsection</li></ol>
+      </li>
+      <li>Second section</li>
+    </ol>
+    <p class="caption">The inner list's <code>counter-reset</code> opens a new scope;
+      <code>counters(list-item, ".")</code> would join them as 1.1, 1.2 &mdash; here the
+      default per-list numbering restarts each level.</p>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from

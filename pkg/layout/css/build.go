@@ -60,10 +60,11 @@ func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.Res
 		// empty document.
 		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, faces, nil
 	}
-	normalize(root)   // anonymous-box fixups + whitespace handling (anon.go)
-	fixupTables(root) // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
-	fixupFlex(root)   // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
-	fixupGrid(root)   // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
+	resolveCounters(root) // list-item markers + CSS counter()/counters() content (counters.go)
+	normalize(root)       // anonymous-box fixups + whitespace handling (anon.go)
+	fixupTables(root)     // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
+	fixupFlex(root)       // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
+	fixupGrid(root)       // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
 	return root, faces, nil
 }
 
@@ -168,12 +169,22 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 // Style are meaningful on a text box; the parent's box-level fields (width,
 // margins, borders) are copied along but have no meaning for a text leaf and
 // should not be read by the layout engine.
+//
+// The non-inherited counter properties (counter-reset/increment/set and content)
+// are explicitly cleared: they are box-level and belong to the parent element, not
+// to its text. Leaving them would make the counter pass (resolveCounters) re-apply
+// the parent's counter-reset for every text node — e.g. a whitespace node between
+// <li>s would reset list-item, restarting list numbering at each item.
 func makeTextBox(data string, parent gcss.ComputedStyle) *cssbox.Box {
 	if data == "" {
 		return nil
 	}
 	style := parent
 	style.Display = "inline"
+	style.CounterReset = nil
+	style.CounterIncrement = nil
+	style.CounterSet = nil
+	style.Content = nil
 	return &cssbox.Box{Kind: cssbox.BoxText, Text: data, Style: style, Display: cssbox.DisplayInline}
 }
 

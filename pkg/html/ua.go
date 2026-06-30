@@ -14,6 +14,13 @@ h1, h2, h3, h4, h5, h6 {
 	display: block;
 }
 li { display: list-item; }
+/* Lists: block-level boxes with the standard left indent for the marker, the
+   default marker styles, and the conventional nested-bullet rotation. */
+ul, ol { margin-top: 1em; margin-bottom: 1em; padding-left: 40px; counter-reset: list-item; }
+ul { list-style-type: disc; }
+ol { list-style-type: decimal; }
+ul ul, ol ul { list-style-type: circle; }
+ul ul ul, ol ol ul { list-style-type: square; }
 tr { display: table-row; }
 td, th { display: table-cell; }
 table { display: table; }

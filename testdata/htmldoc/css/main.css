@@ -453,6 +453,26 @@ body {
   font-size: 13px;
 }
 
+/* ----- lists ----------------------------------------------------------------- */
+
+/* Two columns side by side so the unordered nest and the ordered styles sit
+   together. A GRID (not flex-wrap) — the engine renders flex single-line. */
+.cols2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 28px;
+  margin-bottom: 6px;
+}
+.cols2 h4 { margin-top: 0; }
+
+/* The outline list gets a tinted rule down its left edge to set it apart. */
+.outline {
+  border-left: 3px solid #b03a2e;
+  background: #f0e6c4;
+  padding: 6px 14px 6px 44px;
+  margin: 6px 0;
+}
+
 /* ----- colophon -------------------------------------------------------------- */
 
 .colophon {
