@@ -18,11 +18,13 @@ type Rule struct {
 }
 
 // Stylesheet is a parsed CSS document: an ordered list of style rules plus any
-// captured @font-face rules. Source order is preserved (the cascade uses it as a
-// tie-breaker; @font-face order is the fallback order within a family).
+// captured @font-face and @page rules. Source order is preserved (the cascade uses it
+// as a tie-breaker; @font-face order is the fallback order within a family, and @page
+// order is a cascade tie-breaker resolved by ResolvePage).
 type Stylesheet struct {
 	Rules     []Rule
 	FontFaces []FontFace
+	Pages     []PageRule
 }
 
 // Parse parses a CSS stylesheet. It is total: malformed rules and unsupported
@@ -45,6 +47,10 @@ func Parse(src string) Stylesheet {
 			if strings.EqualFold(strings.TrimSpace(prelude), "@font-face") {
 				if ff, ok := parseFontFace(parseDeclarations(body)); ok {
 					sheet.FontFaces = append(sheet.FontFaces, ff)
+				}
+			} else if rest, ok := atKeyword(prelude, "@page"); ok {
+				if pr, ok := parsePageRule(rest, body, len(sheet.Pages)); ok {
+					sheet.Pages = append(sheet.Pages, pr)
 				}
 			}
 			continue // any other at-rule: block already consumed by the scanner
