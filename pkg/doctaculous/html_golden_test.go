@@ -796,6 +796,25 @@ line area</textarea></div>
   <p>Visited rule inert: <a class="vis" href="/e">still blue</a>.</p>
 </body></html>`,
 	},
+	{
+		// Legacy presentational attributes (no CSS): a bgcolor table with a colored
+		// header row, cellpadding, a border, per-cell align, and a <font color>. Eyeball:
+		// the table has a tan body, a blue header row with white centered text, padded
+		// bordered cells, right-aligned numbers, and the red <font> word.
+		name:       "presentational",
+		viewportPx: 320,
+		html: `<!DOCTYPE html><html><body bgcolor="#fafafa">
+  <table bgcolor="#e8e0d0" cellpadding="6" cellspacing="0" border="1" width="300">
+    <tr bgcolor="#3a6ea5">
+      <th><font color="#ffffff">Item</font></th>
+      <th><font color="#ffffff">Qty</font></th>
+    </tr>
+    <tr><td align="left">Widgets</td><td align="right">12</td></tr>
+    <tr><td align="left">Gadgets</td><td align="right">7</td></tr>
+  </table>
+  <p>A <font color="#cc0000">red word</font> via the obsolete font element.</p>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for

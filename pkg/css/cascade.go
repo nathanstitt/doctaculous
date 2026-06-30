@@ -22,6 +22,12 @@ type Origin int
 const (
 	// OriginUA is the user-agent default stylesheet.
 	OriginUA Origin = iota
+	// OriginPresentationalHint is a legacy presentational attribute mapped to a CSS
+	// property (HTML §15 "presentational hints" — e.g. bgcolor → background-color). It
+	// cascades above the UA stylesheet but below all author CSS, so an explicit author
+	// rule or inline style always wins. Hints carry zero specificity and never use
+	// !important. Derived per element from its attributes (see presentationalHints).
+	OriginPresentationalHint
 	// OriginAuthor is page-supplied CSS: <style>, <link>, and style="".
 	OriginAuthor
 )
@@ -257,20 +263,34 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 		}
 	}
 
+	// Presentational hints: legacy attributes mapped to CSS properties (HTML §15).
+	// They enter the normal pass at OriginPresentationalHint (ranked above UA, below
+	// author) with zero specificity, so an author rule or inline style always wins. A
+	// document with no such attributes contributes nothing here (byte-identical).
+	for _, d := range presentationalHints(n) {
+		normal = append(normal, matched{decl: d, origin: OriginPresentationalHint, order: order})
+		order++
+	}
+
 	// normalRank/importantRank place each origin on the unified cascade ladder so
 	// the same comparison works for both passes:
-	//   UA-normal(0) < author-normal(1) < author-important(2) < UA-important(3)
+	//   UA-normal(0) < hint(1) < author-normal(2) < author-important(3) < UA-important(4)
 	normalRank := func(o Origin) int {
-		if o == OriginAuthor {
+		switch o {
+		case OriginAuthor:
+			return 2
+		case OriginPresentationalHint:
 			return 1
+		default:
+			return 0 // UA
 		}
-		return 0 // UA
 	}
 	importantRank := func(o Origin) int {
+		// Presentational hints have no !important; they never reach the important pass.
 		if o == OriginUA {
-			return 3
+			return 4
 		}
-		return 2 // author
+		return 3 // author
 	}
 
 	lessBy := func(rank func(Origin) int) func(a, b matched) bool {
