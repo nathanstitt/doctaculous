@@ -637,6 +637,58 @@ what is done vs. pending.
   the native chrome) is out of scope (author decoration paints around the native chrome); and a submit button's
   intrinsic width is computed before its `value`-derived label, so a long submit value can slightly overflow its
   button. See `docs/superpowers/specs/2026-06-29-html-forms-design.md`.
+- **HTML rendering — `white-space`** (`pkg/css` `WhiteSpace` + `WhiteSpaceFlags`, `pkg/layout/inline`
+  shape/break, `pkg/layout/css/anon.go`/`inline.go`; covered by `whitespace_test.go`, `anon_test.go`, and the
+  showcase WHITE-SPACE section): `normal`/`nowrap`/`pre`/`pre-wrap`/`pre-line` decomposed into three flags
+  (collapse spaces, preserve newlines, wrap). The shared inline core preserves `\n` as a hard break and advances
+  `\t` to 8-col tab stops in preserving modes, and a `NoWrap` glyph flag stops the breaker taking a soft break in
+  a nowrap/pre run. Byte-identical for the default `normal`. See
+  `docs/superpowers/specs/2026-06-29-html-white-space-design.md`.
+- **HTML rendering — list markers + CSS counters** (`pkg/css/counter_format.go`, `pkg/layout/css/counters.go`,
+  `pkg/font/bullet.go`; covered by `counter_format_test.go`/`list_parse_test.go`/`counters_test.go`/`bullet_test.go`
+  and the showcase LISTS section): `list-style-type` (disc/circle/square, decimal, decimal-leading-zero,
+  lower/upper-roman, lower/upper-alpha, none), `list-style-position`, the `list-style` shorthand; the CSS counter
+  system (`counter-reset`/`-increment`/`-set`, `content: counter()/counters()`) via a document-order tree walk
+  with nested scopes (a counter-reset reaches the resetting element's following siblings). Bullet markers are
+  synthesized as **vector outlines** in `pkg/font` so ▪ (U+25AA, absent from the bundled faces) renders — markers
+  are font-independent, as browsers paint them. See
+  `docs/superpowers/specs/2026-06-29-html-lists-counters-design.md`.
+- **HTML rendering — CSS `background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` +
+  `pkg/layout/paint/background.go`, `layout.BackgroundImageItem`/`BackgroundImageKind`; covered by
+  `background_test.go` in `pkg/css`/`pkg/layout/css`/`pkg/layout/paint`, the `html-bg-*` goldens, the
+  `bg-image-vs-color` reftest, and the showcase BACKGROUNDS section): `background-image: url(...)` (longhand + the
+  `background` shorthand), `background-repeat` (repeat/repeat-x/repeat-y/no-repeat), `background-position`
+  (keywords/%/lengths/mixed), `background-size` (cover/contain/explicit, ratio-preserving auto), `background-origin`
+  /`background-clip` (border/padding/content box). Decoding reuses the `<img>` image cache; a tiling painter loops
+  `DrawImage` clipped to the clip box (tile-count cap). Emitted in CSS paint order (color → image → border) and
+  translated with the fragment for `position:relative` (the origin/clip rects ride `shiftFragmentExtras`). Byte-
+  identical for pages with no background-image (closes the D4 deferral). See
+  `docs/superpowers/specs/2026-06-30-html-background-image-design.md`.
+- **HTML rendering — link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go` pseudo parsing,
+  `pkg/css/cascade.go`/`value.go` `TextDecorationLine`, `pkg/html/ua.go` `a:link` default, `pkg/layout/inline`
+  `Underline`, `pkg/layout/css/fragment.go` `appendUnderlines`; covered by `selector_test.go`, `link_test.go`,
+  `ua_test.go`, the `html-link` golden, the `link-pseudo` reftest, and the showcase LINKS section): the selector
+  engine parses `:pseudo-class` suffixes (pseudo-elements and functional pseudos drop the selector gracefully; the
+  universal `*` carries no type specificity); `:link` matches a hyperlink (a/area/link with href), `:visited` and
+  the dynamic pseudos match nothing in a static render (their rules are inert). `text-decoration: underline|none`
+  paints as a thin rule under each run of underlined glyphs (carried via a new `Underline` flag on the shared
+  inline Run/Glyph — DOCX byte-identical). The UA default `a:link { color:#0000ee; text-decoration:underline }`
+  styles unvisited links; author rules override it. See
+  `docs/superpowers/specs/2026-06-30-html-link-pseudo-classes-design.md`.
+- **HTML rendering — legacy presentational-attribute hints** (`pkg/css/hints.go` + `pkg/css/cascade.go`
+  `OriginPresentationalHint`; covered by `hints_test.go`, `counters_test.go` (the `<ol start>`/`<li value>`
+  offsets), the `html-presentational` golden, the `bgcolor-attr` reftest, and the showcase LEGACY ATTRIBUTES
+  section): legacy attributes are mapped to CSS at a cascade tier between the UA stylesheet and author CSS
+  (HTML §15), so author CSS and inline `style` always win — `bgcolor`/`text`/`bordercolor`/`<font color/face/size>`
+  → color properties; `width`/`height` on table parts; `align` → `text-align` (or `float` on img/table);
+  `valign` → `vertical-align`; `cellspacing` → `border-spacing`; `cellpadding`/`border=N` → cell padding/borders
+  (propagated to cells via the ancestor `<table>`); `nowrap`, `hspace`/`vspace`, `<img border>`, `background` →
+  `background-image`, `<ol type/start>`/`<ul/li type>`/`<li value>` → `list-style-type`+counters, `<body link>` →
+  descendant link color. `presentationalHints(n)` produces declarations in the normal parser's string form, with
+  tolerant legacy value parsers (bare-hex colors, px/% lengths). Byte-identical for documents with no
+  presentational attributes; **Hacker News now renders with its `#f6f6ef` bgcolor + orange header** (the original
+  white-page bug). See `docs/superpowers/specs/2026-06-30-html-presentational-attributes-design.md` and
+  `docs/presentational-attributes-audit.md`.
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -672,7 +724,15 @@ that skip into real output.
    **clip-escape sub-cases** (sub-project 6b), **CSS 2.1 §17 table layout** (sub-project 7), and
    **web fonts** (`@font-face` + WOFF/WOFF2, sub-project 8), **single-line flexbox** (sub-project 9),
    **CSS Grid (explicit grid)** (sub-project 10), **`OpenURL` + the HTTP `ResourceLoader`**
-   (sub-project 11), and **pagination (fixed-height page fragmentation)** (sub-project 12) are done — see the
+   (sub-project 11), **pagination (fixed-height page fragmentation)** (sub-project 12), **`white-space`**
+   (collapse/nowrap/pre/pre-wrap/pre-line + tab stops), **list markers + CSS counters**
+   (`list-style-type`/`-position`, `counter-reset`/`-increment`/`-set`, `content: counter()/counters()`;
+   synthetic bullet outlines so ▪ renders without a font glyph), **CSS `background-image`**
+   (decode + tile + `background-repeat`/`-position`/`-size`/`-origin`/`-clip`, closing the D4 deferral),
+   **link pseudo-classes** (`:link`/`:visited` + general pseudo-class parsing + `text-decoration: underline`),
+   and the **legacy presentational-attribute hints** (`bgcolor`/`text`/`align`/`valign`/`width`/`height`/
+   `cellspacing`/`cellpadding`/`border`/`<font>`/`nowrap`/`background`/`<ol type/start>`/`<li value>`/`<body link>`
+   mapped to CSS at a cascade tier below author CSS — HN now renders with its `bgcolor`) are done — see the
    Done section). The one remaining non-fidelity slice is **CSS paged media** (`@page` size/margins/named pages,
    `break-inside`, widows/orphans, running headers/footers — the bounded pagination slice ships `WithPageSize` +
    between-block breaks + forced `break-before`/`break-after`, deferring these). **(EPUB is out of scope — see
@@ -689,8 +749,8 @@ that skip into real output.
    applied in `fitDest`), **D2** the ratio-preserving min/max sizing step (CSS 10.4 `constrainRatio` — a single
    violated min/max bound scales the other axis to preserve the intrinsic ratio; both-dims-explicit still clamps
    per-axis). Still open: a percentage `height` basis on replaced elements (D3 — deferred, needs a definite
-   containing-block height threaded through the width/single-axis engine; treated as auto today), and CSS
-   `background-image` decode (D4 — deferred feature slice; `background` keeps color only). General
+   containing-block height threaded through the width/single-axis engine; treated as auto today). (**D4** CSS
+   `background-image` decode is now DONE — see the Done section: decode + tile + position/size/origin/clip.) General
    inline/flow — landed fidelity fixes: **B2** (a `vertical-align:baseline` inline-block WITH text aligns its
    last in-flow line box's baseline per CSS 2.1 §10.8.1 via `atomicRunFor`/`lastInFlowLineBaseline`, instead of
    resting its whole border box on the baseline; a replaced/empty/`overflow≠visible` atom stays bottom-aligned),
