@@ -67,6 +67,25 @@ var pagedMediaGoldens = []struct {
 </style></head><body><div style="height:160px;background:#cccccc">x</div></body></html>`,
 	},
 	{
+		// CSS GCPM running header via string()/string-set: each page's @top-left header
+		// shows the most recent <h2> heading (string-set sect content()). Each <h2>+<.blk>
+		// pair (~21px heading + 150px block ≈ 171px) fits the 188px content height
+		// (260 - 2*36), but two pairs (~342px) do not ⇒ the second pair breaks to page 2 ⇒
+		// 2 pages. Eyeball: page 0's top-left header reads "Alpha", page 1's reads "Beta".
+		name:    "running-header",
+		wantPgs: 2,
+		html: `<!DOCTYPE html><html><head><style>
+    @page { size: 400px 260px; margin: 36px 20px; @top-left { content: string(sect); color:#555; font-size:11px } }
+    body { margin: 0 }
+    h2 { font-size:18px; margin:0 }
+    h2.s { string-set: sect content() }
+    .blk { height: 150px }
+  </style></head><body>
+    <h2 class="s">Alpha</h2><div class="blk" style="background:#fdd">one</div>
+    <h2 class="s">Beta</h2><div class="blk" style="background:#dfd">two</div>
+  </body></html>`,
+	},
+	{
 		// @page bleed + crop marks: the page bitmap is the media box (trim 300x220 + 16px
 		// bleed on each side => 332x252); content sits inside the trim box; thin black crop
 		// marks point at the four trim corners in the bleed band, and cross marks straddle

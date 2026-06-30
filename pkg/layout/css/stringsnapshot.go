@@ -6,30 +6,66 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
-// buildStringSnapshots returns, for each page bucket, the running CSS string values
-// (name → value) in effect at the START of that page: the most recent string-set value
-// contributed by any block bucketed on an earlier or the same page, in document order.
-// CSS GCPM `string()` (default, == the "first that starts on the page or the carried
-// value") is approximated by the running last-set value through the page — adequate for
-// the dominant running-header-from-headings pattern. A page with no new setter inherits
-// the prior page's values (carried forward).
-func buildStringSnapshots(buckets []pageBucket) []map[string]string {
-	out := make([]map[string]string, len(buckets))
-	running := map[string]string{}
+// pageStrings holds, for one page, the CSS string values needed to resolve string(name,
+// <keyword>): the value carried INTO the page (Start), the first value SET on the page
+// (First), and the last value in effect through the page end (Last == the default). A
+// name absent from a map means "not set"; First lacking a name means no setter on that
+// page (the keyword resolves to Start, the carried value).
+type pageStrings struct {
+	Start map[string]string // running value at the page's start (before this page's setters)
+	First map[string]string // first value SET on this page (only names set on the page)
+	Last  map[string]string // running value through the page end (default for string(name))
+}
+
+// stringValue resolves string(name, keyword) for this page. keyword is "" (==last),
+// "last", "first", "start", or "first-except". Unknown keyword falls back to last.
+func (ps pageStrings) stringValue(name, keyword string) string {
+	switch keyword {
+	case "first":
+		if v, ok := ps.First[name]; ok {
+			return v
+		}
+		return ps.Start[name] // no setter on this page -> the carried value
+	case "start":
+		return ps.Start[name]
+	case "first-except":
+		// Like first, but blank when the page only carries the value (no setter here) —
+		// used to suppress a header on a continuation page.
+		if v, ok := ps.First[name]; ok {
+			return v
+		}
+		return ""
+	default: // "" or "last"
+		return ps.Last[name]
+	}
+}
+
+// buildStringSnapshots returns, for each page bucket, the CSS string values needed to
+// resolve CSS GCPM `string(name, <keyword>)` per page: the value carried INTO the page
+// (Start), the first value SET on the page (First), and the running value through the
+// page end (Last). The values come from each block's string-set assignments applied in
+// document order; a page with no new setter carries the prior page's running values
+// forward (Start == Last == the carried value, First empty for that name).
+func buildStringSnapshots(buckets []pageBucket) []pageStrings {
+	out := make([]pageStrings, len(buckets))
+	running := map[string]string{} // carried value across pages
 	for i := range buckets {
-		// Apply this page's setters first, so a setter on this page is reflected in the
-		// page's own snapshot (the "or the same page" clause: a running header shows the
-		// last heading seen up to AND INCLUDING this page). A page with no new setter
-		// keeps the prior page's running values (carried forward).
+		start := cloneStrings(running) // value entering this page
+		first := map[string]string{}   // first setter on this page (per name)
 		for _, b := range buckets[i].blocks {
-			applyBlockStringSets(b, running)
+			applyBlockStringSetsTracking(b, running, first)
 		}
-		// Snapshot the running values in effect through the end of this page.
-		snap := make(map[string]string, len(running))
-		for k, v := range running {
-			snap[k] = v
-		}
-		out[i] = snap
+		out[i] = pageStrings{Start: start, First: first, Last: cloneStrings(running)}
+	}
+	return out
+}
+
+// cloneStrings returns a shallow copy of m (a fresh map so later mutation of the source
+// does not alias a captured snapshot). A nil m yields an empty (non-nil) map.
+func cloneStrings(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
 	}
 	return out
 }
@@ -37,6 +73,13 @@ func buildStringSnapshots(buckets []pageBucket) []map[string]string {
 // applyBlockStringSets walks a block fragment's subtree in document order, updating
 // running with each box's string-set assignments (Prefix + content() text + Suffix).
 func applyBlockStringSets(f *Fragment, running map[string]string) {
+	applyBlockStringSetsTracking(f, running, map[string]string{})
+}
+
+// applyBlockStringSetsTracking is applyBlockStringSets but also records into first the
+// FIRST value set for each name on this page (first wins: a name already present in first
+// is not overwritten), so a page's string(name, first) can resolve to its leading setter.
+func applyBlockStringSetsTracking(f *Fragment, running, first map[string]string) {
 	if f == nil {
 		return
 	}
@@ -48,10 +91,13 @@ func applyBlockStringSets(f *Fragment, running map[string]string) {
 			}
 			val += e.Suffix
 			running[e.Name] = val
+			if _, ok := first[e.Name]; !ok {
+				first[e.Name] = val
+			}
 		}
 	}
 	for _, c := range f.Children {
-		applyBlockStringSets(c, running)
+		applyBlockStringSetsTracking(c, running, first)
 	}
 }
 

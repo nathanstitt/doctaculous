@@ -135,7 +135,7 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	body := bodyFragment(root)
 	if body == nil || len(body.Children) == 0 {
 		page := root.Page(g0.pageW, g0.pageH)
-		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1)
+		page.Items = e.appendMarginBoxes(page.Items, g0, 0, 1, pageStrings{})
 		return &layout.Pages{Pages: []layout.Page{page}}
 	}
 

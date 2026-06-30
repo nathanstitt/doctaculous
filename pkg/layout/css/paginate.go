@@ -131,6 +131,10 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 // flattens. geomFn(i, bucket) returns page i's size and content box; a zero marginL/
 // marginT (the WithPageSize path) is byte-identical to the un-inset behavior.
 func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPagePos []pagePositioned, perPageFloats [][]*Fragment, geomFn func(int, pageBucket) pageGeom) []layout.Page {
+	// Per-page CSS running-string snapshots (for string() in @page margin boxes),
+	// computed once: each page's value carried-in / first-set / last-set, from the
+	// blocks bucketed up to and including that page.
+	snaps := buildStringSnapshots(buckets)
 	pages := make([]layout.Page, 0, len(buckets))
 	for i, bk := range buckets {
 		g := geomFn(i, bk)
@@ -194,7 +198,7 @@ func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPa
 		// frame); shift the items it adds by (bleed,bleed). Simplest: append them, then
 		// translate only the newly-added items by the bleed.
 		before := len(pg.Items)
-		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets))
+		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets), snaps[i])
 		if g.bleed != 0 {
 			translateItems(pg.Items, before, g.bleed, g.bleed)
 		}

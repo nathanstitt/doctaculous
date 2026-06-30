@@ -54,6 +54,25 @@ func TestResolveMarginContentCounterStyle(t *testing.T) {
 	}
 }
 
+func TestResolveMarginContentString(t *testing.T) {
+	ps := pageStrings{
+		Start: map[string]string{"t": "S"},
+		First: map[string]string{"t": "F"},
+		Last:  map[string]string{"t": "L"},
+	}
+	chk := func(content, want string) {
+		if got := resolveMarginContentWithStrings(content, 3, 9, ps); got != want {
+			t.Errorf("%q = %q, want %q", content, got, want)
+		}
+	}
+	chk(`string(t)`, "L")
+	chk(`string(t, first)`, "F")
+	chk(`string(t, start)`, "S")
+	chk(`string(t, last)`, "L")
+	chk(`string(t) " p" counter(page)`, "L p3")
+	chk(`string(missing)`, "")
+}
+
 func TestSplitContentComponents(t *testing.T) {
 	got := splitContentComponents(`"Page " counter(page) " of " counter(pages)`)
 	want := []string{`"Page "`, `counter(page)`, `" of "`, `counter(pages)`}

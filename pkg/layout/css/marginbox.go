@@ -15,7 +15,7 @@ import (
 // pageIndex is the zero-based page number and pageCount the total — both feed the page
 // counters counter(page) / counter(pages). It is a no-op when the page has no @page
 // rule or no margin boxes (the common case → byte-identical).
-func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, pageCount int) []layout.Item {
+func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, pageCount int, ps pageStrings) []layout.Item {
 	if !g.used.HasRule || len(g.used.MarginBoxes) == 0 {
 		return items
 	}
@@ -29,7 +29,7 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 	var items2 []mbItem
 	boxW := map[gcss.MarginBoxSlot]float64{}
 	for _, mb := range g.used.MarginBoxes {
-		text := resolveMarginContent(mb.Content, pageIndex+1, pageCount)
+		text := resolveMarginContentWithStrings(mb.Content, pageIndex+1, pageCount, ps)
 		if text == "" {
 			continue
 		}
@@ -55,15 +55,25 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 }
 
 // resolveMarginContent resolves an @page margin box `content` value to a string for the
-// given 1-based page number and total page count. It supports a sequence of components:
-// a quoted "literal", counter(page), counter(pages), and counter(page|pages, <style>)
-// where <style> is any list-style the css.FormatCounter helper handles (decimal,
-// decimal-leading-zero, lower/upper-roman, lower/upper-alpha; an unknown style falls back
-// to decimal). Components are concatenated.
-// An unsupported component (e.g. string(), element(), attr()) contributes nothing — the
-// running-string descriptors are a documented deferral (see the design doc). An empty or
-// `normal`/`none` value yields "".
+// given 1-based page number and total page count, with NO string-set values available
+// (string(name) resolves to ""). It is a thin wrapper over resolveMarginContentWithStrings
+// for callers (and the early-return single-page paths) that carry no per-page snapshot.
 func resolveMarginContent(content string, page, pages int) string {
+	return resolveMarginContentWithStrings(content, page, pages, pageStrings{})
+}
+
+// resolveMarginContentWithStrings resolves an @page margin box `content` value to a string
+// for the given 1-based page number and total page count, using ps (the page's string-set
+// snapshot) to resolve string(). It supports a sequence of components:
+// a quoted "literal", counter(page), counter(pages), counter(page|pages, <style>) where
+// <style> is any list-style the css.FormatCounter helper handles (decimal,
+// decimal-leading-zero, lower/upper-roman, lower/upper-alpha; an unknown style falls back
+// to decimal), and string(name) / string(name, first|last|start|first-except) (CSS GCPM
+// running strings — the value carried into / first set on / last set through this page).
+// Components are concatenated.
+// An unsupported component (e.g. element(), attr()) contributes nothing — a documented
+// deferral (see the design doc). An empty or `normal`/`none` value yields "".
+func resolveMarginContentWithStrings(content string, page, pages int, ps pageStrings) string {
 	content = strings.TrimSpace(content)
 	if content == "" || content == "normal" || content == "none" {
 		return ""
@@ -89,9 +99,18 @@ func resolveMarginContent(content string, page, pages int) string {
 			case "pages":
 				b.WriteString(gcss.FormatCounter(pages, style))
 			}
+		case strings.HasPrefix(comp, "string("):
+			inner := strings.TrimSuffix(strings.TrimPrefix(comp, "string("), ")")
+			parts := strings.SplitN(inner, ",", 2)
+			name := strings.ToLower(strings.TrimSpace(parts[0]))
+			keyword := ""
+			if len(parts) == 2 {
+				keyword = strings.ToLower(strings.TrimSpace(parts[1]))
+			}
+			b.WriteString(ps.stringValue(name, keyword))
 		default:
-			// string(...) / element(...) / attr(...) / unknown: contribute nothing
-			// (deferred). Bare unquoted idents are not valid content; skipped.
+			// element(...) / attr(...) / unknown: contribute nothing (deferred). Bare
+			// unquoted idents are not valid content; skipped.
 		}
 	}
 	return b.String()
