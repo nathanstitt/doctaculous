@@ -70,15 +70,11 @@ func cloneStrings(m map[string]string) map[string]string {
 	return out
 }
 
-// applyBlockStringSets walks a block fragment's subtree in document order, updating
-// running with each box's string-set assignments (Prefix + content() text + Suffix).
-func applyBlockStringSets(f *Fragment, running map[string]string) {
-	applyBlockStringSetsTracking(f, running, map[string]string{})
-}
-
-// applyBlockStringSetsTracking is applyBlockStringSets but also records into first the
-// FIRST value set for each name on this page (first wins: a name already present in first
-// is not overwritten), so a page's string(name, first) can resolve to its leading setter.
+// applyBlockStringSetsTracking walks a block fragment's subtree in document order,
+// updating running with each box's string-set assignments (Prefix + content() text +
+// Suffix) and recording into first the FIRST value set for each name on this page (first
+// wins: a name already present in first is not overwritten), so a page's
+// string(name, first) can resolve to its leading setter.
 func applyBlockStringSetsTracking(f *Fragment, running, first map[string]string) {
 	if f == nil {
 		return

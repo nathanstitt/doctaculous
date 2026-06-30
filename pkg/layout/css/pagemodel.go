@@ -48,9 +48,6 @@ type pageGeom struct {
 func (g pageGeom) mediaW() float64 { return g.pageW + 2*g.bleed }
 func (g pageGeom) mediaH() float64 { return g.pageH + 2*g.bleed }
 
-// marksRequested reports whether @page asked for crop and/or cross marks.
-func (g pageGeom) marksRequested() bool { return g.used.Marks != "" }
-
 // resolvePageGeom resolves the geometry for page index i (named `name`) from a
 // PagedConfig: the page size (API explicit size > @page size > fallback) and the
 // content box after @page margins. blank marks an empty (forced-break) page.
