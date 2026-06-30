@@ -33,6 +33,14 @@ type Run struct {
 	Color        color.RGBA  // zero-alpha => shaped opaque (the historical flat-engine fixup)
 	Break        bool        // hard line break: forces a new line, produces no glyphs
 	Atomic       *AtomicItem // non-nil => an unbreakable inline box (inline-block/replaced)
+	// WhiteSpace is the run's CSS white-space value ("normal" | "nowrap" | "pre" |
+	// "pre-wrap" | "pre-line"). The empty string means "normal" — the historical
+	// behavior — so a caller (e.g. the DOCX engine) that never sets it is unaffected.
+	// In a preserving mode (pre/pre-wrap/pre-line) a '\n' in Text becomes a hard
+	// break and a '\t' advances to the next tab stop; box generation has already
+	// collapsed whitespace for the non-preserving modes, so Text arrives pre-collapsed
+	// there.
+	WhiteSpace string
 }
 
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
@@ -65,6 +73,12 @@ type Glyph struct {
 	Space               bool        // a break opportunity; excluded from a line's trailing width
 	Break               bool        // a hard line break (no ink)
 	Atomic              *AtomicItem // non-nil => atomic box occupying Advance width
+	// NoWrap marks a glyph belonging to a non-wrapping run (white-space: nowrap/pre):
+	// the breaker must not take a soft (width) break at or before it. A Space with
+	// NoWrap set is still a space for width/trailing purposes but is NOT a break
+	// opportunity, so a nowrap inline span stays on one line even inside a wrapping
+	// block.
+	NoWrap bool
 }
 
 // Color is the package's own RGBA so the public glyph type carries no image/color
@@ -83,8 +97,12 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		logf = func(string, ...any) {}
 	}
 	var out []Glyph
+	// lineCol tracks the current column x-position (points) since the last line start,
+	// used to compute tab-stop advances. It re-bases to 0 at each hard break.
+	lineCol := 0.0
 	for _, r := range runs {
 		if r.Break {
+			lineCol = 0
 			out = append(out, Glyph{Break: true})
 			continue
 		}
@@ -103,22 +121,90 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		if r.Color.A == 0 {
 			col.A = 0xff // a zero-alpha color is unset; treat as opaque
 		}
+		_, preserveNL, wrap := flagsFor(r.WhiteSpace)
+		noWrap := !wrap
+		// Space advance (for tab stops) in points: the face's ' ' advance × size.
+		spaceAdv := r.SizePt * 0.25 // fallback if the face has no space glyph
+		if _, sa, ok := face.Glyph(' '); ok {
+			spaceAdv = sa * r.SizePt
+		}
+		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
+		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap}
 		for _, rn := range r.Text {
-			outline, advEm, ok := face.Glyph(rn)
-			if !ok {
-				continue
+			switch {
+			case rn == '\n' && preserveNL:
+				// A preserved newline becomes a hard break and re-bases the tab column.
+				out = append(out, Glyph{Break: true})
+				lineCol = 0
+			case rn == '\t' && preserveNL:
+				// A preserved tab advances to the next tab stop from the current column.
+				adv := tabStop
+				if tabStop > 0 {
+					if a := tabStop - mathMod(lineCol, tabStop); a > 0 {
+						adv = a
+					}
+				}
+				g := base
+				g.Advance = adv
+				g.Space = true
+				out = append(out, g)
+				lineCol += adv
+			default:
+				// Ordinary rune (and, in collapsing modes, a stray '\n'/'\t' that box-gen
+				// already reduced to a space — shape it as a space).
+				if rn == '\n' || rn == '\t' {
+					rn = ' '
+				}
+				outline, advEm, ok := face.Glyph(rn)
+				if !ok {
+					continue
+				}
+				g := base
+				g.Outline = outline
+				g.Advance = advEm * r.SizePt
+				g.Space = rn == ' '
+				out = append(out, g)
+				lineCol += g.Advance
 			}
-			out = append(out, Glyph{
-				Outline:   outline,
-				Advance:   advEm * r.SizePt,
-				Color:     col,
-				SizePt:    r.SizePt,
-				AscentPt:  asc * r.SizePt,
-				DescentPt: desc * r.SizePt,
-				LineGapPt: gap * r.SizePt,
-				Space:     rn == ' ' || rn == '\t',
-			})
 		}
 	}
 	return out
+}
+
+// tabSize is the CSS tab-size used for tab-stop advance in preserving white-space
+// modes (the CSS initial value; the tab-size property itself is not yet supported).
+const tabSize = 8
+
+// flagsFor decomposes an inline run's white-space value into (collapseSpaces,
+// preserveNewlines, wrap). It mirrors css.WhiteSpaceFlags; the inline core keeps its
+// own copy so pkg/layout/inline has no dependency on pkg/css. An empty/unknown value
+// is "normal".
+func flagsFor(ws string) (collapseSpaces, preserveNewlines, wrap bool) {
+	switch ws {
+	case "nowrap":
+		return true, false, false
+	case "pre":
+		return false, true, false
+	case "pre-wrap":
+		return false, true, true
+	case "pre-line":
+		return true, true, true
+	default:
+		return true, false, true
+	}
+}
+
+// mathMod returns the non-negative remainder a mod m (m > 0). A local helper to
+// avoid importing math for one fmod (the values are small, positive points).
+func mathMod(a, m float64) float64 {
+	if m <= 0 {
+		return 0
+	}
+	for a >= m {
+		a -= m
+	}
+	for a < 0 {
+		a += m
+	}
+	return a
 }

@@ -42,6 +42,10 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	// 2. Shape once (width-independent).
 	glyphs := inline.Shape(e.faces, runs, e.logf)
 	align := effectiveTextAlign(b)
+	// The block's white-space controls whether lines wrap at the available width
+	// (normal/pre-wrap/pre-line wrap; nowrap/pre do not). A non-wrapping IFC takes the
+	// whole run (to the next hard break) per line, overflowing the width.
+	_, _, wrap := gcss.WhiteSpaceFlags(b.Style.WhiteSpace)
 
 	// 3. Break + position one line at a time against the float-narrowed band. Float
 	//    queries use the BFC-root frame (bandOriginY + the local pen offset); emitted
@@ -87,7 +91,7 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 		}
 
 		var lineGlyphs []inline.Glyph
-		lineGlyphs, rest = inline.BreakNext(rest, avail)
+		lineGlyphs, rest = inline.BreakNextWrap(rest, avail, wrap)
 		line := inline.MakeLine(lineGlyphs)
 
 		lh := e.effectiveLineHeight(b, line)
@@ -169,12 +173,13 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// A text box carries the parent's inherited font/color/size; only those
 			// fields are meaningful (see makeTextBox) — never its box-level fields.
 			*runs = append(*runs, inline.Run{
-				Text:   child.Text,
-				Family: child.Style.FontFamily,
-				Bold:   child.Style.Bold,
-				Italic: child.Style.Italic,
-				SizePt: child.Style.FontSizePt,
-				Color:  child.Style.Color,
+				Text:       child.Text,
+				Family:     child.Style.FontFamily,
+				Bold:       child.Style.Bold,
+				Italic:     child.Style.Italic,
+				SizePt:     child.Style.FontSizePt,
+				Color:      child.Style.Color,
+				WhiteSpace: child.Style.WhiteSpace,
 			})
 		case child.Kind == cssbox.BoxReplaced:
 			// A replaced inline (e.g. <img>, including an inline-block <img>) sizes via

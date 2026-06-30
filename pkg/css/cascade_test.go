@@ -826,3 +826,52 @@ func TestBreakProperties(t *testing.T) {
 		t.Errorf("page-break-before:avoid then break-before:page => BreakBefore = %q, want page (last wins)", cs3.BreakBefore)
 	}
 }
+
+func TestWhiteSpace(t *testing.T) {
+	// Initial value is normal.
+	if got := initialStyle().WhiteSpace; got != "normal" {
+		t.Errorf("initial white-space = %q, want normal", got)
+	}
+	// All five values parse; an unknown value is ignored (keeps prior).
+	for _, v := range []string{"normal", "nowrap", "pre", "pre-wrap", "pre-line"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "white-space", Value: v})
+		if cs.WhiteSpace != v {
+			t.Errorf("white-space:%s => %q", v, cs.WhiteSpace)
+		}
+	}
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "white-space", Value: "bogus"})
+	if cs.WhiteSpace != "normal" {
+		t.Errorf("white-space:bogus => %q, want normal kept", cs.WhiteSpace)
+	}
+	// Inherited: a child with no white-space takes the parent's.
+	parent := initialStyle()
+	applyDeclaration(&parent, Declaration{Property: "white-space", Value: "pre"})
+	child := inheritFrom(parent)
+	if child.WhiteSpace != "pre" {
+		t.Errorf("inherited white-space = %q, want pre", child.WhiteSpace)
+	}
+}
+
+func TestWhiteSpaceFlags(t *testing.T) {
+	cases := []struct {
+		ws                   string
+		cSpaces, preNL, wrap bool
+	}{
+		{"normal", true, false, true},
+		{"nowrap", true, false, false},
+		{"pre", false, true, false},
+		{"pre-wrap", false, true, true},
+		{"pre-line", true, true, true},
+		{"", true, false, true},      // empty => normal
+		{"bogus", true, false, true}, // unknown => normal
+	}
+	for _, c := range cases {
+		cs, nl, w := WhiteSpaceFlags(c.ws)
+		if cs != c.cSpaces || nl != c.preNL || w != c.wrap {
+			t.Errorf("WhiteSpaceFlags(%q) = (%v,%v,%v), want (%v,%v,%v)",
+				c.ws, cs, nl, w, c.cSpaces, c.preNL, c.wrap)
+		}
+	}
+}

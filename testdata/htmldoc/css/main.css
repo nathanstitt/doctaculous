@@ -431,6 +431,28 @@ body {
   gap: 10px;
 }
 
+/* ----- white-space ----------------------------------------------------------- */
+
+.demo {
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 8px 10px;
+  margin: 0 0 6px 0;
+  font-family: "Inconsolata", monospace;
+  font-size: 13px;
+  color: #1a1a18;
+}
+/* A narrow clip box so the nowrap line visibly overflows and is cut. */
+.nowrapbox {
+  overflow: hidden;
+  width: 280px;
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 8px 10px;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 13px;
+}
+
 /* ----- colophon -------------------------------------------------------------- */
 
 .colophon {

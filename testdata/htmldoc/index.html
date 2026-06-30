@@ -281,6 +281,36 @@
 
       <div class="actions"><button>Save changes</button> <input type="submit" value="Submit"></div>
     </form>
+  </section>
+
+  <!-- ===================== 10 · WHITE-SPACE ===================== -->
+  <section class="section break">
+    <span class="kicker">10 / WHITE-SPACE</span>
+    <h2>The <code>white-space</code> Property</h2>
+    <p class="lede">How runs of spaces, tabs, and newlines are collapsed or preserved,
+      and whether lines wrap.</p>
+
+    <h4><code>pre</code> &mdash; preserve everything, no wrap (tab&#8209;aligned)</h4>
+    <pre class="demo">name      role        team
+ada       founder     core
+grace     compiler    tools
+margaret  navigation  apollo</pre>
+    <p class="caption">Spaces, the literal newlines, and tab stops are preserved; long
+      lines do not wrap (they overflow / are clipped by the box).</p>
+
+    <h4><code>pre-wrap</code> &mdash; preserve, but wrap</h4>
+    <pre class="demo prewrap" style="white-space:pre-wrap">This preformatted block keeps    its    runs of spaces and its
+explicit line breaks, but unlike pre it still wraps a line that is too long to fit within the width of its containing box.</pre>
+
+    <h4><code>pre-line</code> &mdash; collapse spaces, keep newlines</h4>
+    <p class="demo" style="white-space:pre-line">Spaces     collapse     to one,
+but each
+newline is kept.</p>
+
+    <h4><code>nowrap</code> &mdash; collapse, never wrap</h4>
+    <div class="nowrapbox"><span style="white-space:nowrap">This single line never wraps no matter how narrow the box is &mdash; it just runs straight off the right edge and is clipped.</span></div>
+    <p class="caption">The clip box (<code>overflow:hidden</code>) cuts the overflowing
+      line at its edge.</p>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from
