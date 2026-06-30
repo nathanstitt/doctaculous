@@ -6,6 +6,20 @@ page rasterization.** The core pipeline (parse → interpret → raster) is work
 renders real-world PDFs faithfully; see "Status & roadmap" at the bottom for what's done and what's
 next. (**EPUB is out of scope** — see the out-of-scope note at the bottom.)
 
+## Working directives (how to build here)
+
+- **Always implement the maximal, most browser-faithful option.** For any feature
+  with a fidelity/scope choice (which CSS values, how complete the algorithm, edge
+  cases), pick the fullest spec-compliant behavior — do NOT ask which subset to do.
+  Lean to thoroughness; only surface a question for a genuine product decision that
+  cannot be inferred, and even then default toward maximal.
+- **Every feature lands with tests AND a visual entry.** Add unit/golden tests for
+  each part, and add the feature to the `testdata/htmldoc/` showcase (a new section +
+  regenerated, eyeballed goldens) so it is visually exercised end to end.
+- **Each engine feature/sub-project is its own branch → PR off `main`**, merged when CI
+  is green (the stack is fully merged; new work branches from `main`). Keep changes
+  additive and byte-identical for untouched callers (DOCX, pages not using the feature).
+
 ## Non-negotiable constraints
 
 - **Pure Go. No CGo, no native bindings, no WASM engines.** No PDFium / MuPDF / Poppler.
