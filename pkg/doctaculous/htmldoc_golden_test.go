@@ -33,7 +33,10 @@ func TestHTMLDocShowcase(t *testing.T) {
 	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
 	defer srv.Close()
 
-	doc, err := OpenURL(srv.URL+"/index.html", WithPageSize(LetterWidthPt, LetterHeightPt))
+	// WithDefaultPaged drives pagination from the document's own @page rule (Letter
+	// size, a bottom margin band, and a running page-counter footer) — exercising the
+	// full paged-media path end to end, not just fixed-height slicing.
+	doc, err := OpenURL(srv.URL+"/index.html", WithDefaultPaged())
 	if err != nil {
 		t.Fatalf("OpenURL: %v", err)
 	}

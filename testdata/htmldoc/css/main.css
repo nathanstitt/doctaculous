@@ -5,6 +5,22 @@
    ornament. Strictly within implemented CSS: no gradients, shadows, radii,
    transforms, opacity, or text-decoration (none are rendered by the engine). */
 
+/* ----- paged media (@page) --------------------------------------------------- */
+
+/* CSS Paged Media: US-Letter pages with a bottom margin band carrying a running
+   footer (the page counter). The width stays full Letter so the document's grid is
+   unchanged; only a bottom band is reserved, into which @bottom-center paints
+   "Doctaculous · N / TOTAL" on every page. Driven by WithDefaultPaged(). */
+@page {
+  size: letter;
+  margin: 0 0 42px 0;
+  @bottom-center {
+    content: "Doctaculous  ·  " counter(page) " / " counter(pages);
+    color: #6a6a64;
+    font-size: 10px;
+  }
+}
+
 /* ----- page frame ------------------------------------------------------------ */
 
 /* A heavy ruled band that the engine fragments across pages (the body border is
