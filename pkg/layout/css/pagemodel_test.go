@@ -123,3 +123,16 @@ func TestPagedDocNotPagedIsSingleTall(t *testing.T) {
 		t.Errorf("not-paged height = %.1f, expected content height (small), not a fixed page", pages.Pages[0].HeightPt)
 	}
 }
+
+func TestResolvePageGeomBleed(t *testing.T) {
+	cfg := pagedConfigFor(`@page { size: 200px 300px; bleed: 10px; marks: crop }`, 200, 300, false)
+	g := cfg.resolvePageGeom(0, "", false)
+	// Trim box is 200x300; with 10px bleed the MEDIA box (the page bitmap) is 220x320,
+	// and the trim box is offset by (10,10).
+	if g.mediaW() != 220 || g.mediaH() != 320 {
+		t.Errorf("media size = %.0fx%.0f, want 220x320", g.mediaW(), g.mediaH())
+	}
+	if g.bleed != 10 {
+		t.Errorf("bleed = %.1f, want 10", g.bleed)
+	}
+}

@@ -8,6 +8,10 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
+// defaultMarkInset is the bleed-band width synthesized when @page marks are requested
+// without an explicit bleed, so the marks have room outside the trim box (~6pt).
+const defaultMarkInset = 8 // px-as-pt (≈6pt)
+
 // PagedConfig is the resolved paged-media configuration handed to LayoutPagedDoc by
 // the doctaculous backend: whether to paginate at all, a fallback page size (from
 // WithPageSize / the Letter default), an explicit-size flag (so an API size overrides
@@ -36,7 +40,16 @@ type pageGeom struct {
 	marginL, marginT   float64 // content-box origin offset (left/top margins)
 	contentW, contentH float64 // content box size (page minus margins)
 	used               gcss.UsedPage
+	bleed              float64 // @page bleed: the trim→media-box inset on each side (0 = none)
 }
+
+// mediaW / mediaH are the page BITMAP size: the trim box (pageW/pageH) plus bleed on
+// each side. With no bleed they equal pageW/pageH (byte-identical).
+func (g pageGeom) mediaW() float64 { return g.pageW + 2*g.bleed }
+func (g pageGeom) mediaH() float64 { return g.pageH + 2*g.bleed }
+
+// marksRequested reports whether @page asked for crop and/or cross marks.
+func (g pageGeom) marksRequested() bool { return g.used.Marks != "" }
 
 // resolvePageGeom resolves the geometry for page index i (named `name`) from a
 // PagedConfig: the page size (API explicit size > @page size > fallback) and the
@@ -57,6 +70,10 @@ func (pc PagedConfig) resolvePageGeom(i int, name string, blank bool) pageGeom {
 	}
 	if g.contentH <= 0 {
 		g.contentH = g.pageH
+	}
+	g.bleed = up.Bleed
+	if g.bleed == 0 && up.Marks != "" {
+		g.bleed = defaultMarkInset // marks need room to draw outside the trim box
 	}
 	return g
 }
