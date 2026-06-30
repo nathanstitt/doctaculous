@@ -156,9 +156,13 @@ type ComputedStyle struct {
 	Clear string
 
 	// Position is the CSS position value: "static" (default) | "relative" |
-	// "absolute" | "fixed". Not inherited. The box generator maps it to
-	// cssbox.PositionKind.
+	// "absolute" | "fixed" | "running" (CSS GCPM running()). Not inherited. The box
+	// generator maps it to cssbox.PositionKind.
 	Position string
+	// RunningName is the name from `position: running(name)` (CSS GCPM): the box is
+	// removed from normal flow and re-placed into a @page margin box via element(name).
+	// "" when position is not running(). Not inherited.
+	RunningName string
 	// Top/Right/Bottom/Left are the positioning offset properties (CSS 9.3.2),
 	// UnitAuto = "auto" (the initial value). Not inherited. Meaningful only on a
 	// positioned box (relative: paint offset; absolute/fixed: placement against
@@ -704,9 +708,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.Clear = d.Value
 		}
 	case "position":
-		switch d.Value {
-		case "static", "relative", "absolute", "fixed":
-			cs.Position = d.Value
+		v := strings.TrimSpace(d.Value)
+		if name, ok := parseRunning(v); ok {
+			cs.Position = "running"
+			cs.RunningName = name
+		} else {
+			switch v {
+			case "static", "relative", "absolute", "fixed":
+				cs.Position = v
+				cs.RunningName = ""
+			}
 		}
 	case "top":
 		setLength(&cs.Top, d.Value)
@@ -897,6 +908,21 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		applyGridShorthand(cs, d.Value)
 	}
 	// default: unsupported property — ignored on purpose.
+}
+
+// parseRunning parses a `running(name)` position value, returning the name and ok=true.
+// ok is false for any non-running() value. The name is lowercased so element(name)
+// references match case-insensitively.
+func parseRunning(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if !strings.HasPrefix(v, "running(") || !strings.HasSuffix(v, ")") {
+		return "", false
+	}
+	name := strings.TrimSpace(v[len("running(") : len(v)-1])
+	if name == "" {
+		return "", false
+	}
+	return strings.ToLower(name), true
 }
 
 // normalizeAutoFlow canonicalizes a grid-auto-flow value to one of the four valid
