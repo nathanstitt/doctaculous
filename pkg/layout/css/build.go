@@ -45,9 +45,22 @@ func BuildWithFonts(ctx context.Context, doc *html.Document, loader resource.Res
 // rules are returned as a single Stylesheet (only its Pages are populated) ready for
 // ResolvePage. Like BuildWithFonts it never panics on malformed input.
 func BuildWithFontsAndPages(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) (root *cssbox.Box, faces []gcss.FontFace, pages gcss.Stylesheet, err error) {
+	root, faces, pages, _, err = BuildWithFontsPagesRunning(ctx, doc, loader, logf)
+	return root, faces, pages, err
+}
+
+// BuildWithFontsPagesRunning is BuildWithFontsAndPages plus the running elements
+// collected out of normal flow: a box whose computed position is running(name) (CSS
+// GCPM) generates no in-flow fragment and is instead recorded in the returned map under
+// its name (last one wins on a duplicate name). A @page margin box re-places it via
+// content: element(name). The map is empty when no element uses running(), so a document
+// with no running elements builds an identical tree (byte-identical for every existing
+// caller). Like BuildWithFonts it never panics on malformed input.
+func BuildWithFontsPagesRunning(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) (root *cssbox.Box, faces []gcss.FontFace, pages gcss.Stylesheet, running map[string]*cssbox.Box, err error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	running = map[string]*cssbox.Box{}
 	defer func() {
 		if r := recover(); r != nil {
 			logf("box generation recovered from panic: %v", r)
@@ -62,20 +75,20 @@ func BuildWithFontsAndPages(ctx context.Context, doc *html.Document, loader reso
 	sheets, faces, pages.Pages = assembleSheets(ctx, doc, loader, logf)
 	resolver := gcss.NewResolver(sheets, logf)
 
-	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root))
+	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root), running)
 	if root == nil {
 		// The root itself computed to display:none (e.g. html{display:none}).
 		// Degrade to an empty block root rather than falling through to the
 		// panic-recover path via normalize(nil); the result is a renderable
 		// empty document.
-		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, faces, pages, nil
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}, faces, pages, running, nil
 	}
 	resolveCounters(root) // list-item markers + CSS counter()/counters() content (counters.go)
 	normalize(root)       // anonymous-box fixups + whitespace handling (anon.go)
 	fixupTables(root)     // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
 	fixupFlex(root)       // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
 	fixupGrid(root)       // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
-	return root, faces, pages, nil
+	return root, faces, pages, running, nil
 }
 
 // assembleSheets returns the origin-ordered sheets AND the aggregated @font-face and
@@ -109,8 +122,11 @@ func assembleSheets(ctx context.Context, doc *html.Document, loader resource.Res
 }
 
 // generate recursively builds the box for element e (whose computed style is cs)
-// and its descendants. Returns nil for a display:none subtree.
-func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.Box {
+// and its descendants. Returns nil for a display:none subtree. A box with
+// position:running(name) (CSS GCPM) is built normally but recorded in running under
+// its name; the parent loop then omits it from its in-flow children (taken fully out
+// of flow). running is never nil (the build entry initializes it).
+func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running map[string]*cssbox.Box) *cssbox.Box {
 	if cs.Display == "none" {
 		return nil
 	}
@@ -123,6 +139,13 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 	// it is taken out of flow as positioned, not placed as a float.
 	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
 		b.Float = cssbox.FloatNone
+	}
+	// CSS GCPM running(name): the box is taken fully out of flow (no float, no in-flow
+	// space). RunningName carries the name; the parent loop records it in running and
+	// omits it from its children.
+	if b.Position == cssbox.PosRunning {
+		b.Float = cssbox.FloatNone
+		b.RunningName = cs.RunningName
 	}
 	applyBlockify(b, cs) // CSS 9.7: a float OR an abs/fixed box blockifies an inline-level box
 
@@ -160,7 +183,13 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle) *cssbox.
 		switch c := child.(type) {
 		case *html.Element:
 			childCS := r.Compute(c, cs)
-			if cb := generate(c, r, childCS); cb != nil {
+			if cb := generate(c, r, childCS, running); cb != nil {
+				if cb.Position == cssbox.PosRunning {
+					// Out of flow: record by name (last duplicate wins) and do NOT
+					// append to the parent's in-flow children.
+					running[cb.RunningName] = cb
+					continue
+				}
 				b.Children = append(b.Children, cb)
 			}
 		case *html.Text:
@@ -306,6 +335,8 @@ func positionOf(cs gcss.ComputedStyle) cssbox.PositionKind {
 		return cssbox.PosAbsolute
 	case "fixed":
 		return cssbox.PosFixed
+	case "running":
+		return cssbox.PosRunning
 	default:
 		return cssbox.PosStatic
 	}

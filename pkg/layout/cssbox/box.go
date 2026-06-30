@@ -127,6 +127,9 @@ const (
 	PosRelative
 	PosAbsolute
 	PosFixed
+	// PosRunning is `position: running(name)` (CSS GCPM): the box is removed from normal
+	// flow and re-placed into a @page margin box via content: element(name).
+	PosRunning
 )
 
 // ControlKind identifies a form control rendered as a static replaced widget.
@@ -173,6 +176,8 @@ type Box struct {
 	Formatting FormattingContext
 	Float      FloatKind
 	Position   PositionKind
+	// RunningName is the running()-element name when Position == PosRunning ("" otherwise).
+	RunningName string
 
 	// ColSpan / RowSpan are the HTML colspan/rowspan presentational attributes,
 	// read in pkg/html (like <img width/height>), honored only for a
