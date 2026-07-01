@@ -56,8 +56,12 @@ func (m MapLoader) Load(ctx context.Context, ref string) ([]byte, string, error)
 
 // DirLoader is a ResourceLoader that serves files from a base directory, with
 // content type inferred from the file extension. It is intended for test
-// fixtures on local disk; it refuses refs that escape Base (e.g. "../x") rather
-// than following them, but is not hardened for untrusted input beyond that.
+// fixtures on local disk. It resolves ".." and serves any ref that lands inside
+// Base — including a subdir stylesheet's "../asset/…" ref, re-resolved against
+// Base (refs are passed verbatim with no per-stylesheet re-basing, so a
+// stylesheet under css/ reaches the loader as the raw "../img/x"). A ref that
+// still escapes Base is treated as absent. It is not hardened for untrusted
+// input beyond that.
 type DirLoader struct {
 	Base string
 }
@@ -67,11 +71,25 @@ func (d DirLoader) Load(ctx context.Context, ref string) ([]byte, string, error)
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
 	}
-	// Refuse refs that escape Base via "..". Treat an out-of-bounds ref as absent.
 	base := filepath.Clean(d.Base)
 	full := filepath.Clean(filepath.Join(base, ref))
-	if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
-		return nil, "", fmt.Errorf("%q: %w", ref, ErrNotFound)
+	// Accept any ref that resolves to a path inside base (this includes refs that
+	// use ".." internally as long as they land back inside, e.g. "css/../img/x").
+	inside := full == base || strings.HasPrefix(full, base+string(os.PathSeparator))
+	if !inside {
+		// A stylesheet under a subdir may reference "../asset/x"; such a ref, joined
+		// against base, escapes by one segment. Re-resolve it against base by trimming
+		// leading "../" segments and retrying inside base, so sibling asset dirs load.
+		trimmed := ref
+		for strings.HasPrefix(trimmed, "../") || strings.HasPrefix(trimmed, "..\\") {
+			trimmed = trimmed[3:]
+		}
+		retry := filepath.Clean(filepath.Join(base, trimmed))
+		if retry == base || strings.HasPrefix(retry, base+string(os.PathSeparator)) {
+			full = retry
+		} else {
+			return nil, "", fmt.Errorf("%q: %w", ref, ErrNotFound)
+		}
 	}
 	data, err := os.ReadFile(full)
 	if err != nil {

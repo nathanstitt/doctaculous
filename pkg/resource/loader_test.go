@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -68,6 +69,53 @@ func TestDirLoaderHonorsCancellation(t *testing.T) {
 	cancel()
 	if _, _, err := l.Load(ctx, "s.css"); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestDirLoaderServesParentRelativeWithinRoot(t *testing.T) {
+	root := t.TempDir()
+	// Layout mirrors the showcase: <root>/index.html, <root>/css/main.css,
+	// <root>/img/tile.png. A stylesheet under css/ references ../img/tile.png.
+	if err := os.MkdirAll(filepath.Join(root, "img"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("PNGDATA")
+	if err := os.WriteFile(filepath.Join(root, "img", "tile.png"), want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := DirLoader{Base: root}
+
+	// A ref that resolves (via "..") to a file INSIDE the root must be served.
+	got, _, err := d.Load(context.Background(), "css/../img/tile.png")
+	if err != nil {
+		t.Fatalf("css/../img/tile.png: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	// A ref that truly escapes the root must still be refused.
+	if _, _, err := d.Load(context.Background(), "../../etc/passwd"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("escaping ref: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDirLoaderServesRawParentRelative(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "img"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("TILE")
+	if err := os.WriteFile(filepath.Join(root, "img", "tile.png"), want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := DirLoader{Base: root}
+	got, _, err := d.Load(context.Background(), "../img/tile.png")
+	if err != nil {
+		t.Fatalf("../img/tile.png: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
