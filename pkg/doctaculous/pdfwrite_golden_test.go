@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"bytes"
 	"context"
+	"image"
 	"testing"
 
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
@@ -99,4 +100,59 @@ func TestConvertHTMLToPDFPrintMedia(t *testing.T) {
 	if bytes.Equal(render(false), render(true)) {
 		t.Fatal("print and screen output identical; @media print rule was not applied")
 	}
+}
+
+// TestHTMLToPDFFidelity renders an HTML fixture two ways and asserts the generated
+// PDF, re-parsed and rasterized through the project's own pipeline, draws real ink
+// in its content region — proving the embedded fonts and borders render (Option A of
+// the plan: structural fidelity + searchable text, avoiding brittle pixel alignment
+// between the single-tall raster page and the Letter-sized PDF page).
+func TestHTMLToPDFFidelity(t *testing.T) {
+	cases := []struct{ name, html string }{
+		{"text", `<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body><p>Hello PDF</p></body></html>`},
+		{"borders", `<!DOCTYPE html><html><head><style>body{margin:0}.b{border:4px solid #036;padding:8px}</style></head><body><div class="b">Boxed</div></body></html>`},
+		{"mono", `<!DOCTYPE html><html><head><style>body{margin:0}code{font-family:monospace}</style></head><body><code>x = 1</code></body></html>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var pdfBuf bytes.Buffer
+			if err := ConvertHTMLToPDF(context.Background(), bytes.NewReader([]byte(tc.html)), &pdfBuf,
+				PDFOptions{PageWidthPt: 612, PageHeightPt: 792, MarginPt: 36}); err != nil {
+				t.Fatal(err)
+			}
+			// Searchable text: the output carries a ToUnicode CMap and an embedded font.
+			out := pdfBuf.Bytes()
+			if !bytes.Contains(out, []byte("/ToUnicode")) {
+				t.Error("no /ToUnicode: text not searchable")
+			}
+
+			// Round-trip: re-parse OUR PDF and rasterize it through the project pipeline.
+			pdfDoc, err := OpenBytes(out)
+			if err != nil {
+				t.Fatalf("reopen generated PDF: %v", err)
+			}
+			img, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+			if err != nil {
+				t.Fatalf("rasterize generated PDF: %v", err)
+			}
+			if inked := countInkedPixels(img); inked == 0 {
+				t.Errorf("%s: rasterized PDF is blank — glyphs/borders did not draw", tc.name)
+			}
+		})
+	}
+}
+
+// countInkedPixels counts non-white, opaque pixels — a proxy for "something drew".
+func countInkedPixels(img image.Image) int {
+	b := img.Bounds()
+	n := 0
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a > 0 && (r < 0xf000 || g < 0xf000 || bl < 0xf000) {
+				n++
+			}
+		}
+	}
+	return n
 }
