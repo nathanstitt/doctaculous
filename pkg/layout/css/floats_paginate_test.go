@@ -48,6 +48,116 @@ func TestFloatsPaintInNamedPageRun(t *testing.T) {
 	}
 }
 
+// TestFloatsScopedPerRunSameWidth reproduces the cross-run float-duplication bug and
+// pins its fix. Two NON-ADJACENT sections both select the same named wide @page (with a
+// default-page section between them), each containing a distinctly-colored float. All
+// three sections' top-level floats bubble to one shared page-root BFC, and both wide runs
+// resolve to the same @page width — so they share a single cached layout (layoutByWidth[w])
+// whose Floats slice holds BOTH colored floats.
+//
+// Before the fix, floatsForRun consumed that whole shared Floats slice for EACH wide run,
+// so the red float (section A) painted once per wide run AND leaked onto section B's pages
+// (and vice-versa). After the fix, each float is scoped to its originating run, so each
+// color paints exactly once, only on its own section's pages.
+func TestFloatsScopedPerRunSameWidth(t *testing.T) {
+	src := []byte(`<!DOCTYPE html><html><head><style>
+	  @page wide { size: 1200px 800px }
+	  .land { page: wide }
+	  .figA { float: left; width: 100px; height: 60px; background: #cc0000 }
+	  .figB { float: left; width: 100px; height: 60px; background: #00cc00 }
+	</style></head><body>
+	  <section class="land"><div class="figA"></div><p>section A beside its red float</p></section>
+	  <section><p>default-page section between the two wide sections</p></section>
+	  <section class="land"><div class="figB"></div><p>section B beside its green float</p></section>
+	</body></html>`)
+
+	doc, err := html.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	root, faces, pages, running, err := layoutcss.BuildWithFontsPagesRunning(ctx, doc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := layoutcss.New(layoutfont.NewFaceCacheWithFonts(faces, nil, nil, nil), nil, nil)
+	out, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
+		Paged: true, FallbackW: 816, FallbackH: 1056, ExplicitSize: false,
+		Pages: pages, Running: running,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	redPages := pagesWithFilledRect(out, 0xcc, 0x00, 0x00)
+	greenPages := pagesWithFilledRect(out, 0x00, 0xcc, 0x00)
+
+	// Each float paints exactly once across all pages (a float duplicated per run would
+	// count 2, not 1).
+	if n := countFilledRect(out, 0xcc, 0x00, 0x00); n != 1 {
+		t.Errorf("red float (section A) painted %d times across all pages; want exactly 1", n)
+	}
+	if n := countFilledRect(out, 0x00, 0xcc, 0x00); n != 1 {
+		t.Errorf("green float (section B) painted %d times across all pages; want exactly 1", n)
+	}
+
+	// The red and green floats must land on DIFFERENT pages (section A vs section B),
+	// never sharing a page — i.e. neither color leaks onto the other section's pages.
+	if len(redPages) != 1 || len(greenPages) != 1 {
+		t.Fatalf("expected each color on exactly one page; red=%v green=%v", redPages, greenPages)
+	}
+	if redPages[0] == greenPages[0] {
+		t.Errorf("red and green floats landed on the same page %d; section floats must not cross runs", redPages[0])
+	}
+}
+
+// countFilledRect counts Rule/Background items across all pages whose color approximately
+// matches (r,g,b).
+func countFilledRect(pages *layout.Pages, r, g, b uint8) int {
+	near := func(a, want uint8) bool {
+		if a > want {
+			return a-want < 8
+		}
+		return want-a < 8
+	}
+	n := 0
+	for pi := range pages.Pages {
+		for _, it := range pages.Pages[pi].Items {
+			if it.Kind == layout.RuleKind || it.Kind == layout.BackgroundKind {
+				c := it.Rule.Color
+				if near(c.R, r) && near(c.G, g) && near(c.B, b) {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+
+// pagesWithFilledRect returns the indices of pages carrying a Rule/Background item whose
+// color approximately matches (r,g,b).
+func pagesWithFilledRect(pages *layout.Pages, r, g, b uint8) []int {
+	near := func(a, want uint8) bool {
+		if a > want {
+			return a-want < 8
+		}
+		return want-a < 8
+	}
+	var out []int
+	for pi := range pages.Pages {
+		for _, it := range pages.Pages[pi].Items {
+			if it.Kind == layout.RuleKind || it.Kind == layout.BackgroundKind {
+				c := it.Rule.Color
+				if near(c.R, r) && near(c.G, g) && near(c.B, b) {
+					out = append(out, pi)
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
 // hasFilledRect reports whether any page carries a Rule/Background item whose color
 // approximately matches (r,g,b).
 func hasFilledRect(pages *layout.Pages, r, g, b uint8) bool {

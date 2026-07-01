@@ -241,7 +241,7 @@ type runBucket struct {
 	floats []*Fragment
 }
 
-// floatsForRun partitions the run layout's floats across its buckets, mirroring the
+// floatsForRun partitions THIS run's floats across its buckets, mirroring the
 // single-width splitFloatsByPage: a float is routed to the bucket whose vertical band
 // contains its margin-box top (pageForY — a float above the first band clamps to bucket
 // 0, below the last clamps to the last), then shifted into that bucket's local frame
@@ -250,16 +250,64 @@ type runBucket struct {
 // run at this width — shifting the original in place (as splitFloatsByPage safely does,
 // since it owns its layout) would corrupt later buckets. Returns one slice per bucket
 // (nil where a bucket has no floats), so a float-free run is byte-identical.
-func floatsForRun(runLayout *Fragment, bks []pageBucket) [][]*Fragment {
+//
+// CRITICAL: runLayout.Floats is the ENTIRE document layout's float list (every top-level
+// float bubbles up to the page-root BFC), so it must NOT be distributed wholesale into
+// every run — two non-consecutive runs that resolve to the same @page width share one
+// layoutByWidth[w] entry, and consuming its whole Floats slice in each run would paint
+// every float once per run (duplication) and cross-route floats between sections. We
+// therefore scope to floats ORIGINATING in this run's block range [r.start,r.end) via
+// runFloats (structural cssbox-descendant attribution), so each float is emitted by
+// exactly one run — its owning run — exactly once.
+func floatsForRun(runFloats []*Fragment, bks []pageBucket) [][]*Fragment {
 	out := make([][]*Fragment, len(bks))
-	if runLayout == nil || len(runLayout.Floats) == 0 || len(bks) == 0 {
+	if len(runFloats) == 0 || len(bks) == 0 {
 		return out
 	}
-	for _, fl := range runLayout.Floats {
+	for _, fl := range runFloats {
 		bi := pageForY(fl.Y, bks)
 		clone := cloneFloatForPage(fl)
 		shiftFragment(clone, -bks[bi].top)
 		out[bi] = append(out[bi], clone)
+	}
+	return out
+}
+
+// floatsOriginatingIn scopes the layout's page-root floats to those ORIGINATING within
+// the given top-level block fragments (a run's block range). Each top-level float
+// bubbles up to the page-root BFC (layoutByWidth[w].Floats), losing its in-flow position
+// in the tree; but the floated box is still a cssbox descendant of the top-level block it
+// was declared in. So a float belongs to a run iff its source cssbox.Box (Fragment.Box)
+// is a descendant of one of the run's top-level block boxes. This is an exact structural
+// attribution — unaffected by the float's Y frame — so a float is assigned to exactly one
+// run even when several runs share the same @page width (hence the same shared Floats
+// slice). A float whose Box is nil or is not a descendant of ANY of these blocks is not
+// this run's (it belongs to another run and will be picked up there); it is skipped here.
+func floatsOriginatingIn(allFloats []*Fragment, runBlocks []*Fragment) []*Fragment {
+	if len(allFloats) == 0 || len(runBlocks) == 0 {
+		return nil
+	}
+	owned := map[*cssbox.Box]bool{}
+	var collect func(b *cssbox.Box)
+	collect = func(b *cssbox.Box) {
+		if b == nil || owned[b] {
+			return
+		}
+		owned[b] = true
+		for _, c := range b.Children {
+			collect(c)
+		}
+	}
+	for _, blk := range runBlocks {
+		if blk != nil {
+			collect(blk.Box)
+		}
+	}
+	var out []*Fragment
+	for _, fl := range allFloats {
+		if fl != nil && fl.Box != nil && owned[fl.Box] {
+			out = append(out, fl)
+		}
 	}
 	return out
 }
@@ -381,7 +429,16 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		// Split this run's out-of-flow floats across its buckets (cloned + shifted into
 		// each bucket's local frame). Without this, floats in a named-page section were
 		// dropped entirely (paginateRuns nil'd Floats and never re-attached them).
-		runFloats := floatsForRun(layoutByWidth[geom.contentW], bks)
+		//
+		// Scope to floats ORIGINATING in THIS run's block range: layoutByWidth[w].Floats
+		// is the whole document's float list, shared by every run at this width. Two
+		// non-consecutive runs at the same @page width (e.g. wide, default, wide) would
+		// otherwise each emit ALL of that width's floats — painting each float once per run
+		// and cross-routing floats between sections. floatsOriginatingIn attributes each
+		// float to its owning run structurally (its cssbox.Box is a descendant of one of
+		// this run's top-level block boxes), so each float is emitted by exactly one run.
+		ownFloats := floatsOriginatingIn(layoutByWidth[geom.contentW].Floats, runBlocks)
+		runFloats := floatsForRun(ownFloats, bks)
 		for bi, bk := range bks {
 			all = append(all, runBucket{bucket: bk, geom: geom, floats: runFloats[bi]})
 		}
