@@ -60,7 +60,12 @@ func (g pageGeom) mediaH() float64 { return g.pageH + 2*g.bleed }
 func (pc PagedConfig) resolvePageGeom(i int, name string, blank bool) pageGeom {
 	up := pc.Pages.ResolvePage(i, name, blank)
 	g := pageGeom{pageW: pc.FallbackW, pageH: pc.FallbackH, used: up}
-	if up.HasSize && !pc.ExplicitSize {
+	// An explicit API size (WithPageSize) overrides the DEFAULT (unnamed) @page size,
+	// but a section that opted into a NAMED page (page: <name>) must still get that
+	// page's own @page size — otherwise a `page: landscape` section can never reflow
+	// wider. So apply a named page's size unconditionally, and the unnamed page's size
+	// only when the API did not pin one.
+	if up.HasSize && (name != "" || !pc.ExplicitSize) {
 		g.pageW, g.pageH = up.WidthPt, up.HeightPt
 	}
 	if up.HasRule {
