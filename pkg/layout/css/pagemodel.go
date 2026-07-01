@@ -283,6 +283,15 @@ func floatsForRun(runFloats []*Fragment, bks []pageBucket) [][]*Fragment {
 // run even when several runs share the same @page width (hence the same shared Floats
 // slice). A float whose Box is nil or is not a descendant of ANY of these blocks is not
 // this run's (it belongs to another run and will be picked up there); it is skipped here.
+//
+// Only page-root-BFC floats flow through here; a float bubbled to a NESTED BFC paints
+// within its own subtree and is correctly not seen (nor wanted) here. Two floats are
+// deliberately skipped as a narrow, documented limitation of the multi-named-page path
+// (the common single-run paginateDoc/splitFloatsByPage path emits all root floats fine):
+// a float that is a DIRECT child of <body> (a sibling of the top-level blocks, descendant
+// of none) and a float with a nil .Box (anonymous/synthetic) are attributed to no run and
+// so appear on no page. This is less wrong than the pre-fix cross-run duplication, and such
+// floats have no `page` name to attribute to anyway.
 func floatsOriginatingIn(allFloats []*Fragment, runBlocks []*Fragment) []*Fragment {
 	if len(allFloats) == 0 || len(runBlocks) == 0 {
 		return nil
