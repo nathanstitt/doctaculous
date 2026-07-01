@@ -21,6 +21,11 @@ type HTMLOption func(*htmlConfig)
 type htmlConfig struct {
 	viewportPt   float64
 	pageHeightPt float64
+	// paged requests pagination using the document's @page rules (set by
+	// WithDefaultPaged or WithPageSize). explicitSize records that WithPageSize set an
+	// explicit page size, which overrides any @page `size`.
+	paged        bool
+	explicitSize bool
 	loader       resource.ResourceLoader
 	sys          layoutfont.SystemFontProvider
 	logf         func(string, ...any)
@@ -57,15 +62,35 @@ const (
 
 // WithPageSize paginates output into fixed widthPt × heightPt (points) pages: the
 // document lays out at widthPt and is sliced into heightPt-tall pages, breaking
-// between top-level blocks and at forced page breaks (CSS break-before/after: page).
-// Without WithPageSize the document renders as a single tall page (the default).
-// widthPt or heightPt <= 0 is ignored (no pagination).
+// between top-level blocks and at forced page breaks (CSS break-before/after: page),
+// honoring break-inside / widows / orphans. The explicit size overrides any @page
+// `size`, but @page margins and margin boxes (running headers/footers) still apply.
+// Without WithPageSize (or WithDefaultPaged) the document renders as a single tall
+// page (the default). widthPt or heightPt <= 0 is ignored (no pagination).
 func WithPageSize(widthPt, heightPt float64) HTMLOption {
 	return func(c *htmlConfig) {
 		if widthPt > 0 && heightPt > 0 {
 			c.viewportPt = widthPt
 			c.pageHeightPt = heightPt
+			c.paged = true
+			c.explicitSize = true
 		}
+	}
+}
+
+// WithDefaultPaged paginates output using the document's @page rules (size, margins,
+// and margin boxes) when present, falling back to US-Letter (LetterWidthPt ×
+// LetterHeightPt) for any dimension the document does not specify. Unlike WithPageSize
+// it sets no explicit size, so an @page `size` is honored. Without it (and without
+// WithPageSize) the document renders as a single tall page.
+func WithDefaultPaged() HTMLOption {
+	return func(c *htmlConfig) {
+		c.paged = true
+		c.explicitSize = false
+		if c.pageHeightPt <= 0 {
+			c.pageHeightPt = LetterHeightPt
+		}
+		c.viewportPt = LetterWidthPt
 	}
 }
 
@@ -171,13 +196,20 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 		return nil, fmt.Errorf("doctaculous: parse html: %w", err)
 	}
 	ctx := context.Background()
-	root, fontFaces, err := layoutcss.BuildWithFonts(ctx, doc, cfg.loader, cfg.logf)
+	root, fontFaces, pageRules, running, err := layoutcss.BuildWithFontsPagesRunning(ctx, doc, cfg.loader, cfg.logf)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
 	}
 	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, cfg.sys, cfg.logf)
 	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
-	pages, err := engine.LayoutPaged(ctx, root, cfg.viewportPt, cfg.pageHeightPt)
+	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
+		Paged:        cfg.paged,
+		FallbackW:    cfg.viewportPt,
+		FallbackH:    cfg.pageHeightPt,
+		ExplicitSize: cfg.explicitSize,
+		Pages:        pageRules,
+		Running:      running,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)
 	}

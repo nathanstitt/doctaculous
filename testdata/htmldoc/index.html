@@ -21,6 +21,11 @@
 </head>
 <body>
 
+  <!-- Running head: position:running(rhead) lifts this OUT of the body flow and the
+       @page @top-left margin box re-paints it (content:element(rhead)) on every page.
+       It must NOT appear inline in the masthead below. -->
+  <div class="run-header">Doctaculous <span class="run-em">&middot;</span> HTML Rendering Specimen</div>
+
   <!-- ===================== MASTHEAD ===================== -->
   <header class="masthead">
     <div class="bar">
@@ -448,6 +453,43 @@ newline is kept.</p>
       <li>Third in Roman</li>
       <li>Fourth in Roman</li>
     </ol>
+
+  </section>
+
+  <!-- ===================== 15 · LANDSCAPE (named page) ===================== -->
+  <section class="section break land">
+    <span class="kicker">15 / LANDSCAPE</span>
+    <h2>Landscape Reflow</h2>
+    <p class="lede">This section selects a wider <code>@page landscape</code> via
+      <code>page: landscape</code>; its content reflows to the wider measure of a
+      landscape US&#8209;Letter page (1056&times;816px) instead of the portrait column.</p>
+
+    <p>Because the named page is wider, the flex row below stretches edge to edge across
+      the full landscape measure, and the table beneath it reflows to the same wide
+      width &mdash; both visibly wider than any portrait page in this specimen. The
+      running chrome (the head at top&#8209;left, the section title at top&#8209;right,
+      and the page counters along the bottom) carries over onto the landscape page band
+      unchanged.</p>
+
+    <div class="panels">
+      <div class="panel">Parser &amp; xref</div>
+      <div class="panel alt">Content interpreter</div>
+      <div class="panel gold">Raster backend</div>
+      <div class="panel">Reflow engine</div>
+      <div class="panel alt">CSS cascade</div>
+    </div>
+
+    <table class="wideledger">
+      <thead>
+        <tr><th>Pipeline stage</th><th>Package</th><th>Input</th><th>Output</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Parse</td><td>pkg/pdf</td><td>bytes</td><td>Document</td><td>xref tables &amp; streams, object streams</td></tr>
+        <tr><td>Interpret</td><td>pkg/pdf/content</td><td>content stream</td><td>paint ops</td><td>paths, text, images, shadings</td></tr>
+        <tr><td>Reflow</td><td>pkg/layout/css</td><td>cssbox tree</td><td>fragment tree</td><td>block / inline / flex / grid / table</td></tr>
+        <tr><td>Raster</td><td>pkg/render/raster</td><td>paint ops</td><td>bitmap</td><td>pure&#8209;Go, dependency&#8209;light</td></tr>
+      </tbody>
+    </table>
 
     <div class="colophon">
       <p>Doctaculous &middot; pure&#8209;Go, MIT&#8209;licensed &middot; rendered from

@@ -5,6 +5,82 @@
    ornament. Strictly within implemented CSS: no gradients, shadows, radii,
    transforms, opacity, or text-decoration (none are rendered by the engine). */
 
+/* ----- paged media (@page) --------------------------------------------------- */
+
+/* CSS Paged Media: US-Letter pages with running chrome in BOTH margin bands, crop
+   marks in a bleed band, and a named landscape page. Top margin (56px) houses a
+   running HEAD on the left and the running SECTION TITLE on the right; the bottom
+   (42px) carries the page counter (decimal, centered) and a roman page number (right).
+   `marks: crop cross; bleed` grows every page to the media box and draws trim marks.
+   Driven by WithDefaultPaged(); the left/right margins stay 0 so the body frame still
+   runs edge to edge as before.
+
+   Margin-band content composed here:
+     @top-left     content: element(rhead)  — the position:running(rhead) header div
+     @top-right    content: string(sect)    — the most recent <h2> (via string-set)
+     @bottom-center  "Doctaculous · N / M"  — decimal page / pages counter
+     @bottom-right   "p. <roman>"           — counter(page, lower-roman) */
+@page {
+  size: letter;
+  margin: 56px 0 42px 0;
+  marks: crop cross;
+  bleed: 12px;
+  @top-left {
+    content: element(rhead);
+  }
+  @top-right {
+    content: string(sect);
+    color: #6a6a64;
+    font-family: "Inconsolata", monospace;
+    font-size: 11px;
+    text-align: right;
+  }
+  @bottom-center {
+    content: "Doctaculous  ·  " counter(page) " / " counter(pages);
+    color: #6a6a64;
+    font-size: 10px;
+  }
+  @bottom-right {
+    content: "p. " counter(page, lower-roman);
+    color: #6a6a64;
+    font-family: "Inconsolata", monospace;
+    font-size: 10px;
+    text-align: right;
+  }
+}
+
+/* A wider LANDSCAPE named page (landscape US-Letter = 1056×816px). The .land section
+   selects it via `page: landscape`, so its content reflows to the wider measure. It
+   carries the same bottom counter so the footer is continuous across orientations. */
+@page landscape {
+  size: 1056px 816px;
+  margin: 56px 0 42px 0;
+  marks: crop cross;
+  bleed: 12px;
+  @top-left {
+    content: element(rhead);
+  }
+  @top-right {
+    content: string(sect);
+    color: #6a6a64;
+    font-family: "Inconsolata", monospace;
+    font-size: 11px;
+    text-align: right;
+  }
+  @bottom-center {
+    content: "Doctaculous  ·  " counter(page) " / " counter(pages);
+    color: #6a6a64;
+    font-size: 10px;
+  }
+  @bottom-right {
+    content: "p. " counter(page, lower-roman);
+    color: #6a6a64;
+    font-family: "Inconsolata", monospace;
+    font-size: 10px;
+    text-align: right;
+  }
+}
+
 /* ----- page frame ------------------------------------------------------------ */
 
 /* A heavy ruled band that the engine fragments across pages (the body border is
@@ -13,6 +89,28 @@
 body {
   border: 6px solid #1a1a18;
   padding: 28px 36px 36px 36px;
+}
+
+/* ----- running head (position: running + element()) -------------------------- */
+
+/* A formatted running header lifted OUT of the body flow by position:running(rhead)
+   and re-painted into the @top-left margin box on every page via content:element(rhead).
+   It is styled like a printed running head — a thin brand rule under a small caps-ish
+   sans line — proving element() carries real markup (border + color + the inline
+   <span>), not just a string. It must NOT appear inline in the masthead. */
+.run-header {
+  position: running(rhead);
+  font-family: "Inconsolata", monospace;
+  font-size: 11px;
+  font-weight: bold;
+  color: #a64b2a;
+  border-bottom: 2px solid #a64b2a;
+  padding: 0 0 3px 36px;
+  width: 360px;
+}
+.run-header .run-em {
+  color: #d9a521;
+  padding: 0 4px;
 }
 
 /* ----- masthead -------------------------------------------------------------- */
@@ -65,12 +163,20 @@ body {
   break-before: page;
 }
 
-/* Numbered section header: a gold tab + sans title, separated by a thin rule. */
+/* Numbered section header: a gold tab + sans title, separated by a thin rule.
+   string-set: sect content() publishes each title as the running `sect` string, which
+   @top-right shows on the page(s) that section occupies (running-header-from-headings). */
 .section h2 {
   font-size: 24px;
   font-weight: bold;
   margin: 0 0 2px 0;
   padding: 0;
+  string-set: sect content();
+}
+
+/* The landscape section selects the wider named @page; its content reflows wide. */
+.land {
+  page: landscape;
 }
 
 .section .kicker {
@@ -506,6 +612,45 @@ a.cta:link { color: #b03a2e; }
 a.bare:link { text-decoration: none; color: #2e6da4; }
 /* An inert :visited rule (never matches in a static render). */
 a.seen:visited { color: #6a9a3a; }
+
+/* ----- landscape (named-page reflow) ----------------------------------------- */
+
+/* A flex row of equal panels that spans the full content measure: on the wide
+   landscape page it stretches edge to edge, making the wider page obvious. A 100%
+   table beneath it reflows to the same wide measure. */
+.land .panels {
+  display: flex;
+  gap: 12px;
+  margin: 14px 0;
+}
+.land .panels .panel {
+  flex: 1 1 0;
+  height: 96px;
+  background: #3a4a5a;
+  border: 2px solid #1a1a18;
+  color: #f4f0e6;
+  font-family: "Inconsolata", monospace;
+  font-size: 12px;
+  padding: 8px;
+}
+.land .panels .panel.alt { background: #a64b2a; }
+.land .panels .panel.gold { background: #d9a521; color: #1a1a18; }
+
+.land .wideledger {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.land .wideledger th, .land .wideledger td {
+  border: 1px solid #1a1a18;
+  padding: 6px 10px;
+  text-align: left;
+}
+.land .wideledger thead th {
+  background: #1a1a18;
+  color: #f4f0e6;
+}
 
 /* ----- colophon -------------------------------------------------------------- */
 

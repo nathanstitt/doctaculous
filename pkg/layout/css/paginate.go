@@ -115,8 +115,31 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// later page paints on that page rather than riding page 0.
 	perPageFloats := splitFloatsByPage(root, buckets)
 
+	// Uniform geometry: every page is viewportW × pageH with no content inset (the
+	// WithPageSize path; @page margins/sizes are applied by paginateDoc's geomFn).
+	geomFn := func(int, pageBucket) pageGeom {
+		return pageGeom{pageW: viewportW, pageH: pageH, contentW: viewportW, contentH: pageH}
+	}
+	// nil running map: this path (WithPageSize, no @page rule) has no margin boxes, so
+	// appendMarginBoxes early-returns and element() never fires.
+	pages := e.assemblePages(root, body, buckets, perPagePos, perPageFloats, geomFn, nil)
+	return &layout.Pages{Pages: pages}
+}
+
+// assemblePages builds one layout.Page per bucket: it shallow-clones the root/body
+// wrapper for the page, assigns the page's positioned + float layers, fragments the
+// wrapper's own border/background into the page's local frame, shifts the page's blocks
+// to local Y 0, optionally insets the content by the page's @page margins (geomFn), and
+// flattens. geomFn(i, bucket) returns page i's size and content box; a zero marginL/
+// marginT (the WithPageSize path) is byte-identical to the un-inset behavior.
+func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPagePos []pagePositioned, perPageFloats [][]*Fragment, geomFn func(int, pageBucket) pageGeom, running map[string]*cssbox.Box) []layout.Page {
+	// Per-page CSS running-string snapshots (for string() in @page margin boxes),
+	// computed once: each page's value carried-in / first-set / last-set, from the
+	// blocks bucketed up to and including that page.
+	snaps := buildStringSnapshots(buckets)
 	pages := make([]layout.Page, 0, len(buckets))
 	for i, bk := range buckets {
+		g := geomFn(i, bk)
 		// Shallow-clone the root/body wrapper so each page can carry its own block
 		// list without mutating the shared tree. The block fragments themselves are
 		// the original pointers — each belongs to exactly one page, so shifting them
@@ -163,9 +186,29 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 		// positioned shift is needed.
 		shiftFragments(bk.blocks, -bk.top)
 
-		pages = append(pages, pageRoot.Page(viewportW, pageH))
+		// Content is inset by the @page margins AND, when bleeding, shifted inward by the
+		// bleed so the trim box sits at (bleed,bleed) within the larger media-box bitmap.
+		dx, dy := g.marginL+g.bleed, g.marginT+g.bleed
+		if dx != 0 || dy != 0 {
+			translateFragment(&pageRoot, dx, dy)
+		}
+		// The page bitmap is the MEDIA box (trim + bleed all sides); with no bleed this is
+		// the trim box, byte-identical to before.
+		pg := pageRoot.Page(g.mediaW(), g.mediaH())
+		// Margin boxes (running headers/footers) are positioned in the trim-box frame, so
+		// they too must shift by the bleed. appendMarginBoxes computes rects from g (trim
+		// frame); shift the items it adds by (bleed,bleed). Simplest: append them, then
+		// translate only the newly-added items by the bleed.
+		before := len(pg.Items)
+		pg.Items = e.appendMarginBoxes(pg.Items, g, i, len(buckets), snaps[i], running)
+		if g.bleed != 0 {
+			translateItems(pg.Items, before, g.bleed, g.bleed)
+		}
+		// Registration marks draw in the bleed band, in MEDIA-box coordinates (no shift).
+		pg.Items = appendCropMarks(pg.Items, g)
+		pages = append(pages, pg)
 	}
-	return &layout.Pages{Pages: pages}
+	return pages
 }
 
 // pageBucket is one page's worth of top-level block fragments plus the page-space Y
@@ -333,11 +376,72 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 	if len(blocks) == 0 {
 		return []pageBucket{{top: 0}}
 	}
+	// work is a mutable copy: a widows/orphans line split replaces the current block
+	// with its head (placed) and inserts its tail as the next item to process (so a tail
+	// that itself overflows splits again — iterative). prevBlock tracks the last block
+	// placed (for the break-*: avoid pairwise keep), since indexing into a mutating
+	// slice for blocks[bi-1] is unsafe.
+	work := append([]*Fragment(nil), blocks...)
 	var buckets []pageBucket
 	var cur pageBucket
-	for _, b := range blocks {
+	var prevBlock *Fragment
+	for i := 0; i < len(work); i++ {
+		b := work[i]
 		forcedBefore, forcedAfter := effectiveBreaks(b)
 		overflow := len(cur.blocks) > 0 && (b.Y+b.H)-cur.top > pageH
+		// break-*: avoid keep-together (CSS Fragmentation §4.2): when an UNFORCED
+		// (overflow) break would land between the previous block and b, but that join is
+		// bound by break-after: avoid (on the previous block) or break-before: avoid (on
+		// b), keep them together by carrying the previous block — AND any further
+		// avoid-bound blocks immediately preceding it (the maximal contiguous avoid-bound
+		// run ending at the previous block) — onto b's new page, provided the whole run
+		// plus b then fits a page (else the avoid is dropped, logged, and the plain
+		// overflow break stands). A forced break always wins over avoid (CSS), so this
+		// applies only to overflow. The keep is CHAIN-AWARE: a run of length 1 is the
+		// pairwise heading+paragraph case; a longer chain (e.g. heading + sub-heading +
+		// paragraph) moves whole. At least one block is always left on the current page
+		// (runStart >= 1), so this never empties the page it breaks from.
+		if overflow && !forcedBefore && len(cur.blocks) >= 2 && prevBlock != nil && breakAvoidBetween(prevBlock, b) {
+			// Collect the maximal contiguous run at the end of cur whose internal joins are
+			// all avoid-bound AND whose last member is avoid-bound to b (already true).
+			runStart := len(cur.blocks) - 1
+			for runStart > 0 && breakAvoidBetween(cur.blocks[runStart-1], cur.blocks[runStart]) {
+				runStart--
+			}
+			// Leave at least one block on the current page (else this becomes a plain move).
+			if runStart >= 1 {
+				run := cur.blocks[runStart:]
+				if fitsRunWith(run, b, pageH) {
+					moved := append([]*Fragment(nil), run...)
+					cur.blocks = cur.blocks[:runStart]
+					buckets = append(buckets, cur)
+					cur = pageBucket{top: moved[0].Y - usedTopMargin(moved[0], cbWidth)}
+					cur.blocks = append(cur.blocks, moved...)
+					overflow = false
+				} else {
+					logf("css pagination: break-*: avoid chain could not be kept together (exceeds a page); breaking")
+				}
+			}
+		}
+		// Widows/orphans line splitting on an OVERFLOW of an already-occupied page (CSS
+		// Fragmentation §4): when an unforced break would push a line-splittable block
+		// whole to the next page but PART of it fits on the current page, split it at a
+		// line boundary BEFORE closing the page (so the head fills the rest of this page).
+		// splitBlockForPage honors widows/orphans and may decline (move whole), in which
+		// case we fall through to the normal page-close + whole-block placement. A forced
+		// break is not line-split.
+		if overflow && !forcedBefore && len(cur.blocks) > 0 && lineSplittable(b) {
+			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			if res.head != nil && res.tail != nil {
+				cur.blocks = append(cur.blocks, res.head)
+				buckets = append(buckets, cur)
+				cur = pageBucket{top: res.tail.Y} // tail's top edge is suppressed → flush
+				queueTail(&work, i, res.tail)
+				prevBlock = res.head
+				continue
+			}
+			// res.head==nil ⇒ move whole (widows/orphans can't be met): fall through.
+		}
 		// Close the current page only if it already has content: a forced-before on
 		// the first block (cur empty) is a no-op, not a leading empty page.
 		if (forcedBefore || overflow) && len(cur.blocks) > 0 {
@@ -362,13 +466,30 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 			if overflow && !forcedBefore {
 				cur.top = b.Y - usedTopMargin(b, cbWidth)
 			}
-			// A block taller than a page on an otherwise-empty page cannot be split in
-			// this slice: keep it, it overflows the page bottom (clipped by the bitmap).
-			if b.H > pageH {
-				logf("css pagination: block taller than page (%.0fpt > %.0fpt); overflowing, not splitting", b.H, pageH)
+		}
+		// Widows/orphans line splitting of a block LEADING a fresh page that is itself
+		// taller than a whole page (the iterative case — a tail that still overflows, or a
+		// paragraph taller than a page). The head fills this page; the tail is queued.
+		if !forcedBefore && len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
+			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			if res.head != nil && res.tail != nil {
+				cur.blocks = append(cur.blocks, res.head)
+				buckets = append(buckets, cur)
+				cur = pageBucket{top: res.tail.Y}
+				queueTail(&work, i, res.tail)
+				prevBlock = res.head
+				continue
 			}
+			// res.head==nil (can't satisfy minimums while leading the page): place whole,
+			// it overflows.
+		}
+		// A block taller than a page that could not be (line-)split overflows its page
+		// (clipped by the bitmap) — the documented degradation.
+		if len(cur.blocks) == 0 && b.H > pageH {
+			logf("css pagination: block taller than page (%.0fpt > %.0fpt); overflowing, not splitting", b.H, pageH)
 		}
 		cur.blocks = append(cur.blocks, b)
+		prevBlock = b
 		if forcedAfter {
 			buckets = append(buckets, cur)
 			cur = pageBucket{}
@@ -383,6 +504,32 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		buckets = append(buckets, pageBucket{top: 0})
 	}
 	return buckets
+}
+
+// queueTail inserts a split block's tail into the work slice at index i+1 so the
+// bucketing loop processes it as the very next block (it leads the next page and may
+// split again — making the splitter iterative across an arbitrary number of pages).
+func queueTail(work *[]*Fragment, i int, tail *Fragment) {
+	*work = append(*work, nil)
+	copy((*work)[i+2:], (*work)[i+1:])
+	(*work)[i+1] = tail
+}
+
+// widowsOf / orphansOf read a block fragment's widows / orphans count (CSS, inherited,
+// initial 2). A nil Box reads as the initial 2 so a synthetic block still gets the
+// default protection.
+func widowsOf(f *Fragment) int {
+	if f == nil || f.Box == nil || f.Box.Style.Widows < 1 {
+		return 2
+	}
+	return f.Box.Style.Widows
+}
+
+func orphansOf(f *Fragment) int {
+	if f == nil || f.Box == nil || f.Box.Style.Orphans < 1 {
+		return 2
+	}
+	return f.Box.Style.Orphans
 }
 
 // wrapperDecorationTop returns f's border-box top (f.Y) when f paints a decoration that
@@ -403,6 +550,39 @@ func wrapperDecorationTop(f *Fragment, fallback float64) float64 {
 		}
 	}
 	return fallback
+}
+
+// breakAvoidBetween reports whether a break between block prev and block b is
+// discouraged by an avoid hint: break-after: avoid / avoid-page on prev, or
+// break-before: avoid / avoid-page on b (CSS Fragmentation §4.2). The bucketer uses it
+// to keep the pair on one page when an unforced break would otherwise split them.
+func breakAvoidBetween(prev, b *Fragment) bool {
+	return isAvoidBreak(breakAfter(prev)) || isAvoidBreak(breakBefore(b))
+}
+
+// isAvoidBreak reports whether a break-before/after value asks to avoid a break here
+// ("avoid" / "avoid-page"). Other values (forced, auto, "") are not avoid.
+func isAvoidBreak(v string) bool {
+	return v == "avoid" || v == "avoid-page"
+}
+
+// fitsRunWith reports whether a contiguous run of blocks plus a trailing block b fits on
+// one pageH-tall page (first block's top to b's bottom).
+func fitsRunWith(run []*Fragment, b *Fragment, pageH float64) bool {
+	if len(run) == 0 {
+		return b.H <= pageH
+	}
+	return (b.Y+b.H)-run[0].Y <= pageH
+}
+
+// keptInsideAvoid reports whether a block carries break-inside: avoid / avoid-page,
+// asking the paginator to keep its content on one page (so the line-level splitter
+// must not split it). A nil Box reads as not-avoid.
+func keptInsideAvoid(f *Fragment) bool {
+	if f == nil || f.Box == nil {
+		return false
+	}
+	return isAvoidBreak(f.Box.Style.BreakInside)
 }
 
 // effectiveBreaks returns a top-level block's effective forced break-before / break-after,
