@@ -64,7 +64,11 @@ func (pc PagedConfig) resolvePageGeom(i int, name string, blank bool) pageGeom {
 	// but a section that opted into a NAMED page (page: <name>) must still get that
 	// page's own @page size — otherwise a `page: landscape` section can never reflow
 	// wider. So apply a named page's size unconditionally, and the unnamed page's size
-	// only when the API did not pin one.
+	// only when the API did not pin one. "A named page's size" is the size the CSS
+	// cascade RESOLVED for that page, which may be INHERITED from an unnamed @page rule
+	// (a named lookup folds in unnamed @page declarations — see page.go matchingPageRules),
+	// not only a size the named rule declared itself — this is cascade-consistent and
+	// intended (a named section inherits the unnamed @page size even under ExplicitSize).
 	if up.HasSize && (name != "" || !pc.ExplicitSize) {
 		g.pageW, g.pageH = up.WidthPt, up.HeightPt
 	}
