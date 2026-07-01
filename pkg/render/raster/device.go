@@ -73,6 +73,21 @@ func (d *Device) FillGlyph(outline *render.Path, c render.FillColor, blendMode s
 	d.compositeBlend(mask, color.RGBA(c), blendMode)
 }
 
+// DrawGlyph renders g by filling g.Face's outline for g.GID, transformed into
+// device space by g.Transform. Runes and Advance are ignored — they matter only to
+// text-emitting backends. This produces pixels identical to the equivalent
+// FillGlyph call, so existing goldens are unchanged.
+func (d *Device) DrawGlyph(g render.GlyphRef) {
+	if g.Face == nil {
+		return
+	}
+	outline := g.Face.Outline(g.GID)
+	if outline == nil || outline.Empty() {
+		return
+	}
+	d.FillGlyph(render.TransformPath(outline, g.Transform), g.Color, g.Blend)
+}
+
 // DrawImage maps img's unit square through ctm into device space using inverse
 // sampling (nearest neighbor), respecting the current clip and blend mode.
 func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64, blendMode string) {

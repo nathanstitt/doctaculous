@@ -323,27 +323,7 @@ func clipRect(dev render.Device, mat render.Matrix, x0, y0, x1, y1 float64) {
 
 // transformPath returns a copy of src with every point mapped through m.
 func transformPath(src *render.Path, m render.Matrix) *render.Path {
-	out := &render.Path{Segments: make([]render.Segment, len(src.Segments))}
-	for i, s := range src.Segments {
-		ns := render.Segment{Kind: s.Kind}
-		switch s.Kind {
-		case render.MoveTo, render.LineTo:
-			ns.P0 = applyPoint(m, s.P0)
-		case render.CubeTo:
-			ns.P0 = applyPoint(m, s.P0)
-			ns.P1 = applyPoint(m, s.P1)
-			ns.P2 = applyPoint(m, s.P2)
-		case render.Close:
-			// no points
-		}
-		out.Segments[i] = ns
-	}
-	return out
-}
-
-func applyPoint(m render.Matrix, p render.Point) render.Point {
-	x, y := m.Apply(p.X, p.Y)
-	return render.Point{X: x, Y: y}
+	return render.TransformPath(src, m)
 }
 
 func moveTo(p *render.Path, m render.Matrix, x, y float64) {
