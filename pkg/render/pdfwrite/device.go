@@ -33,6 +33,15 @@ func newPageDevice(wPt, hPt float64) *pageDevice {
 	return &pageDevice{wPt: wPt, hPt: hPt, embed: newFontEmbedder()}
 }
 
+// newPageDeviceWithEmbedder builds a page device sharing an existing font embedder,
+// so a glyph's emit code is consistent across every page (the codes are assigned once
+// in a sequential pre-pass and only read here). The shared embedder must already know
+// every glyph this device will draw, so the device performs no new assignment — its
+// use() calls hit the already-seen path and are safe to run concurrently.
+func newPageDeviceWithEmbedder(wPt, hPt float64, embed *fontEmbedder) *pageDevice {
+	return &pageDevice{wPt: wPt, hPt: hPt, embed: embed}
+}
+
 func (d *pageDevice) Size() (int, int) { return int(d.wPt), int(d.hPt) }
 
 func (d *pageDevice) Fill(p *render.Path, paint render.FillPaint) {
