@@ -235,6 +235,108 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 type runBucket struct {
 	bucket pageBucket
 	geom   pageGeom
+	// floats holds this bucket's out-of-flow floats, cloned from the run's cached
+	// layout and shifted into the bucket's local frame (Y 0). nil when the bucket has
+	// no floats — so a float-free document is byte-identical (no float items emitted).
+	floats []*Fragment
+}
+
+// floatsForRun partitions the run layout's floats across its buckets, mirroring the
+// single-width splitFloatsByPage: a float is routed to the bucket whose vertical band
+// contains its margin-box top (pageForY — a float above the first band clamps to bucket
+// 0, below the last clamps to the last), then shifted into that bucket's local frame
+// (-bk.top) to match the bucket's blocks. It CLONES each float before shifting, because
+// the run layout (layoutByWidth[w]) is a shared cache reused across every bucket of every
+// run at this width — shifting the original in place (as splitFloatsByPage safely does,
+// since it owns its layout) would corrupt later buckets. Returns one slice per bucket
+// (nil where a bucket has no floats), so a float-free run is byte-identical.
+func floatsForRun(runLayout *Fragment, bks []pageBucket) [][]*Fragment {
+	out := make([][]*Fragment, len(bks))
+	if runLayout == nil || len(runLayout.Floats) == 0 || len(bks) == 0 {
+		return out
+	}
+	for _, fl := range runLayout.Floats {
+		bi := pageForY(fl.Y, bks)
+		clone := cloneFloatForPage(fl)
+		shiftFragment(clone, -bks[bi].top)
+		out[bi] = append(out[bi], clone)
+	}
+	return out
+}
+
+// cloneFloatForPage deep-copies a float fragment enough that shiftFragment (and the
+// later translateFragment page-inset) can move it WITHOUT mutating the shared cached
+// run layout (layoutByWidth[w], reused across buckets/runs at one width). It copies
+// every field those two functions mutate in place or recurse into: the child slices
+// (Children, Floats, Positioned), the inline line/glyph slices (BaselineY/Glyphs[].X
+// are shifted), the pointer contents shiftFragment/translateFragment mutate (Image,
+// Control, BgImage — CX/CY/Origin*/Clip* are moved), and the in-place-mutated auxiliary
+// slices (Collapsed strips, PositionedInfo[].ClipChain rects). Value-typed fields
+// (ClipRect, Border, Background, …) are copied by the struct copy `c := *f`. Genuinely
+// read-only fields (glyph Outline paths, decoded images, the source cssbox.Box, styles)
+// are shared by pointer — neither shift function touches them.
+func cloneFloatForPage(f *Fragment) *Fragment {
+	if f == nil {
+		return nil
+	}
+	c := *f
+	if len(f.Children) > 0 {
+		c.Children = make([]*Fragment, len(f.Children))
+		for i, ch := range f.Children {
+			c.Children[i] = cloneFloatForPage(ch)
+		}
+	}
+	if len(f.Floats) > 0 {
+		c.Floats = make([]*Fragment, len(f.Floats))
+		for i, ch := range f.Floats {
+			c.Floats[i] = cloneFloatForPage(ch)
+		}
+	}
+	if len(f.Positioned) > 0 {
+		c.Positioned = make([]*Fragment, len(f.Positioned))
+		for i, ch := range f.Positioned {
+			c.Positioned[i] = cloneFloatForPage(ch)
+		}
+	}
+	if len(f.Lines) > 0 {
+		c.Lines = make([]LineFragment, len(f.Lines))
+		for i, ln := range f.Lines {
+			nl := ln
+			if len(ln.Glyphs) > 0 {
+				nl.Glyphs = make([]GlyphFragment, len(ln.Glyphs))
+				copy(nl.Glyphs, ln.Glyphs)
+			}
+			c.Lines[i] = nl
+		}
+	}
+	if len(f.Collapsed) > 0 {
+		c.Collapsed = make([]layout.BorderItem, len(f.Collapsed))
+		copy(c.Collapsed, f.Collapsed)
+	}
+	if len(f.PositionedInfo) > 0 {
+		c.PositionedInfo = make([]PositionedInfo, len(f.PositionedInfo))
+		for i, pi := range f.PositionedInfo {
+			np := pi
+			if len(pi.ClipChain) > 0 {
+				np.ClipChain = make([]rect, len(pi.ClipChain))
+				copy(np.ClipChain, pi.ClipChain)
+			}
+			c.PositionedInfo[i] = np
+		}
+	}
+	if f.Image != nil {
+		img := *f.Image
+		c.Image = &img
+	}
+	if f.Control != nil {
+		ctl := *f.Control
+		c.Control = &ctl
+	}
+	if f.BgImage != nil {
+		bg := *f.BgImage
+		c.BgImage = &bg
+	}
+	return &c
 }
 
 // paginateRuns paginates a document whose top-level blocks resolve to more than one
@@ -276,8 +378,12 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		runBlocks := blocks[r.start:r.end]
 		cb := contentWidth(bodyFragment(layoutByWidth[geom.contentW]), geom.contentW)
 		bks := bucketBlocks(runBlocks, geom.contentH, cb, e.logf)
-		for _, bk := range bks {
-			all = append(all, runBucket{bucket: bk, geom: geom})
+		// Split this run's out-of-flow floats across its buckets (cloned + shifted into
+		// each bucket's local frame). Without this, floats in a named-page section were
+		// dropped entirely (paginateRuns nil'd Floats and never re-attached them).
+		runFloats := floatsForRun(layoutByWidth[geom.contentW], bks)
+		for bi, bk := range bks {
+			all = append(all, runBucket{bucket: bk, geom: geom, floats: runFloats[bi]})
 		}
 	}
 	if len(all) == 0 {
@@ -310,7 +416,12 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		copy(children, base.Children)
 		children[len(children)-1] = &runBody
 		pageRoot.Children = children
-		pageRoot.Positioned, pageRoot.PositionedInfo, pageRoot.Floats = nil, nil, nil
+		pageRoot.Positioned, pageRoot.PositionedInfo = nil, nil
+		// Attach this bucket's floats at the page root (mirroring paginateDoc/assemblePages,
+		// which sets pageRoot.Floats and keeps the body wrapper's Floats nil). They are in
+		// the bucket's local frame; the translateFragment inset below carries them by the
+		// same @page margin/bleed delta (translateFragment recurses into Floats).
+		pageRoot.Floats = all[i].floats
 
 		dx, dy := g.marginL+g.bleed, g.marginT+g.bleed
 		if dx != 0 || dy != 0 {
