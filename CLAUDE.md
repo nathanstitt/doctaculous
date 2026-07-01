@@ -740,6 +740,48 @@ what is done vs. pending.
   **the last non-fidelity HTML slice, with full CSS Paged Media fidelity**. See
   `docs/superpowers/specs/2026-06-30-html-paged-media-design.md` and the four sub-plans under
   `docs/superpowers/plans/2026-06-30-*`.
+- **HTML/DOCX → PDF writer (`pkg/render/pdfwrite`)** (a second `render.Device` sibling to
+  `pkg/render/raster` that emits a real PDF with **selectable/searchable text** instead of pixels;
+  `pkg/render/device.go` `DrawGlyph`/`GlyphRef`/`GlyphFace`, `pkg/font/family.go`/`sfnt.go` face identity,
+  `pkg/render/pdfwrite/{object,font,subset,device,page}.go`, `pkg/css/media.go`, `pkg/doctaculous/pdfwrite_backend.go`;
+  covered by per-file unit tests, a `-race` determinism test, a `BenchmarkWriteDocument -cpu 1,4` speedup, and
+  the `pkg/doctaculous` HTML→PDF round-trip + searchable-text tests). `ConvertHTMLToPDF(ctx, in, out, PDFOptions)`
+  and `(*Document).WritePDF(ctx, out, PDFOptions)` turn a laid-out reflow document (HTML **or** DOCX — the DOCX
+  path is a free bonus, both meet `render.Device`) into a PDF. Pieces: a new text-aware **`DrawGlyph(GlyphRef)`
+  seam** carrying font identity (Face + GID + Runes + em→page transform + color) threaded from the shaper
+  (`inline.Glyph`) through `layout.GlyphItem` to `paint.paintGlyph`, which now prefers `DrawGlyph` when a glyph
+  has identity and falls back to `FillGlyph` otherwise — so **the raster backend renders `DrawGlyph` via the
+  outline and every existing golden stays byte-identical**; **face identity on `font.Face`** (`ProgramBytes`,
+  `ProgramKind`, `GID`, `Outline`, `GlyphAdvance`, `UnitsPerEm`, `GlyphName`) exposing the raw program bytes +
+  format for embedding; a **write-only PDF object model + serializer** (`object.go`: Name/Int/Real/String/Ref/
+  Dict/Array/stream + xref/trailer, flate-compressed streams, deterministic key order — validated by re-parsing
+  through the project's own `pkg/pdf`); **font embedding by kind** (`font.go`) — a **Type0/Identity-H CIDFontType2**
+  with a **glyf-subsetted** `/FontFile2` (`subset.go`: table-directory rewrite zeroing unused glyphs, GIDs
+  preserved so Identity `CIDToGIDMap` stays valid, composite deps retained) for TrueType faces, and a **simple
+  `/Type1` font** with `/FontFile` (PFB→Length1/2/3), `/Encoding /Differences`, `/Widths`, and `/ToUnicode` for
+  the bundled sans/serif substitutes (TeX Gyre Heros/Termes are Type1 PFB — so **default body text is real,
+  searchable text**, not outline fills; the device emits 2-byte GID hex for Identity-H and 1-byte codes for the
+  simple font); every face carries a **`/ToUnicode` CMap** so text is copyable; a **`render.Device` page device**
+  (`device.go`) turning paint calls into content-stream operators (`m/l/c/h`, `f/f*`, `S`, `rg/RG`, `q/Q`, `W/W* n`,
+  `Do`, and `BT / Tf / Tm / Tj / ET` for text), emitting **raw page-space coordinates** with a **single page-level
+  Y-flip CTM** (`1 0 0 -1 0 H cm`) applied once by the assembler; and a **concurrent document assembler**
+  (`page.go`) that **fragments** each `layout.Page` into `PageHeightPt`-tall bands at straddle-safe cuts (a band's
+  content is painted translated and the PDF **MediaBox clips** the overflow — no per-item clipping), **renders
+  bands in parallel** (each into its own `pageDevice`+`fontEmbedder`, a pure value, no shared state → `-race`
+  clean, `GOMAXPROCS`-bounded), then **assembles sequentially** de-duplicating each face to **one embedded subset**
+  across all pages, with **deterministic output** (per-index result slots + first-use face order, never map
+  iteration — `TestWriteDocumentDeterministic`). Also **`@media print` capture** (`pkg/css`: `@media print/screen/all`
+  blocks are now parsed-and-tagged rather than discarded — `Media` on `Rule`, `RulesForMedia`, and a media context
+  on the cascade `Resolver` defaulting to `MediaScreen` so the existing HTML render is byte-identical; `PDFOptions.Print`
+  / `WithPrintMedia` switch it to `MediaPrint`). The whole thing is **byte-identical for the existing corpus** (the
+  raster/DOCX/HTML goldens are unchanged: `DrawGlyph` rasterizes via the outline, and no existing caller opts into
+  the writer or print media). Images embed as RGB XObjects (+`/SMask` for alpha). Validated end-to-end by rendering
+  HTML→PDF, **re-parsing the output through the project's own `pkg/pdf`, and rasterizing it** — the content region
+  draws real ink for Type1 body text, TrueType monospace, and borders alike. See
+  `docs/superpowers/plans/2026-06-26-html-to-pdf-writer.md`. Deferred (each degrades gracefully, logged): a Type1
+  face needing **>256 distinct glyphs** spills the overflow to outline fills (the simple-font code space is one byte;
+  Latin text never approaches this); CFF-flavored OpenType embeds the whole (un-subsetted) program; and shadings/
+  gradients are skipped (the reflow engines emit none).
 
 ### TODO (roughly priority order — pick these up next)
 
@@ -786,8 +828,11 @@ that skip into real output.
    mapped to CSS at a cascade tier below author CSS — HN now renders with its `bgcolor`), and **CSS paged media**
    (`@page` size/margins + named-page selectors, `break-inside`, **widows/orphans via mid-block line
    fragmentation**, and running headers/footers via `@page` margin boxes with page counters) are done — see the
-   Done section. **Every non-fidelity HTML slice is now landed.** **(EPUB is out of scope — see
-   the out-of-scope note at the bottom.)** Positioning — landed fidelity fixes:
+   Done section. **Every non-fidelity HTML slice is now landed.** The **HTML/DOCX → PDF writer device**
+   (`pkg/render/pdfwrite`, `ConvertHTMLToPDF`/`WritePDF`, searchable-text embedding + `@media print`) has also
+   landed — see its Done bullet; a **PDF/DOCX/HTML text-extraction backend** (a read-side `Device` consuming the
+   same `DrawGlyph`/`GlyphRef` seam) and **fuller paged-media in the PDF path** are the natural follow-ups. **(EPUB
+   is out of scope — see the out-of-scope note at the bottom.)** Positioning — landed fidelity fixes:
    **C2** abs `width:auto` **shrink-to-fit** (`min(max(min-content, available), max-content)` via
    `absShrinkToFitWidth`, threaded into both placement and interior layout — a right-anchored box's left edge
    stays consistent), and **C3** abs `margin:auto` centering (`distributeAbsMargins` splits the over-constrained

@@ -40,6 +40,15 @@ func (d *recordDevice) DrawImage(image.Image, render.Matrix, float64, string) {}
 func (d *recordDevice) FillGlyph(outline *render.Path, c render.FillColor, _ string) {
 	d.glyphs = append(d.glyphs, recordedGlyph{outline: outline, color: c})
 }
+func (d *recordDevice) DrawGlyph(g render.GlyphRef) {
+	// Mirror the rasterizer: record the face's transformed outline so glyph-count
+	// and geometry assertions hold whether paint routes via FillGlyph or DrawGlyph.
+	var o *render.Path
+	if g.Face != nil {
+		o = render.TransformPath(g.Face.Outline(g.GID), g.Transform)
+	}
+	d.glyphs = append(d.glyphs, recordedGlyph{outline: o, color: g.Color})
+}
 func (d *recordDevice) FillShading(render.Shader, render.Matrix, string) {}
 func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)       { d.clips = append(d.clips, p) }
 func (d *recordDevice) Save()                                            { d.saves++ }

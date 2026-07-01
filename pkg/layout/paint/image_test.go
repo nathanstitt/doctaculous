@@ -25,6 +25,7 @@ func (d *imageRecordDevice) DrawImage(_ image.Image, ctm render.Matrix, _ float6
 	d.ctms = append(d.ctms, ctm)
 }
 func (d *imageRecordDevice) FillGlyph(*render.Path, render.FillColor, string) {}
+func (d *imageRecordDevice) DrawGlyph(render.GlyphRef)                        {}
 func (d *imageRecordDevice) FillShading(render.Shader, render.Matrix, string) {}
 func (d *imageRecordDevice) PushClip(*render.Path, render.FillRule)           { d.pushClip++ }
 func (d *imageRecordDevice) Save()                                            {}

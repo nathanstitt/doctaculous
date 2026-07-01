@@ -58,6 +58,13 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	return &Document{r: &reflowRenderer{pages: pages}}, nil
 }
 
+// reflowPages is implemented by renderers backed by *layout.Pages, so the PDF writer
+// can drive the same laid-out pages the rasterizer uses.
+type reflowPages interface{ layoutPages() *layout.Pages }
+
+// layoutPages exposes the laid-out pages for the PDF writer (WritePDF).
+func (r *reflowRenderer) layoutPages() *layout.Pages { return r.pages }
+
 func (r *reflowRenderer) pageCount() int { return len(r.pages.Pages) }
 
 func (r *reflowRenderer) renderPage(_ context.Context, index int, opts RasterOptions) (image.Image, error) {
