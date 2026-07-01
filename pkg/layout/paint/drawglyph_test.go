@@ -16,7 +16,7 @@ type glyphRouteDev struct {
 	fillGlyphs int
 }
 
-func (r *glyphRouteDev) DrawGlyph(render.GlyphRef)                    { r.drawGlyphs++ }
+func (r *glyphRouteDev) DrawGlyph(render.GlyphRef)                        { r.drawGlyphs++ }
 func (r *glyphRouteDev) FillGlyph(*render.Path, render.FillColor, string) { r.fillGlyphs++ }
 
 // TestPaintGlyphPrefersDrawGlyph asserts a glyph carrying font identity routes

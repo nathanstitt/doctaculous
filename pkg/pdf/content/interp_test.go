@@ -36,7 +36,7 @@ func (d *recDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64,
 	d.lastImageAlpha = alpha
 }
 func (d *recDevice) FillGlyph(o *render.Path, c render.FillColor, blendMode string) { d.glyphs++ }
-func (d *recDevice) DrawGlyph(render.GlyphRef)                                       { d.glyphs++ }
+func (d *recDevice) DrawGlyph(render.GlyphRef)                                      { d.glyphs++ }
 func (d *recDevice) FillShading(shader render.Shader, ctm render.Matrix, blendMode string) {
 	d.shadings++
 }
