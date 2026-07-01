@@ -229,16 +229,24 @@ type ComputedStyle struct {
 type Resolver struct {
 	sheets []OriginSheet
 	logf   func(string, ...any)
+	media  Media // active media context; only rules for this type (or MediaAll) apply
 }
 
 // NewResolver builds a Resolver over origin-tagged stylesheets. Sheets may be
 // given in any order; the cascade applies origin/specificity/source-order rules.
+// The media context defaults to MediaScreen (the interactive/HTML render); call
+// SetMedia to switch to print for PDF output.
 func NewResolver(sheets []OriginSheet, logf func(string, ...any)) *Resolver {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Resolver{sheets: sheets, logf: logf}
+	return &Resolver{sheets: sheets, logf: logf, media: MediaScreen}
 }
+
+// SetMedia sets the active media context (MediaScreen or MediaPrint). Rules tagged
+// with a different media type are excluded from the cascade; MediaAll rules (every
+// top-level rule) always apply, so a document with no @media blocks is unaffected.
+func (r *Resolver) SetMedia(m Media) { r.media = m }
 
 // ComputeRoot returns the ComputedStyle of a root element (one with no parent),
 // using the CSS initial values as the inheritance base. Box generation calls
@@ -271,6 +279,9 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 		sheet := &r.sheets[si].Sheet
 		for ri := range sheet.Rules {
 			rule := &sheet.Rules[ri]
+			if rule.Media != MediaAll && rule.Media != r.media {
+				continue // rule belongs to a different media context
+			}
 			spec, ok := bestMatch(rule.Selectors, n)
 			if !ok {
 				continue
