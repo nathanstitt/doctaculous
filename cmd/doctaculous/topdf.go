@@ -20,6 +20,7 @@ import (
 func topdfCmd(args []string) error {
 	fs := flag.NewFlagSet("topdf", flag.ContinueOnError)
 	var (
+		in       = fs.String("in", "", "input document (alternative to the positional argument)")
 		out      = fs.String("out", "", "output PDF file (required)")
 		pageW    = fs.Float64("page-width", 0, "page width in points (default US Letter, 612)")
 		pageH    = fs.Float64("page-height", 0, "page height in points (default US Letter, 792)")
@@ -39,11 +40,11 @@ func topdfCmd(args []string) error {
 		}
 		return err
 	}
-	if fs.NArg() != 1 {
+	input, err := resolveInput(*in, fs.Args())
+	if err != nil {
 		fs.Usage()
-		return fmt.Errorf("expected exactly one input document, got %d", fs.NArg())
+		return err
 	}
-	input := fs.Arg(0)
 	if *out == "" {
 		return fmt.Errorf("--out is required")
 	}
@@ -108,6 +109,7 @@ func openReflowDocument(input, pageSize string) (*doctaculous.Document, error) {
 // before flags ("topdf in.html --out o.pdf").
 func reorderTopdfArgs(args []string) []string {
 	valueFlags := map[string]bool{
+		"-in": true, "--in": true,
 		"-out": true, "--out": true,
 		"-page-width": true, "--page-width": true,
 		"-page-height": true, "--page-height": true,

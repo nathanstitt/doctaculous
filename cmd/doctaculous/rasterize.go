@@ -23,6 +23,7 @@ import (
 func rasterizeCmd(args []string) error {
 	fs := flag.NewFlagSet("rasterize", flag.ContinueOnError)
 	var (
+		in       = fs.String("in", "", "input document (alternative to the positional argument)")
 		page     = fs.Int("page", 1, "1-based page number to render")
 		pages    = fs.String("pages", "", "page range, e.g. 1-3,5 or \"all\" (overrides --page)")
 		out      = fs.String("out", "", "output file or pattern (use %d for page number when rendering a range)")
@@ -44,11 +45,11 @@ func rasterizeCmd(args []string) error {
 		}
 		return err
 	}
-	if fs.NArg() != 1 {
+	input, err := resolveInput(*in, fs.Args())
+	if err != nil {
 		fs.Usage()
-		return fmt.Errorf("expected exactly one input document, got %d", fs.NArg())
+		return err
 	}
-	input := fs.Arg(0)
 	if *out == "" {
 		return fmt.Errorf("--out is required")
 	}
@@ -271,6 +272,7 @@ func writeImage(path string, img image.Image, format string) (err error) {
 // value.
 func reorderArgs(args []string) []string {
 	valueFlags := map[string]bool{
+		"-in": true, "--in": true,
 		"-page": true, "--page": true,
 		"-pages": true, "--pages": true,
 		"-out": true, "--out": true,

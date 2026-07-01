@@ -67,3 +67,77 @@ func TestTopdfCmdHelpExitsClean(t *testing.T) {
 		t.Errorf("topdf -h returned error: %v", err)
 	}
 }
+
+// TestTopdfCmdInFlag asserts the --in flag is an alternative to the positional input.
+func TestTopdfCmdInFlag(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.html")
+	if err := os.WriteFile(in, []byte("<p>via --in</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.pdf")
+	if err := topdfCmd([]string{"--in", in, "--out", out}); err != nil {
+		t.Fatalf("topdfCmd --in: %v", err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+}
+
+// TestTopdfCmdRejectsInAndPositional asserts giving both --in and a positional arg errors.
+func TestTopdfCmdRejectsInAndPositional(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.html")
+	if err := os.WriteFile(in, []byte("<p>x</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.pdf")
+	if err := topdfCmd([]string{in, "--in", in, "--out", out}); err == nil {
+		t.Fatal("expected an error when both --in and a positional input are given")
+	}
+}
+
+// TestRunInfersCommand asserts the top-level run() picks the subcommand from the
+// --out extension when no subcommand is named.
+func TestRunInfersCommand(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.html")
+	if err := os.WriteFile(in, []byte("<p>infer me</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.pdf")
+	if err := run([]string{"--in", in, "--out", out}); err != nil {
+		t.Fatalf("run (inferred topdf): %v", err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("inferred topdf produced no output: %v", err)
+	}
+}
+
+// TestInferCommand covers the extension-based command inference.
+func TestInferCommand(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+		ok   bool
+	}{
+		{[]string{"--in", "a.html", "--out", "a.pdf"}, "topdf", true},
+		{[]string{"--in", "a.pdf", "--out", "a.png"}, "rasterize", true},
+		{[]string{"--in", "https://x.com", "--out", "x.pdf"}, "topdf", true},
+		{[]string{"--in", "a.docx", "--out", "out"}, "topdf", true},    // fall back to input ext
+		{[]string{"--in", "a.pdf", "--out", "out"}, "rasterize", true}, // fall back to input ext
+		{[]string{"--in", "mystery", "--out", "mystery"}, "", false},   // inconclusive
+	}
+	for _, tc := range cases {
+		got, err := inferCommand(tc.args)
+		if tc.ok && err != nil {
+			t.Errorf("inferCommand(%v) errored: %v", tc.args, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("inferCommand(%v) = %q; want an error", tc.args, got)
+		}
+		if got != tc.want {
+			t.Errorf("inferCommand(%v) = %q; want %q", tc.args, got, tc.want)
+		}
+	}
+}
