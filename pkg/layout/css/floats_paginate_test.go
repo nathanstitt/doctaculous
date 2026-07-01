@@ -111,6 +111,108 @@ func TestFloatsScopedPerRunSameWidth(t *testing.T) {
 	}
 }
 
+// TestFloatRelativeDescendantShiftedOnPage pins the fix for the float-clone alias bug in
+// cloneFloatForPage. A position:relative descendant of a float is stored as the SAME
+// *Fragment pointer in BOTH the float's Children (painted in flow, skipped at paint) AND
+// its Positioned slice (the copy that actually paints); shiftFragmentExtras deliberately
+// skips relative Positioned entries because they are already shifted through Children.
+//
+// The multi-named-page float path (floatsForRun) CLONES each float before shifting it into
+// its bucket's local frame. Before the fix the clone split that one aliased pointer into
+// two independent clones, so the Positioned-side copy (the painting one) was never shifted
+// — it painted at the pre-shift document Y. Here the float lands on a page with a non-zero
+// bucket top, so a mis-aliased clone paints the relative descendant far below the page. The
+// fix threads an old->new pointer map through the clone so the alias survives; the
+// descendant then paints at its correct page-local Y (page top + its relative offset).
+func TestFloatRelativeDescendantShiftedOnPage(t *testing.T) {
+	src := []byte(`<!DOCTYPE html><html><head><style>
+	  @page wide { size: 1200px 300px }
+	  .land { page: wide }
+	  .b { height: 250px; background: #eeeeee }
+	  .fig { float: left; width: 120px; height: 80px; background: #cc0000 }
+	  .rel { position: relative; top: 30px; left: 10px; width: 40px; height: 40px; background: #0000cc }
+	</style></head><body>
+	  <section class="land">
+	    <div class="b">block one</div>
+	    <div class="b">block two</div>
+	    <div class="b">block three</div>
+	    <div class="fig"><div class="rel"></div></div>
+	    <div class="b">block after</div>
+	  </section>
+	</body></html>`)
+
+	doc, err := html.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	root, faces, pages, running, err := layoutcss.BuildWithFontsPagesRunning(ctx, doc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := layoutcss.New(layoutfont.NewFaceCacheWithFonts(faces, nil, nil, nil), nil, nil)
+	out, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
+		Paged: true, FallbackW: 816, FallbackH: 1056, ExplicitSize: false,
+		Pages: pages, Running: running,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find the relative descendant's paint item (the blue rect) and the float itself (red).
+	// The float lands on a later page (bucket top != 0), so both are shifted into that page's
+	// local frame: the red float at Y=0, the blue descendant at Y = float-top + relative-top
+	// = 0 + 30. Before the fix the blue rect kept its unshifted document Y (~780), far below
+	// the 300px page.
+	redItem, redOK := filledRectItem(out, 0xcc, 0x00, 0x00)
+	blueItem, blueOK := filledRectItem(out, 0x00, 0x00, 0xcc)
+	if !redOK {
+		t.Fatal("float (red) produced no paint item")
+	}
+	if !blueOK {
+		t.Fatal("relative descendant (blue) produced no paint item")
+	}
+	if redItem.page != blueItem.page {
+		t.Fatalf("float and its relative descendant painted on different pages: red=%d blue=%d", redItem.page, blueItem.page)
+	}
+	// The relative descendant must sit just below the float's top (offset 30), i.e. within
+	// the page, NOT at its unshifted document Y (which was > the 300px page height).
+	if blueItem.y < 0 || blueItem.y > 300 {
+		t.Fatalf("relative descendant painted at page-local Y %.1f, outside the 300px page — clone lost the Children<->Positioned alias so the Positioned-side copy was never shifted", blueItem.y)
+	}
+	if want := redItem.y + 30; blueItem.y != want {
+		t.Errorf("relative descendant Y = %.1f; want %.1f (float top %.1f + relative top 30)", blueItem.y, want, redItem.y)
+	}
+}
+
+// filledRect is a Rule/Background paint item plus the page it was found on.
+type filledRect struct {
+	page int
+	y    float64
+}
+
+// filledRectItem returns the first Rule/Background item across all pages whose color
+// approximately matches (r,g,b), with the page index it was found on.
+func filledRectItem(pages *layout.Pages, r, g, b uint8) (filledRect, bool) {
+	near := func(a, want uint8) bool {
+		if a > want {
+			return a-want < 8
+		}
+		return want-a < 8
+	}
+	for pi := range pages.Pages {
+		for _, it := range pages.Pages[pi].Items {
+			if it.Kind == layout.RuleKind || it.Kind == layout.BackgroundKind {
+				c := it.Rule.Color
+				if near(c.R, r) && near(c.G, g) && near(c.B, b) {
+					return filledRect{page: pi, y: it.Rule.YPt}, true
+				}
+			}
+		}
+	}
+	return filledRect{}, false
+}
+
 // countFilledRect counts Rule/Background items across all pages whose color approximately
 // matches (r,g,b).
 func countFilledRect(pages *layout.Pages, r, g, b uint8) int {

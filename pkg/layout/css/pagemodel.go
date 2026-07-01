@@ -332,27 +332,55 @@ func floatsOriginatingIn(allFloats []*Fragment, runBlocks []*Fragment) []*Fragme
 // (ClipRect, Border, Background, …) are copied by the struct copy `c := *f`. Genuinely
 // read-only fields (glyph Outline paths, decoded images, the source cssbox.Box, styles)
 // are shared by pointer — neither shift function touches them.
+//
+// ALIASING: a position:relative descendant of the float is stored as the SAME *Fragment
+// pointer in BOTH Children (painted in flow, skipped at paint via IsPositioned) AND
+// Positioned (the copy that actually paints). shiftFragment/shiftFragmentExtras rely on
+// this alias — the Children recursion shifts the fragment, and shiftFragmentExtras
+// deliberately SKIPS relative Positioned entries because they are already shifted through
+// Children. A naive deep clone splits that one pointer into two independent clones, so the
+// Positioned-side copy (the one that paints) would never be shifted onto the page. This
+// clone therefore threads an old->new pointer map: each Children/Floats entry records its
+// clone, and a Positioned entry reuses the mapped clone when its source was already cloned
+// (an aliased in-flow relative), cloning independently only genuinely out-of-flow entries
+// (abs/fixed, never present in Children). This preserves the alias in the clone.
 func cloneFloatForPage(f *Fragment) *Fragment {
+	return cloneFloatForPageMap(f, map[*Fragment]*Fragment{})
+}
+
+// cloneFloatForPageMap is cloneFloatForPage's worker: seen maps each ORIGINAL fragment
+// pointer to its clone, so an aliased relative descendant (present in both Children and
+// Positioned) maps to a SINGLE clone — preserving the Children<->Positioned alias that
+// shiftFragment relies on.
+func cloneFloatForPageMap(f *Fragment, seen map[*Fragment]*Fragment) *Fragment {
 	if f == nil {
 		return nil
 	}
+	if existing, ok := seen[f]; ok {
+		return existing // already cloned (aliased across Children/Floats/Positioned)
+	}
 	c := *f
+	seen[f] = &c
 	if len(f.Children) > 0 {
 		c.Children = make([]*Fragment, len(f.Children))
 		for i, ch := range f.Children {
-			c.Children[i] = cloneFloatForPage(ch)
+			c.Children[i] = cloneFloatForPageMap(ch, seen)
 		}
 	}
 	if len(f.Floats) > 0 {
 		c.Floats = make([]*Fragment, len(f.Floats))
 		for i, ch := range f.Floats {
-			c.Floats[i] = cloneFloatForPage(ch)
+			c.Floats[i] = cloneFloatForPageMap(ch, seen)
 		}
 	}
 	if len(f.Positioned) > 0 {
 		c.Positioned = make([]*Fragment, len(f.Positioned))
 		for i, ch := range f.Positioned {
-			c.Positioned[i] = cloneFloatForPage(ch)
+			// A relative descendant is aliased into Children (already in seen); reuse
+			// that clone so the Positioned-side pointer stays the paint-layer alias of
+			// the in-flow copy shiftFragment moves. An abs/fixed descendant appears only
+			// here and is cloned independently.
+			c.Positioned[i] = cloneFloatForPageMap(ch, seen)
 		}
 	}
 	if len(f.Lines) > 0 {
@@ -425,6 +453,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 	}
 
 	var all []runBucket
+	attributed := map[*Fragment]bool{} // floats routed to some run (for the unattributed-float diagnostic below)
 	for _, r := range runs {
 		geom, blocks := getLayout(r.name)
 		// Take this run's blocks BY INDEX from the matching-width layout. The cssbox tree
@@ -447,9 +476,23 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		// float to its owning run structurally (its cssbox.Box is a descendant of one of
 		// this run's top-level block boxes), so each float is emitted by exactly one run.
 		ownFloats := floatsOriginatingIn(layoutByWidth[geom.contentW].Floats, runBlocks)
+		for _, fl := range ownFloats {
+			attributed[fl] = true
+		}
 		runFloats := floatsForRun(ownFloats, bks)
 		for bi, bk := range bks {
 			all = append(all, runBucket{bucket: bk, geom: geom, floats: runFloats[bi]})
+		}
+	}
+	// Diagnostic: a page-root float attributed to NO run (a body-direct float — a sibling of
+	// the top-level blocks, descendant of none — or a nil-Box anonymous/synthetic float)
+	// appears on no page. This is a documented limitation of the multi-named-page path (see
+	// floatsOriginatingIn); log it so a future regression that silently drops a float surfaces.
+	for w, frag := range layoutByWidth {
+		for _, fl := range frag.Floats {
+			if fl != nil && !attributed[fl] {
+				e.logf("css layout: page-root float attributed to no run (body-direct or nil-Box), painted on no page (width=%.0f, box=%v)", w, fl.Box)
+			}
 		}
 	}
 	if len(all) == 0 {
