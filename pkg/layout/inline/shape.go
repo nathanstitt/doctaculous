@@ -179,9 +179,15 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 				g.Outline = outline
 				g.Advance = advEm * r.SizePt
 				g.Space = rn == ' '
+				// Carry font identity ONLY for a real font glyph. When face.GID fails the
+				// outline came from a synthesized marker (e.g. a bullet the face lacks) —
+				// its GID would be .notdef, so a text-emitting backend must not re-fetch by
+				// GID; clear Face so paint fills the synthesized Outline directly.
 				if gid, ok := face.GID(rn); ok {
 					g.GID = gid
 					g.Runes = []rune{rn}
+				} else {
+					g.Face = nil
 				}
 				out = append(out, g)
 				lineCol += g.Advance
