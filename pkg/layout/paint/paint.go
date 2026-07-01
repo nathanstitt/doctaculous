@@ -59,13 +59,27 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 //	scale(size, -size)  — em to points, flipping Y so the font's up becomes page down
 //	translate(X, Y)     — move to the glyph's baseline origin in page space
 //	mat                 — page points to device pixels
+// paintGlyph draws one glyph. When the glyph carries font identity (Face+GID), it
+// uses DrawGlyph so text-emitting backends (PDF) can embed real text; otherwise it
+// falls back to filling the raw outline. The em -> device transform is the same in
+// both cases: Scale(size,-size) · Translate(X,Y) · mat.
 func paintGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) {
-	if g.Outline == nil || g.Outline.Empty() {
-		return
-	}
 	m := render.Scale(g.SizePt, -g.SizePt).
 		Mul(render.Translate(g.XPt, g.YPt)).
 		Mul(mat)
+	if g.Face != nil {
+		dev.DrawGlyph(render.GlyphRef{
+			Face:      g.Face,
+			GID:       g.GID,
+			Runes:     g.Runes,
+			Transform: m,
+			Color:     render.FillColor{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+		})
+		return
+	}
+	if g.Outline == nil || g.Outline.Empty() {
+		return
+	}
 	dev.FillGlyph(transformPath(g.Outline, m), render.FillColor{
 		R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A,
 	}, "")

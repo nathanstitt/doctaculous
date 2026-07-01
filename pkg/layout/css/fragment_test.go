@@ -108,7 +108,9 @@ func TestAppendItemsGlyphs(t *testing.T) {
 		t.Fatalf("item[0] kind = %v, want GlyphKind", it.Kind)
 	}
 	wantGlyph := layout.GlyphItem{Outline: out, XPt: 50, YPt: 123.5, SizePt: 12, Color: col}
-	if it.Glyph != wantGlyph {
+	// GlyphItem carries a []rune (Runes), so compare the comparable fields directly.
+	if g := it.Glyph; g.Outline != wantGlyph.Outline || g.XPt != wantGlyph.XPt ||
+		g.YPt != wantGlyph.YPt || g.SizePt != wantGlyph.SizePt || g.Color != wantGlyph.Color {
 		t.Errorf("glyph = %+v, want %+v", it.Glyph, wantGlyph)
 	}
 	if it.Glyph.Outline != out {

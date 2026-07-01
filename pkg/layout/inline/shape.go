@@ -88,6 +88,13 @@ type Glyph struct {
 	// engine's line emitter to paint as an underline rule. The shaper does not act on
 	// it. Zero (false) for callers that don't set Run.Underline (e.g. DOCX).
 	Underline bool
+	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
+	// writer embeds Face's program for GID and maps GID -> Runes in /ToUnicode). Face
+	// is nil for whitespace/atomic/break glyphs; a rasterizing backend ignores all
+	// three and paints Outline.
+	Face  *pkgfont.Face
+	GID   uint16
+	Runes []rune
 }
 
 // Color is the package's own RGBA so the public glyph type carries no image/color
@@ -138,7 +145,7 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 			spaceAdv = sa * r.SizePt
 		}
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
-		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline}
+		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline, Face: face}
 		for _, rn := range r.Text {
 			switch {
 			case rn == '\n' && preserveNL:
@@ -172,6 +179,10 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 				g.Outline = outline
 				g.Advance = advEm * r.SizePt
 				g.Space = rn == ' '
+				if gid, ok := face.GID(rn); ok {
+					g.GID = gid
+					g.Runes = []rune{rn}
+				}
 				out = append(out, g)
 				lineCol += g.Advance
 			}

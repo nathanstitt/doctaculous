@@ -119,6 +119,7 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
 					Color:     color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 					Underline: g.Underline,
+					Face:      g.Face, GID: g.GID, Runes: g.Runes,
 				})
 			}
 			x += g.Advance

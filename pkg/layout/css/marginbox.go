@@ -364,6 +364,7 @@ func (e *Engine) appendMarginText(items []layout.Item, text string, decls []gcss
 				Glyph: layout.GlyphItem{
 					Outline: g.Outline, XPt: x, YPt: baselineY, SizePt: g.SizePt,
 					Color: color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+					Face:  g.Face, GID: g.GID, Runes: g.Runes,
 				},
 			})
 		}
