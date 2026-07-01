@@ -9,6 +9,31 @@ import (
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 )
 
+func TestMarginBoxRectSharedTrailWidth(t *testing.T) {
+	// A trailing (right/bottom) box's rect must be its OWN width w at the pinned edge —
+	// NOT the full band width — so appendMarginText's text-align:right resolves inside it
+	// (a full-band width double-applies the alignment, pushing text off the page). Page
+	// 300x200, margins 20; top band x in [20,280) (width 260). A 60pt-wide right box pins
+	// to x=280-60=220 with width 60 (its right edge = 280 = the band's right edge, inside).
+	g := pageGeom{pageW: 300, pageH: 200, marginL: 20, marginT: 20, contentW: 260, contentH: 160}
+	widths := map[gcss.MarginBoxSlot]float64{gcss.MarginTopRight: 60}
+	r := marginBoxRectShared(gcss.MarginTopRight, g, widths)
+	if r.w != 60 {
+		t.Errorf("trail box width = %.1f, want 60 (its own width, not the band)", r.w)
+	}
+	if r.x != 220 {
+		t.Errorf("trail box x = %.1f, want 220 (pinned right)", r.x)
+	}
+	if r.x+r.w > 280.5 {
+		t.Errorf("trail box right edge = %.1f, want <= 280 (inside the band, not off-page)", r.x+r.w)
+	}
+	// An unmeasured box (w=0, e.g. an element() box) falls back to the full band width.
+	r0 := marginBoxRectShared(gcss.MarginTopRight, g, map[gcss.MarginBoxSlot]float64{})
+	if r0.w != 260 {
+		t.Errorf("unmeasured trail box width = %.1f, want 260 (band fallback)", r0.w)
+	}
+}
+
 func TestResolveMarginContent(t *testing.T) {
 	cases := []struct {
 		content    string

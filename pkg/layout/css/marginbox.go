@@ -274,25 +274,40 @@ func marginBoxRectShared(slot gcss.MarginBoxSlot, g pageGeom, boxW map[gcss.Marg
 	if !ok {
 		return band // a corner: unchanged
 	}
+	// The box's own content extent (w) is what pins the trailing/center boxes AND sizes
+	// their rect: each distributed box gets a rect of its OWN width w at its pinned
+	// origin, so appendMarginText's per-box text-align resolves WITHIN that exact-width
+	// rect (a full-band width here would double-apply the alignment — a trailing box
+	// would pin right, then right-align again within the band, landing off-page). A
+	// zero/unmeasured w (e.g. an element() box, sized elsewhere) falls back to the full
+	// band so the box is not collapsed to nothing.
 	w := boxW[slot]
 	switch {
 	case horizontal:
-		switch slot {
-		case lead:
-			return marginRect{x: band.x, y: band.y, w: band.w, h: band.h}
-		case trail:
-			return marginRect{x: band.x + band.w - w, y: band.y, w: band.w, h: band.h}
-		case center:
-			return marginRect{x: band.x + (band.w-w)/2, y: band.y, w: band.w, h: band.h}
+		bw := w
+		if bw <= 0 {
+			bw = band.w
 		}
-	default: // vertical edge: distribute along Y
 		switch slot {
 		case lead:
-			return marginRect{x: band.x, y: band.y, w: band.w, h: band.h}
+			return marginRect{x: band.x, y: band.y, w: bw, h: band.h}
 		case trail:
-			return marginRect{x: band.x, y: band.y + band.h - w, w: band.w, h: band.h}
+			return marginRect{x: band.x + band.w - bw, y: band.y, w: bw, h: band.h}
 		case center:
-			return marginRect{x: band.x, y: band.y + (band.h-w)/2, w: band.w, h: band.h}
+			return marginRect{x: band.x + (band.w-bw)/2, y: band.y, w: bw, h: band.h}
+		}
+	default: // vertical edge: distribute along Y (the box's extent runs along Y here)
+		bh := w
+		if bh <= 0 {
+			bh = band.h
+		}
+		switch slot {
+		case lead:
+			return marginRect{x: band.x, y: band.y, w: band.w, h: bh}
+		case trail:
+			return marginRect{x: band.x, y: band.y + band.h - bh, w: band.w, h: bh}
+		case center:
+			return marginRect{x: band.x, y: band.y + (band.h-bh)/2, w: band.w, h: bh}
 		}
 	}
 	return band
