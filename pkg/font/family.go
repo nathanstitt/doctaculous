@@ -154,6 +154,10 @@ func (f *Face) GlyphAdvance(gid uint16) float64 {
 	return adv
 }
 
+// GlyphName returns gid's PostScript glyph name, or "" if unnamed. A PDF simple
+// Type1 font's /Encoding /Differences maps character codes to these names.
+func (f *Face) GlyphName(gid uint16) string { return f.prog.gp.glyphName(fonts.GID(gid)) }
+
 // Metrics returns the face's vertical line metrics in em units (Y up): a positive
 // ascent above the baseline, a positive descent magnitude below it, and the
 // font's suggested extra line gap. The reflow engine derives line height from
