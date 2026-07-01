@@ -1,6 +1,6 @@
 // Command doctaculous is the command-line interface to the doctaculous document
-// toolkit. The current subcommand is "rasterize", which renders PDF pages to
-// images.
+// toolkit. Subcommands: "rasterize" renders document pages to images, and "topdf"
+// converts a reflow document (HTML/URL/DOCX) to a PDF with searchable text.
 package main
 
 import (
@@ -28,6 +28,8 @@ func run(args []string) error {
 	switch cmd {
 	case "rasterize":
 		return rasterizeCmd(rest)
+	case "topdf":
+		return topdfCmd(rest)
 	case "version", "-v", "--version":
 		fmt.Println("doctaculous", version)
 		return nil
@@ -45,9 +47,10 @@ func usage() {
 
 usage:
   doctaculous rasterize <input.pdf|.docx|.html|URL> [flags]
+  doctaculous topdf <input.html|.docx|URL> --out file.pdf [flags]
   doctaculous version
   doctaculous help
 
-run "doctaculous rasterize -h" for rasterize flags.
+run "doctaculous rasterize -h" or "doctaculous topdf -h" for subcommand flags.
 `)
 }
