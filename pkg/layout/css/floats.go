@@ -115,6 +115,27 @@ func (c *floatContext) place(side cssbox.FloatKind, w, h, y, cbLeft, cbRight flo
 	}
 }
 
+// shiftFloatsFrom translates every float placed into this context at index >= from
+// DOWN the page by dy: both the avoidance geometry (floatBox.y, queried by later
+// floats and in-flow content in this BFC) and the placed fragment's subtree
+// (floatBox.frag via shiftFragment). The block stacker calls it to correct a float
+// whose containing block's border top was resolved (by margin collapsing or clearance)
+// only AFTER the float was provisionally placed against the un-resolved band origin;
+// dy is purely vertical (the collapse/clearance gap), so X is untouched. A dy of 0 is a
+// no-op (the common no-collapse case), keeping float-free / non-collapsing pages
+// byte-identical.
+func (c *floatContext) shiftFloatsFrom(from int, dy float64) {
+	if dy == 0 || from < 0 {
+		return
+	}
+	for i := from; i < len(c.floats); i++ {
+		c.floats[i].y += dy
+		if c.floats[i].frag != nil {
+			shiftFragment(c.floats[i].frag, dy)
+		}
+	}
+}
+
 // nextDropY returns the smallest float bottom strictly greater than y among floats
 // overlapping band [y, y+h); if none, returns y (caller guards against a spin).
 func (c *floatContext) nextDropY(y, h float64) float64 {
