@@ -109,6 +109,57 @@ func TestIsHTTPURL(t *testing.T) {
 	}
 }
 
+// TestRasterizeCmdHTMLPaginatesByDefault asserts an HTML document taller than one
+// US-Letter page renders to MULTIPLE numbered pages by default (page-size defaults to
+// "letter"), and that --page-size tall opts into a single tall page.
+func TestRasterizeCmdHTMLPaginatesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "tall.html")
+	// ~120 stacked blocks force the content well past a single Letter page.
+	body := ""
+	for i := 0; i < 120; i++ {
+		body += `<p style="height:40px;margin:0">line</p>`
+	}
+	html := `<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body>` + body + `</body></html>`
+	if err := os.WriteFile(in, []byte(html), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default (no --page-size): paginates → more than one page.
+	pat := filepath.Join(dir, "def-%d.png")
+	if err := rasterizeCmd([]string{in, "--out", pat, "--pages", "all", "--dpi", "72"}); err != nil {
+		t.Fatalf("rasterizeCmd default: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "def-2.png")); err != nil {
+		t.Errorf("default should paginate to >1 page; def-2.png missing: %v", err)
+	}
+
+	// --page-size tall: one tall page only.
+	tallOut := filepath.Join(dir, "tall-%d.png")
+	if err := rasterizeCmd([]string{in, "--out", tallOut, "--pages", "all", "--dpi", "72", "--page-size", "tall"}); err != nil {
+		t.Fatalf("rasterizeCmd tall: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tall-1.png")); err != nil {
+		t.Errorf("tall-1.png missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tall-2.png")); err == nil {
+		t.Error("--page-size tall should produce only one page, but tall-2.png exists")
+	}
+}
+
+// TestRasterizeCmdRejectsBadPageSize asserts an unknown --page-size errors.
+func TestRasterizeCmdRejectsBadPageSize(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "x.html")
+	if err := os.WriteFile(in, []byte("<p>x</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := rasterizeCmd([]string{in, "--out", filepath.Join(dir, "o.png"), "--page-size", "a4"})
+	if err == nil {
+		t.Fatal("expected an error for --page-size a4")
+	}
+}
+
 // TestRasterizeCmdURL drives the rasterize subcommand end to end against a loopback
 // HTTP server serving HTML, proving an http:// URL input is fetched (OpenURL) and
 // rendered to a PNG. Hermetic via net/http/httptest.
@@ -121,10 +172,12 @@ func TestRasterizeCmdURL(t *testing.T) {
 	defer srv.Close()
 
 	out := filepath.Join(t.TempDir(), "page-%d.png")
-	if err := rasterizeCmd([]string{srv.URL, "--out", out, "--pages", "all", "--dpi", "72"}); err != nil {
+	// --page-size tall forces the single-tall-page path (the default is now "letter",
+	// which paginates); a one-line document is one tall page either way.
+	if err := rasterizeCmd([]string{srv.URL, "--out", out, "--pages", "all", "--dpi", "72", "--page-size", "tall"}); err != nil {
 		t.Fatalf("rasterizeCmd(URL): %v", err)
 	}
-	// A single tall page (no --page-size) → page-1.png must exist and be non-empty.
+	// A single tall page → page-1.png must exist and be non-empty.
 	got := filepath.Join(filepath.Dir(out), "page-1.png")
 	info, err := os.Stat(got)
 	if err != nil {

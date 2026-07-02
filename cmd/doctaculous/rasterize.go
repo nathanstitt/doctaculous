@@ -29,7 +29,7 @@ func rasterizeCmd(args []string) error {
 		dpi      = fs.Float64("dpi", 150, "render resolution in DPI")
 		format   = fs.String("format", "png", "output image format: png or jpg")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
-		pageSize = fs.String("page-size", "", "HTML page size: \"letter\" to paginate, empty for one tall page (HTML only)")
+		pageSize = fs.String("page-size", "letter", "HTML page size: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page (HTML only)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx|.html|URL> [flags]\n") //nolint:errcheck // stderr write
@@ -61,8 +61,8 @@ func rasterizeCmd(args []string) error {
 	if *workers < 1 {
 		return fmt.Errorf("--workers must be at least 1, got %d", *workers)
 	}
-	if *pageSize != "" && *pageSize != "letter" {
-		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or empty)", *pageSize)
+	if *pageSize != "letter" && *pageSize != "tall" && *pageSize != "" {
+		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or \"tall\")", *pageSize)
 	}
 
 	doc, err := openDocument(input, *pageSize)
@@ -117,8 +117,8 @@ func rasterizeCmd(args []string) error {
 // in e.g. .pdf is still treated as a web page). Otherwise it dispatches on file
 // extension: .docx goes through the reflow pipeline, .html/.htm through the HTML
 // pipeline, and everything else is treated as PDF. The HTML page size (pageSize —
-// "letter" paginates, empty is one tall page) applies to the URL and HTML paths and
-// is ignored for PDF/DOCX.
+// "letter" paginates onto US-Letter pages, "tall" renders one tall page) applies to
+// the URL and HTML paths and is ignored for PDF/DOCX.
 func openDocument(input, pageSize string) (*doctaculous.Document, error) {
 	if isHTTPURL(input) {
 		return doctaculous.OpenURL(input, htmlOpts(pageSize)...)
@@ -142,8 +142,8 @@ func isHTTPURL(input string) bool {
 }
 
 // htmlOpts builds the HTML layout options shared by the URL and local-HTML paths:
-// pageSize "letter" paginates onto US-Letter pages; any other value (incl. empty)
-// renders a single tall page.
+// pageSize "letter" (the CLI default) paginates onto US-Letter pages; "tall" (or an
+// empty value) renders a single tall page.
 func htmlOpts(pageSize string) []doctaculous.HTMLOption {
 	if pageSize == "letter" {
 		return []doctaculous.HTMLOption{
