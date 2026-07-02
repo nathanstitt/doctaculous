@@ -66,22 +66,42 @@ func (c *floatContext) rightEdge(y, h float64) float64 {
 // the placed floatBox (frag still nil — the caller sets it). A float wider than the
 // whole band is placed at the edge at y (allowed to overflow) rather than looping.
 // The loop is bounded: each retry lowers y' past at least one blocking float.
-func (c *floatContext) place(side cssbox.FloatKind, w, h, y float64) floatBox {
+//
+// cbLeft/cbRight are the float's OWN containing block's content-box edges, which may
+// be inset from the BFC's context edges (c.cbLeft/c.cbRight) when a non-BFC ancestor
+// (e.g. a padded <body> or <section>) sits between the float and the BFC root: the
+// float belongs to the BFC's float list but must sit within its containing block's
+// content box, so a left float floors at cbLeft and a right float ceils at cbRight,
+// honoring the containing block's padding/border. Passing the context's own edges
+// (cbLeft==c.cbLeft, cbRight==c.cbRight) is the no-inset case.
+func (c *floatContext) place(side cssbox.FloatKind, w, h, y, cbLeft, cbRight float64) floatBox {
 	bandW := c.cbRight - c.cbLeft
+	// clamped returns the available left/right boundaries in the band, floored/ceiled
+	// to the float's own containing-block content box (cbLeft/cbRight) so a float
+	// honors that box's padding/border even when it lies inside the BFC context.
+	clamped := func(y float64) (left, right float64) {
+		if left = c.leftEdge(y, h); left < cbLeft {
+			left = cbLeft
+		}
+		if right = c.rightEdge(y, h); right > cbRight {
+			right = cbRight
+		}
+		return left, right
+	}
+	appendAt := func(y, left, right float64) floatBox {
+		x := left
+		if side == cssbox.FloatRight {
+			x = right - w
+		}
+		fb := floatBox{side: side, x: x, y: y, w: w, h: h}
+		c.floats = append(c.floats, fb)
+		return fb
+	}
 	for {
-		left := c.leftEdge(y, h)
-		right := c.rightEdge(y, h)
+		left, right := clamped(y)
 		if w > bandW || right-left >= w {
 			// Fits (or is wider than the whole band -> overflow at the edge).
-			var x float64
-			if side == cssbox.FloatRight {
-				x = right - w
-			} else {
-				x = left
-			}
-			fb := floatBox{side: side, x: x, y: y, w: w, h: h}
-			c.floats = append(c.floats, fb)
-			return fb
+			return appendAt(y, left, right)
 		}
 		// Doesn't fit at y: drop to the bottom of the shallowest float whose band
 		// overlaps [y, y+h) (the next opportunity for more width).
@@ -89,15 +109,7 @@ func (c *floatContext) place(side cssbox.FloatKind, w, h, y float64) floatBox {
 		if next <= y {
 			// No lower opportunity (shouldn't happen given the fit test, but guard
 			// against a spin): place at the edge at y.
-			var x float64
-			if side == cssbox.FloatRight {
-				x = right - w
-			} else {
-				x = left
-			}
-			fb := floatBox{side: side, x: x, y: y, w: w, h: h}
-			c.floats = append(c.floats, fb)
-			return fb
+			return appendAt(y, left, right)
 		}
 		y = next
 	}

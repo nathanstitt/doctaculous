@@ -746,7 +746,11 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	marginW := ed.mL + res.frag.W + ed.mR
 	marginH := res.marginTop + res.frag.H + res.marginBottom
 
-	fb := fc.place(child.Float, marginW, marginH, placeY)
+	// The float sits within its containing block's content box (contentX ..
+	// contentX+cbWidth), which may be inset from the BFC's context edges when a
+	// non-BFC ancestor (e.g. a padded <body>/<section>) lies between: pass those
+	// edges so a left float honors the containing block's left padding/border.
+	fb := fc.place(child.Float, marginW, marginH, placeY, contentX, contentX+cbWidth)
 
 	// fb.x/fb.y is the float's MARGIN-box top-left in the BFC-root frame. The border
 	// box sits inside it by the left/top margins. Translate the provisional fragment
