@@ -239,6 +239,13 @@ type runBucket struct {
 	// layout and shifted into the bucket's local frame (Y 0). nil when the bucket has
 	// no floats — so a float-free document is byte-identical (no float items emitted).
 	floats []*Fragment
+	// pos holds this bucket's share of the positioned layer (its position:relative
+	// blocks, the page-CB position:absolute boxes whose band is this bucket, and a clone
+	// of every position:fixed box), with its parallel PositionedInfo. Empty when the
+	// bucket has no positioned content — so a positioned-free document is byte-identical.
+	// Without this, paginateRuns nil'd the positioned layer and never re-attached it, so
+	// every relative/absolute/fixed box in a multi-named-page document painted nowhere.
+	pos pagePositioned
 }
 
 // floatsForRun partitions THIS run's floats across its buckets, mirroring the
@@ -296,6 +303,20 @@ func floatsOriginatingIn(allFloats []*Fragment, runBlocks []*Fragment) []*Fragme
 	if len(allFloats) == 0 || len(runBlocks) == 0 {
 		return nil
 	}
+	owned := ownedBoxes(runBlocks)
+	var out []*Fragment
+	for _, fl := range allFloats {
+		if fl != nil && fl.Box != nil && owned[fl.Box] {
+			out = append(out, fl)
+		}
+	}
+	return out
+}
+
+// ownedBoxes returns the set of every cssbox.Box in the subtrees rooted at runBlocks'
+// boxes — the structural attribution both floatsOriginatingIn and positionedForRun use to
+// scope a shared-layout out-of-flow entry (float / abs / fixed) to its owning run.
+func ownedBoxes(runBlocks []*Fragment) map[*cssbox.Box]bool {
 	owned := map[*cssbox.Box]bool{}
 	var collect func(b *cssbox.Box)
 	collect = func(b *cssbox.Box) {
@@ -312,11 +333,96 @@ func floatsOriginatingIn(allFloats []*Fragment, runBlocks []*Fragment) []*Fragme
 			collect(blk.Box)
 		}
 	}
-	var out []*Fragment
-	for _, fl := range allFloats {
-		if fl != nil && fl.Box != nil && owned[fl.Box] {
-			out = append(out, fl)
+	return owned
+}
+
+// positionedForRun partitions THIS run's slice of the layout's positioned layer across its
+// buckets, the positioned-layer analogue of floatsForRun. It mirrors splitPositionedByPage
+// (the single-run path) but is scoped and clones like the float path, because runRoot is a
+// shared cached layout (layoutByWidth[w], reused across every bucket of every run at this
+// width). runBlocks are this run's top-level block fragments; bks are the run's buckets
+// (already carrying bk.blocks, shifted into their local frames by the caller). Each kind of
+// positioned entry is routed like splitPositionedByPage:
+//
+//   - A position:relative block (or a relative descendant of one) is IN FLOW, so its SAME
+//     *Fragment pointer is a bucket block (or lives in a bucket's Children subtree) that the
+//     caller already shifted into its page-local frame. It is re-attached BY POINTER — NOT
+//     cloned, NOT re-shifted (cloning would split the Children<->Positioned alias and its
+//     paint copy would never move; the caller's translateFragment margin-inset moves it via
+//     Children and skips the aliased Positioned entry, so it lands correctly).
+//   - A page-CB position:absolute box is out of flow (not a bucket block): routed to the
+//     bucket whose band holds its border-box top (pageForY, clamped), CLONED, and shifted
+//     into that bucket's local frame (the caller's translateFragment then applies the @page
+//     margin inset, exactly as for floats).
+//   - A position:fixed box repeats on every bucket of this run: a clone per bucket, each
+//     shifted into that bucket's local frame. (A fixed box's frag.Y is already viewport-page
+//     relative, so the shift lands it at the same on-page Y on every page. Repeating only
+//     across THIS run's pages — not the whole document — is a narrow limitation of the
+//     multi-named-page path, mirroring the per-run float scoping; it is strictly better than
+//     the pre-fix drop, and the showcase uses no fixed boxes.)
+//
+// Scoping: runRoot.Positioned is the WHOLE document's positioned layer (top-level positioned
+// boxes bubble to the page-root), shared by every run at this width — so, like floats, each
+// entry is attributed to exactly one run structurally (its source .Box is a descendant of one
+// of this run's blocks). An entry owned by no run in this width-layout is skipped here (it
+// belongs to another run and is emitted there). Returns one pagePositioned per bucket, each
+// with parallel frags/infos; all empty when this run has no positioned content (byte-identical).
+func positionedForRun(runRoot *Fragment, runBlocks []*Fragment, bks []pageBucket) []pagePositioned {
+	out := make([]pagePositioned, len(bks))
+	if runRoot == nil || len(runRoot.Positioned) == 0 || len(bks) == 0 {
+		return out
+	}
+	owned := ownedBoxes(runBlocks)
+	// Map each bucket block — and every positioned (relative) descendant in its in-flow
+	// Children subtree — to its bucket index, so an aliased relative entry is routed to the
+	// page its in-flow position landed on (catching a relative block nested under static
+	// wrappers whose pointer bubbled to the root). Abs/fixed entries are out of flow and so
+	// are not in any block's Children subtree → not in this map → distributed by kind below.
+	blockPage := map[*Fragment]int{}
+	var mark func(f *Fragment, page int)
+	mark = func(f *Fragment, page int) {
+		blockPage[f] = page
+		for _, c := range f.Children {
+			mark(c, page)
 		}
+	}
+	for bi := range bks {
+		for _, b := range bks[bi].blocks {
+			mark(b, bi)
+		}
+	}
+	assign := func(page int, frag *Fragment, info PositionedInfo) {
+		out[page].frags = append(out[page].frags, frag)
+		out[page].infos = append(out[page].infos, info)
+	}
+	for i, frag := range runRoot.Positioned {
+		var info PositionedInfo
+		if i < len(runRoot.PositionedInfo) {
+			info = runRoot.PositionedInfo[i]
+		}
+		if p, ok := blockPage[frag]; ok {
+			// Relative block / relative descendant: aliased with a bucket block already
+			// shifted by the caller — re-attach by pointer, no clone, no shift.
+			assign(p, frag, info)
+			continue
+		}
+		// From here on the entry is out of flow (abs/fixed). Scope it to this run: an entry
+		// owned by another run's blocks is emitted there, not here.
+		if frag == nil || frag.Box == nil || !owned[frag.Box] {
+			continue
+		}
+		if isFixedFragment(frag) {
+			for bi := range bks {
+				clone := cloneFloatForPage(frag)
+				shiftFragment(clone, -bks[bi].top)
+				assign(bi, clone, info)
+			}
+			continue
+		}
+		page := pageForY(frag.Y, bks)
+		clone := cloneFloatForPage(frag)
+		shiftFragment(clone, -bks[page].top)
+		assign(page, clone, info)
 	}
 	return out
 }
@@ -480,8 +586,16 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 			attributed[fl] = true
 		}
 		runFloats := floatsForRun(ownFloats, bks)
+		// Split this run's positioned layer (relative blocks re-attached by pointer; page-CB
+		// abs boxes routed to their band + cloned + shifted; fixed boxes cloned onto every
+		// bucket) across its buckets. Computed BEFORE the assembly loop shifts bk.blocks: a
+		// relative entry is the same pointer as its bucket block, moved later by that shift;
+		// an abs/fixed clone is shifted here off the run-layout's (still un-shifted) Y, which
+		// matches bks[].top. Without this the positioned layer was nil'd and never re-attached
+		// — every relative/absolute/fixed box in a multi-named-page document painted nowhere.
+		runPos := positionedForRun(layoutByWidth[geom.contentW], runBlocks, bks)
 		for bi, bk := range bks {
-			all = append(all, runBucket{bucket: bk, geom: geom, floats: runFloats[bi]})
+			all = append(all, runBucket{bucket: bk, geom: geom, floats: runFloats[bi], pos: runPos[bi]})
 		}
 	}
 	// Diagnostic: a page-root float attributed to NO run (a body-direct float — a sibling of
@@ -525,7 +639,15 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		copy(children, base.Children)
 		children[len(children)-1] = &runBody
 		pageRoot.Children = children
-		pageRoot.Positioned, pageRoot.PositionedInfo = nil, nil
+		// Attach this bucket's positioned layer at the page root (mirroring paginateDoc/
+		// assemblePages). Relative entries are the same pointers as bucket blocks (moved by
+		// the shiftFragments above and, below, by translateFragment via Children — and skipped
+		// as Positioned entries by shiftFragmentExtras, so not double-moved); abs/fixed clones
+		// are in the bucket-local frame and the translateFragment inset carries them by the
+		// @page margin/bleed delta (it recurses into Positioned). The body wrapper owns no
+		// positioned layer of its own (the root does), so its copy stays nil.
+		pageRoot.Positioned = all[i].pos.frags
+		pageRoot.PositionedInfo = all[i].pos.infos
 		// Attach this bucket's floats at the page root (mirroring paginateDoc/assemblePages,
 		// which sets pageRoot.Floats and keeps the body wrapper's Floats nil). They are in
 		// the bucket's local frame; the translateFragment inset below carries them by the
