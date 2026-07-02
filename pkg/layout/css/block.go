@@ -378,9 +378,17 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		}
 	}
 
-	// A box that establishes its own BFC owns its floats' paint layer.
+	// A box that establishes its own BFC owns its floats' paint layer. Its floats were
+	// placed in the interior's content-top-0 frame (childBand=0 in layoutInterior), so —
+	// like the in-flow children above — they must be shifted down into page space by the
+	// box's own content-box top (contentTopY = border-box top + top border + top padding).
+	// Without this a float in a bordered/padded BFC painted at the BFC's BORDER-box top,
+	// ignoring the box's own top border+padding (its X was already inset by placement, only
+	// Y was short). The leading margin gap is NOT added here: it pushes in-flow content down,
+	// but a float's margin box still touches the content-box top edge (CSS 9.5).
 	if newBFC {
 		frag.IsBFC = true
+		shiftFragments(in.bfcFloats, contentTopY)
 		frag.Floats = in.bfcFloats
 	}
 
@@ -622,12 +630,22 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		}
 
 		if child.Float != cssbox.FloatNone {
-			// Place the float in the BFC-root frame at the current in-flow band:
-			// bandOriginY (this content box's top in that frame) + cursorY (local). A
-			// float establishes its own BFC; pass posCtx + the float-as-CB owner so a
-			// positioned float's abs descendants resolve against it.
-			e.placeFloat(ctx, child, contentW, contentX, bandOriginY+cursorY, fc, posCtx, posCB)
-			continue // a float does not advance the in-flow cursor or collapse margins
+			// Place the float in the BFC-root frame at the current in-flow band. Its top
+			// may not rise above the previous in-flow sibling's MARGIN-box bottom (CSS 9.5:
+			// "the outer top of a floating box may not be higher than the outer top of any
+			// block ... earlier in the source"). cursorY sits at the previous block's
+			// border-box bottom (prevBorder); the previous block's bottom margin (prevBottom)
+			// is still pending — a float does not collapse with it, but it does sit below it,
+			// so advance the float's top past it. A float still does not advance the in-flow
+			// cursor or collapse margins for the NEXT block.
+			floatTop := cursorY
+			if !first {
+				if mb := prevBorder + prevBottom; mb > floatTop {
+					floatTop = mb
+				}
+			}
+			e.placeFloat(ctx, child, contentW, contentX, bandOriginY+floatTop, fc, posCtx, posCB)
+			continue
 		}
 
 		// clear: lower the cursor below the matching floats. clearY is in the BFC-root
@@ -677,6 +695,12 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		// sits at res.marginTop, which we now know and use to place it exactly. Pass
 		// bandOriginY+startY as the child's band origin so a nested in-flow block
 		// knows its position in the BFC-root frame (its IFC queries floats there).
+		//
+		// floatCountBefore snapshots this BFC's float list so we can retroactively
+		// correct floats this child placed into it once the child's true border top is
+		// known (see below). (Floats a nested-BFC descendant placed go to a DIFFERENT
+		// context, ride res.frag's shift, and are not in fc — so they are untouched.)
+		floatCountBefore := len(fc.floats)
 		res := e.layoutBlock(ctx, child, childWidth, childOriginX, 0, bandOriginY+startY, fc, posCtx, posCB)
 
 		var borderTop float64 // desired local Y of this child's border-box top
@@ -693,6 +717,28 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 		// The child currently sits with its border top at res.marginTop (margin edge
 		// was 0); shift it so its border top lands at borderTop.
 		shiftFragment(res.frag, borderTop-res.marginTop)
+
+		// Correct any float this child placed DIRECTLY into this BFC. The child laid its
+		// floats out against a PROVISIONAL band origin (bandOriginY+startY+ed.mT), because
+		// its real border top was not yet known; the child's in-flow content was then
+		// shifted down to borderTop by the line above. A float attaches to the BFC root's
+		// float list (not to res.frag), so that shift did NOT move it — leaving it too high
+		// by exactly the gap the collapsed margin / clearance opened between the provisional
+		// start+margin and the resolved border top. The correction that lands the float's
+		// band origin on the child's true content-box top is borderTop-(startY+ed.mT); apply
+		// it to both the geometry (so later floats avoid the corrected box) and the fragment.
+		// (=0 for the first child and for a cleared child, where borderTop==startY and mT is
+		// absorbed — so the common no-collapse case is untouched / byte-identical.)
+		if len(fc.floats) > floatCountBefore {
+			// childWidth (not contentW) is the width layoutBlock resolved child's ed.mT
+			// against — they differ only for a float-narrowed BFC child, whose floats do
+			// NOT enter this fc, so this branch only sees non-BFC children where the two are
+			// equal; using childWidth keeps the margin basis exactly consistent regardless.
+			childMT := usedEdges(child, childWidth).mT
+			if adj := borderTop - startY - childMT; adj != 0 {
+				fc.shiftFloatsFrom(floatCountBefore, adj)
+			}
+		}
 		out = append(out, res.frag)
 
 		// A relative child stays in flow (its space is reserved above) but is flagged
@@ -746,7 +792,11 @@ func (e *Engine) placeFloat(ctx context.Context, child *cssbox.Box, cbWidth, con
 	marginW := ed.mL + res.frag.W + ed.mR
 	marginH := res.marginTop + res.frag.H + res.marginBottom
 
-	fb := fc.place(child.Float, marginW, marginH, placeY)
+	// The float sits within its containing block's content box (contentX ..
+	// contentX+cbWidth), which may be inset from the BFC's context edges when a
+	// non-BFC ancestor (e.g. a padded <body>/<section>) lies between: pass those
+	// edges so a left float honors the containing block's left padding/border.
+	fb := fc.place(child.Float, marginW, marginH, placeY, contentX, contentX+cbWidth)
 
 	// fb.x/fb.y is the float's MARGIN-box top-left in the BFC-root frame. The border
 	// box sits inside it by the left/top margins. Translate the provisional fragment

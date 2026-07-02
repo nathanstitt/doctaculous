@@ -7,6 +7,9 @@
 *.test
 *.out
 
+# Scratch render output (e.g. rasterize --out); regenerate, never commit.
+/out/
+
 # Materialized test fixtures (see cmd/dumpfixtures); regenerate, never commit.
 /fixtures-out/
 

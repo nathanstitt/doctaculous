@@ -70,15 +70,37 @@ func TestOppositeFloatsNarrowBoth(t *testing.T) {
 	}
 }
 
+// TestPlaceHonorsInsetContainingBlock: a float whose containing block is inset from
+// the BFC context (e.g. a padded <body>/<section> between the float and the BFC root)
+// is floored/ceiled to that box's content edges, not the wider context edges. This
+// pins the fix for a float:left in a padded body being placed at the border-box left
+// (ignoring the body's left padding) instead of the content-box left.
+func TestPlaceHonorsInsetContainingBlock(t *testing.T) {
+	// BFC context spans [0,200]; the float's own containing block is inset to [40,160]
+	// (a 40px-padded box). A left float must start at 40, not 0.
+	c := newCtx(0, 200)
+	fl := c.place(cssbox.FloatLeft, 50, 40, 0, 40, 160)
+	if !approx(fl.x, 40) {
+		t.Errorf("left float x = %v, want 40 (containing block's left padding honored)", fl.x)
+	}
+	// A right float in the same inset box must end at the box's right edge (160), so
+	// its left edge is 160-50 = 110.
+	c2 := newCtx(0, 200)
+	fr := c2.place(cssbox.FloatRight, 50, 40, 0, 40, 160)
+	if !approx(fr.x, 110) {
+		t.Errorf("right float x = %v, want 110 (containing block's right padding honored)", fr.x)
+	}
+}
+
 // TestPlaceStacksThenWraps: two left floats fit side by side; a third that doesn't
 // fit wraps to a new row below the shallower of the two.
 func TestPlaceStacksThenWraps(t *testing.T) {
 	c := newCtx(0, 200)
-	f1 := c.place(cssbox.FloatLeft, 80, 40, 0) // left edge: x=0
+	f1 := c.place(cssbox.FloatLeft, 80, 40, 0, c.cbLeft, c.cbRight) // left edge: x=0
 	if !approx(f1.x, 0) || !approx(f1.y, 0) {
 		t.Fatalf("f1 = %+v, want x=0 y=0", f1)
 	}
-	f2 := c.place(cssbox.FloatLeft, 80, 60, 0) // next to f1: x=80
+	f2 := c.place(cssbox.FloatLeft, 80, 60, 0, c.cbLeft, c.cbRight) // next to f1: x=80
 	if !approx(f2.x, 80) || !approx(f2.y, 0) {
 		t.Fatalf("f2 = %+v, want x=80 y=0", f2)
 	}
@@ -87,7 +109,7 @@ func TestPlaceStacksThenWraps(t *testing.T) {
 	// pushing leftEdge to 160, so still only 40px available — not enough. nextDropY
 	// then finds f2 bottom=60. At y=60 no floats overlap: leftEdge=0, 200px available.
 	// So f3 ends up at x=0, y=60.
-	f3 := c.place(cssbox.FloatLeft, 80, 30, 0)
+	f3 := c.place(cssbox.FloatLeft, 80, 30, 0, c.cbLeft, c.cbRight)
 	if !approx(f3.x, 0) || !approx(f3.y, 60) {
 		t.Fatalf("f3 = %+v, want x=0 y=60", f3)
 	}
@@ -96,11 +118,11 @@ func TestPlaceStacksThenWraps(t *testing.T) {
 // TestPlaceRightStacks: right floats stack from the right edge leftward.
 func TestPlaceRightStacks(t *testing.T) {
 	c := newCtx(0, 200)
-	f1 := c.place(cssbox.FloatRight, 50, 40, 0) // right margin edge at 200 -> x=150
+	f1 := c.place(cssbox.FloatRight, 50, 40, 0, c.cbLeft, c.cbRight) // right margin edge at 200 -> x=150
 	if !approx(f1.x, 150) || !approx(f1.y, 0) {
 		t.Fatalf("f1 = %+v, want x=150 y=0", f1)
 	}
-	f2 := c.place(cssbox.FloatRight, 50, 40, 0) // next left of f1 -> x=100
+	f2 := c.place(cssbox.FloatRight, 50, 40, 0, c.cbLeft, c.cbRight) // next left of f1 -> x=100
 	if !approx(f2.x, 100) || !approx(f2.y, 0) {
 		t.Fatalf("f2 = %+v, want x=100 y=0", f2)
 	}
@@ -110,7 +132,7 @@ func TestPlaceRightStacks(t *testing.T) {
 // requested y (allowed to overflow) rather than looping forever.
 func TestPlaceOverflowWide(t *testing.T) {
 	c := newCtx(0, 100)
-	f := c.place(cssbox.FloatLeft, 250, 30, 10)
+	f := c.place(cssbox.FloatLeft, 250, 30, 10, c.cbLeft, c.cbRight)
 	if !approx(f.x, 0) || !approx(f.y, 10) {
 		t.Fatalf("overflow-wide float = %+v, want x=0 y=10", f)
 	}
@@ -119,7 +141,7 @@ func TestPlaceOverflowWide(t *testing.T) {
 // TestPlaceNotAboveY: a float never rises above the requested y (content order).
 func TestPlaceNotAboveY(t *testing.T) {
 	c := newCtx(0, 200)
-	f := c.place(cssbox.FloatLeft, 50, 20, 100)
+	f := c.place(cssbox.FloatLeft, 50, 20, 100, c.cbLeft, c.cbRight)
 	if f.y < 100-eps {
 		t.Errorf("float placed at y=%v, want >= 100", f.y)
 	}
@@ -189,8 +211,8 @@ func TestMaxBottom(t *testing.T) {
 	if got := c.maxBottom(); got != 0 {
 		t.Errorf("maxBottom (no floats) = %v, want 0", got)
 	}
-	c.place(cssbox.FloatLeft, 50, 40, 0) // bottom 40
-	c.place(cssbox.FloatLeft, 50, 70, 0) // stacks beside; bottom 70
+	c.place(cssbox.FloatLeft, 50, 40, 0, c.cbLeft, c.cbRight) // bottom 40
+	c.place(cssbox.FloatLeft, 50, 70, 0, c.cbLeft, c.cbRight) // stacks beside; bottom 70
 	if got := c.maxBottom(); got != 70 {
 		t.Errorf("maxBottom = %v, want 70", got)
 	}
