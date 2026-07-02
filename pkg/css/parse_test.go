@@ -7,11 +7,16 @@ func TestParseStylesheet(t *testing.T) {
 		/* comment */
 		h1, .title { color: red; font-size: 24px; }
 		p { margin-top: 10px }
-		@media print { p { color: black } }   /* whole at-rule skipped */
+		@media print { p { color: black } }   /* captured + tagged MediaPrint */
 	`
 	sheet := Parse(src)
-	if len(sheet.Rules) != 2 {
-		t.Fatalf("got %d rules, want 2 (the @media block is skipped): %+v", len(sheet.Rules), sheet.Rules)
+	// The @media print block is now captured (tagged MediaPrint), so the sheet holds
+	// all 3 rules; the default (screen) cascade still sees only the 2 top-level ones.
+	if len(sheet.Rules) != 3 {
+		t.Fatalf("got %d rules, want 3 (top-level + captured @media): %+v", len(sheet.Rules), sheet.Rules)
+	}
+	if got := len(sheet.RulesForMedia(MediaScreen)); got != 2 {
+		t.Fatalf("screen-context rules = %d, want 2 (the @media print rule is excluded)", got)
 	}
 	// First rule has 2 selectors and 2 declarations.
 	if len(sheet.Rules[0].Selectors) != 2 {

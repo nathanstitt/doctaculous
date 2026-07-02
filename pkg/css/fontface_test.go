@@ -46,9 +46,13 @@ func TestParseStylesheetCapturesFontFace(t *testing.T) {
 		@media print { p { color: black } }
 	`
 	sheet := Parse(src)
-	// The normal rule still parses; @media is still skipped (regression guard).
-	if len(sheet.Rules) != 1 {
-		t.Fatalf("got %d rules, want 1: %+v", len(sheet.Rules), sheet.Rules)
+	// The normal rule still parses; the @media print block is now captured (tagged
+	// MediaPrint) rather than discarded, so 2 rules total and 1 in the screen context.
+	if len(sheet.Rules) != 2 {
+		t.Fatalf("got %d rules, want 2: %+v", len(sheet.Rules), sheet.Rules)
+	}
+	if got := len(sheet.RulesForMedia(MediaScreen)); got != 1 {
+		t.Fatalf("screen-context rules = %d, want 1", got)
 	}
 	if len(sheet.FontFaces) != 1 {
 		t.Fatalf("got %d font faces, want 1: %+v", len(sheet.FontFaces), sheet.FontFaces)

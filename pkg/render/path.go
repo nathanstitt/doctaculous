@@ -69,3 +69,32 @@ func (p *Path) Clone() *Path {
 	copy(segs, p.Segments)
 	return &Path{Segments: segs}
 }
+
+// TransformPath returns a copy of p with every point mapped through m. It is used
+// by backends that need a path in a different coordinate space (e.g. a glyph
+// outline moved into device space). It returns nil for a nil p.
+func TransformPath(p *Path, m Matrix) *Path {
+	if p == nil {
+		return nil
+	}
+	ap := func(pt Point) Point {
+		x, y := m.Apply(pt.X, pt.Y)
+		return Point{X: x, Y: y}
+	}
+	out := &Path{Segments: make([]Segment, len(p.Segments))}
+	for i, s := range p.Segments {
+		ns := Segment{Kind: s.Kind}
+		switch s.Kind {
+		case MoveTo, LineTo:
+			ns.P0 = ap(s.P0)
+		case CubeTo:
+			ns.P0 = ap(s.P0)
+			ns.P1 = ap(s.P1)
+			ns.P2 = ap(s.P2)
+		case Close:
+			// no points
+		}
+		out.Segments[i] = ns
+	}
+	return out
+}

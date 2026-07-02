@@ -57,6 +57,14 @@ func BuildWithFontsAndPages(ctx context.Context, doc *html.Document, loader reso
 // with no running elements builds an identical tree (byte-identical for every existing
 // caller). Like BuildWithFonts it never panics on malformed input.
 func BuildWithFontsPagesRunning(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, logf func(string, ...any)) (root *cssbox.Box, faces []gcss.FontFace, pages gcss.Stylesheet, running map[string]*cssbox.Box, err error) {
+	return BuildWithFontsPagesRunningMedia(ctx, doc, loader, gcss.MediaScreen, logf)
+}
+
+// BuildWithFontsPagesRunningMedia is BuildWithFontsPagesRunning with an explicit
+// media context: the cascade honors @media rules for media (plus MediaAll rules),
+// so a PDF writer can request MediaPrint. The other Build* helpers default to
+// MediaScreen, so every existing caller is unchanged (byte-identical).
+func BuildWithFontsPagesRunningMedia(ctx context.Context, doc *html.Document, loader resource.ResourceLoader, media gcss.Media, logf func(string, ...any)) (root *cssbox.Box, faces []gcss.FontFace, pages gcss.Stylesheet, running map[string]*cssbox.Box, err error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -74,6 +82,7 @@ func BuildWithFontsPagesRunning(ctx context.Context, doc *html.Document, loader 
 	var sheets []gcss.OriginSheet
 	sheets, faces, pages.Pages = assembleSheets(ctx, doc, loader, logf)
 	resolver := gcss.NewResolver(sheets, logf)
+	resolver.SetMedia(media)
 
 	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root), running)
 	if root == nil {

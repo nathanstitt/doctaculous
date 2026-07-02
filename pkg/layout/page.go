@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 
+	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -150,6 +151,13 @@ type GlyphItem struct {
 	XPt, YPt float64      // pen origin on the baseline, in page space
 	SizePt   float64      // em scale in points
 	Color    color.RGBA
+
+	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
+	// writer). Face is nil when the glyph has no identity (whitespace, or a caller
+	// that predates the seam), in which case paint falls back to filling Outline.
+	Face  *font.Face
+	GID   uint16
+	Runes []rune
 }
 
 // RuleItem is an axis-aligned filled rectangle in page space (points, Y-down). It

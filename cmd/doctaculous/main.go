@@ -1,11 +1,13 @@
 // Command doctaculous is the command-line interface to the doctaculous document
-// toolkit. The current subcommand is "rasterize", which renders PDF pages to
-// images.
+// toolkit. Subcommands: "rasterize" renders document pages to images, and "topdf"
+// converts a reflow document (HTML/URL/DOCX) to a PDF with searchable text.
 package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -24,10 +26,11 @@ func run(args []string) error {
 		return fmt.Errorf("no command given")
 	}
 
-	cmd, rest := args[0], args[1:]
-	switch cmd {
+	switch args[0] {
 	case "rasterize":
-		return rasterizeCmd(rest)
+		return rasterizeCmd(args[1:])
+	case "topdf":
+		return topdfCmd(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("doctaculous", version)
 		return nil
@@ -35,19 +38,96 @@ func run(args []string) error {
 		usage()
 		return nil
 	default:
-		usage()
-		return fmt.Errorf("unknown command %q", cmd)
+		// No explicit subcommand: infer topdf vs rasterize from the --in/--out file
+		// extensions (a .pdf output => topdf; an image output => rasterize).
+		cmd, err := inferCommand(args)
+		if err != nil {
+			usage()
+			return err
+		}
+		if cmd == "topdf" {
+			return topdfCmd(args)
+		}
+		return rasterizeCmd(args)
 	}
+}
+
+// inferCommand picks a subcommand from the flags when none is named. It prefers the
+// output extension (--out): a .pdf output means "topdf", an image output (.png/.jpg/
+// .jpeg) means "rasterize". Failing that it falls back to the input: a .pdf input can
+// only be rasterized, while an .html/.htm/.docx input or an http(s) URL means topdf.
+// It errors (rather than guessing) when neither extension is conclusive.
+func inferCommand(args []string) (string, error) {
+	in := flagValue(args, "in")
+	out := flagValue(args, "out")
+	switch strings.ToLower(filepath.Ext(out)) {
+	case ".pdf":
+		return "topdf", nil
+	case ".png", ".jpg", ".jpeg":
+		return "rasterize", nil
+	}
+	if isHTTPURL(in) {
+		return "topdf", nil
+	}
+	switch strings.ToLower(filepath.Ext(in)) {
+	case ".html", ".htm", ".docx":
+		return "topdf", nil
+	case ".pdf":
+		return "rasterize", nil
+	}
+	return "", fmt.Errorf("cannot infer command; name a subcommand (topdf|rasterize) or use recognizable --in/--out extensions")
+}
+
+// resolveInput returns the single input document from the --in flag or a positional
+// argument. Exactly one source must be given: it errors if both are set (ambiguous)
+// or neither, or if more than one positional argument is present.
+func resolveInput(inFlag string, positional []string) (string, error) {
+	switch {
+	case inFlag != "" && len(positional) > 0:
+		return "", fmt.Errorf("give the input via either --in or a positional argument, not both")
+	case inFlag != "":
+		return inFlag, nil
+	case len(positional) == 1:
+		return positional[0], nil
+	case len(positional) == 0:
+		return "", fmt.Errorf("no input document given (use --in <file> or a positional argument)")
+	default:
+		return "", fmt.Errorf("expected exactly one input document, got %d", len(positional))
+	}
+}
+
+// flagValue returns the value of --name/-name from args, supporting both the
+// "--name value" and "--name=value" forms. It returns "" when absent.
+func flagValue(args []string, name string) string {
+	long, short := "--"+name, "-"+name
+	for i, a := range args {
+		switch {
+		case a == long || a == short:
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+		case strings.HasPrefix(a, long+"="):
+			return strings.TrimPrefix(a, long+"=")
+		case strings.HasPrefix(a, short+"="):
+			return strings.TrimPrefix(a, short+"=")
+		}
+	}
+	return ""
 }
 
 func usage() {
 	fmt.Fprint(os.Stderr, `doctaculous - pure-Go document toolkit
 
 usage:
-  doctaculous rasterize <input.pdf|.docx|.html|URL> [flags]
+  doctaculous topdf     --in <file.html|.docx|URL> --out file.pdf [flags]
+  doctaculous rasterize  --in <file.pdf|.docx|.html|URL> --out file.png [flags]
+  doctaculous --in <input> --out <output>   (subcommand inferred from extensions)
   doctaculous version
   doctaculous help
 
-run "doctaculous rasterize -h" for rasterize flags.
+The input may be given via --in or as a positional argument. When no subcommand is
+named, it is inferred from the --out extension (.pdf => topdf; .png/.jpg => rasterize).
+
+run "doctaculous topdf -h" or "doctaculous rasterize -h" for subcommand flags.
 `)
 }

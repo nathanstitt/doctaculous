@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"sort"
 
+	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -204,6 +205,11 @@ type GlyphFragment struct {
 	// underlined glyphs on a line are painted with one underline rule (see
 	// appendSelfContent).
 	Underline bool
+	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
+	// writer). Face is nil for a glyph with no identity; the rasterizer ignores them.
+	Face  *font.Face
+	GID   uint16
+	Runes []rune
 }
 
 // AppendItems appends f's drawing primitives, and its descendants', to dst in CSS 2.1
@@ -480,7 +486,7 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			}
 			dst = append(dst, layout.Item{
 				Kind:  layout.GlyphKind,
-				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY, SizePt: g.SizePt, Color: g.Color},
+				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes},
 			})
 		}
 		dst = appendUnderlines(dst, ln)

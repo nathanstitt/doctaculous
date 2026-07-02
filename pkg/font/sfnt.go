@@ -47,5 +47,34 @@ func LoadSFNT(data []byte) (*Face, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Face{prog: prog, names: prog.nameToGID()}, nil
+	// Retain the (decompressed) sfnt bytes for PDF embedding. A CFF-flavored sfnt
+	// (an OTTO container with a "CFF " table) embeds as /FontFile3 OpenType, a
+	// glyf-flavored one as /FontFile2; sniff the table directory to tell them apart.
+	kind := ProgramKindTrueType
+	if sfntHasTable(sfnt, "CFF ") {
+		kind = ProgramKindCFF
+	}
+	return &Face{prog: prog, names: prog.nameToGID(), progData: sfnt, progKind: kind}, nil
+}
+
+// sfntHasTable reports whether the sfnt table directory in data declares a table
+// with the 4-byte tag. It is tolerant of a short/malformed directory (returns
+// false rather than panicking).
+func sfntHasTable(data []byte, tag string) bool {
+	if len(data) < 12 || len(tag) != 4 {
+		return false
+	}
+	numTables := int(binary.BigEndian.Uint16(data[4:6]))
+	const dirStart = 12
+	const recSize = 16 // tag(4) + checksum(4) + offset(4) + length(4)
+	for i := 0; i < numTables; i++ {
+		off := dirStart + i*recSize
+		if off+4 > len(data) {
+			return false
+		}
+		if string(data[off:off+4]) == tag {
+			return true
+		}
+	}
+	return false
 }

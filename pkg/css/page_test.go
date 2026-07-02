@@ -19,9 +19,13 @@ func TestParseStylesheetCapturesPage(t *testing.T) {
 	if len(ss.Pages) != 3 {
 		t.Fatalf("got %d @page rules, want 3: %+v", len(ss.Pages), ss.Pages)
 	}
-	// The non-@page at-rule (@media) is still skipped, and the normal rule survives.
-	if len(ss.Rules) != 1 || ss.Rules[0].Declarations[0].Value != "red" {
-		t.Errorf("normal rules = %+v, want one p{color:red}", ss.Rules)
+	// The @media screen block is now captured (tagged MediaScreen); the top-level
+	// rule still comes first. Two rules total, the first being p{color:red}.
+	if len(ss.Rules) != 2 || ss.Rules[0].Declarations[0].Value != "red" {
+		t.Errorf("rules = %+v, want p{color:red} first (+ captured @media a{color:blue})", ss.Rules)
+	}
+	if ss.Rules[1].Media != MediaScreen {
+		t.Errorf("captured @media rule tagged %v, want MediaScreen", ss.Rules[1].Media)
 	}
 
 	// Base rule: A4 landscape => 1123 x 794 (px@96), margin 2cm all sides.

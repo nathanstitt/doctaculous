@@ -233,6 +233,9 @@ func (e *Engine) emitLine(st *flowState, ln inline.Line, xStart, baseline, lineW
 					YPt:     baseline,
 					SizePt:  gl.SizePt,
 					Color:   color.RGBA{R: gl.Color.R, G: gl.Color.G, B: gl.Color.B, A: gl.Color.A},
+					Face:    gl.Face,
+					GID:     gl.GID,
+					Runes:   gl.Runes,
 				},
 			})
 		}

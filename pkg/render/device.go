@@ -33,6 +33,14 @@ type Device interface {
 	// The outline uses the nonzero winding rule. blendMode is the /BM blend mode.
 	FillGlyph(outline *Path, color FillColor, blendMode string)
 
+	// DrawGlyph paints one shaped glyph placed in device space via g.Transform (em
+	// space, Y up, 1 em = 1 unit -> device space). Backends that only rasterize
+	// render g.Face's outline for g.GID and may ignore g.Runes and g.Advance;
+	// backends that emit text (PDF, text extraction) use g.Runes for a ToUnicode
+	// mapping and g.Advance for spacing. g.Blend is the /BM blend mode ("" =
+	// Normal), matching FillGlyph.
+	DrawGlyph(g GlyphRef)
+
 	// FillShading fills the active clip region by evaluating shader at each device
 	// pixel, honoring the active clip and the named blend mode. The device maps each
 	// pixel center from device space into shading (user) space via the inverse of
@@ -55,6 +63,31 @@ type Device interface {
 // FillPaint so glyph rendering need not carry a fill rule).
 type FillColor struct {
 	R, G, B, A uint8
+}
+
+// GlyphRef is one shaped glyph handed to a Device, carrying enough identity for a
+// rasterizing backend (Face+GID outline), a PDF writer (Face+GID embed/subset,
+// Runes for ToUnicode), and a future text-extraction backend (Runes+Transform+
+// Advance for positioned text). It is format-neutral: both the reflow paint layer
+// and the PDF content interpreter can populate it.
+type GlyphRef struct {
+	Face      GlyphFace // font identity; see GlyphFace
+	GID       uint16    // glyph id within Face
+	Runes     []rune    // source characters this glyph represents (the cluster)
+	Transform Matrix    // em space (Y up) -> device space; position, size, skew
+	Advance   float64   // horizontal advance in device units
+	Color     FillColor
+	Blend     string // /BM blend mode ("" = Normal)
+}
+
+// GlyphFace is the minimal view of a font face a Device needs: outline geometry
+// for a GID (rasterizer). The concrete type is *font.Face; this interface keeps
+// pkg/render from importing pkg/font (which would invert the layer dependency). A
+// PDF writer needs more than the outline (program bytes) and type-asserts the
+// concrete *font.Face at its own boundary.
+type GlyphFace interface {
+	// Outline returns gid's outline in em units (Y up), or nil if empty/missing.
+	Outline(gid uint16) *Path
 }
 
 // Shader evaluates a PDF shading: it maps a point in shading (user) space to the

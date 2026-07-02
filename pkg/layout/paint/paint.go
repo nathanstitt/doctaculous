@@ -59,13 +59,28 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 //	scale(size, -size)  — em to points, flipping Y so the font's up becomes page down
 //	translate(X, Y)     — move to the glyph's baseline origin in page space
 //	mat                 — page points to device pixels
+//
+// paintGlyph draws one glyph. When the glyph carries font identity (Face+GID), it
+// uses DrawGlyph so text-emitting backends (PDF) can embed real text; otherwise it
+// falls back to filling the raw outline. The em -> device transform is the same in
+// both cases: Scale(size,-size) · Translate(X,Y) · mat.
 func paintGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) {
-	if g.Outline == nil || g.Outline.Empty() {
-		return
-	}
 	m := render.Scale(g.SizePt, -g.SizePt).
 		Mul(render.Translate(g.XPt, g.YPt)).
 		Mul(mat)
+	if g.Face != nil {
+		dev.DrawGlyph(render.GlyphRef{
+			Face:      g.Face,
+			GID:       g.GID,
+			Runes:     g.Runes,
+			Transform: m,
+			Color:     render.FillColor{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+		})
+		return
+	}
+	if g.Outline == nil || g.Outline.Empty() {
+		return
+	}
 	dev.FillGlyph(transformPath(g.Outline, m), render.FillColor{
 		R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A,
 	}, "")
@@ -323,27 +338,7 @@ func clipRect(dev render.Device, mat render.Matrix, x0, y0, x1, y1 float64) {
 
 // transformPath returns a copy of src with every point mapped through m.
 func transformPath(src *render.Path, m render.Matrix) *render.Path {
-	out := &render.Path{Segments: make([]render.Segment, len(src.Segments))}
-	for i, s := range src.Segments {
-		ns := render.Segment{Kind: s.Kind}
-		switch s.Kind {
-		case render.MoveTo, render.LineTo:
-			ns.P0 = applyPoint(m, s.P0)
-		case render.CubeTo:
-			ns.P0 = applyPoint(m, s.P0)
-			ns.P1 = applyPoint(m, s.P1)
-			ns.P2 = applyPoint(m, s.P2)
-		case render.Close:
-			// no points
-		}
-		out.Segments[i] = ns
-	}
-	return out
-}
-
-func applyPoint(m render.Matrix, p render.Point) render.Point {
-	x, y := m.Apply(p.X, p.Y)
-	return render.Point{X: x, Y: y}
+	return render.TransformPath(src, m)
 }
 
 func moveTo(p *render.Path, m render.Matrix, x, y float64) {

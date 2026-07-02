@@ -11,10 +11,13 @@ type Declaration struct {
 	Important bool
 }
 
-// Rule is a style rule: a selector group plus its declarations.
+// Rule is a style rule: a selector group plus its declarations. Media is the media
+// context the rule applies in (MediaAll for a top-level rule, or the type of an
+// enclosing @media block); RulesForMedia filters on it.
 type Rule struct {
 	Selectors    []Selector
 	Declarations []Declaration
+	Media        Media
 }
 
 // Stylesheet is a parsed CSS document: an ordered list of style rules plus any
@@ -52,6 +55,22 @@ func Parse(src string) Stylesheet {
 				if pr, ok := parsePageRule(rest, body, len(sheet.Pages)); ok {
 					sheet.Pages = append(sheet.Pages, pr)
 				}
+			} else if rest, ok := atKeyword(prelude, "@media"); ok {
+				// Capture the block's rules, tagged with its media type, so a media
+				// context (e.g. print, for PDF output) can select them. The inner body is
+				// itself a stylesheet; parse it and fold its rules (and any nested
+				// @font-face/@page) up, tagging each rule with this block's media. Rules
+				// already tagged (a nested @media) keep their inner tag.
+				m := mediaFromPrelude(rest)
+				inner := Parse(body)
+				for _, r := range inner.Rules {
+					if r.Media == MediaAll {
+						r.Media = m
+					}
+					sheet.Rules = append(sheet.Rules, r)
+				}
+				sheet.FontFaces = append(sheet.FontFaces, inner.FontFaces...)
+				sheet.Pages = append(sheet.Pages, inner.Pages...)
 			}
 			continue // any other at-rule: block already consumed by the scanner
 		}

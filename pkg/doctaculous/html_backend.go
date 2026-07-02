@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/html"
 	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
@@ -29,6 +30,10 @@ type htmlConfig struct {
 	loader       resource.ResourceLoader
 	sys          layoutfont.SystemFontProvider
 	logf         func(string, ...any)
+	// media is the cascade media context. It defaults to css.MediaScreen (the
+	// interactive/HTML render); WithPrintMedia switches it to css.MediaPrint so
+	// @media print rules apply (used for PDF output).
+	media css.Media
 }
 
 // defaultViewportPt is the default layout viewport width in points (px:pt 1:1).
@@ -40,7 +45,7 @@ const defaultViewportPt = 1280
 // applied: the default viewport width, no loader (links are skipped), and a
 // no-op logger.
 func defaultHTMLConfig() htmlConfig {
-	return htmlConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil}
+	return htmlConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil, media: css.MediaScreen}
 }
 
 // WithViewportWidth sets the layout viewport width in CSS pixels (treated 1:1 as
@@ -112,6 +117,14 @@ func WithSystemFontProvider(p layoutfont.SystemFontProvider) HTMLOption {
 // Build and Layout). Defaults to a no-op.
 func WithLogf(f func(string, ...any)) HTMLOption {
 	return func(c *htmlConfig) { c.logf = f }
+}
+
+// WithPrintMedia makes box generation honor @media print rules (and exclude
+// screen-only rules) — the print media context, used for PDF output. Without it the
+// cascade uses the screen context (the default). @media all and top-level rules
+// apply in both, so a document with no @media blocks is unaffected.
+func WithPrintMedia() HTMLOption {
+	return func(c *htmlConfig) { c.media = css.MediaPrint }
 }
 
 // OpenHTML reads and renders an HTML file at path, laying it out at the default
@@ -196,7 +209,7 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 		return nil, fmt.Errorf("doctaculous: parse html: %w", err)
 	}
 	ctx := context.Background()
-	root, fontFaces, pageRules, running, err := layoutcss.BuildWithFontsPagesRunning(ctx, doc, cfg.loader, cfg.logf)
+	root, fontFaces, pageRules, running, err := layoutcss.BuildWithFontsPagesRunningMedia(ctx, doc, cfg.loader, cfg.media, cfg.logf)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
 	}
