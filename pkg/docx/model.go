@@ -29,17 +29,141 @@ type Document struct {
 	Section SectionProps
 }
 
-// Block is a top-level flow item. For now only paragraphs are modeled; tables and
-// other block types are added in later phases.
+// Block is a top-level flow item: exactly one field is non-nil. A paragraph
+// (w:p) or a table (w:tbl).
 type Block struct {
 	// Paragraph is set for a w:p block.
 	Paragraph *Paragraph
+	// Table is set for a w:tbl block.
+	Table *Table
 }
 
-// Paragraph is a w:p: a sequence of runs sharing paragraph-level properties.
+// Paragraph is a w:p: a sequence of inline children (runs, hyperlink groups,
+// drawings) sharing paragraph-level properties.
 type Paragraph struct {
-	Props ParagraphProps
-	Runs  []Run
+	Props   ParagraphProps
+	Content []ParaChild
+}
+
+// ParaChild is one inline-level member of a paragraph's content: exactly one
+// field is non-nil. A bare Run, a Hyperlink group wrapping runs, or a Drawing
+// (an embedded image).
+type ParaChild struct {
+	Run       *Run
+	Hyperlink *Hyperlink
+	Drawing   *Drawing
+}
+
+// Hyperlink is a w:hyperlink: a group of runs that link to Target (an external
+// URL resolved from the r:id relationship) or Anchor (an internal bookmark).
+// Later phases populate it; Phase 1 only declares it.
+type Hyperlink struct {
+	Target string
+	Anchor string
+	Runs   []Run
+}
+
+// Drawing is a w:drawing carrying an embedded image: RelID references the image
+// part via the document relationships; WidthEMU/HeightEMU are the extent (914400
+// EMU = 1in). Later phases populate it; Phase 1 only declares it.
+type Drawing struct {
+	RelID     string
+	WidthEMU  int64
+	HeightEMU int64
+}
+
+// Table is a w:tbl: a column grid plus rows. Props carries table-level borders,
+// shading, width, and alignment. Later phases populate Props; Phase 1 declares
+// the shape.
+type Table struct {
+	Grid  []Twips // w:tblGrid column widths
+	Rows  []TableRow
+	Props TableProps
+}
+
+// TableRow is a w:tr. Props carries row height and header/split flags.
+type TableRow struct {
+	Cells []TableCell
+	Props RowProps
+}
+
+// TableCell is a w:tc. Blocks holds the cell's content (paragraphs, nested
+// tables — the recursion). GridSpan is w:gridSpan (horizontal span; default 1).
+// VMerge records vertical merging (row spanning). Props carries cell borders,
+// shading, width, and vertical alignment.
+type TableCell struct {
+	Blocks   []Block
+	GridSpan int
+	VMerge   VMergeKind
+	Props    CellProps
+}
+
+// VMergeKind classifies a cell's w:vMerge state.
+type VMergeKind int
+
+const (
+	// VMergeNone means the cell is not vertically merged.
+	VMergeNone VMergeKind = iota
+	// VMergeRestart begins a vertical merge (w:vMerge val="restart" or a bare
+	// w:vMerge with no val on the first row of a span).
+	VMergeRestart
+	// VMergeContinue continues the merge above (w:vMerge val="continue").
+	VMergeContinue
+)
+
+// TableProps holds table-level properties (w:tblPr). Fields are populated in the
+// tables phase.
+type TableProps struct {
+	Borders  BoxBorders
+	Shading  Shading
+	WidthPct int   // w:tblW type="pct" (in fiftieths of a percent per OOXML); 0 = unset
+	WidthDxa Twips // w:tblW type="dxa"; 0 = unset
+	Justify  Justify
+}
+
+// RowProps holds row-level properties (w:trPr). Populated in the tables phase.
+type RowProps struct {
+	IsHeader  bool  // w:tblHeader
+	HeightDxa Twips // w:trHeight
+}
+
+// CellProps holds cell-level properties (w:tcPr). Populated in the tables phase.
+type CellProps struct {
+	Borders  BoxBorders
+	Shading  Shading
+	WidthDxa Twips // w:tcW type="dxa"; 0 = unset
+	VAlign   CellVAlign
+}
+
+// CellVAlign is a cell's vertical alignment (w:vAlign).
+type CellVAlign int
+
+const (
+	VAlignTop CellVAlign = iota
+	VAlignCenter
+	VAlignBottom
+)
+
+// BoxBorders holds the four edge borders of a table or cell. Populated in the
+// tables phase.
+type BoxBorders struct {
+	Top, Bottom, Left, Right Border
+}
+
+// Border is one edge border (w:tblBorders/w:tcBorders child). SizeEighthPt is
+// w:sz in eighths of a point. None is true when style="nil"/"none".
+type Border struct {
+	None         bool
+	SizeEighthPt int
+	Color        color.RGBA
+	HasColor     bool
+}
+
+// Shading is a cell/table background fill (w:shd). HasFill distinguishes an
+// explicit fill from "unset"/"auto".
+type Shading struct {
+	Fill    color.RGBA
+	HasFill bool
 }
 
 // Run is a w:r: a span of text sharing run-level (character) properties, plus an
