@@ -43,6 +43,55 @@ func TestParseTableGridRowsCells(t *testing.T) {
 	}
 }
 
+func TestParseTableProps(t *testing.T) {
+	doc := mustParse(t, `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:tbl>
+  <w:tblPr>
+    <w:tblW w:type="dxa" w:w="5000"/>
+    <w:jc w:val="center"/>
+    <w:tblBorders>
+      <w:top w:sz="8" w:color="FF0000"/>
+      <w:bottom w:sz="8" w:color="FF0000"/>
+    </w:tblBorders>
+  </w:tblPr>
+  <w:tr>
+    <w:tc>
+      <w:tcPr>
+        <w:tcW w:type="dxa" w:w="2500"/>
+        <w:vAlign w:val="center"/>
+        <w:shd w:fill="EEEEEE"/>
+      </w:tcPr>
+      <w:p><w:r><w:t>c</w:t></w:r></w:p>
+    </w:tc>
+  </w:tr>
+</w:tbl>
+</w:body></w:document>`)
+	tb := doc.Body[0].Table
+	if tb.Props.WidthDxa != 5000 {
+		t.Fatalf("table WidthDxa = %d, want 5000", tb.Props.WidthDxa)
+	}
+	if tb.Props.Justify != JustifyCenter {
+		t.Fatalf("table Justify = %v, want center", tb.Props.Justify)
+	}
+	if tb.Props.Borders.Top.None || tb.Props.Borders.Top.SizeEighthPt != 8 {
+		t.Fatalf("table top border = %+v, want sz 8", tb.Props.Borders.Top)
+	}
+	if !tb.Props.Borders.Top.HasColor || tb.Props.Borders.Top.Color.R != 0xFF {
+		t.Fatalf("table top border color = %+v, want red", tb.Props.Borders.Top)
+	}
+	cell := tb.Rows[0].Cells[0]
+	if cell.Props.WidthDxa != 2500 {
+		t.Fatalf("cell WidthDxa = %d, want 2500", cell.Props.WidthDxa)
+	}
+	if cell.Props.VAlign != VAlignCenter {
+		t.Fatalf("cell VAlign = %v, want center", cell.Props.VAlign)
+	}
+	if !cell.Props.Shading.HasFill || cell.Props.Shading.Fill.R != 0xEE {
+		t.Fatalf("cell shading = %+v, want #EEEEEE", cell.Props.Shading)
+	}
+}
+
 func TestParseTableVMerge(t *testing.T) {
 	doc := mustParse(t, `<?xml version="1.0"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>

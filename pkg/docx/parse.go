@@ -636,21 +636,79 @@ func parseTc(dec *xml.Decoder) (TableCell, error) {
 	}
 }
 
-// parseTblPr consumes a w:tblPr. Task 2.2 reads borders/shading/width/jc; this
-// stub skips the body so structural parsing works first.
+// parseTblPr reads w:tblPr: table width (w:tblW), alignment (w:jc), and borders
+// (w:tblBorders) / shading (w:shd).
 func parseTblPr(dec *xml.Decoder) (TableProps, error) {
 	var props TableProps
-	return props, skipElement(dec, "tblPr")
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return props, fmt.Errorf("%w: tblPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "tblW":
+					applyTblW(&props.WidthDxa, &props.WidthPct, t)
+				case "jc":
+					props.Justify = parseJustify(wVal(t))
+				case "tblBorders":
+					b, err := parseBorders(dec, "tblBorders")
+					if err != nil {
+						return props, err
+					}
+					props.Borders = b
+					continue
+				case "shd":
+					props.Shading = parseShd(t)
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return props, fmt.Errorf("%w: tblPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tblPr" {
+				return props, nil
+			}
+		}
+	}
 }
 
-// parseTrPr consumes a w:trPr (row height / header flag in Task 2.2).
+// parseTrPr reads w:trPr: the header-row flag (w:tblHeader) and row height
+// (w:trHeight).
 func parseTrPr(dec *xml.Decoder) (RowProps, error) {
 	var props RowProps
-	return props, skipElement(dec, "trPr")
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return props, fmt.Errorf("%w: trPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "tblHeader":
+					props.IsHeader = parseOnOff(wVal(t))
+				case "trHeight":
+					if v, ok := wAttrInt(t, "val"); ok {
+						props.HeightDxa = Twips(v)
+					}
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return props, fmt.Errorf("%w: trPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "trPr" {
+				return props, nil
+			}
+		}
+	}
 }
 
 // parseTcPr consumes a w:tcPr, returning cell props plus the gridSpan and vMerge
-// state (both needed for structure, so they are read here, not deferred).
+// state.
 func parseTcPr(dec *xml.Decoder) (props CellProps, gridSpan int, vmerge VMergeKind, err error) {
 	for {
 		tok, terr := dec.Token()
@@ -667,6 +725,20 @@ func parseTcPr(dec *xml.Decoder) (props CellProps, gridSpan int, vmerge VMergeKi
 					}
 				case "vMerge":
 					vmerge = parseVMerge(t)
+				case "tcW":
+					var pct int
+					applyTblW(&props.WidthDxa, &pct, t)
+				case "vAlign":
+					props.VAlign = parseVAlign(wVal(t))
+				case "tcBorders":
+					b, berr := parseBorders(dec, "tcBorders")
+					if berr != nil {
+						return props, gridSpan, vmerge, berr
+					}
+					props.Borders = b
+					continue
+				case "shd":
+					props.Shading = parseShd(t)
 				}
 			}
 			if serr := dec.Skip(); serr != nil {
@@ -680,6 +752,102 @@ func parseTcPr(dec *xml.Decoder) (props CellProps, gridSpan int, vmerge VMergeKi
 	}
 }
 
+// applyTblW reads a w:tblW / w:tcW measurement. type="dxa" is twips; type="pct"
+// is fiftieths of a percent. Only one of dxa/pct is set.
+func applyTblW(dxa *Twips, pct *int, e xml.StartElement) {
+	typ, _ := wAttr(e, "type")
+	v, ok := wAttrInt(e, "w")
+	if !ok {
+		return
+	}
+	switch typ {
+	case "pct":
+		*pct = v
+	default: // "dxa" or unspecified
+		*dxa = Twips(v)
+	}
+}
+
+// parseVAlign maps a w:vAlign value to a CellVAlign.
+func parseVAlign(val string) CellVAlign {
+	switch val {
+	case "center":
+		return VAlignCenter
+	case "bottom":
+		return VAlignBottom
+	default:
+		return VAlignTop
+	}
+}
+
+// parseShd reads a w:shd fill into a Shading. fill="auto" or absent yields no
+// fill (HasFill false).
+func parseShd(e xml.StartElement) Shading {
+	fill, _ := wAttr(e, "fill")
+	if c, ok := parseColor(fill); ok {
+		return Shading{Fill: c, HasFill: true}
+	}
+	return Shading{}
+}
+
+// parseBorders reads a w:tblBorders / w:tcBorders element's four edges. name is
+// the wrapping element's local name (so the loop knows its end tag).
+func parseBorders(dec *xml.Decoder, name string) (BoxBorders, error) {
+	var b BoxBorders
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return b, fmt.Errorf("%w: %s: %v", ErrMalformedXML, name, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				border := parseBorder(t)
+				switch t.Name.Local {
+				case "top":
+					b.Top = border
+				case "bottom":
+					b.Bottom = border
+				case "left", "start":
+					b.Left = border
+				case "right", "end":
+					b.Right = border
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return b, fmt.Errorf("%w: %s: %v", ErrMalformedXML, name, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == name {
+				return b, nil
+			}
+		}
+	}
+}
+
+// parseBorder reads one border edge element (w:sz eighths-of-a-point, w:color,
+// w:val style). val="nil"/"none" marks the edge as no-border.
+func parseBorder(e xml.StartElement) Border {
+	var bd Border
+	if v := wVal(e); v == "nil" || v == "none" {
+		bd.None = true
+	}
+	if v, ok := wAttrInt(e, "sz"); ok {
+		bd.SizeEighthPt = v
+	}
+	if c, ok := parseColor(mustColorAttr(e)); ok {
+		bd.Color = c
+		bd.HasColor = true
+	}
+	return bd
+}
+
+// mustColorAttr returns the w:color attribute value, or "" if absent.
+func mustColorAttr(e xml.StartElement) string {
+	v, _ := wAttr(e, "color")
+	return v
+}
+
 // parseVMerge maps a w:vMerge element to a VMergeKind. A bare w:vMerge with no val
 // (or val="restart") begins a merge; val="continue" continues it.
 func parseVMerge(e xml.StartElement) VMergeKind {
@@ -688,27 +856,6 @@ func parseVMerge(e xml.StartElement) VMergeKind {
 		return VMergeContinue
 	default: // "restart" or empty
 		return VMergeRestart
-	}
-}
-
-// skipElement consumes tokens until the matching end element of name, discarding
-// them. It is used by props stubs that do not yet read their body.
-func skipElement(dec *xml.Decoder, name string) error {
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return fmt.Errorf("%w: %s: %v", ErrMalformedXML, name, err)
-		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			if err := dec.Skip(); err != nil {
-				return fmt.Errorf("%w: %s: %v", ErrMalformedXML, name, err)
-			}
-		case xml.EndElement:
-			if t.Name.Local == name {
-				return nil
-			}
-		}
 	}
 }
 
