@@ -850,6 +850,13 @@ func (e *Engine) solveAutoWidths(ctx context.Context, g *tableGrid, contentW flo
 	var used float64
 	if w, ok := specifiedFixedWidth(g.table); ok {
 		used = w - spacing
+	} else if _, pct := pctWidthOf(g.table); pct {
+		// A PERCENTAGE table width (the classic <table width="100%">) is a DEFINITE width:
+		// the caller has already resolved it into contentW, so the table fills the available
+		// content width and the surplus over the columns' max-content is distributed across
+		// them (CSS 17.5.2 — a specified table width ≥ the columns' max is honored). This is
+		// distinct from width:auto (the else branch), which shrink-wraps to sumMax.
+		used = avail
 	} else {
 		used = sumMax
 		if used > avail {

@@ -264,6 +264,43 @@ func TestPercentColumnTakesShare(t *testing.T) {
 	}
 }
 
+// TestPercentTableWidthFillsAvailable covers a table with a PERCENTAGE width (the
+// classic <table width="100%">): its used width is the resolved percentage of the
+// containing block (which the caller has already folded into contentW), NOT the natural
+// content width. So when the content is far narrower than the available width, the
+// surplus is distributed across the auto columns to fill it — the columns must span the
+// full width, not sit shrink-wrapped at the left. (A width:auto table, by contrast,
+// shrinks to content — TestAutoTableColumnsSizeToContent.)
+func TestPercentTableWidthFillsAvailable(t *testing.T) {
+	mkCell := func(text string) *cssbox.Box {
+		st := gcss.ComputedStyle{FontSizePt: 16, FontFamily: "serif",
+			Width: gcss.Length{Unit: gcss.UnitAuto}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}
+		txt := &cssbox.Box{Kind: cssbox.BoxText, Text: text, Display: cssbox.DisplayInline, Style: st}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell,
+			Formatting: cssbox.InlineFC, Style: st, Children: []*cssbox.Box{txt}}
+	}
+	// width:100% table with two short-content columns.
+	st := gcss.ComputedStyle{TableLayout: "auto",
+		Width: gcss.Length{Value: 100, Unit: gcss.UnitPercent}, MaxWidth: gcss.Length{Unit: gcss.UnitAuto}}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{mkCell("Hi"), mkCell("Go")}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: st, Children: []*cssbox.Box{rg}}
+
+	e := New(nil, nil, nil)
+	g := buildGrid(tbl)
+	// contentW=600 is the table's resolved 100% content width (the caller resolved the
+	// percentage before calling solveAutoWidths).
+	e.solveAutoWidths(context.Background(), g, 600)
+	total := g.cols[0].width + g.cols[1].width
+	if total < 599 || total > 601 {
+		t.Errorf("a width:100%% table must fill its 600 available width; got %v (col0=%v col1=%v)",
+			total, g.cols[0].width, g.cols[1].width)
+	}
+}
+
 func TestColspanRaisesSpannedColumns(t *testing.T) {
 	// Row 0: a single wide cell spanning 2 columns (specified width 200).
 	// Row 1: two narrow cells (spec 30 each).
