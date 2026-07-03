@@ -69,13 +69,24 @@ func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
 	if d == nil || r == nil {
 		return root
 	}
-	for _, blk := range d.Body {
-		if blk.Paragraph == nil {
-			continue
-		}
-		body.Children = append(body.Children, lowerParagraph(blk.Paragraph, r)...)
-	}
+	body.Children = lowerBlocks(d.Body, r)
 	return root
+}
+
+// lowerBlocks lowers a sequence of DOCX blocks (paragraphs and tables) into
+// cssbox boxes. It is shared by the document body and by table cells (cell
+// content recursion).
+func lowerBlocks(blocks []docx.Block, r *style.Resolver) []*lcssbox.Box {
+	var out []*lcssbox.Box
+	for _, blk := range blocks {
+		switch {
+		case blk.Paragraph != nil:
+			out = append(out, lowerParagraph(blk.Paragraph, r)...)
+		case blk.Table != nil:
+			out = append(out, lowerTable(blk.Table, r))
+		}
+	}
+	return out
 }
 
 // lowerParagraph resolves a paragraph's effective formatting and lowers its runs

@@ -43,6 +43,18 @@ var Core = []CoreFixture{
 		Pages: 2,
 		Build: multipageDocx,
 	},
+	{
+		Name:  "table",
+		Desc:  "a 2x2 bordered table with shaded header cells",
+		Pages: 1,
+		Build: tableDocx,
+	},
+	{
+		Name:  "table-spans",
+		Desc:  "a table exercising gridSpan (colspan) and vMerge (rowspan)",
+		Pages: 1,
+		Build: tableSpansDocx,
+	},
 }
 
 const docOpen = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -124,3 +136,62 @@ const styledStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:rPr><w:b/><w:sz w:val="32"/><w:color w:val="2E74B5"/></w:rPr>
   </w:style>
 </w:styles>`
+
+// cellBorders is a per-cell w:tcBorders fragment drawing a thin border on all four
+// edges in the given RRGGBB color. Per-cell borders (unlike the table-level
+// w:insideH/w:insideV, which this parser does not read) are honored, so the grid
+// lines between cells actually render.
+func cellBorders(color string) string {
+	edge := func(side string) string {
+		return `<w:` + side + ` w:val="single" w:sz="4" w:color="` + color + `"/>`
+	}
+	return `<w:tcBorders>` + edge("top") + edge("bottom") + edge("left") + edge("right") + `</w:tcBorders>`
+}
+
+// tblCell wraps cell content XML in a w:tc with optional tcPr (raw XML).
+func tblCell(tcPr, content string) string {
+	inner := ""
+	if tcPr != "" {
+		inner = "<w:tcPr>" + tcPr + "</w:tcPr>"
+	}
+	return "<w:tc>" + inner + content + "</w:tc>"
+}
+
+// tableDocx builds a 2x2 table: a shaded, header row over a body row, with a thin
+// black grid drawn from per-cell borders (sz=4 eighths-of-a-point ≈ 0.5pt).
+func tableDocx() []byte {
+	tblPr := `<w:tblPr><w:tblW w:type="dxa" w:w="8000"/></w:tblPr>`
+	grid := `<w:tblGrid><w:gridCol w:w="4000"/><w:gridCol w:w="4000"/></w:tblGrid>`
+	hdr := cellBorders("000000") + `<w:shd w:fill="D9E2F3"/>`
+	body := cellBorders("000000")
+	row1 := "<w:tr>" +
+		tblCell(hdr, para("", "", "Name")) +
+		tblCell(hdr, para("", "", "Score")) + "</w:tr>"
+	row2 := "<w:tr>" +
+		tblCell(body, para("", "", "Alice")) +
+		tblCell(body, para("", "", "42")) + "</w:tr>"
+	tbl := "<w:tbl>" + tblPr + grid + row1 + row2 + "</w:tbl>"
+	doc := docOpen + para("", "", "A table:") + tbl + docClose
+	return New().SetDocument(doc).Bytes()
+}
+
+// tableSpansDocx builds a 3-column table where a header cell spans two rows (vMerge
+// restart/continue) in column 0 and a body cell spans two columns (gridSpan) in row 2.
+// Per-cell borders make the span geometry visible.
+func tableSpansDocx() []byte {
+	tblPr := `<w:tblPr><w:tblW w:type="dxa" w:w="8000"/></w:tblPr>`
+	grid := `<w:tblGrid><w:gridCol w:w="2666"/><w:gridCol w:w="2667"/><w:gridCol w:w="2667"/></w:tblGrid>`
+	bd := cellBorders("333333")
+	// Row 1: a vMerge-restart cell in col 0, then two normal cells.
+	row1 := "<w:tr>" +
+		tblCell(bd+`<w:vMerge w:val="restart"/>`, para("", "", "Merged")) +
+		tblCell(bd, para("", "", "B")) +
+		tblCell(bd, para("", "", "C")) + "</w:tr>"
+	// Row 2: the vMerge-continue cell (col 0, covered), then a gridSpan=2 cell.
+	row2 := "<w:tr>" +
+		tblCell(bd+`<w:vMerge w:val="continue"/>`, para("", "", "")) +
+		tblCell(bd+`<w:gridSpan w:val="2"/>`, para("", "", "Spans two columns")) + "</w:tr>"
+	tbl := "<w:tbl>" + tblPr + grid + row1 + row2 + "</w:tbl>"
+	doc := docOpen + tbl + docClose
+	return New().SetDocument(doc).Bytes()
+}

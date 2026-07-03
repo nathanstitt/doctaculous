@@ -126,17 +126,6 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 				continue
 			}
 			switch t.Name.Local {
-			case "p":
-				p, sect, err := parseParagraph(dec)
-				if err != nil {
-					return err
-				}
-				doc.Body = append(doc.Body, Block{Paragraph: p})
-				// A sectPr inside the last paragraph's pPr is the section for that
-				// run of content; for a single-section document it is the whole doc.
-				if sect != nil {
-					doc.Section = *sect
-				}
 			case "sectPr":
 				sect, err := parseSectPr(dec)
 				if err != nil {
@@ -144,8 +133,15 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 				}
 				doc.Section = sect
 			default:
-				if err := dec.Skip(); err != nil {
-					return fmt.Errorf("%w: body: %v", ErrMalformedXML, err)
+				blk, sect, err := parseBlockChild(dec, t)
+				if err != nil {
+					return err
+				}
+				if blk != nil {
+					doc.Body = append(doc.Body, *blk)
+				}
+				if sect != nil {
+					doc.Section = *sect
 				}
 			}
 		case xml.EndElement:
@@ -153,6 +149,32 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 				return nil
 			}
 		}
+	}
+}
+
+// parseBlockChild dispatches a block-level start element (w:p or w:tbl) shared by
+// the body and by table cells. It returns the parsed block (nil for an element it
+// skips) and any sectPr found in a paragraph's pPr (a section boundary; nil in a
+// cell context). start is the already-read start element.
+func parseBlockChild(dec *xml.Decoder, start xml.StartElement) (*Block, *SectionProps, error) {
+	switch start.Name.Local {
+	case "p":
+		p, sect, err := parseParagraph(dec)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &Block{Paragraph: p}, sect, nil
+	case "tbl":
+		tb, err := parseTbl(dec)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &Block{Table: tb}, nil, nil
+	default:
+		if err := dec.Skip(); err != nil {
+			return nil, nil, fmt.Errorf("%w: block: %v", ErrMalformedXML, err)
+		}
+		return nil, nil, nil
 	}
 }
 
@@ -451,6 +473,390 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 		} else if v, ok := wAttr(e, "hAnsi"); ok && v != "" {
 			props.Family = v
 		}
+	}
+}
+
+// parseTbl consumes a w:tbl into a Table: its grid, rows, and (Task 2.2) props.
+func parseTbl(dec *xml.Decoder) (*Table, error) {
+	tb := &Table{}
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: tbl: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: tbl: %v", ErrMalformedXML, err)
+				}
+				continue
+			}
+			switch t.Name.Local {
+			case "tblGrid":
+				grid, err := parseTblGrid(dec)
+				if err != nil {
+					return nil, err
+				}
+				tb.Grid = grid
+			case "tblPr":
+				props, err := parseTblPr(dec)
+				if err != nil {
+					return nil, err
+				}
+				tb.Props = props
+			case "tr":
+				row, err := parseTr(dec)
+				if err != nil {
+					return nil, err
+				}
+				tb.Rows = append(tb.Rows, row)
+			default:
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: tbl: %v", ErrMalformedXML, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tbl" {
+				return tb, nil
+			}
+		}
+	}
+}
+
+// parseTblGrid reads the w:gridCol widths of a w:tblGrid.
+func parseTblGrid(dec *xml.Decoder) ([]Twips, error) {
+	var grid []Twips
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: tblGrid: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "gridCol" {
+				if v, ok := wAttrInt(t, "w"); ok {
+					grid = append(grid, Twips(v))
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return nil, fmt.Errorf("%w: tblGrid: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tblGrid" {
+				return grid, nil
+			}
+		}
+	}
+}
+
+// parseTr consumes a w:tr into a TableRow.
+func parseTr(dec *xml.Decoder) (TableRow, error) {
+	var row TableRow
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return row, fmt.Errorf("%w: tr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return row, fmt.Errorf("%w: tr: %v", ErrMalformedXML, err)
+				}
+				continue
+			}
+			switch t.Name.Local {
+			case "trPr":
+				props, err := parseTrPr(dec)
+				if err != nil {
+					return row, err
+				}
+				row.Props = props
+			case "tc":
+				cell, err := parseTc(dec)
+				if err != nil {
+					return row, err
+				}
+				row.Cells = append(row.Cells, cell)
+			default:
+				if err := dec.Skip(); err != nil {
+					return row, fmt.Errorf("%w: tr: %v", ErrMalformedXML, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tr" {
+				return row, nil
+			}
+		}
+	}
+}
+
+// parseTc consumes a w:tc into a TableCell, recursing into its block content.
+func parseTc(dec *xml.Decoder) (TableCell, error) {
+	cell := TableCell{GridSpan: 1}
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return cell, fmt.Errorf("%w: tc: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return cell, fmt.Errorf("%w: tc: %v", ErrMalformedXML, err)
+				}
+				continue
+			}
+			switch t.Name.Local {
+			case "tcPr":
+				props, span, vmerge, err := parseTcPr(dec)
+				if err != nil {
+					return cell, err
+				}
+				cell.Props = props
+				if span > 0 {
+					cell.GridSpan = span
+				}
+				cell.VMerge = vmerge
+			default:
+				blk, _, err := parseBlockChild(dec, t)
+				if err != nil {
+					return cell, err
+				}
+				if blk != nil {
+					cell.Blocks = append(cell.Blocks, *blk)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tc" {
+				return cell, nil
+			}
+		}
+	}
+}
+
+// parseTblPr reads w:tblPr: table width (w:tblW), alignment (w:jc), and borders
+// (w:tblBorders) / shading (w:shd).
+func parseTblPr(dec *xml.Decoder) (TableProps, error) {
+	var props TableProps
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return props, fmt.Errorf("%w: tblPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "tblW":
+					applyTblW(&props.WidthDxa, &props.WidthPct, t)
+				case "jc":
+					props.Justify = parseJustify(wVal(t))
+				case "tblBorders":
+					b, err := parseBorders(dec, "tblBorders")
+					if err != nil {
+						return props, err
+					}
+					props.Borders = b
+					continue
+				case "shd":
+					props.Shading = parseShd(t)
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return props, fmt.Errorf("%w: tblPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tblPr" {
+				return props, nil
+			}
+		}
+	}
+}
+
+// parseTrPr reads w:trPr: the header-row flag (w:tblHeader) and row height
+// (w:trHeight).
+func parseTrPr(dec *xml.Decoder) (RowProps, error) {
+	var props RowProps
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return props, fmt.Errorf("%w: trPr: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "tblHeader":
+					props.IsHeader = parseOnOff(wVal(t))
+				case "trHeight":
+					if v, ok := wAttrInt(t, "val"); ok {
+						props.HeightDxa = Twips(v)
+					}
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return props, fmt.Errorf("%w: trPr: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "trPr" {
+				return props, nil
+			}
+		}
+	}
+}
+
+// parseTcPr consumes a w:tcPr, returning cell props plus the gridSpan and vMerge
+// state.
+func parseTcPr(dec *xml.Decoder) (props CellProps, gridSpan int, vmerge VMergeKind, err error) {
+	for {
+		tok, terr := dec.Token()
+		if terr != nil {
+			return props, gridSpan, vmerge, fmt.Errorf("%w: tcPr: %v", ErrMalformedXML, terr)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "gridSpan":
+					if v, ok := wAttrInt(t, "val"); ok {
+						gridSpan = v
+					}
+				case "vMerge":
+					vmerge = parseVMerge(t)
+				case "tcW":
+					// Cells carry only a dxa width in the model; a pct cell width is dropped.
+					var pct int
+					applyTblW(&props.WidthDxa, &pct, t)
+				case "vAlign":
+					props.VAlign = parseVAlign(wVal(t))
+				case "tcBorders":
+					b, berr := parseBorders(dec, "tcBorders")
+					if berr != nil {
+						return props, gridSpan, vmerge, berr
+					}
+					props.Borders = b
+					continue
+				case "shd":
+					props.Shading = parseShd(t)
+				}
+			}
+			if serr := dec.Skip(); serr != nil {
+				return props, gridSpan, vmerge, fmt.Errorf("%w: tcPr: %v", ErrMalformedXML, serr)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tcPr" {
+				return props, gridSpan, vmerge, nil
+			}
+		}
+	}
+}
+
+// applyTblW reads a w:tblW / w:tcW measurement. type="dxa" is twips; type="pct"
+// is fiftieths of a percent. Only one of dxa/pct is set.
+func applyTblW(dxa *Twips, pct *int, e xml.StartElement) {
+	typ, _ := wAttr(e, "type")
+	v, ok := wAttrInt(e, "w")
+	if !ok {
+		return
+	}
+	switch typ {
+	case "pct":
+		*pct = v
+	default: // "dxa" or unspecified
+		*dxa = Twips(v)
+	}
+}
+
+// parseVAlign maps a w:vAlign value to a CellVAlign.
+func parseVAlign(val string) CellVAlign {
+	switch val {
+	case "center":
+		return VAlignCenter
+	case "bottom":
+		return VAlignBottom
+	default:
+		return VAlignTop
+	}
+}
+
+// parseShd reads a w:shd fill into a Shading. fill="auto" or absent yields no
+// fill (HasFill false).
+func parseShd(e xml.StartElement) Shading {
+	fill, _ := wAttr(e, "fill")
+	if c, ok := parseColor(fill); ok {
+		return Shading{Fill: c, HasFill: true}
+	}
+	return Shading{}
+}
+
+// parseBorders reads a w:tblBorders / w:tcBorders element's four edges. name is
+// the wrapping element's local name (so the loop knows its end tag).
+func parseBorders(dec *xml.Decoder, name string) (BoxBorders, error) {
+	var b BoxBorders
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return b, fmt.Errorf("%w: %s: %v", ErrMalformedXML, name, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				border := parseBorder(t)
+				switch t.Name.Local {
+				case "top":
+					b.Top = border
+				case "bottom":
+					b.Bottom = border
+				case "left", "start":
+					b.Left = border
+				case "right", "end":
+					b.Right = border
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return b, fmt.Errorf("%w: %s: %v", ErrMalformedXML, name, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == name {
+				return b, nil
+			}
+		}
+	}
+}
+
+// parseBorder reads one border edge element (w:sz eighths-of-a-point, w:color,
+// w:val style). val="nil"/"none" marks the edge as no-border.
+func parseBorder(e xml.StartElement) Border {
+	var bd Border
+	if v := wVal(e); v == "nil" || v == "none" {
+		bd.None = true
+	}
+	if v, ok := wAttrInt(e, "sz"); ok {
+		bd.SizeEighthPt = v
+	}
+	if c, ok := parseColor(wColor(e)); ok {
+		bd.Color = c
+		bd.HasColor = true
+	}
+	return bd
+}
+
+// wColor returns the w:color attribute value, or "" if absent.
+func wColor(e xml.StartElement) string {
+	v, _ := wAttr(e, "color")
+	return v
+}
+
+// parseVMerge maps a w:vMerge element to a VMergeKind. A bare w:vMerge with no val
+// (or val="restart") begins a merge; val="continue" continues it.
+func parseVMerge(e xml.StartElement) VMergeKind {
+	switch wVal(e) {
+	case "continue":
+		return VMergeContinue
+	default: // "restart" or empty
+		return VMergeRestart
 	}
 }
 
