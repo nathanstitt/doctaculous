@@ -39,18 +39,17 @@ next. (**EPUB is out of scope** — see the out-of-scope note at the bottom.)
 backend · `pkg/doctaculous` public API · `cmd/doctaculous` thin CLI.
 
 **Reflowable documents** (DOCX and HTML) share a second pipeline that meets the PDF
-pipeline at `render.Device`. During the HTML-rendering program there are **two box models**: the
-existing **flat** model (`pkg/layout/box.Document` — DOCX's `pkg/docx` parse → `pkg/docx/style`
-cascade → `pkg/docx/lower` → `pkg/layout` reflow engine → `pkg/layout/paint`), and a **recursive,
-format-neutral** model (`pkg/layout/cssbox`) that the CSS layout engine (`pkg/layout/css`) consumes. A
-reflow frontend is a parse+lower step producing one of these box models (DOCX → `box.Document` today;
-HTML → `cssbox` via `pkg/html` + `pkg/css` + `pkg/layout/css`); it never touches line-breaking or
-pagination. Both engines now share one **inline-layout core** (`pkg/layout/inline`: shaping,
-greedy line-breaking, alignment/justification math), so the flat engine and the CSS inline formatting
-context use the same shaper and breaker. These converge late: a dedicated sub-project re-points DOCX
-lowering onto `cssbox` and retires the flat model, so one recursive engine drives every reflow format.
-Font outlines for both pipelines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces
-for reflow); `pkg/layout/font` caches them.
+pipeline at `render.Device`. There is now **one recursive, format-neutral box model**
+(`pkg/layout/cssbox`) that the CSS layout engine (`pkg/layout/css`) consumes, driving **every** reflow
+format — the earlier **flat** model (`pkg/layout/box.Document`) and its flat engine (`pkg/layout/flow`)
+have been **deleted** (the DOCX→cssbox convergence). A reflow frontend is a parse+lower step producing a
+`cssbox` tree with resolved `css.ComputedStyle`: DOCX → `cssbox` via `pkg/docx` parse → `pkg/docx/style`
+cascade → `pkg/docx/cssbox` lowering; HTML → `cssbox` via `pkg/html` + `pkg/css` + `pkg/layout/css` box
+generation. A frontend never touches line-breaking or pagination. The engine uses one **inline-layout
+core** (`pkg/layout/inline`: shaping, greedy line-breaking, alignment/justification math). `pkg/layout`
+retains only the shared output types (`Pages`/`Page`/`Item`) and `pkg/layout/paint`, consumed by the
+CSS engine. Font outlines come from `pkg/font` (`pkg/font/family.go` exposes named-family faces for
+reflow); `pkg/layout/font` caches them.
 
 The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML)
 must stay backend-agnostic so we can add an SVG/other backend later without touching parsing,
@@ -177,12 +176,32 @@ what is done vs. pending.
   properties (bold/italic/underline, `w:sz`, `w:color`, `w:rFonts`), paragraph properties
   (`w:jc`, `w:spacing`, `w:ind`, `w:pStyle`, `w:pageBreakBefore`), and section geometry
   (`w:sectPr` pgSz/pgMar). Styles (`pkg/docx/style`): the full `docDefaults → basedOn chain →
-  direct` cascade with a cycle guard. Layout (`pkg/layout`): greedy line-breaking, vertical flow,
-  and pagination on overflow with real font metrics; line height = font metrics × 1.15 for
-  `lineRule=auto`; left/right/center/justify alignment; first-line/left/right indents. Fonts:
+  direct` cascade with a cycle guard. Layout: DOCX lowers to a `cssbox` tree (`pkg/docx/cssbox`) and
+  runs through the **shared CSS layout engine** (`pkg/layout/css`) — greedy line-breaking, vertical
+  flow, and pagination on overflow with real font metrics; line height = font metrics × 1.15 for
+  `lineRule=auto` (via `LineHeight` auto/em), a minimum floor for `lineRule=atLeast` (via
+  `LineHeightMin`), an exact value for `lineRule=exact`; left/right/center/justify alignment;
+  first-line (incl. hanging)/left/right indents (via `text-indent` + margins). Fonts:
   named families resolve to the bundled base-14 substitutes (`pkg/font/family.go`, Office defaults
   like Calibri/Cambria aliased), glyphs resolved by name then cmap. Single section; one engine
   drives the same `render.Device`/raster as PDF.
+- **Reflowable convergence — DOCX on the CSS engine** (`pkg/docx/cssbox` lowering replaces the deleted
+  flat `pkg/docx/lower`→`pkg/layout/box`→`pkg/layout/flow` path; `docxDocument` now runs the CSS engine;
+  the flat engine + flat box model are removed — covered by the regenerated, eyeballed `docx-*` goldens
+  and `pkg/docx/cssbox` lowering tests): DOCX paragraphs/runs/breaks/geometry lower **directly** into a
+  `cssbox.Box` tree with resolved `css.ComputedStyle` (page geometry carried as a synthesized `@page`
+  stylesheet so the CSS paged engine insets content by the DOCX section margins exactly as for an HTML
+  `@page` rule), then paginate through the shared engine — so tables/lists/images already in the CSS
+  engine become reachable by DOCX for free (future DOCX-frontend work). Three additive engine features
+  filled the flat-model vocabulary gap, each **inert for HTML** (byte-identical): CSS **`text-indent`**
+  (first-line indent, hanging when negative), a line-height **`LineHeightMin`** "at least" floor
+  (`lineRule=atLeast`), and the DOCX auto multiplier (via `LineHeight` em). The `render.Device` seam,
+  the PDF pipeline, and the shared inline core are **untouched**; the DOCX→PDF writer path rides the new
+  engine transparently. Hard line breaks (`w:br`) reuse the real engine mechanism (a preserved newline
+  in a `white-space: pre-line` run → a hard-break glyph). The `docx-*` goldens were regenerated and
+  eyeballed (the CSS engine's line metrics differ slightly from the flat engine — the expected, approved
+  baseline; the `multipage` fixture was grown so it still genuinely spans two pages). See
+  `docs/superpowers/specs/2026-07-02-docx-cssbox-convergence-design.md`.
 - **CSS engine — parse + cascade** (`pkg/css`, unit-tested in isolation; no layout/rendering yet):
   a hand-written, dependency-free CSS tokenizer + parser (rules, declarations, `!important`, at-rule
   skipping, comment stripping), selector matching (type / universal / class / id / descendant /
@@ -804,13 +823,17 @@ that skip into real output.
    Bundle weighted faces + symbol look-alikes, and ideally standard AFM widths for exact base-14
    metrics.
 5. **DOCX features (reflow frontend)** — each a new `testdata/gen/docx` fixture + golden in the same
-   PR; add new box-model vocabulary to `pkg/layout/box` (engine track) before the DOCX frontend
-   emits it, so HTML gets it for free. In rough order: **lists/numbering** (`numbering.xml`,
-   per-level counters, marker glyphs), **tables** (`w:tbl`, grid + column-width solve, spans, cell
-   content recursion — the biggest engine addition), **images** (`w:drawing`→`a:blip`→media,
-   PNG/JPEG decode, EMU placement → `dev.DrawImage`), **headers/footers + multi-section** (margin-band
-   content, per-section geometry), and **embedded fonts** (de-obfuscate `word/fonts/*`, which also
-   fixes bold/italic fidelity).
+   PR. Since DOCX now lowers to `cssbox` through the shared CSS engine (convergence done), most of
+   these features **already exist in the engine** (the CSS engine has tables, lists/markers+counters,
+   images) — so the work is mostly in `pkg/docx/cssbox` lowering: parse the DOCX construct and emit the
+   corresponding `cssbox`/`css.ComputedStyle` the engine already understands (only genuinely-new layout
+   vocabulary goes into `pkg/css` + `pkg/layout/css`, where HTML gets it for free). In rough order:
+   **lists/numbering** (`numbering.xml`, per-level counters → the engine's list-marker/counter path),
+   **tables** (`w:tbl` → `display:table` cells; the engine's CSS table layout does the grid/spans/
+   column-width solve), **images** (`w:drawing`→`a:blip`→media, PNG/JPEG decode, EMU placement → a
+   `cssbox` replaced box → `dev.DrawImage`), **headers/footers + multi-section** (margin-band content
+   via `@page` margin boxes, per-section geometry), and **embedded fonts** (de-obfuscate
+   `word/fonts/*`, which also fixes bold/italic fidelity).
 6. **HTML rendering — remaining slices** (the CSS parse+cascade, box generation, block+inline
    normal-flow layout/paint with `OpenHTML`, replaced content + images, **floats + clear**,
    **positioning** (relative/absolute/fixed), **overflow clipping**, **full z-index stacking**, the
