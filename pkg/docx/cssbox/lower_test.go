@@ -3,6 +3,7 @@ package cssbox
 import (
 	"testing"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/docx/style"
 	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -42,5 +43,140 @@ func TestGeometry(t *testing.T) {
 	root := Lower(d, style.NewResolver(d, nil))
 	if root == nil || root.Kind != lcssbox.BoxBlock {
 		t.Errorf("Lower(d, r) root = %+v, want BoxBlock root", root)
+	}
+}
+
+func TestLowerCenteredBoldRun(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Props: docx.ParagraphProps{Justify: docx.JustifyCenter, HasJustify: true},
+			Runs: []docx.Run{
+				{Text: "Hi", Props: docx.RunProps{Bold: true, HasBold: true}},
+			},
+		}}},
+	}
+	root := Lower(d, style.NewResolver(d, nil))
+	if len(root.Children) != 1 {
+		t.Fatalf("root children = %d, want 1", len(root.Children))
+	}
+	blk := root.Children[0]
+	if blk.Kind != lcssbox.BoxBlock {
+		t.Errorf("block kind = %v, want BoxBlock", blk.Kind)
+	}
+	if blk.Formatting != lcssbox.InlineFC {
+		t.Errorf("block formatting = %v, want InlineFC", blk.Formatting)
+	}
+	if blk.Style.TextAlign != "center" {
+		t.Errorf("text-align = %q, want center", blk.Style.TextAlign)
+	}
+	if len(blk.Children) != 1 {
+		t.Fatalf("block children = %d, want 1", len(blk.Children))
+	}
+	tb := blk.Children[0]
+	if tb.Kind != lcssbox.BoxText || tb.Text != "Hi" {
+		t.Errorf("text box = %+v, want BoxText 'Hi'", tb)
+	}
+	if !tb.Style.Bold {
+		t.Error("text box should be bold")
+	}
+	if tb.Display != lcssbox.DisplayInline {
+		t.Errorf("text box display = %v, want inline", tb.Display)
+	}
+}
+
+func TestLowerHardBreak(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Runs: []docx.Run{
+				{Text: "a"},
+				{Break: docx.BreakLine},
+				{Text: "b"},
+			},
+		}}},
+	}
+	root := Lower(d, style.NewResolver(d, nil))
+	if len(root.Children) != 1 {
+		t.Fatalf("root children = %d, want 1", len(root.Children))
+	}
+	blk := root.Children[0]
+	if len(blk.Children) != 3 {
+		t.Fatalf("block children = %d, want 3", len(blk.Children))
+	}
+	brk := blk.Children[1]
+	if brk.Kind != lcssbox.BoxText || brk.Text != "\n" {
+		t.Errorf("break box = %+v, want BoxText '\\n'", brk)
+	}
+	if brk.Style.WhiteSpace != "pre-line" {
+		t.Errorf("break box white-space = %q, want pre-line", brk.Style.WhiteSpace)
+	}
+	if ws := blk.Children[0].Style.WhiteSpace; ws != "" && ws != "normal" {
+		t.Errorf("text run white-space = %q, want normal (not pre-line)", ws)
+	}
+}
+
+func TestLowerPageBreakSplitsBlocks(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Runs: []docx.Run{
+				{Text: "before"},
+				{Break: docx.BreakPage},
+				{Text: "after"},
+			},
+		}}},
+	}
+	root := Lower(d, style.NewResolver(d, nil))
+	if len(root.Children) != 2 {
+		t.Fatalf("root children = %d, want 2 (split on page break)", len(root.Children))
+	}
+	if root.Children[1].Style.BreakBefore != "page" {
+		t.Errorf("second block BreakBefore = %q, want page", root.Children[1].Style.BreakBefore)
+	}
+	if root.Children[0].Children[0].Text != "before" || root.Children[1].Children[0].Text != "after" {
+		t.Error("page break did not split text correctly")
+	}
+}
+
+func TestLowerAutoLineHeightIsNotZero(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Runs: []docx.Run{{Text: "x"}},
+		}}},
+	}
+	root := Lower(d, style.NewResolver(d, nil))
+	if len(root.Children) != 1 {
+		t.Fatalf("root children = %d, want 1", len(root.Children))
+	}
+	lh := root.Children[0].Style.LineHeight
+	if lh.Unit != gcss.UnitAuto {
+		t.Errorf("auto line-height unit = %v (value %v), want UnitAuto (guard against zero-value collapse)", lh.Unit, lh.Value)
+	}
+}
+
+func TestLowerAlignmentMapping(t *testing.T) {
+	cases := []struct {
+		j    docx.Justify
+		want string
+	}{
+		{docx.JustifyBoth, "justify"},
+		{docx.JustifyRight, "right"},
+		{docx.JustifyLeft, "left"},
+		{docx.JustifyCenter, "center"},
+	}
+	for _, c := range cases {
+		d := &docx.Document{
+			Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+			Body: []docx.Block{{Paragraph: &docx.Paragraph{
+				Props: docx.ParagraphProps{Justify: c.j, HasJustify: true},
+				Runs:  []docx.Run{{Text: "x"}},
+			}}},
+		}
+		root := Lower(d, style.NewResolver(d, nil))
+		if got := root.Children[0].Style.TextAlign; got != c.want {
+			t.Errorf("justify %v → %q, want %q", c.j, got, c.want)
+		}
 	}
 }
