@@ -21,6 +21,28 @@ func bodyOf(root *lcssbox.Box) *lcssbox.Box {
 	return root.Children[len(root.Children)-1]
 }
 
+// TestLowerParagraphReadsContent verifies lowering consumes Paragraph.Content and
+// still produces one styled text box per run.
+func TestLowerParagraphReadsContent(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840, MarginLeft: 1440, MarginRight: 1440, MarginTop: 1440, MarginBottom: 1440},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Content: []docx.ParaChild{{Run: &docx.Run{Text: "hello"}}},
+		}}},
+	}
+	r := style.NewResolver(d, nil)
+	root := Lower(d, r)
+	// root -> body -> paragraph block -> text box
+	body := root.Children[len(root.Children)-1]
+	if len(body.Children) != 1 {
+		t.Fatalf("body children = %d, want 1 paragraph block", len(body.Children))
+	}
+	para := body.Children[0]
+	if len(para.Children) != 1 || para.Children[0].Text != "hello" {
+		t.Fatalf("paragraph children = %+v, want one text box 'hello'", para.Children)
+	}
+}
+
 func TestLowerNilYieldsEmptyBlockRoot(t *testing.T) {
 	root := Lower(nil, nil)
 	if root == nil {
@@ -67,8 +89,8 @@ func TestLowerCenteredBoldRun(t *testing.T) {
 		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 		Body: []docx.Block{{Paragraph: &docx.Paragraph{
 			Props: docx.ParagraphProps{Justify: docx.JustifyCenter, HasJustify: true},
-			Runs: []docx.Run{
-				{Text: "Hi", Props: docx.RunProps{Bold: true, HasBold: true}},
+			Content: []docx.ParaChild{
+				{Run: &docx.Run{Text: "Hi", Props: docx.RunProps{Bold: true, HasBold: true}}},
 			},
 		}}},
 	}
@@ -110,13 +132,13 @@ func TestLowerRunPropsMapEndToEnd(t *testing.T) {
 	d := &docx.Document{
 		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 		Body: []docx.Block{{Paragraph: &docx.Paragraph{
-			Runs: []docx.Run{{Text: "styled", Props: docx.RunProps{
+			Content: []docx.ParaChild{{Run: &docx.Run{Text: "styled", Props: docx.RunProps{
 				Italic: true, HasItalic: true,
 				Underline: true, HasUnderline: true,
 				SizeHalfPts: 28, HasSize: true, // 28 half-points = 14pt
 				Color: red, HasColor: true,
 				Family: "Times New Roman",
-			}}},
+			}}}},
 		}}},
 	}
 	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
@@ -147,7 +169,7 @@ func TestLowerNoUnderlineIsNone(t *testing.T) {
 	d := &docx.Document{
 		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 		Body: []docx.Block{{Paragraph: &docx.Paragraph{
-			Runs: []docx.Run{{Text: "plain"}},
+			Content: []docx.ParaChild{{Run: &docx.Run{Text: "plain"}}},
 		}}},
 	}
 	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
@@ -161,10 +183,10 @@ func TestLowerHardBreak(t *testing.T) {
 	d := &docx.Document{
 		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 		Body: []docx.Block{{Paragraph: &docx.Paragraph{
-			Runs: []docx.Run{
-				{Text: "a"},
-				{Break: docx.BreakLine},
-				{Text: "b"},
+			Content: []docx.ParaChild{
+				{Run: &docx.Run{Text: "a"}},
+				{Run: &docx.Run{Break: docx.BreakLine}},
+				{Run: &docx.Run{Text: "b"}},
 			},
 		}}},
 	}
@@ -192,10 +214,10 @@ func TestLowerPageBreakSplitsBlocks(t *testing.T) {
 	d := &docx.Document{
 		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 		Body: []docx.Block{{Paragraph: &docx.Paragraph{
-			Runs: []docx.Run{
-				{Text: "before"},
-				{Break: docx.BreakPage},
-				{Text: "after"},
+			Content: []docx.ParaChild{
+				{Run: &docx.Run{Text: "before"}},
+				{Run: &docx.Run{Break: docx.BreakPage}},
+				{Run: &docx.Run{Text: "after"}},
 			},
 		}}},
 	}
@@ -215,7 +237,7 @@ func TestLowerAutoLineHeightIsNotZero(t *testing.T) {
 	d := &docx.Document{
 		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 		Body: []docx.Block{{Paragraph: &docx.Paragraph{
-			Runs: []docx.Run{{Text: "x"}},
+			Content: []docx.ParaChild{{Run: &docx.Run{Text: "x"}}},
 		}}},
 	}
 	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
@@ -242,8 +264,8 @@ func TestLowerAlignmentMapping(t *testing.T) {
 		d := &docx.Document{
 			Section: docx.SectionProps{PageW: 12240, PageH: 15840},
 			Body: []docx.Block{{Paragraph: &docx.Paragraph{
-				Props: docx.ParagraphProps{Justify: c.j, HasJustify: true},
-				Runs:  []docx.Run{{Text: "x"}},
+				Props:   docx.ParagraphProps{Justify: c.j, HasJustify: true},
+				Content: []docx.ParaChild{{Run: &docx.Run{Text: "x"}}},
 			}}},
 		}
 		body := bodyOf(Lower(d, style.NewResolver(d, nil)))

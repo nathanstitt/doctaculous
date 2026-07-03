@@ -93,7 +93,13 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
 	}
 	var blocks []*lcssbox.Box
 	cur := newBlock()
-	for _, run := range p.Runs {
+	for _, child := range p.Content {
+		if child.Run == nil {
+			// Hyperlink groups and drawings are lowered in the images+hyperlinks
+			// phase; a bare run is all Phase 1 handles.
+			continue
+		}
+		run := *child.Run
 		switch run.Break {
 		case docx.BreakPage:
 			blocks = append(blocks, cur)
