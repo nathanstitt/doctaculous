@@ -38,6 +38,12 @@ func (c *listCounter) next(numID, ilvl int) int {
 // a resolved marker. It reuses lowerParagraph for the item's inline content, then
 // overlays list-item display + the marker. A page break inside the paragraph
 // (multiple blocks) keeps the marker only on the first block.
+//
+// The DOCX render path never runs the HTML counter pass (pkg/layout/css/counters.go
+// resolveCounters), which is what makes a marker visible on the HTML side by
+// prepending a counter text box. So we mirror that here: after recording the marker
+// on the box, we prepend the marker string as a leading inline text box on the first
+// block so it actually renders in front of the item content.
 func lowerListParagraph(p *docx.Paragraph, r *style.Resolver, num *docx.Numbering, ctr *listCounter) []*lcssbox.Box {
 	blocks := lowerParagraph(p, r)
 	if len(blocks) == 0 {
@@ -46,7 +52,16 @@ func lowerListParagraph(p *docx.Paragraph, r *style.Resolver, num *docx.Numberin
 	first := blocks[0]
 	first.Display = lcssbox.DisplayListItem
 	first.Style.Display = "list-item"
-	first.Marker = &lcssbox.MarkerContent{Text: markerText(p.Props, num, ctr), Outside: true}
+	// markerText advances the list counter as a side effect — call it exactly once.
+	mt := markerText(p.Props, num, ctr)
+	first.Marker = &lcssbox.MarkerContent{Text: mt, Outside: true}
+	if mt != "" {
+		// Style the marker from the paragraph's effective (default) run formatting so
+		// it shares the item's font/size/color and sits on the item's first line.
+		er := r.EffectiveRun(p.Props, docx.RunProps{})
+		marker := runTextBox(mt, er, first.Style)
+		first.Children = append([]*lcssbox.Box{marker}, first.Children...)
+	}
 	return blocks
 }
 

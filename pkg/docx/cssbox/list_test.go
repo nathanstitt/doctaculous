@@ -60,6 +60,48 @@ func TestLowerBulletListMarker(t *testing.T) {
 	}
 }
 
+func TestLowerListPrependsMarkerText(t *testing.T) {
+	// A decimal-numbered item must render its marker: the list-item box's FIRST
+	// child is a real inline text box carrying the marker "1. " (the DOCX path skips
+	// the HTML resolveCounters pass, so the marker has to be lowered as a child here).
+	num, _ := docxParseNumbering()
+	d := &docx.Document{
+		Section:   docx.SectionProps{PageW: 12240, PageH: 15840, MarginLeft: 1440, MarginRight: 1440, MarginTop: 1440, MarginBottom: 1440},
+		Numbering: num,
+		Body:      []docx.Block{listItemBlock(1, 0, "First item")},
+	}
+	root := lowerDoc(t, d)
+	body := root.Children[len(root.Children)-1]
+	item := body.Children[0]
+	if item.Display != lcssbox.DisplayListItem {
+		t.Fatalf("item Display = %v, want DisplayListItem", item.Display)
+	}
+	if len(item.Children) < 2 {
+		t.Fatalf("item children = %d, want the marker box + content", len(item.Children))
+	}
+	marker := item.Children[0]
+	if marker.Kind != lcssbox.BoxText {
+		t.Fatalf("marker Kind = %v, want BoxText", marker.Kind)
+	}
+	if marker.Display != lcssbox.DisplayInline {
+		t.Fatalf("marker Display = %v, want DisplayInline", marker.Display)
+	}
+	if marker.Text != "1. " {
+		t.Fatalf("marker Text = %q, want %q", marker.Text, "1. ")
+	}
+	// The item content ("First item") must still be present as a later child.
+	var haveContent bool
+	for _, c := range item.Children[1:] {
+		if c.Kind == lcssbox.BoxText && c.Text == "First item" {
+			haveContent = true
+			break
+		}
+	}
+	if !haveContent {
+		t.Fatalf("item content %q missing after the prepended marker; children = %+v", "First item", item.Children)
+	}
+}
+
 func docxParseNumbering() (*docx.Numbering, error) {
 	return docx.ParseNumberingForTest([]byte(`<?xml version="1.0"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
