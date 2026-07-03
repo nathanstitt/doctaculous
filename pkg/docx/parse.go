@@ -726,6 +726,7 @@ func parseTcPr(dec *xml.Decoder) (props CellProps, gridSpan int, vmerge VMergeKi
 				case "vMerge":
 					vmerge = parseVMerge(t)
 				case "tcW":
+					// Cells carry only a dxa width in the model; a pct cell width is dropped.
 					var pct int
 					applyTblW(&props.WidthDxa, &pct, t)
 				case "vAlign":
@@ -835,15 +836,15 @@ func parseBorder(e xml.StartElement) Border {
 	if v, ok := wAttrInt(e, "sz"); ok {
 		bd.SizeEighthPt = v
 	}
-	if c, ok := parseColor(mustColorAttr(e)); ok {
+	if c, ok := parseColor(wColor(e)); ok {
 		bd.Color = c
 		bd.HasColor = true
 	}
 	return bd
 }
 
-// mustColorAttr returns the w:color attribute value, or "" if absent.
-func mustColorAttr(e xml.StartElement) string {
+// wColor returns the w:color attribute value, or "" if absent.
+func wColor(e xml.StartElement) string {
 	v, _ := wAttr(e, "color")
 	return v
 }

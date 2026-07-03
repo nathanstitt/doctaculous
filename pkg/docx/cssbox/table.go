@@ -25,16 +25,13 @@ func lowerTable(tb *docx.Table, r *style.Resolver) *lcssbox.Box {
 			Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayTableRow, Formatting: lcssbox.TableFC,
 			Style: gcss.InitialStyle(),
 		}
-		col := 0
 		for ci, cell := range row.Cells {
 			span := cell.GridSpan
 			if span < 1 {
 				span = 1
 			}
 			if cell.VMerge == docx.VMergeContinue {
-				// Covered by the restart cell's RowSpan; drop it (advance the grid
-				// column so a later cell in the row still lands correctly).
-				col += span
+				// Covered by the restart cell's RowSpan; drop it.
 				continue
 			}
 			cellBox := &lcssbox.Box{
@@ -45,7 +42,6 @@ func lowerTable(tb *docx.Table, r *style.Resolver) *lcssbox.Box {
 			}
 			cellBox.Children = lowerBlocks(cell.Blocks, r)
 			rowBox.Children = append(rowBox.Children, cellBox)
-			col += span
 		}
 		table.Children = append(table.Children, rowBox)
 	}
@@ -95,7 +91,7 @@ func tableStyle(p docx.TableProps, grid []docx.Twips) gcss.ComputedStyle {
 	cs.BorderCollapse = "collapse"
 	switch {
 	case p.WidthDxa > 0:
-		cs.Width = pt(docx.Twips(p.WidthDxa).Points())
+		cs.Width = pt(p.WidthDxa.Points())
 	case p.WidthPct > 0:
 		cs.Width = gcss.Length{Value: float64(p.WidthPct) / 50, Unit: gcss.UnitPercent}
 	}
@@ -112,7 +108,7 @@ func cellStyle(p docx.CellProps) gcss.ComputedStyle {
 	cs := gcss.InitialStyle()
 	cs.Display = "table-cell"
 	if p.WidthDxa > 0 {
-		cs.Width = pt(docx.Twips(p.WidthDxa).Points())
+		cs.Width = pt(p.WidthDxa.Points())
 	}
 	cs.VerticalAlign = vAlignString(p.VAlign)
 	applyBorders(&cs, p.Borders)
