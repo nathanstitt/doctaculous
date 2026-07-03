@@ -596,3 +596,55 @@ func TestInlineGlyphColorPropagates(t *testing.T) {
 		t.Errorf("glyph color = %v, want rgb(10,20,30) opaque", c)
 	}
 }
+
+// TestTextIndentPositive: a positive text-indent shifts the FIRST line's start-X to
+// the right of a wrapped line's start-X; a wrapped (non-first) line is unindented.
+// With no indent the two are equal.
+func TestTextIndentPositive(t *testing.T) {
+	// Narrow content box so the text wraps to >= 2 lines.
+	src := reset + `<p style="width:60px;text-indent:20px">Hello wonderful wrapping world here</p>`
+	p := layoutOne(t, src, 1000)
+	if len(p.Lines) < 2 {
+		t.Fatalf("wrapped lines = %d, want >= 2", len(p.Lines))
+	}
+	first := firstLineWithGlyphs(t, p).Glyphs[0].X
+	wrapped := p.Lines[1].Glyphs[0].X
+	if !(first > wrapped) {
+		t.Errorf("indented first line X = %v, want > wrapped line X = %v", first, wrapped)
+	}
+	// The indent is exactly 20px past the wrapped line's (content-left) start.
+	if d := first - wrapped; absf(d-20) > 1e-6 {
+		t.Errorf("first-line indent = %v, want 20", d)
+	}
+
+	// Control: with no indent, first and wrapped lines share the same start-X.
+	ctl := layoutOne(t, reset+`<p style="width:60px">Hello wonderful wrapping world here</p>`, 1000)
+	if len(ctl.Lines) < 2 {
+		t.Fatalf("control wrapped lines = %d, want >= 2", len(ctl.Lines))
+	}
+	cf := firstLineWithGlyphs(t, ctl).Glyphs[0].X
+	cw := ctl.Lines[1].Glyphs[0].X
+	if cf != cw {
+		t.Errorf("no-indent first X = %v, wrapped X = %v, want equal", cf, cw)
+	}
+}
+
+// TestTextIndentNegativeHanging: a negative text-indent (hanging indent) shifts the
+// FIRST line's start-X to the LEFT of the wrapped lines' start-X.
+func TestTextIndentNegativeHanging(t *testing.T) {
+	// Give the paragraph left padding so the first line has room to hang leftward
+	// without leaving the paragraph box (the wrapped lines start at content-left).
+	src := reset + `<p style="width:60px;padding-left:30px;text-indent:-20px">Hello wonderful wrapping world here</p>`
+	p := layoutOne(t, src, 1000)
+	if len(p.Lines) < 2 {
+		t.Fatalf("wrapped lines = %d, want >= 2", len(p.Lines))
+	}
+	first := firstLineWithGlyphs(t, p).Glyphs[0].X
+	wrapped := p.Lines[1].Glyphs[0].X
+	if !(first < wrapped) {
+		t.Errorf("hanging first line X = %v, want < wrapped line X = %v", first, wrapped)
+	}
+	if d := wrapped - first; absf(d-20) > 1e-6 {
+		t.Errorf("hanging indent = %v, want 20", d)
+	}
+}

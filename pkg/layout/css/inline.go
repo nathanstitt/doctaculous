@@ -66,6 +66,11 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	rest := glyphs
 	lineHGuess := e.lineHeightGuess(b)             // representative band height for the float-band queries
 	cbLeft, cbRight := contentX, contentX+contentW // this box's own content box (clamp bounds)
+	// text-indent applies to the FIRST line only: it narrows the first line's available
+	// width and shifts its start X by the same amount. A negative indent (hanging) widens
+	// the first line and shifts it left; the arithmetic handles it without clamping.
+	indent := textIndentPt(b, contentW)
+	firstLine := true
 	for len(rest) > 0 {
 		bandY := bandOriginY + (penY - contentTopY) // this line's Y in the BFC-root frame
 		availLeft := fc.leftEdge(bandY, lineHGuess)
@@ -90,8 +95,16 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			availLeft, avail = contentX, contentW
 		}
 
+		// The first line is indented: it starts `indent` points inset from the band's
+		// left and has that much less width. Wrapped lines are unaffected.
+		lineIndent := 0.0
+		if firstLine {
+			lineIndent = indent
+			firstLine = false
+		}
+
 		var lineGlyphs []inline.Glyph
-		lineGlyphs, rest = inline.BreakNextWrap(rest, avail, wrap)
+		lineGlyphs, rest = inline.BreakNextWrap(rest, avail-lineIndent, wrap)
 		line := inline.MakeLine(lineGlyphs)
 
 		lh := e.effectiveLineHeight(b, line)
@@ -100,7 +113,8 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 		spaceCount := inline.CountSpaces(line.Glyphs)
 		isLast := len(rest) == 0
 		// availLeft is the absolute page-space left for this line; avail is its width.
-		p := inline.Place(align, availLeft, avail, line.WidthPt, spaceCount, isLast)
+		// The first-line indent insets the start and narrows the placement width.
+		p := inline.Place(align, availLeft+lineIndent, avail-lineIndent, line.WidthPt, spaceCount, isLast)
 
 		var emitted []GlyphFragment
 		x := p.StartX
@@ -360,6 +374,24 @@ func effectiveTextAlign(b *cssbox.Box) inline.Align {
 		return mapTextAlign(firstInlineTextAlign(b))
 	}
 	return mapTextAlign(b.Style.TextAlign)
+}
+
+// textIndentPt resolves a block's text-indent to points. px/pt are absolute; em
+// resolves against the font size; percent resolves against contentW; anything
+// else (incl. an anonymous box's zero style) is 0. The value is signed: a negative
+// result is a hanging indent (the first line starts to the left of the wrapped ones).
+func textIndentPt(b *cssbox.Box, contentW float64) float64 {
+	ti := b.Style.TextIndent
+	switch ti.Unit {
+	case gcss.UnitPx, gcss.UnitPt:
+		return ti.Value
+	case gcss.UnitEm:
+		return ti.Value * b.Style.FontSizePt
+	case gcss.UnitPercent:
+		return ti.Value / 100 * contentW
+	default:
+		return 0
+	}
 }
 
 // firstInlineTextAlign returns the first non-empty TextAlign found walking b's
