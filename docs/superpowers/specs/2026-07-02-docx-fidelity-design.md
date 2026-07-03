@@ -10,6 +10,13 @@ floats, images, and positioning for the HTML pipeline. DOCX lowering is being re
 (the flat `pkg/layout/box` model is being retired); **this spec assumes DOCX lowers into `cssbox`.**
 Read CLAUDE.md "Architecture" and roadmap item 5 ("DOCX features").
 
+**Sequencing dependency:** the DOCX-onto-`cssbox` re-point (flat-model retirement) is a prerequisite
+for Phase 2 onward — the whole "lower into `cssbox`, which already does the layout" strategy requires
+it. That work is in progress in a separate branch. Phase 1 (the recursive-model refactor) is expressed
+in `pkg/docx` and is largely independent of it, but **Phase 2 (tables) must not start until DOCX
+lowering targets `cssbox` on `main`.** If the re-point has not merged when this sub-project begins,
+either rebase onto its branch or block Phase 2 on its merge.
+
 ## Goal
 
 Close the DOCX feature gap. Today `pkg/docx` parses only paragraphs + runs (bold/italic/underline,
