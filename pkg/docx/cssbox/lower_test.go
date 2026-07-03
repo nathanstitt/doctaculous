@@ -1,6 +1,7 @@
 package cssbox
 
 import (
+	"image/color"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
@@ -97,6 +98,62 @@ func TestLowerCenteredBoldRun(t *testing.T) {
 	}
 	if tb.Display != lcssbox.DisplayInline {
 		t.Errorf("text box display = %v, want inline", tb.Display)
+	}
+}
+
+// TestLowerRunPropsMapEndToEnd locks the full run-property mapping onto the text
+// box's ComputedStyle: family, size (half-points → points), italic, underline, and
+// color. Bold is covered by TestLowerCenteredBoldRun. Without this, only bold was
+// asserted and italic/underline/color/family/size could silently stop mapping.
+func TestLowerRunPropsMapEndToEnd(t *testing.T) {
+	red := color.RGBA{R: 0xC0, G: 0x10, B: 0x20, A: 0xFF}
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Runs: []docx.Run{{Text: "styled", Props: docx.RunProps{
+				Italic: true, HasItalic: true,
+				Underline: true, HasUnderline: true,
+				SizeHalfPts: 28, HasSize: true, // 28 half-points = 14pt
+				Color: red, HasColor: true,
+				Family: "Times New Roman",
+			}}},
+		}}},
+	}
+	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+	tb := body.Children[0].Children[0]
+	if tb.Kind != lcssbox.BoxText || tb.Text != "styled" {
+		t.Fatalf("text box = %+v, want BoxText 'styled'", tb)
+	}
+	if !tb.Style.Italic {
+		t.Error("italic not mapped")
+	}
+	if tb.Style.TextDecorationLine != "underline" {
+		t.Errorf("text-decoration = %q, want underline", tb.Style.TextDecorationLine)
+	}
+	if tb.Style.FontSizePt != 14 {
+		t.Errorf("font-size = %vpt, want 14 (28 half-points)", tb.Style.FontSizePt)
+	}
+	if tb.Style.Color != red {
+		t.Errorf("color = %+v, want %+v", tb.Style.Color, red)
+	}
+	if tb.Style.FontFamily != "Times New Roman" {
+		t.Errorf("font-family = %q, want Times New Roman", tb.Style.FontFamily)
+	}
+}
+
+// TestLowerNoUnderlineIsNone confirms a run without underline resolves to the
+// explicit "none" (not empty), so it can't accidentally inherit an underline.
+func TestLowerNoUnderlineIsNone(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{
+			Runs: []docx.Run{{Text: "plain"}},
+		}}},
+	}
+	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+	tb := body.Children[0].Children[0]
+	if tb.Style.TextDecorationLine != "none" {
+		t.Errorf("text-decoration = %q, want none", tb.Style.TextDecorationLine)
 	}
 }
 

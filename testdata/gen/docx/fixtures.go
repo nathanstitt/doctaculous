@@ -66,6 +66,14 @@ func para(style, jc, text string) string {
 	return "<w:p>" + pPr.String() + `<w:r><w:t xml:space="preserve">` + text + "</w:t></w:r></w:p>"
 }
 
+// paraItalicUnderline builds a paragraph with a single run carrying italic +
+// underline run properties, so a golden exercises the run-property mapping
+// (w:i/w:u → italic + text-decoration:underline) end to end.
+func paraItalicUnderline(text string) string {
+	return "<w:p><w:r><w:rPr><w:i/><w:u w:val=\"single\"/></w:rPr>" +
+		`<w:t xml:space="preserve">` + text + "</w:t></w:r></w:p>"
+}
+
 func paragraphDocx() []byte {
 	body := para("", "", "The quick brown fox jumps over the lazy dog, and then the lazy dog jumps right back over the quick brown fox to even the score.")
 	return New().SetDocument(docOpen + body + docClose).Bytes()
@@ -82,6 +90,7 @@ func styledDocx() []byte {
 		para("Heading1", "", "A Bold Heading") +
 		para("", "", "Body text under the heading, set in the default Normal style with ordinary running prose that wraps as needed.") +
 		para("", "", "A second body paragraph to show inter-paragraph spacing in action.") +
+		paraItalicUnderline("This line is italic and underlined.") +
 		docClose
 	return New().SetDocument(doc).SetStyles(styledStyles).Bytes()
 }
