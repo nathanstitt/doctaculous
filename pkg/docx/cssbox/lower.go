@@ -56,9 +56,11 @@ func Geometry(d *docx.Document) PageGeometry {
 // is obtained separately via Geometry(d).
 func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
 	newWrapper := func() *lcssbox.Box {
+		st := gcss.InitialStyle()
+		st.Display = "block" // match the box-level DisplayBlock (Style.Display is unread by layout, but reads clearly)
 		return &lcssbox.Box{
 			Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock, Formatting: lcssbox.BlockFC,
-			Style: gcss.InitialStyle(),
+			Style: st,
 		}
 	}
 	root := newWrapper()
@@ -141,7 +143,7 @@ func paragraphStyle(eff style.EffectiveParagraph) gcss.ComputedStyle {
 func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lcssbox.Box {
 	cs := para // inherit block-level context (line-height/text-align) for the IFC
 	cs.Display = "inline"
-	cs.WhiteSpace = "" // normal: run text collapses spaces normally
+	cs.WhiteSpace = "normal" // run text collapses spaces normally
 	cs.FontFamily = er.Family
 	cs.Bold = er.Bold
 	cs.Italic = er.Italic

@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"strconv"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
@@ -79,9 +80,12 @@ func docxDocument(d *docx.Document) (*Document, error) {
 // for an HTML @page rule. Point values are emitted as px (the layout scalar treats
 // px:pt 1:1), preserving DOCX's physical 72dpi-equivalent scale.
 func docxPageSheet(g docxcssbox.PageGeometry) gcss.Stylesheet {
-	css := fmt.Sprintf("@page { size: %gpx %gpx; margin: %gpx %gpx %gpx %gpx }",
-		g.PageWidthPt, g.PageHeightPt,
-		g.MarginTopPt, g.MarginRightPt, g.MarginBottomPt, g.MarginLeftPt)
+	// %f (not %g) so a fractional twip→point value can never fall into %g's exponent
+	// notation, which the @page length parser would reject.
+	px := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + "px" }
+	css := fmt.Sprintf("@page { size: %s %s; margin: %s %s %s %s }",
+		px(g.PageWidthPt), px(g.PageHeightPt),
+		px(g.MarginTopPt), px(g.MarginRightPt), px(g.MarginBottomPt), px(g.MarginLeftPt))
 	return gcss.Parse(css)
 }
 
