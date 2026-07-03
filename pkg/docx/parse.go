@@ -187,7 +187,10 @@ func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
 				if err != nil {
 					return nil, nil, err
 				}
-				p.Runs = append(p.Runs, runs...)
+				for i := range runs {
+					r := runs[i]
+					p.Content = append(p.Content, ParaChild{Run: &r})
+				}
 			default:
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
