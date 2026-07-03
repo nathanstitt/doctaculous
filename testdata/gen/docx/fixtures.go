@@ -89,10 +89,10 @@ func styledDocx() []byte {
 func multipageDocx() []byte {
 	var b strings.Builder
 	b.WriteString(docOpen)
-	// Enough paragraphs to spill just past one Letter page (~46 lines of body
-	// text) onto a second, without ballooning into many pages.
+	// Enough body text to spill onto a second Letter page under the CSS engine
+	// (aim for ~1.5–2 pages), so the pagination/parallel path stays exercised.
 	line := "The quick brown fox jumps over the lazy dog. "
-	for i := 0; i < 22; i++ {
+	for i := 0; i < 40; i++ {
 		b.WriteString(para("", "", strings.Repeat(line, 2)))
 	}
 	b.WriteString(docClose)
