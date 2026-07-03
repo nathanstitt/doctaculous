@@ -29,3 +29,17 @@ func TestParseNumbering(t *testing.T) {
 		t.Fatalf("lvl1 text = %q, want %%2.", lvl1.Text)
 	}
 }
+
+func TestParseNumPr(t *testing.T) {
+	doc := mustParse(t, `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>item</w:t></w:r></w:p>
+</w:body></w:document>`)
+	pp := doc.Body[0].Paragraph.Props
+	if !pp.HasNum {
+		t.Fatalf("HasNum = false, want true")
+	}
+	if pp.NumID != 3 || pp.ILvl != 1 {
+		t.Fatalf("numPr = (numId %d, ilvl %d), want (3, 1)", pp.NumID, pp.ILvl)
+	}
+}
