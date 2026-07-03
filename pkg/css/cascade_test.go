@@ -854,6 +854,37 @@ func TestWhiteSpace(t *testing.T) {
 	}
 }
 
+func TestTextIndent(t *testing.T) {
+	// Initial value is a zero-value Length (no indent).
+	if got := initialStyle().TextIndent; got != (Length{}) {
+		t.Errorf("initial text-indent = %v, want zero-value Length", got)
+	}
+
+	// `p { text-indent: 24px }` cascades onto a <p>.
+	src := `p { text-indent: 24px; }`
+	sheet := Parse(src)
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+	p := &fakeNode{tag: "p"}
+	pStyle := r.ComputeRoot(p)
+	if pStyle.TextIndent != (Length{24, UnitPx}) {
+		t.Errorf("text-indent = %v, want {24, UnitPx}", pStyle.TextIndent)
+	}
+
+	// An element with no text-indent rule keeps the zero value.
+	div := &fakeNode{tag: "div"}
+	divStyle := r.ComputeRoot(div)
+	if divStyle.TextIndent != (Length{}) {
+		t.Errorf("absent text-indent = %v, want zero-value Length", divStyle.TextIndent)
+	}
+
+	// Inherited: a child with no text-indent takes the parent's.
+	child := &fakeNode{tag: "span", parent: p}
+	childStyle := r.Compute(child, pStyle)
+	if childStyle.TextIndent != (Length{24, UnitPx}) {
+		t.Errorf("inherited text-indent = %v, want {24, UnitPx}", childStyle.TextIndent)
+	}
+}
+
 func TestWhiteSpaceFlags(t *testing.T) {
 	cases := []struct {
 		ws                   string

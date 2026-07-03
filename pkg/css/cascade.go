@@ -45,7 +45,7 @@ type OriginSheet struct {
 // this struct — they are retained on the Rule for later sub-projects.
 //
 // Inherited properties (CSS) are Color, FontFamily, FontSizePt, Bold, Italic,
-// LineHeight, TextAlign, and WhiteSpace; inheritFrom must be kept in sync with this set.
+// LineHeight, TextAlign, TextIndent, and WhiteSpace; inheritFrom must be kept in sync with this set.
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
@@ -69,6 +69,8 @@ type ComputedStyle struct {
 	LineHeight Length // UnitAuto = "normal"
 
 	TextAlign string // "left" | "right" | "center" | "justify"
+
+	TextIndent Length // first-line indent (signed; negative = hanging). Zero length = none. Inherited.
 
 	// TextDecorationLine is the supported subset of CSS text-decoration: "none"
 	// (initial) or "underline". Modeled as inherited (like Color) so it propagates to
@@ -405,6 +407,7 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Italic = parent.Italic
 	cs.LineHeight = parent.LineHeight
 	cs.TextAlign = parent.TextAlign
+	cs.TextIndent = parent.TextIndent
 	cs.TextDecorationLine = parent.TextDecorationLine
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.ListStyleType = parent.ListStyleType
@@ -564,6 +567,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "left", "right", "center", "justify":
 			cs.TextAlign = d.Value
 		}
+	case "text-indent":
+		// A single length token (px/pt/em/%); may be signed (negative = hanging).
+		setLength(&cs.TextIndent, d.Value)
 	case "text-decoration", "text-decoration-line":
 		// Supported subset: underline / none. The shorthand may carry color/style/
 		// thickness tokens too; we scan for the line keyword. "none" clears it.
