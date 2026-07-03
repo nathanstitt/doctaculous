@@ -51,7 +51,7 @@ func lowerListParagraph(p *docx.Paragraph, r *style.Resolver, num *docx.Numberin
 	}
 	first := blocks[0]
 	first.Display = lcssbox.DisplayListItem
-	first.Style.Display = "list-item"
+	first.Style.Display = "list-item" // match Box.Display (Style.Display is unread by layout, but reads clearly)
 	// markerText advances the list counter as a side effect — call it exactly once.
 	mt := markerText(p.Props, num, ctr)
 	first.Marker = &lcssbox.MarkerContent{Text: mt, Outside: true}
@@ -99,6 +99,9 @@ func formatMarker(lvl docx.NumLevel, value int) string {
 	// literal suffix (e.g. the "." in "%1.").
 	out := replaceFirstPlaceholder(lvl.Text, num)
 	if out == "" {
+		// A pattern with no %N placeholder (e.g. a literal "Note") is malformed for a
+		// numbered level; fall back to "N." rather than dropping the number. The
+		// authored literal is intentionally not preserved (a rare degenerate case).
 		out = num + "."
 	}
 	return out + " "
@@ -106,6 +109,12 @@ func formatMarker(lvl docx.NumLevel, value int) string {
 
 // replaceFirstPlaceholder replaces the first "%<digit>" token in pattern with num,
 // leaving surrounding literals intact. If there is no placeholder, returns "".
+//
+// LIMITATION (single-level only): it substitutes num for the FIRST %<digit> found,
+// ignoring which level the digit names. This is correct for single-level markers
+// ("%1." / "%2."), but multi-level patterns ("%1.%2.") need each %N resolved against
+// level N-1's counter — a follow-up when multi-level numbering lands (make this
+// level-aware / rename to replaceLevelPlaceholder then).
 func replaceFirstPlaceholder(pattern, num string) string {
 	for i := 0; i+1 < len(pattern); i++ {
 		if pattern[i] == '%' && pattern[i+1] >= '0' && pattern[i+1] <= '9' {
