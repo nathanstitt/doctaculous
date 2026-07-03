@@ -73,23 +73,27 @@ func TestParseParagraphsAndRuns(t *testing.T) {
 		t.Fatalf("Body blocks = %d, want 2", len(d.Body))
 	}
 	p0 := d.Body[0].Paragraph
-	if p0 == nil || len(p0.Runs) != 2 {
-		t.Fatalf("paragraph 0 runs = %v, want 2", p0)
+	if p0 == nil {
+		t.Fatalf("paragraph 0 = nil, want a paragraph")
 	}
-	if got := p0.Runs[0].Text; got != "Hello " {
+	runs0 := runsOf(p0)
+	if len(runs0) != 2 {
+		t.Fatalf("paragraph 0 runs = %d, want 2", len(runs0))
+	}
+	if got := runs0[0].Text; got != "Hello " {
 		t.Errorf("run 0 text = %q, want %q", got, "Hello ")
 	}
-	if got := p0.Runs[1].Text; got != "world" {
+	if got := runs0[1].Text; got != "world" {
 		t.Errorf("run 1 text = %q, want %q (xml:space preserve)", got, "world")
 	}
-	if !p0.Runs[0].Props.Bold || !p0.Runs[0].Props.HasBold {
+	if !runs0[0].Props.Bold || !runs0[0].Props.HasBold {
 		t.Error("run 0 should be bold")
 	}
-	if p0.Runs[0].Props.SizeHalfPts != 28 {
-		t.Errorf("run 0 size = %d half-points, want 28", p0.Runs[0].Props.SizeHalfPts)
+	if runs0[0].Props.SizeHalfPts != 28 {
+		t.Errorf("run 0 size = %d half-points, want 28", runs0[0].Props.SizeHalfPts)
 	}
-	if p0.Runs[0].Props.Color != (color.RGBA{R: 0xff, A: 0xff}) {
-		t.Errorf("run 0 color = %v, want red", p0.Runs[0].Props.Color)
+	if runs0[0].Props.Color != (color.RGBA{R: 0xff, A: 0xff}) {
+		t.Errorf("run 0 color = %v, want red", runs0[0].Props.Color)
 	}
 }
 
@@ -138,7 +142,7 @@ func TestParseBreakAndStyleRef(t *testing.T) {
 		t.Error("paragraph 0 should be centered")
 	}
 	// "before" / page break / "after" → three runs in order.
-	runs := d.Body[1].Paragraph.Runs
+	runs := runsOf(d.Body[1].Paragraph)
 	if len(runs) != 3 {
 		t.Fatalf("runs = %d, want 3 (before, break, after)", len(runs))
 	}
@@ -199,11 +203,57 @@ func TestParseTextPreservesWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
-	runs := d.Body[0].Paragraph.Runs
+	runs := runsOf(d.Body[0].Paragraph)
 	if got := runs[0].Text; got != " spaced " {
 		t.Errorf("run 0 text = %q, want %q (whitespace preserved)", got, " spaced ")
 	}
 	if got := runs[1].Text; got != "untrimmed " {
 		t.Errorf("run 1 text = %q, want %q (trailing space preserved without preserve attr)", got, "untrimmed ")
 	}
+}
+
+// TestParseParagraphFillsContent verifies runs land in Paragraph.Content (not the
+// removed Runs field) after the refactor.
+func TestParseParagraphFillsContent(t *testing.T) {
+	doc := mustParse(t, `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:r><w:t>alpha</w:t></w:r><w:r><w:t> beta</w:t></w:r></w:p>
+</w:body></w:document>`)
+	if len(doc.Body) != 1 || doc.Body[0].Paragraph == nil {
+		t.Fatalf("body = %+v, want 1 paragraph block", doc.Body)
+	}
+	c := doc.Body[0].Paragraph.Content
+	if len(c) != 2 {
+		t.Fatalf("Content len = %d, want 2", len(c))
+	}
+	if c[0].Run == nil || c[0].Run.Text != "alpha" {
+		t.Fatalf("Content[0] = %+v, want Run{alpha}", c[0])
+	}
+	if c[1].Run == nil || c[1].Run.Text != " beta" {
+		t.Fatalf("Content[1] = %+v, want Run{ beta}", c[1])
+	}
+}
+
+// mustParse parses a document.xml body string into a Document, failing the test
+// on error. It parses the document part directly (no OPC package needed).
+func mustParse(t *testing.T, documentXML string) *Document {
+	t.Helper()
+	doc := &Document{Section: defaultSection()}
+	if err := parseDocument([]byte(documentXML), doc); err != nil {
+		t.Fatalf("parseDocument: %v", err)
+	}
+	return doc
+}
+
+// runsOf collects the bare runs from a paragraph's Content, ignoring hyperlink
+// groups and drawings. It keeps the existing parser tests (which assert on the
+// pre-refactor Runs slice) readable after runs moved into Content.
+func runsOf(p *Paragraph) []Run {
+	var out []Run
+	for _, c := range p.Content {
+		if c.Run != nil {
+			out = append(out, *c.Run)
+		}
+	}
+	return out
 }
