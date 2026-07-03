@@ -47,11 +47,23 @@ func Geometry(d *docx.Document) PageGeometry {
 	}
 }
 
-// Lower converts a parsed DOCX document into a cssbox tree rooted at a block box
-// (the <body> analogue). A nil document or resolver yields an empty root rather
-// than panicking. Page geometry is obtained separately via Geometry(d).
+// Lower converts a parsed DOCX document into a cssbox tree the CSS layout engine
+// consumes. The tree mirrors HTML's nesting — an outer root block (the <html>
+// analogue) with a single body block child (the <body> analogue) that holds the
+// paragraph blocks — because the paged engine locates the document's top-level
+// blocks as root.Children[last].Children (its bodyFragment lookup). A nil document
+// or resolver yields the empty root/body pair rather than panicking. Page geometry
+// is obtained separately via Geometry(d).
 func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
-	root := &lcssbox.Box{Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock, Formatting: lcssbox.BlockFC}
+	newWrapper := func() *lcssbox.Box {
+		return &lcssbox.Box{
+			Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock, Formatting: lcssbox.BlockFC,
+			Style: gcss.InitialStyle(),
+		}
+	}
+	root := newWrapper()
+	body := newWrapper()
+	root.Children = []*lcssbox.Box{body}
 	if d == nil || r == nil {
 		return root
 	}
@@ -59,7 +71,7 @@ func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
 		if blk.Paragraph == nil {
 			continue
 		}
-		root.Children = append(root.Children, lowerParagraph(blk.Paragraph, r)...)
+		body.Children = append(body.Children, lowerParagraph(blk.Paragraph, r)...)
 	}
 	return root
 }
@@ -105,7 +117,12 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
 // first-line indent → text-indent (signed; negative = hanging), page-break-before, and
 // the line-spacing rule (auto/exact/atLeast) via applyLineHeight.
 func paragraphStyle(eff style.EffectiveParagraph) gcss.ComputedStyle {
-	cs := gcss.ComputedStyle{Display: "block", TextAlign: alignString(eff.Justify)}
+	// Start from the CSS initial values so Width/Height/MaxWidth carry auto/none (a
+	// bare literal would leave them {0, UnitPx} = an explicit 0px, collapsing the
+	// block to zero size), then overlay the paragraph's resolved formatting.
+	cs := gcss.InitialStyle()
+	cs.Display = "block"
+	cs.TextAlign = alignString(eff.Justify)
 	if eff.PageBreakBefore {
 		cs.BreakBefore = "page" // paragraph-level w:pageBreakBefore (distinct from a mid-run page break)
 	}

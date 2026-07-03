@@ -427,6 +427,14 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	return cs
 }
 
+// InitialStyle returns a ComputedStyle holding the CSS initial values (auto/none
+// lengths, the initial keywords, etc.). Reflow frontends that synthesize
+// ComputedStyle values directly instead of running the cascade (e.g. the DOCX
+// lowering) MUST start from this base — a bare ComputedStyle{} literal leaves
+// Width/Height/MaxWidth as the zero Length ({0, UnitPx}), which the layout engine
+// reads as an explicit 0px, collapsing every block to zero size.
+func InitialStyle() ComputedStyle { return initialStyle() }
+
 // initialStyle returns a ComputedStyle holding the CSS initial values, used as
 // the base for the root element before any rule or inheritance is applied.
 func initialStyle() ComputedStyle {

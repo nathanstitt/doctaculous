@@ -9,6 +9,17 @@ import (
 	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
+// bodyOf returns the body wrapper (root.Children[0]) that holds the paragraph
+// blocks. Lower nests the paragraphs under a body block (the <body> analogue) so the
+// CSS paged engine's bodyFragment lookup (root.Children[last]) finds the top-level
+// block list; the tests reach through it to the paragraph blocks.
+func bodyOf(root *lcssbox.Box) *lcssbox.Box {
+	if root == nil || len(root.Children) == 0 {
+		return &lcssbox.Box{}
+	}
+	return root.Children[len(root.Children)-1]
+}
+
 func TestLowerNilYieldsEmptyBlockRoot(t *testing.T) {
 	root := Lower(nil, nil)
 	if root == nil {
@@ -17,8 +28,12 @@ func TestLowerNilYieldsEmptyBlockRoot(t *testing.T) {
 	if root.Kind != lcssbox.BoxBlock {
 		t.Errorf("root.Kind = %v, want BoxBlock", root.Kind)
 	}
-	if len(root.Children) != 0 {
-		t.Errorf("root has %d children, want 0", len(root.Children))
+	// The root wraps a single (empty) body block; the body carries no paragraphs.
+	if len(root.Children) != 1 {
+		t.Fatalf("root has %d children, want 1 (the body wrapper)", len(root.Children))
+	}
+	if body := bodyOf(root); len(body.Children) != 0 {
+		t.Errorf("body has %d children, want 0", len(body.Children))
 	}
 }
 
@@ -56,11 +71,11 @@ func TestLowerCenteredBoldRun(t *testing.T) {
 			},
 		}}},
 	}
-	root := Lower(d, style.NewResolver(d, nil))
-	if len(root.Children) != 1 {
-		t.Fatalf("root children = %d, want 1", len(root.Children))
+	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+	if len(body.Children) != 1 {
+		t.Fatalf("body children = %d, want 1", len(body.Children))
 	}
-	blk := root.Children[0]
+	blk := body.Children[0]
 	if blk.Kind != lcssbox.BoxBlock {
 		t.Errorf("block kind = %v, want BoxBlock", blk.Kind)
 	}
@@ -96,11 +111,11 @@ func TestLowerHardBreak(t *testing.T) {
 			},
 		}}},
 	}
-	root := Lower(d, style.NewResolver(d, nil))
-	if len(root.Children) != 1 {
-		t.Fatalf("root children = %d, want 1", len(root.Children))
+	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+	if len(body.Children) != 1 {
+		t.Fatalf("body children = %d, want 1", len(body.Children))
 	}
-	blk := root.Children[0]
+	blk := body.Children[0]
 	if len(blk.Children) != 3 {
 		t.Fatalf("block children = %d, want 3", len(blk.Children))
 	}
@@ -127,14 +142,14 @@ func TestLowerPageBreakSplitsBlocks(t *testing.T) {
 			},
 		}}},
 	}
-	root := Lower(d, style.NewResolver(d, nil))
-	if len(root.Children) != 2 {
-		t.Fatalf("root children = %d, want 2 (split on page break)", len(root.Children))
+	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+	if len(body.Children) != 2 {
+		t.Fatalf("body children = %d, want 2 (split on page break)", len(body.Children))
 	}
-	if root.Children[1].Style.BreakBefore != "page" {
-		t.Errorf("second block BreakBefore = %q, want page", root.Children[1].Style.BreakBefore)
+	if body.Children[1].Style.BreakBefore != "page" {
+		t.Errorf("second block BreakBefore = %q, want page", body.Children[1].Style.BreakBefore)
 	}
-	if root.Children[0].Children[0].Text != "before" || root.Children[1].Children[0].Text != "after" {
+	if body.Children[0].Children[0].Text != "before" || body.Children[1].Children[0].Text != "after" {
 		t.Error("page break did not split text correctly")
 	}
 }
@@ -146,11 +161,11 @@ func TestLowerAutoLineHeightIsNotZero(t *testing.T) {
 			Runs: []docx.Run{{Text: "x"}},
 		}}},
 	}
-	root := Lower(d, style.NewResolver(d, nil))
-	if len(root.Children) != 1 {
-		t.Fatalf("root children = %d, want 1", len(root.Children))
+	body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+	if len(body.Children) != 1 {
+		t.Fatalf("body children = %d, want 1", len(body.Children))
 	}
-	lh := root.Children[0].Style.LineHeight
+	lh := body.Children[0].Style.LineHeight
 	if lh.Unit != gcss.UnitAuto {
 		t.Errorf("auto line-height unit = %v (value %v), want UnitAuto (guard against zero-value collapse)", lh.Unit, lh.Value)
 	}
@@ -174,8 +189,8 @@ func TestLowerAlignmentMapping(t *testing.T) {
 				Runs:  []docx.Run{{Text: "x"}},
 			}}},
 		}
-		root := Lower(d, style.NewResolver(d, nil))
-		if got := root.Children[0].Style.TextAlign; got != c.want {
+		body := bodyOf(Lower(d, style.NewResolver(d, nil)))
+		if got := body.Children[0].Style.TextAlign; got != c.want {
 			t.Errorf("justify %v → %q, want %q", c.j, got, c.want)
 		}
 	}
