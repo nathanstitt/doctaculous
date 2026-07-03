@@ -885,6 +885,26 @@ func TestTextIndent(t *testing.T) {
 	}
 }
 
+// TestLineHeightMinInherited: LineHeightMin is a directly-set field (no CSS
+// property) that is CSS-inherited, so a child with no override takes the parent's.
+// DOCX lowering sets it on ComputedStyle for lineRule=atLeast; it must propagate to
+// descendant boxes like the other inherited line-box properties.
+func TestLineHeightMinInherited(t *testing.T) {
+	// Initial value is a zero-value Length (no floor).
+	if got := initialStyle().LineHeightMin; got != (Length{}) {
+		t.Errorf("initial line-height-min = %v, want zero-value Length", got)
+	}
+
+	// A parent style carrying a min floor inherits to a child through inheritFrom.
+	parent := initialStyle()
+	parent.LineHeightMin = Length{40, UnitPt}
+	child := &fakeNode{tag: "span"}
+	childStyle := NewResolver(nil, nil).Compute(child, parent)
+	if childStyle.LineHeightMin != (Length{40, UnitPt}) {
+		t.Errorf("inherited line-height-min = %v, want {40, UnitPt}", childStyle.LineHeightMin)
+	}
+}
+
 func TestWhiteSpaceFlags(t *testing.T) {
 	cases := []struct {
 		ws                   string

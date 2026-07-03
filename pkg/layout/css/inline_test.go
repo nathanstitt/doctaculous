@@ -376,6 +376,44 @@ func TestAutoLineHeightExcludesLineGap(t *testing.T) {
 	}
 }
 
+// TestLineHeightMinFloor pins the DOCX lineRule=atLeast floor: a block whose natural
+// line box (10pt font metrics) is well under 40pt, given a LineHeightMin of 40pt,
+// produces a line height >= 40pt. The SAME block WITHOUT the floor stays under 40pt —
+// proving the fixture is valid and it is the floor (not the font metrics) that raises
+// the height. HTML never sets LineHeightMin, so this floor is inert on every HTML
+// fixture. Exercises effectiveLineHeight directly with a synthetic line (the pattern
+// TestAutoLineHeightExcludesLineGap uses for autoLineHeight).
+func lineHeightMinBlock(min gcss.Length) *cssbox.Box {
+	st := autoBlockStyle()
+	st.FontSizePt = 10
+	st.LineHeight = gcss.Length{Unit: gcss.UnitAuto} // "normal" -> metrics-based auto height
+	st.LineHeightMin = min
+	return &cssbox.Box{
+		Kind:       cssbox.BoxBlock,
+		Display:    cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC,
+		Style:      st,
+	}
+}
+
+func TestLineHeightMinFloor(t *testing.T) {
+	e := New(nil, nil, nil)
+	// A modest 10pt-face line: ascent+descent well under 40pt, no atomic extent.
+	line := inline.Line{AscentPt: 8, DescentPt: 2}
+
+	// Baseline: no floor -> natural (auto) line height, comfortably under 40pt.
+	hBase := e.effectiveLineHeight(lineHeightMinBlock(gcss.Length{}), line)
+	if hBase <= 0 || hBase >= 40 {
+		t.Fatalf("baseline line height = %v, want a positive value well under 40 (fixture invalid otherwise)", hBase)
+	}
+
+	// With a 40pt "at least" floor, the same line's height is raised to >= 40.
+	hFloored := e.effectiveLineHeight(lineHeightMinBlock(gcss.Length{Value: 40, Unit: gcss.UnitPt}), line)
+	if hFloored < 40 {
+		t.Errorf("floored line height = %v, want >= 40 (LineHeightMin floor)", hFloored)
+	}
+}
+
 // TestParagraphLineHeightReasonable is the end-to-end companion: two wrapped lines of
 // 16px text must be spaced by a browser-comparable ~1.1–1.4× the font size, NOT ~3× (the
 // E5 bug spaced them ~49pt apart). It asserts the gap between consecutive line baselines.

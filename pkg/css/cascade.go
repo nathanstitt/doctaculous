@@ -45,7 +45,7 @@ type OriginSheet struct {
 // this struct — they are retained on the Rule for later sub-projects.
 //
 // Inherited properties (CSS) are Color, FontFamily, FontSizePt, Bold, Italic,
-// LineHeight, TextAlign, TextIndent, and WhiteSpace; inheritFrom must be kept in sync with this set.
+// LineHeight, LineHeightMin, TextAlign, TextIndent, and WhiteSpace; inheritFrom must be kept in sync with this set.
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
@@ -62,11 +62,12 @@ type ComputedStyle struct {
 	BackgroundClip     string         // "border-box" (initial) | "padding-box" | "content-box"
 	BackgroundAttach   string         // "scroll" (initial) | "fixed" (degraded to scroll)
 
-	FontFamily string
-	FontSizePt float64 // resolved to an absolute size (px treated 1:1 as pt for now)
-	Bold       bool
-	Italic     bool
-	LineHeight Length // UnitAuto = "normal"
+	FontFamily    string
+	FontSizePt    float64 // resolved to an absolute size (px treated 1:1 as pt for now)
+	Bold          bool
+	Italic        bool
+	LineHeight    Length // UnitAuto = "normal"
+	LineHeightMin Length // "at least" line-height floor (DOCX lineRule=atLeast). Zero = no floor. Inherited.
 
 	TextAlign string // "left" | "right" | "center" | "justify"
 
@@ -406,6 +407,7 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Bold = parent.Bold
 	cs.Italic = parent.Italic
 	cs.LineHeight = parent.LineHeight
+	cs.LineHeightMin = parent.LineHeightMin
 	cs.TextAlign = parent.TextAlign
 	cs.TextIndent = parent.TextIndent
 	cs.TextDecorationLine = parent.TextDecorationLine

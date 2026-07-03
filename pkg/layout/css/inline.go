@@ -474,10 +474,27 @@ func (e *Engine) effectiveLineHeight(b *cssbox.Box, line inline.Line) float64 {
 	} else {
 		h = resolveLineHeight(b.Style.LineHeight, b.Style.FontSizePt, line)
 	}
+	if min := lineHeightMinPt(b); min > h {
+		h = min
+	}
 	if atomic := atomicLineExtent(line); atomic > h {
 		h = atomic
 	}
 	return h
+}
+
+// lineHeightMinPt resolves a block's line-height "at least" floor to points.
+// px/pt are absolute; em resolves against the font size; anything else is 0 (no floor).
+func lineHeightMinPt(b *cssbox.Box) float64 {
+	m := b.Style.LineHeightMin
+	switch m.Unit {
+	case gcss.UnitPx, gcss.UnitPt:
+		return m.Value
+	case gcss.UnitEm:
+		return m.Value * b.Style.FontSizePt
+	default:
+		return 0
+	}
 }
 
 // resolveLineHeight turns a line-height Length plus a font size into a line height in
