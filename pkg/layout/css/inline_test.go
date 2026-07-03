@@ -376,6 +376,44 @@ func TestAutoLineHeightExcludesLineGap(t *testing.T) {
 	}
 }
 
+// TestLineHeightMinFloor pins the DOCX lineRule=atLeast floor: a block whose natural
+// line box (10pt font metrics) is well under 40pt, given a LineHeightMin of 40pt,
+// produces a line height >= 40pt. The SAME block WITHOUT the floor stays under 40pt —
+// proving the fixture is valid and it is the floor (not the font metrics) that raises
+// the height. HTML never sets LineHeightMin, so this floor is inert on every HTML
+// fixture. Exercises effectiveLineHeight directly with a synthetic line (the pattern
+// TestAutoLineHeightExcludesLineGap uses for autoLineHeight).
+func lineHeightMinBlock(min gcss.Length) *cssbox.Box {
+	st := autoBlockStyle()
+	st.FontSizePt = 10
+	st.LineHeight = gcss.Length{Unit: gcss.UnitAuto} // "normal" -> metrics-based auto height
+	st.LineHeightMin = min
+	return &cssbox.Box{
+		Kind:       cssbox.BoxBlock,
+		Display:    cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC,
+		Style:      st,
+	}
+}
+
+func TestLineHeightMinFloor(t *testing.T) {
+	e := New(nil, nil, nil)
+	// A modest 10pt-face line: ascent+descent well under 40pt, no atomic extent.
+	line := inline.Line{AscentPt: 8, DescentPt: 2}
+
+	// Baseline: no floor -> natural (auto) line height, comfortably under 40pt.
+	hBase := e.effectiveLineHeight(lineHeightMinBlock(gcss.Length{}), line)
+	if hBase <= 0 || hBase >= 40 {
+		t.Fatalf("baseline line height = %v, want a positive value well under 40 (fixture invalid otherwise)", hBase)
+	}
+
+	// With a 40pt "at least" floor, the same line's height is raised to >= 40.
+	hFloored := e.effectiveLineHeight(lineHeightMinBlock(gcss.Length{Value: 40, Unit: gcss.UnitPt}), line)
+	if hFloored < 40 {
+		t.Errorf("floored line height = %v, want >= 40 (LineHeightMin floor)", hFloored)
+	}
+}
+
 // TestParagraphLineHeightReasonable is the end-to-end companion: two wrapped lines of
 // 16px text must be spaced by a browser-comparable ~1.1–1.4× the font size, NOT ~3× (the
 // E5 bug spaced them ~49pt apart). It asserts the gap between consecutive line baselines.
@@ -594,5 +632,57 @@ func TestInlineGlyphColorPropagates(t *testing.T) {
 	c := ln.Glyphs[0].Color
 	if c.R != 10 || c.G != 20 || c.B != 30 || c.A != 255 {
 		t.Errorf("glyph color = %v, want rgb(10,20,30) opaque", c)
+	}
+}
+
+// TestTextIndentPositive: a positive text-indent shifts the FIRST line's start-X to
+// the right of a wrapped line's start-X; a wrapped (non-first) line is unindented.
+// With no indent the two are equal.
+func TestTextIndentPositive(t *testing.T) {
+	// Narrow content box so the text wraps to >= 2 lines.
+	src := reset + `<p style="width:60px;text-indent:20px">Hello wonderful wrapping world here</p>`
+	p := layoutOne(t, src, 1000)
+	if len(p.Lines) < 2 {
+		t.Fatalf("wrapped lines = %d, want >= 2", len(p.Lines))
+	}
+	first := firstLineWithGlyphs(t, p).Glyphs[0].X
+	wrapped := p.Lines[1].Glyphs[0].X
+	if !(first > wrapped) {
+		t.Errorf("indented first line X = %v, want > wrapped line X = %v", first, wrapped)
+	}
+	// The indent is exactly 20px past the wrapped line's (content-left) start.
+	if d := first - wrapped; absf(d-20) > 1e-6 {
+		t.Errorf("first-line indent = %v, want 20", d)
+	}
+
+	// Control: with no indent, first and wrapped lines share the same start-X.
+	ctl := layoutOne(t, reset+`<p style="width:60px">Hello wonderful wrapping world here</p>`, 1000)
+	if len(ctl.Lines) < 2 {
+		t.Fatalf("control wrapped lines = %d, want >= 2", len(ctl.Lines))
+	}
+	cf := firstLineWithGlyphs(t, ctl).Glyphs[0].X
+	cw := ctl.Lines[1].Glyphs[0].X
+	if cf != cw {
+		t.Errorf("no-indent first X = %v, wrapped X = %v, want equal", cf, cw)
+	}
+}
+
+// TestTextIndentNegativeHanging: a negative text-indent (hanging indent) shifts the
+// FIRST line's start-X to the LEFT of the wrapped lines' start-X.
+func TestTextIndentNegativeHanging(t *testing.T) {
+	// Give the paragraph left padding so the first line has room to hang leftward
+	// without leaving the paragraph box (the wrapped lines start at content-left).
+	src := reset + `<p style="width:60px;padding-left:30px;text-indent:-20px">Hello wonderful wrapping world here</p>`
+	p := layoutOne(t, src, 1000)
+	if len(p.Lines) < 2 {
+		t.Fatalf("wrapped lines = %d, want >= 2", len(p.Lines))
+	}
+	first := firstLineWithGlyphs(t, p).Glyphs[0].X
+	wrapped := p.Lines[1].Glyphs[0].X
+	if !(first < wrapped) {
+		t.Errorf("hanging first line X = %v, want < wrapped line X = %v", first, wrapped)
+	}
+	if d := wrapped - first; absf(d-20) > 1e-6 {
+		t.Errorf("hanging indent = %v, want 20", d)
 	}
 }

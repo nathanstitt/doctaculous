@@ -45,7 +45,7 @@ type OriginSheet struct {
 // this struct — they are retained on the Rule for later sub-projects.
 //
 // Inherited properties (CSS) are Color, FontFamily, FontSizePt, Bold, Italic,
-// LineHeight, TextAlign, and WhiteSpace; inheritFrom must be kept in sync with this set.
+// LineHeight, LineHeightMin, TextAlign, TextIndent, and WhiteSpace; inheritFrom must be kept in sync with this set.
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
@@ -62,13 +62,16 @@ type ComputedStyle struct {
 	BackgroundClip     string         // "border-box" (initial) | "padding-box" | "content-box"
 	BackgroundAttach   string         // "scroll" (initial) | "fixed" (degraded to scroll)
 
-	FontFamily string
-	FontSizePt float64 // resolved to an absolute size (px treated 1:1 as pt for now)
-	Bold       bool
-	Italic     bool
-	LineHeight Length // UnitAuto = "normal"
+	FontFamily    string
+	FontSizePt    float64 // resolved to an absolute size (px treated 1:1 as pt for now)
+	Bold          bool
+	Italic        bool
+	LineHeight    Length // UnitAuto = "normal"
+	LineHeightMin Length // "at least" line-height floor (DOCX lineRule=atLeast). Zero = no floor. Inherited.
 
 	TextAlign string // "left" | "right" | "center" | "justify"
+
+	TextIndent Length // first-line indent (signed; negative = hanging). Zero length = none. Inherited.
 
 	// TextDecorationLine is the supported subset of CSS text-decoration: "none"
 	// (initial) or "underline". Modeled as inherited (like Color) so it propagates to
@@ -404,7 +407,9 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Bold = parent.Bold
 	cs.Italic = parent.Italic
 	cs.LineHeight = parent.LineHeight
+	cs.LineHeightMin = parent.LineHeightMin
 	cs.TextAlign = parent.TextAlign
+	cs.TextIndent = parent.TextIndent
 	cs.TextDecorationLine = parent.TextDecorationLine
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.ListStyleType = parent.ListStyleType
@@ -421,6 +426,14 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	// table-layout, vertical-align, break-*, break-inside are NOT inherited (per CSS).
 	return cs
 }
+
+// InitialStyle returns a ComputedStyle holding the CSS initial values (auto/none
+// lengths, the initial keywords, etc.). Reflow frontends that synthesize
+// ComputedStyle values directly instead of running the cascade (e.g. the DOCX
+// lowering) MUST start from this base — a bare ComputedStyle{} literal leaves
+// Width/Height/MaxWidth as the zero Length ({0, UnitPx}), which the layout engine
+// reads as an explicit 0px, collapsing every block to zero size.
+func InitialStyle() ComputedStyle { return initialStyle() }
 
 // initialStyle returns a ComputedStyle holding the CSS initial values, used as
 // the base for the root element before any rule or inheritance is applied.
@@ -564,6 +577,9 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "left", "right", "center", "justify":
 			cs.TextAlign = d.Value
 		}
+	case "text-indent":
+		// A single length token (px/pt/em/%); may be signed (negative = hanging).
+		setLength(&cs.TextIndent, d.Value)
 	case "text-decoration", "text-decoration-line":
 		// Supported subset: underline / none. The shorthand may carry color/style/
 		// thickness tokens too; we scan for the line keyword. "none" clears it.

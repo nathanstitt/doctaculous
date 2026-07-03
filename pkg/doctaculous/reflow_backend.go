@@ -2,18 +2,23 @@ package doctaculous
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"math"
+	"strconv"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
-	docxlower "github.com/nathanstitt/doctaculous/pkg/docx/lower"
+	docxcssbox "github.com/nathanstitt/doctaculous/pkg/docx/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/docx/style"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
+	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // reflowRenderer renders a reflowable document that has already been laid out into
@@ -45,17 +50,43 @@ func OpenDOCXBytes(data []byte) (*Document, error) {
 	return docxDocument(d)
 }
 
-// docxDocument lowers a parsed DOCX through the style cascade into the neutral box
-// model and runs the reflow engine, wrapping the result for rasterization.
+// docxDocument lowers a parsed DOCX through the style cascade into the recursive
+// cssbox tree and runs the shared CSS layout engine, wrapping the result for
+// rasterization. The DOCX section's page size and margins are carried into the CSS
+// paged engine as a synthesized @page stylesheet (docxPageSheet), reusing the exact
+// margin-inset machinery HTML uses for a real @page rule.
 func docxDocument(d *docx.Document) (*Document, error) {
 	resolver := style.NewResolver(d, nil)
-	boxDoc := docxlower.Document(d, resolver)
-	engine := layout.New(layoutfont.NewFaceCache(), nil)
-	pages, err := engine.Layout(context.Background(), boxDoc)
+	root := docxcssbox.Lower(d, resolver)
+	geom := docxcssbox.Geometry(d)
+	ctx := context.Background()
+	faces := layoutfont.NewFaceCache()
+	engine := layoutcss.New(faces, resource.MapLoader(nil), nil)
+	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
+		Paged:        true,
+		FallbackW:    geom.PageWidthPt, // full page; @page size/margins refine below
+		FallbackH:    geom.PageHeightPt,
+		ExplicitSize: false, // let the synthesized @page size apply
+		Pages:        docxPageSheet(geom),
+	})
 	if err != nil {
 		return nil, err
 	}
 	return &Document{r: &reflowRenderer{pages: pages}}, nil
+}
+
+// docxPageSheet synthesizes an @page stylesheet carrying the DOCX section's page
+// size and margins, so the CSS paged engine insets DOCX content exactly as it does
+// for an HTML @page rule. Point values are emitted as px (the layout scalar treats
+// px:pt 1:1), preserving DOCX's physical 72dpi-equivalent scale.
+func docxPageSheet(g docxcssbox.PageGeometry) gcss.Stylesheet {
+	// %f (not %g) so a fractional twip→point value can never fall into %g's exponent
+	// notation, which the @page length parser would reject.
+	px := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + "px" }
+	css := fmt.Sprintf("@page { size: %s %s; margin: %s %s %s %s }",
+		px(g.PageWidthPt), px(g.PageHeightPt),
+		px(g.MarginTopPt), px(g.MarginRightPt), px(g.MarginBottomPt), px(g.MarginLeftPt))
+	return gcss.Parse(css)
 }
 
 // reflowPages is implemented by renderers backed by *layout.Pages, so the PDF writer
