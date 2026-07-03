@@ -139,8 +139,11 @@ type CellProps struct {
 type CellVAlign int
 
 const (
+	// VAlignTop is w:vAlign val="top" (the default) — cell content aligns to the top.
 	VAlignTop CellVAlign = iota
+	// VAlignCenter is w:vAlign val="center" — cell content is vertically centered.
 	VAlignCenter
+	// VAlignBottom is w:vAlign val="bottom" — cell content aligns to the bottom.
 	VAlignBottom
 )
 

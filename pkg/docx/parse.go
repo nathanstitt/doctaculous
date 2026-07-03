@@ -188,6 +188,7 @@ func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
 					return nil, nil, err
 				}
 				for i := range runs {
+					// Copy into a fresh local: &runs[i] would alias parseRun's slice.
 					r := runs[i]
 					p.Content = append(p.Content, ParaChild{Run: &r})
 				}
