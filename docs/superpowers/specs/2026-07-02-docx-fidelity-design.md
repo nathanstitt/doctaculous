@@ -6,16 +6,18 @@ branch → PR off `main` per the project's workflow, merged when CI is green).
 
 **Builds on:** the DOCX reflow frontend (parse → style cascade → lower → layout) and — critically —
 the **`cssbox` recursive layout engine**, which already implements the layout side of tables, lists,
-floats, images, and positioning for the HTML pipeline. DOCX lowering is being re-pointed onto `cssbox`
-(the flat `pkg/layout/box` model is being retired); **this spec assumes DOCX lowers into `cssbox`.**
-Read CLAUDE.md "Architecture" and roadmap item 5 ("DOCX features").
+floats, images, and positioning for the HTML pipeline. The **DOCX→`cssbox` convergence has landed on
+`main`** (PR #32, "feat/docx-cssbox-convergence"): the flat `pkg/layout/box` engine is deleted, and DOCX
+now renders through the CSS engine. The lowering lives in **`pkg/docx/cssbox`** (package `cssbox`, entry
+point `Lower(d *docx.Document, r *style.Resolver) *cssbox.Box` — placed *outside* `pkg/docx` to avoid an
+import cycle with `pkg/docx/style`). It resolves each paragraph/run through the DOCX style cascade and
+emits **concrete `css.ComputedStyle` values, so nothing DOCX-specific crosses the boundary** — this pass
+extends that same lowering. Read CLAUDE.md "Architecture", the convergence design/plan
+(`docs/superpowers/specs/2026-07-02-docx-cssbox-convergence-design.md`,
+`docs/superpowers/plans/2026-07-02-docx-cssbox-convergence.md`), and roadmap item 5 ("DOCX features").
 
-**Sequencing dependency:** the DOCX-onto-`cssbox` re-point (flat-model retirement) is a prerequisite
-for Phase 2 onward — the whole "lower into `cssbox`, which already does the layout" strategy requires
-it. That work is in progress in a separate branch. Phase 1 (the recursive-model refactor) is expressed
-in `pkg/docx` and is largely independent of it, but **Phase 2 (tables) must not start until DOCX
-lowering targets `cssbox` on `main`.** If the re-point has not merged when this sub-project begins,
-either rebase onto its branch or block Phase 2 on its merge.
+**No sequencing dependency remains** — the convergence this pass depended on is already merged. Every
+phase branches straight off `main`.
 
 ## Goal
 
@@ -46,8 +48,10 @@ Therefore this sub-project is overwhelmingly a **parse-and-lower** problem, not 
 1. **Parse** the missing OOXML into a faithful, recursive `pkg/docx` model.
 2. **Resolve** the new OPC parts (numbering, media, headers/footers, footnotes, settings) via the
    existing relationship machinery.
-3. **Lower** each new structure into the corresponding `cssbox.Box` subtree with the right `Display`,
-   `ComputedStyle`, `Marker`, and `Replaced` fields — the same subtree HTML box-generation emits.
+3. **Lower** each new structure — extending `pkg/docx/cssbox`'s existing `Lower`/`lowerParagraph`/
+   `runTextBox` — into the corresponding `cssbox.Box` subtree with the right `Display`, `ComputedStyle`,
+   `Marker`, and `Replaced` fields (concrete `css.ComputedStyle` string values, matching the current
+   lowering) — the same subtree HTML box-generation emits.
 
 The layout engine, the anonymous-box fixups, spans, column solve, and cell recursion take over from
 there. DOCX tables get the *same* engine HTML tables use, for free.
@@ -159,9 +163,10 @@ where `ParaChild` distinguishes a bare `Run`, a `Hyperlink{Target string; Runs [
 `Drawing{RelID string; ExtentEMU (w,h int64); ...}` (an inline image). List membership is carried on
 `ParagraphProps` (`NumID`, `ILvl`) since numbering is a paragraph property (`w:numPr`).
 
-**Phase 1 lands the refactor with no new features** — the existing paragraph/run walk is re-expressed
-over the new types, and **all existing DOCX goldens stay byte-identical**. Tables/lists/images/
-hyperlinks then fill in the new vocabulary in later phases.
+**Phase 1 lands the refactor with no new features** — the parser and `pkg/docx/cssbox`'s existing
+`Lower`/`lowerParagraph` are re-expressed over the new `Block` sum type / `Paragraph.Content`, and
+**all existing DOCX goldens stay byte-identical**. Tables/lists/images/hyperlinks then fill in the new
+vocabulary in later phases.
 
 ## The lowering path (DOCX → `cssbox`)
 
@@ -175,7 +180,7 @@ engine sees familiar input:
 | `w:drawing` → `a:blip` | `Box{Kind: BoxReplaced, Replaced: {decoded image}}`, sized from EMU extent (914400 EMU = 1in). Reuses the replaced-image sizing/paint path. |
 | `w:hyperlink` | an inline `Box{Kind: BoxInline}` carrying the resolved href (retained for conversion; the raster path may underline+color it, or ignore it). |
 | headers / footers | lowered into the paged-media margin-band mechanism (per-section, default/even/first). |
-| Tier-3 props | additions to the run-props → `ComputedStyle` mapping (strike → `text-decoration`, `vertAlign` → super/sub, highlight → `background-color`, caps → `text-transform`, etc.). |
+| Tier-3 props | additions to the run-props → `ComputedStyle` mapping, extending the existing `runTextBox` (which already maps family/bold/italic/size/color/underline): strike → `text-decoration: line-through`, `vertAlign` → super/sub, highlight → `background-color`, caps → `text-transform`, etc. Requires widening `style.EffectiveRun` (today only Bold/Italic/Underline/Size/Color/Family) + the parser's `applyRPrChild`. |
 
 **Byte-identity constraint** (CLAUDE.md): every existing DOCX golden stays pixel-identical until the new
 lowering emits new vocabulary. New features light up **only** for documents that use them; a
