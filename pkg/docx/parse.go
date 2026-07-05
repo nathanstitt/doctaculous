@@ -54,6 +54,8 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 		}
 		doc.Numbering = num
 	}
+
+	doc.Rels = pkg.allRels(mainName)
 	return doc, nil
 }
 
@@ -104,6 +106,39 @@ func (p *pkgReader) relsForByType(partName, relType string) string {
 		}
 	}
 	return ""
+}
+
+// allRels returns every relationship for a source part, keyed by id, with targets
+// resolved relative to the part's directory for internal (package) targets and
+// left verbatim for external ones.
+func (p *pkgReader) allRels(partName string) map[string]Relationship {
+	partName = cleanPart(partName)
+	dir, base := splitPart(partName)
+	relsName := joinPart(dir, "_rels", base+".rels")
+	data, ok := p.part(relsName)
+	if !ok {
+		return nil
+	}
+	var doc struct {
+		Rels []struct {
+			ID         string `xml:"Id,attr"`
+			Target     string `xml:"Target,attr"`
+			TargetMode string `xml:"TargetMode,attr"`
+		} `xml:"Relationship"`
+	}
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	out := make(map[string]Relationship, len(doc.Rels))
+	for _, r := range doc.Rels {
+		external := r.TargetMode == "External"
+		target := r.Target
+		if !external {
+			target = joinPart(dir, r.Target)
+		}
+		out[r.ID] = Relationship{ID: r.ID, Target: target, External: external}
+	}
+	return out
 }
 
 // parseDocument walks word/document.xml, filling the body blocks and the
@@ -235,6 +270,12 @@ func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
 					r := runs[i]
 					p.Content = append(p.Content, ParaChild{Run: &r})
 				}
+			case "hyperlink":
+				h, err := parseHyperlink(dec, t)
+				if err != nil {
+					return nil, nil, err
+				}
+				p.Content = append(p.Content, ParaChild{Hyperlink: h})
 			default:
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
@@ -448,6 +489,55 @@ func parseRun(dec *xml.Decoder) ([]Run, error) {
 			}
 		}
 	}
+}
+
+// parseHyperlink consumes a w:hyperlink: its runs plus the r:id / w:anchor
+// attributes. start is the already-read start element (carrying the attributes).
+func parseHyperlink(dec *xml.Decoder, start xml.StartElement) (*Hyperlink, error) {
+	h := &Hyperlink{}
+	if id, ok := rAttr(start, "id"); ok {
+		h.SetRelID(id)
+	}
+	if anchor, ok := wAttr(start, "anchor"); ok {
+		h.Anchor = anchor
+	}
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: hyperlink: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "r" {
+				runs, err := parseRun(dec)
+				if err != nil {
+					return nil, err
+				}
+				h.Runs = append(h.Runs, runs...)
+				continue
+			}
+			if err := dec.Skip(); err != nil {
+				return nil, fmt.Errorf("%w: hyperlink: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "hyperlink" {
+				return h, nil
+			}
+		}
+	}
+}
+
+// rNS is the officeDocument relationships namespace (the r: prefix).
+const rNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+// rAttr returns an r-namespaced attribute by local name (e.g. r:id).
+func rAttr(e xml.StartElement, local string) (string, bool) {
+	for _, a := range e.Attr {
+		if a.Name.Local == local && (a.Name.Space == rNS || a.Name.Space == "") {
+			return a.Value, true
+		}
+	}
+	return "", false
 }
 
 // parseText reads the character data of a w:t verbatim. We deliberately do not

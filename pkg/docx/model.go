@@ -26,10 +26,21 @@ type Document struct {
 	// Numbering holds the parsed word/numbering.xml (list definitions), or nil if
 	// the document has no numbering part.
 	Numbering *Numbering
+	// Rels maps a relationship id (r:id) to its target for the main document part
+	// (external hyperlink URLs, image parts). Empty if the document has no rels.
+	Rels map[string]Relationship
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
 	Section SectionProps
+}
+
+// Relationship is one document relationship (Id -> Target), with the external
+// flag set when TargetMode="External" (hyperlinks to URLs).
+type Relationship struct {
+	ID       string
+	Target   string
+	External bool
 }
 
 // Block is a top-level flow item: exactly one field is non-nil. A paragraph
@@ -57,14 +68,22 @@ type ParaChild struct {
 	Drawing   *Drawing
 }
 
-// Hyperlink is a w:hyperlink: a group of runs that link to Target (an external
-// URL resolved from the r:id relationship) or Anchor (an internal bookmark).
-// Later phases populate it; Phase 1 only declares it.
+// Hyperlink is a w:hyperlink: a group of runs linking to an external URL
+// (resolved from RelID via the document relationships) or an internal Anchor
+// (bookmark). Target is populated at lowering time from RelID; the parser sets
+// only relID + Anchor + Runs.
 type Hyperlink struct {
-	Target string
+	relID  string
 	Anchor string
+	Target string
 	Runs   []Run
 }
+
+// RelID returns the r:id relationship id referencing the external target, or "".
+func (h *Hyperlink) RelID() string { return h.relID }
+
+// SetRelID sets the relationship id (used by the parser).
+func (h *Hyperlink) SetRelID(id string) { h.relID = id }
 
 // Drawing is a w:drawing carrying an embedded image: RelID references the image
 // part via the document relationships; WidthEMU/HeightEMU are the extent (914400
