@@ -274,3 +274,36 @@ func TestLowerAlignmentMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestLowerHyperlinkStylesRuns(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840, MarginLeft: 1440, MarginRight: 1440, MarginTop: 1440, MarginBottom: 1440},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{Content: []docx.ParaChild{
+			{Run: &docx.Run{Text: "see "}},
+			{Hyperlink: linkWith("the site")},
+		}}}},
+	}
+	root := lowerDoc(t, d)
+	body := root.Children[len(root.Children)-1]
+	para := body.Children[0]
+	// two inline text boxes: "see " (default) and "the site" (link-styled).
+	if len(para.Children) != 2 {
+		t.Fatalf("paragraph inline children = %d, want 2", len(para.Children))
+	}
+	link := para.Children[1]
+	if link.Text != "the site" {
+		t.Fatalf("link text = %q, want 'the site'", link.Text)
+	}
+	if link.Style.TextDecorationLine != "underline" {
+		t.Fatalf("link decoration = %q, want underline", link.Style.TextDecorationLine)
+	}
+	if link.Style.Color.B != 0xEE || link.Style.Color.R != 0x00 {
+		t.Fatalf("link color = %+v, want #0000EE", link.Style.Color)
+	}
+}
+
+func linkWith(text string) *docx.Hyperlink {
+	h := &docx.Hyperlink{Runs: []docx.Run{{Text: text}}}
+	h.SetRelID("rId5")
+	return h
+}

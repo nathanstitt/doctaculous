@@ -6,6 +6,8 @@
 package cssbox
 
 import (
+	"image/color"
+
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/docx/style"
@@ -108,9 +110,21 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
 	var blocks []*lcssbox.Box
 	cur := newBlock()
 	for _, child := range p.Content {
+		if child.Hyperlink != nil {
+			for _, run := range child.Hyperlink.Runs {
+				if run.Text == "" {
+					continue
+				}
+				er := r.EffectiveRun(p.Props, run.Props)
+				cur.Children = append(cur.Children, linkTextBox(run.Text, er, cur.Style))
+			}
+			continue
+		}
+		if child.Drawing != nil {
+			// Drawings (images) are lowered in Task 4.4.
+			continue
+		}
 		if child.Run == nil {
-			// Hyperlink groups and drawings are lowered in the images+hyperlinks
-			// phase; a bare run is all Phase 1 handles.
 			continue
 		}
 		run := *child.Run
@@ -175,6 +189,17 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 		cs.TextDecorationLine = "none"
 	}
 	return &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
+}
+
+// linkTextBox lowers a hyperlink run's text into an inline box styled as a link:
+// the run's own formatting, overlaid with link blue + underline (the HTML a:link
+// UA default). The URL is not carried on the cssbox tree; it survives on the docx
+// model for the conversion path.
+func linkTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lcssbox.Box {
+	box := runTextBox(text, er, para)
+	box.Style.Color = color.RGBA{R: 0x00, G: 0x00, B: 0xEE, A: 0xFF}
+	box.Style.TextDecorationLine = "underline"
+	return box
 }
 
 // hardBreakBox lowers a DOCX line/column break to a preserved-newline text box. Only
