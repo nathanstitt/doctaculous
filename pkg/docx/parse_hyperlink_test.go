@@ -22,8 +22,8 @@ func TestParseHyperlinkStructure(t *testing.T) {
 	if h == nil {
 		t.Fatalf("content[1].Hyperlink = nil, want a hyperlink")
 	}
-	if h.RelID() != "rId5" {
-		t.Fatalf("hyperlink relID = %q, want rId5", h.RelID())
+	if h.RelID != "rId5" {
+		t.Fatalf("hyperlink relID = %q, want rId5", h.RelID)
 	}
 	if len(h.Runs) != 1 || h.Runs[0].Text != "the site" {
 		t.Fatalf("hyperlink runs = %+v, want ['the site']", h.Runs)

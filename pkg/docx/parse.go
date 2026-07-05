@@ -483,6 +483,9 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
 			case "drawing":
+				// A drawing accumulates separately from run text; within one w:r this
+				// loses text/drawing interleaving, but Word emits each drawing in its
+				// own run, so cross-run document order is preserved.
 				dr, err := parseDrawing(dec)
 				if err != nil {
 					return nil, nil, err
@@ -563,7 +566,7 @@ func attrInt64(e xml.StartElement, local string) (int64, bool) {
 func parseHyperlink(dec *xml.Decoder, start xml.StartElement) (*Hyperlink, error) {
 	h := &Hyperlink{}
 	if id, ok := rAttr(start, "id"); ok {
-		h.SetRelID(id)
+		h.RelID = id
 	}
 	if anchor, ok := wAttr(start, "anchor"); ok {
 		h.Anchor = anchor

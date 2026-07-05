@@ -73,20 +73,18 @@ type ParaChild struct {
 
 // Hyperlink is a w:hyperlink: a group of runs linking to an external URL
 // (resolved from RelID via the document relationships) or an internal Anchor
-// (bookmark). Target is populated at lowering time from RelID; the parser sets
-// only relID + Anchor + Runs.
+// (bookmark). The parser sets RelID + Anchor + Runs.
 type Hyperlink struct {
-	relID  string
+	// RelID is the r:id relationship id referencing the external target, or "".
+	RelID  string
 	Anchor string
+	// Target is the resolved external URL. It is RESERVED for the conversion path
+	// (DOCX→HTML/markdown), which will resolve RelID through Document.Rels; the
+	// current parse+render path does not populate it (render styles the link inline
+	// and reads only Runs).
 	Target string
 	Runs   []Run
 }
-
-// RelID returns the r:id relationship id referencing the external target, or "".
-func (h *Hyperlink) RelID() string { return h.relID }
-
-// SetRelID sets the relationship id (used by the parser).
-func (h *Hyperlink) SetRelID(id string) { h.relID = id }
 
 // Drawing is a w:drawing carrying an embedded image: RelID references the image
 // part via the document relationships; WidthEMU/HeightEMU are the extent (914400

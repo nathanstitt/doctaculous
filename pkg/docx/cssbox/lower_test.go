@@ -303,7 +303,5 @@ func TestLowerHyperlinkStylesRuns(t *testing.T) {
 }
 
 func linkWith(text string) *docx.Hyperlink {
-	h := &docx.Hyperlink{Runs: []docx.Run{{Text: text}}}
-	h.SetRelID("rId5")
-	return h
+	return &docx.Hyperlink{RelID: "rId5", Runs: []docx.Run{{Text: text}}}
 }

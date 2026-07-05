@@ -41,6 +41,14 @@ const emuPerPt = 12700
 func drawingBox(dr *docx.Drawing, para gcss.ComputedStyle) *lcssbox.Box {
 	cs := para
 	cs.Display = "inline-block"
+	// Reset block-level indent margins: this is an inline-block atom, so the
+	// paragraph's MarginLeft/Right (from w:ind) would otherwise be applied a second
+	// time as the image's own margins (double-indent).
+	cs.MarginLeft = gcss.Length{}
+	cs.MarginRight = gcss.Length{}
+	cs.MarginTop = gcss.Length{}
+	cs.MarginBottom = gcss.Length{}
+	cs.TextIndent = gcss.Length{}
 	attrs := map[string]string{"src": dr.RelID}
 	if dr.WidthEMU > 0 {
 		attrs["width"] = strconv.Itoa(int(dr.WidthEMU / emuPerPt))
