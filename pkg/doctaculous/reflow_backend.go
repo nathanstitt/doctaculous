@@ -18,7 +18,6 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // reflowRenderer renders a reflowable document that has already been laid out into
@@ -61,7 +60,7 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	geom := docxcssbox.Geometry(d)
 	ctx := context.Background()
 	faces := layoutfont.NewFaceCache()
-	engine := layoutcss.New(faces, resource.MapLoader(nil), nil)
+	engine := layoutcss.New(faces, docxcssbox.MediaLoader(d), nil)
 	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
 		Paged:        true,
 		FallbackW:    geom.PageWidthPt, // full page; @page size/margins refine below

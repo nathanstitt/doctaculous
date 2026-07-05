@@ -121,7 +121,7 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
 			continue
 		}
 		if child.Drawing != nil {
-			// Drawings (images) are lowered in Task 4.4.
+			cur.Children = append(cur.Children, drawingBox(child.Drawing, cur.Style))
 			continue
 		}
 		if child.Run == nil {
