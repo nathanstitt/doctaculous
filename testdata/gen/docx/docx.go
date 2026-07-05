@@ -19,8 +19,9 @@ var fixedModTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 // is not usable; start with New. Set the document and (optionally) styles XML,
 // then call Bytes.
 type Builder struct {
-	documentXML string
-	stylesXML   string
+	documentXML  string
+	stylesXML    string
+	numberingXML string
 }
 
 // New returns a Builder seeded with an empty document body.
@@ -42,6 +43,13 @@ func (b *Builder) SetStyles(xml string) *Builder {
 	return b
 }
 
+// SetNumbering sets the word/numbering.xml part. When empty, no numbering part is
+// written.
+func (b *Builder) SetNumbering(xml string) *Builder {
+	b.numberingXML = xml
+	return b
+}
+
 // Bytes serializes the package to .docx bytes. It writes the required OPC parts:
 // [Content_Types].xml, the package and document relationships, the main document,
 // and the optional styles part.
@@ -57,18 +65,21 @@ func (b *Builder) Bytes() []byte {
 		_, _ = w.Write([]byte(content))
 	}
 
-	write("[Content_Types].xml", contentTypes(b.stylesXML != ""))
+	write("[Content_Types].xml", contentTypes(b.stylesXML != "", b.numberingXML != ""))
 	write("_rels/.rels", rootRels)
-	write("word/_rels/document.xml.rels", docRels(b.stylesXML != ""))
+	write("word/_rels/document.xml.rels", docRels(b.stylesXML != "", b.numberingXML != ""))
 	write("word/document.xml", b.documentXML)
 	if b.stylesXML != "" {
 		write("word/styles.xml", b.stylesXML)
+	}
+	if b.numberingXML != "" {
+		write("word/numbering.xml", b.numberingXML)
 	}
 	_ = zw.Close()
 	return buf.Bytes()
 }
 
-func contentTypes(withStyles bool) string {
+func contentTypes(withStyles, withNumbering bool) string {
 	s := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -78,6 +89,10 @@ func contentTypes(withStyles bool) string {
 		s += `
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>`
 	}
+	if withNumbering {
+		s += `
+  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>`
+	}
 	return s + "\n</Types>"
 }
 
@@ -86,12 +101,16 @@ const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`
 
-func docRels(withStyles bool) string {
+func docRels(withStyles, withNumbering bool) string {
 	s := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
 	if withStyles {
 		s += `
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`
+	}
+	if withNumbering {
+		s += `
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>`
 	}
 	return s + "\n</Relationships>"
 }

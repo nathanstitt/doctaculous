@@ -1,6 +1,12 @@
 package docx
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
+
+// itoa is strconv.Itoa; a tiny local alias keeps the fixture strings readable.
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // CoreFixture is one canonical DOCX fixture: a stable name, a human description,
 // the page count it must lay out to, and a builder for its bytes. It mirrors the
@@ -54,6 +60,12 @@ var Core = []CoreFixture{
 		Desc:  "a table exercising gridSpan (colspan) and vMerge (rowspan)",
 		Pages: 1,
 		Build: tableSpansDocx,
+	},
+	{
+		Name:  "list",
+		Desc:  "an ordered (decimal) list and an unordered (bullet) list",
+		Pages: 1,
+		Build: listDocx,
 	},
 }
 
@@ -195,3 +207,35 @@ func tableSpansDocx() []byte {
 	doc := docOpen + tbl + docClose
 	return New().SetDocument(doc).Bytes()
 }
+
+// listItem wraps text in a paragraph carrying a w:numPr (numId + ilvl).
+func listItem(numID, ilvl int, text string) string {
+	return `<w:p><w:pPr><w:numPr><w:ilvl w:val="` + itoa(ilvl) + `"/><w:numId w:val="` + itoa(numID) + `"/></w:numPr></w:pPr>` +
+		`<w:r><w:t xml:space="preserve">` + text + `</w:t></w:r></w:p>`
+}
+
+func listDocx() []byte {
+	doc := docOpen +
+		para("", "", "Ordered:") +
+		listItem(1, 0, "First item") +
+		listItem(1, 0, "Second item") +
+		listItem(1, 0, "Third item") +
+		para("", "", "Unordered:") +
+		listItem(2, 0, "Bullet one") +
+		listItem(2, 0, "Bullet two") +
+		docClose
+	return New().SetDocument(doc).SetNumbering(listNumbering).Bytes()
+}
+
+// listNumbering defines a decimal list (numId 1) and a bullet list (numId 2).
+const listNumbering = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="1">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="&#8226;"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>`
