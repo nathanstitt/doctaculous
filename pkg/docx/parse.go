@@ -56,6 +56,7 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 	}
 
 	doc.Rels = pkg.allRels(mainName)
+	doc.Media = pkg.mediaParts()
 	return doc, nil
 }
 
@@ -261,7 +262,7 @@ func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
 				p.Props = props
 				sect = s
 			case "r":
-				runs, err := parseRun(dec)
+				runs, drawings, err := parseRun(dec)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -269,6 +270,9 @@ func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
 					// Copy into a fresh local: &runs[i] would alias parseRun's slice.
 					r := runs[i]
 					p.Content = append(p.Content, ParaChild{Run: &r})
+				}
+				for _, dr := range drawings {
+					p.Content = append(p.Content, ParaChild{Drawing: dr})
 				}
 			case "hyperlink":
 				h, err := parseHyperlink(dec, t)
@@ -431,10 +435,11 @@ func applyIndent(props *ParagraphProps, e xml.StartElement) {
 // contains a break: the text before/around the break and the break itself are
 // modeled as runs sharing the same properties so the layout engine sees them in
 // order.
-func parseRun(dec *xml.Decoder) ([]Run, error) {
+func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 	var props RunProps
 	var sb strings.Builder
 	var out []Run
+	var drawings []*Drawing
 	flushText := func() {
 		if sb.Len() > 0 {
 			out = append(out, Run{Props: props, Text: sb.String()})
@@ -444,13 +449,13 @@ func parseRun(dec *xml.Decoder) ([]Run, error) {
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+			return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
 			if t.Name.Space != wNS {
 				if err := dec.Skip(); err != nil {
-					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
 				continue
 			}
@@ -458,37 +463,99 @@ func parseRun(dec *xml.Decoder) ([]Run, error) {
 			case "rPr":
 				props, err = parseRPr(dec)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			case "t":
 				text, err := parseText(dec, t)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				sb.WriteString(text)
 			case "tab":
 				sb.WriteByte('\t')
 				if err := dec.Skip(); err != nil {
-					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
 			case "br":
 				flushText()
 				out = append(out, Run{Props: props, Break: parseBreak(t)})
 				if err := dec.Skip(); err != nil {
-					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
+			case "drawing":
+				dr, err := parseDrawing(dec)
+				if err != nil {
+					return nil, nil, err
+				}
+				if dr != nil {
+					drawings = append(drawings, dr)
 				}
 			default:
 				if err := dec.Skip(); err != nil {
-					return nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
 			}
 		case xml.EndElement:
 			if t.Name.Local == "r" {
 				flushText()
-				return out, nil
+				return out, drawings, nil
 			}
 		}
 	}
+}
+
+// parseDrawing consumes a w:drawing, extracting the image extent (wp:extent
+// cx/cy in EMU) and the blip's relationship id (a:blip r:embed). It walks by
+// local name (the wp:/a:/pic: namespaces are distinct but the local names are
+// unambiguous). Returns nil if no blip is found (an unsupported drawing shape).
+func parseDrawing(dec *xml.Decoder) (*Drawing, error) {
+	dr := &Drawing{}
+	hasBlip := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: drawing: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "extent":
+				if v, ok := attrInt64(t, "cx"); ok {
+					dr.WidthEMU = v
+				}
+				if v, ok := attrInt64(t, "cy"); ok {
+					dr.HeightEMU = v
+				}
+			case "blip":
+				if id, ok := rAttr(t, "embed"); ok {
+					dr.RelID = id
+					hasBlip = true
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "drawing" {
+				if !hasBlip {
+					return nil, nil
+				}
+				return dr, nil
+			}
+		}
+	}
+}
+
+// attrInt64 returns an int64-valued attribute by local name (EMU extents exceed
+// int range on 32-bit, so use int64).
+func attrInt64(e xml.StartElement, local string) (int64, bool) {
+	for _, a := range e.Attr {
+		if a.Name.Local == local {
+			n, err := strconv.ParseInt(strings.TrimSpace(a.Value), 10, 64)
+			if err != nil {
+				return 0, false
+			}
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // parseHyperlink consumes a w:hyperlink: its runs plus the r:id / w:anchor
@@ -509,7 +576,7 @@ func parseHyperlink(dec *xml.Decoder, start xml.StartElement) (*Hyperlink, error
 		switch t := tok.(type) {
 		case xml.StartElement:
 			if t.Name.Space == wNS && t.Name.Local == "r" {
-				runs, err := parseRun(dec)
+				runs, _, err := parseRun(dec)
 				if err != nil {
 					return nil, err
 				}

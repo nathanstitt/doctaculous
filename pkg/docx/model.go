@@ -29,6 +29,9 @@ type Document struct {
 	// Rels maps a relationship id (r:id) to its target for the main document part
 	// (external hyperlink URLs, image parts). Empty if the document has no rels.
 	Rels map[string]Relationship
+	// Media maps an image part name (e.g. "word/media/image1.png") to its raw
+	// bytes, for drawings to decode. Empty if the document embeds no media.
+	Media map[string][]byte
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.

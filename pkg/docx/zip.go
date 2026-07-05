@@ -67,6 +67,22 @@ func (p *pkgReader) part(name string) ([]byte, bool) {
 	return b, true
 }
 
+// mediaParts returns every word/media/* part keyed by its part name.
+func (p *pkgReader) mediaParts() map[string][]byte {
+	var out map[string][]byte
+	for name := range p.files {
+		if strings.HasPrefix(name, "word/media/") {
+			if data, ok := p.part(name); ok {
+				if out == nil {
+					out = map[string][]byte{}
+				}
+				out[name] = data
+			}
+		}
+	}
+	return out
+}
+
 // mainDocumentPart locates word/document.xml by following the package
 // relationships from /_rels/.rels (the officeDocument relationship), falling back
 // to the conventional path. It returns ErrMissingPart if neither resolves to an
