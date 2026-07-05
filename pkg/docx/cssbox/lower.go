@@ -69,21 +69,24 @@ func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
 	if d == nil || r == nil {
 		return root
 	}
-	body.Children = lowerBlocks(d.Body, r)
+	body.Children = lowerBlocks(d.Body, r, d.Numbering, newListCounter())
 	return root
 }
 
-// lowerBlocks lowers a sequence of DOCX blocks (paragraphs and tables) into
-// cssbox boxes. It is shared by the document body and by table cells (cell
-// content recursion).
-func lowerBlocks(blocks []docx.Block, r *style.Resolver) []*lcssbox.Box {
+// lowerBlocks lowers a sequence of DOCX blocks (paragraphs, list items, tables).
+// num is the document's numbering (may be nil); ctr threads list-counter state.
+func lowerBlocks(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, ctr *listCounter) []*lcssbox.Box {
 	var out []*lcssbox.Box
 	for _, blk := range blocks {
 		switch {
 		case blk.Paragraph != nil:
-			out = append(out, lowerParagraph(blk.Paragraph, r)...)
+			if blk.Paragraph.Props.HasNum && num != nil {
+				out = append(out, lowerListParagraph(blk.Paragraph, r, num, ctr)...)
+			} else {
+				out = append(out, lowerParagraph(blk.Paragraph, r)...)
+			}
 		case blk.Table != nil:
-			out = append(out, lowerTable(blk.Table, r))
+			out = append(out, lowerTable(blk.Table, r, num))
 		}
 	}
 	return out

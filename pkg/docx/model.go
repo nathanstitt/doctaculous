@@ -23,6 +23,9 @@ type Document struct {
 	// Styles holds the resolved style table (docDefaults + named styles). It may
 	// be nil if the package has no styles part.
 	Styles *Styles
+	// Numbering holds the parsed word/numbering.xml (list definitions), or nil if
+	// the document has no numbering part.
+	Numbering *Numbering
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
@@ -245,6 +248,11 @@ type ParagraphProps struct {
 	HasIndentLeft, HasIndentRight, HasFirstLine bool
 	// PageBreakBefore forces the paragraph to start a new page (w:pageBreakBefore).
 	PageBreakBefore bool
+	// NumID/ILvl are the list membership from w:numPr (numId + ilvl); HasNum marks
+	// them set. A paragraph with HasNum lowers to a list item.
+	NumID  int
+	ILvl   int
+	HasNum bool
 }
 
 // RunProps holds the directly-specified run (character) properties (w:rPr). Bool

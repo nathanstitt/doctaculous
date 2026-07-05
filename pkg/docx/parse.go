@@ -44,6 +44,16 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 		}
 		doc.Styles = styles
 	}
+
+	// Numbering part: prefer the relationship target, fall back to the convention.
+	numName := resolveNumberingPart(pkg, mainName)
+	if data, ok := pkg.part(numName); ok {
+		num, err := parseNumbering(data)
+		if err != nil {
+			return nil, err
+		}
+		doc.Numbering = num
+	}
 	return doc, nil
 }
 
@@ -56,6 +66,17 @@ func resolveStylesPart(pkg *pkgReader, mainName string) string {
 		return rels
 	}
 	return "word/styles.xml"
+}
+
+// resolveNumberingPart finds the numbering part name via the main document's
+// relationships, falling back to word/numbering.xml.
+func resolveNumberingPart(pkg *pkgReader, mainName string) string {
+	const numType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering"
+	rels := pkg.relsForByType(mainName, numType)
+	if rels != "" {
+		return rels
+	}
+	return "word/numbering.xml"
 }
 
 // relsForByType returns the first relationship target of the given type for a
@@ -241,12 +262,16 @@ func parsePPr(dec *xml.Decoder) (ParagraphProps, *SectionProps, error) {
 		case xml.StartElement:
 			if t.Name.Space == wNS {
 				applyPPrChild(&props, t)
-				if t.Name.Local == "sectPr" {
+				switch t.Name.Local {
+				case "sectPr":
 					s, err := parseSectPr(dec)
 					if err != nil {
 						return props, nil, err
 					}
 					sect = &s
+					continue
+				case "numPr":
+					applyNumPr(&props, dec)
 					continue
 				}
 			}
@@ -277,6 +302,39 @@ func applyPPrChild(props *ParagraphProps, e xml.StartElement) {
 		applySpacing(props, e)
 	case "ind":
 		applyIndent(props, e)
+	}
+}
+
+// applyNumPr reads a w:numPr's w:ilvl and w:numId children into the paragraph's
+// list membership. A numPr with a numId (even without an explicit ilvl, which
+// defaults to 0) marks the paragraph as a list item.
+func applyNumPr(props *ParagraphProps, dec *xml.Decoder) {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "ilvl":
+					if v, ok := wAttrInt(t, "val"); ok {
+						props.ILvl = v
+					}
+				case "numId":
+					if v, ok := wAttrInt(t, "val"); ok {
+						props.NumID = v
+						props.HasNum = true
+					}
+				}
+			}
+			_ = dec.Skip()
+		case xml.EndElement:
+			if t.Name.Local == "numPr" {
+				return
+			}
+		}
 	}
 }
 

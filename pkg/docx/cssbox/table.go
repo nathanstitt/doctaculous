@@ -14,7 +14,7 @@ import (
 // DisplayTableCell boxes carrying ColSpan (w:gridSpan) and RowSpan (derived from
 // w:vMerge). Cell content lowers recursively via lowerBlocks. Borders, shading,
 // and width map onto the table/cell ComputedStyle.
-func lowerTable(tb *docx.Table, r *style.Resolver) *lcssbox.Box {
+func lowerTable(tb *docx.Table, r *style.Resolver, num *docx.Numbering) *lcssbox.Box {
 	table := &lcssbox.Box{
 		Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayTable, Formatting: lcssbox.TableFC,
 		Style: tableStyle(tb.Props, tb.Grid),
@@ -40,7 +40,7 @@ func lowerTable(tb *docx.Table, r *style.Resolver) *lcssbox.Box {
 				ColSpan: span,
 				RowSpan: rowSpans[cellKey{ri, ci}],
 			}
-			cellBox.Children = lowerBlocks(cell.Blocks, r)
+			cellBox.Children = lowerBlocks(cell.Blocks, r, num, newListCounter())
 			rowBox.Children = append(rowBox.Children, cellBox)
 		}
 		table.Children = append(table.Children, rowBox)
