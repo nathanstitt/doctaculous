@@ -256,7 +256,7 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 		cs.BackgroundColor = er.Highlight
 	}
 	if er.Caps || er.SmallCaps {
-		cs.TextTransform = "uppercase" // small-caps approximated as uppercase (logged deferral)
+		cs.TextTransform = "uppercase" // small-caps approximated as uppercase (true small-caps needs synthesized glyphs)
 	}
 	return &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
 }

@@ -278,7 +278,9 @@ func applyTextTransform(s, transform string) string {
 
 // capitalizeWords uppercases the first rune of each run of letters, leaving the rest
 // unchanged (a pragmatic approximation of CSS "capitalize": a letter preceded by a
-// non-letter starts a word).
+// non-letter starts a word). An apostrophe (U+0027 ' or U+2019 ’) is treated as part
+// of the surrounding word — it does NOT reset the word state — so a contraction like
+// "it's" capitalizes to "It's" rather than "It'S".
 func capitalizeWords(s string) string {
 	var b strings.Builder
 	prevLetter := false
@@ -288,7 +290,12 @@ func capitalizeWords(s string) string {
 		} else {
 			b.WriteRune(r)
 		}
-		prevLetter = unicode.IsLetter(r)
+		// An apostrophe is transparent to word boundaries: leave prevLetter as-is so the
+		// letter after it is not treated as a new word start. Any other non-letter resets
+		// the state, so the next letter begins a word.
+		if r != '\'' && r != '’' {
+			prevLetter = unicode.IsLetter(r)
+		}
 	}
 	return b.String()
 }

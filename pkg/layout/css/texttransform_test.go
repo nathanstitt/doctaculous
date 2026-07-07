@@ -60,6 +60,22 @@ func TestTextTransformCapitalize(t *testing.T) {
 	}
 }
 
+// TestTextTransformCapitalizeApostrophe confirms an intra-word apostrophe does not
+// start a new word: "it's a test" capitalizes to "It's A Test", NOT "It'S A Test"
+// (the letter after the apostrophe stays lowercase).
+func TestTextTransformCapitalizeApostrophe(t *testing.T) {
+	got := renderInlineText(t, `<body><p><span style="text-transform:capitalize">it's a test</span></p></body>`)
+	if !strings.Contains(got, "It's") {
+		t.Fatalf("rendered text = %q, want It's (apostrophe not a word boundary)", got)
+	}
+	if strings.Contains(got, "It'S") {
+		t.Fatalf("rendered text = %q, apostrophe wrongly capitalized the following letter", got)
+	}
+	if !strings.Contains(got, "A") || !strings.Contains(got, "Test") {
+		t.Fatalf("rendered text = %q, want A and Test capitalized", got)
+	}
+}
+
 // TestTextTransformNoneUnchanged confirms the default (no transform) leaves the text
 // case untouched — the byte-identical baseline. (Whitespace glyphs carry no Runes, so
 // the collected rune stream is space-free; assert on the case-preserved words.)

@@ -440,49 +440,63 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	return dst
 }
 
-// appendUnderlines emits text-decoration:underline rules for one line: one thin
-// RuleKind rectangle per contiguous run of underlined glyphs, spanning the run's
-// x-extent (pen origin of the first glyph to pen-end of the last), positioned just
-// below the baseline. Thickness and offset scale with the run's glyph size (≈0.07em
-// thick, ≈0.12em below the baseline) — a simple, browser-plausible underline. Emitted
-// after the glyphs (an underline sits below the ink, so order doesn't matter).
-func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
+// appendDecoRules emits one RuleKind item per contiguous run of glyphs for which sel
+// returns true on a line: a single thin rectangle spanning the run's x-extent (pen
+// origin of the first glyph to pen-end of the last), drawn thickFactor*size thick at
+// yOffFactor*size from the (baseline-shift-adjusted) line baseline. A POSITIVE
+// yOffFactor is BELOW the baseline (underline); a NEGATIVE one is ABOVE it
+// (line-through). size is the run's tallest glyph's size, and the thickness is clamped
+// to a 1pt minimum. Emitted after the glyphs (the rule and the ink don't overlap in a
+// way that depends on order). Shared by appendUnderlines and appendStrikes so the
+// run-detection logic lives once.
+func appendDecoRules(dst []layout.Item, ln *LineFragment, sel func(*GlyphFragment) bool, yOffFactor, thickFactor float64) []layout.Item {
 	i := 0
 	for i < len(ln.Glyphs) {
-		if g := &ln.Glyphs[i]; !g.Underline || g.Outline == nil {
+		if g := &ln.Glyphs[i]; !sel(g) {
 			i++
 			continue
 		}
-		// Start of an underlined run: extend over consecutive underlined glyphs.
+		// Start of a decorated run: extend over consecutive selected glyphs.
 		x0 := ln.Glyphs[i].X
 		x1 := ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
 		size := ln.Glyphs[i].SizePt
-		// The underline is drawn in the glyph's own color. CSS paints a propagated
-		// underline in the DECORATING ancestor's color, which diverges only when a
-		// descendant overrides color without re-declaring decoration (a narrow case the
-		// engine does not yet thread the decorating color through — deferred).
+		// The rule is drawn in the glyph's own color. CSS paints a propagated decoration
+		// in the DECORATING ancestor's color, which diverges only when a descendant
+		// overrides color without re-declaring decoration (a narrow case the engine does
+		// not yet thread the decorating color through — deferred).
 		col := ln.Glyphs[i].Color
-		// A super/sub run's underline follows the shifted glyphs (0 for the common case).
+		// A super/sub run's rule follows the shifted glyphs (0 for the common case).
 		shift := ln.Glyphs[i].BaselineShiftPt
-		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].Underline && ln.Glyphs[i].Outline != nil; i++ {
+		for i++; i < len(ln.Glyphs) && sel(&ln.Glyphs[i]); i++ {
 			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
 			if ln.Glyphs[i].SizePt > size {
 				size = ln.Glyphs[i].SizePt // a span uses its tallest glyph's metrics
 			}
 		}
-		thickness := size * 0.07
+		thickness := size * thickFactor
 		if thickness < 1 {
 			thickness = 1
 		}
-		yTop := ln.BaselineY - shift + size*0.12
+		y := ln.BaselineY - shift + yOffFactor*size
 		if x1 > x0 {
 			dst = append(dst, layout.Item{
 				Kind: layout.RuleKind,
-				Rule: layout.RuleItem{XPt: x0, YPt: yTop, WPt: x1 - x0, HPt: thickness, Color: col},
+				Rule: layout.RuleItem{XPt: x0, YPt: y, WPt: x1 - x0, HPt: thickness, Color: col},
 			})
 		}
 	}
 	return dst
+}
+
+// appendUnderlines emits text-decoration:underline rules for one line: one thin
+// RuleKind rectangle per contiguous run of underlined glyphs, spanning the run's
+// x-extent (pen origin of the first glyph to pen-end of the last), positioned just
+// below the baseline. Thickness and offset scale with the run's glyph size (≈0.07em
+// thick, ≈0.12em below the baseline) — a simple, browser-plausible underline. Emitted
+// after the glyphs (an underline sits below the ink, so order doesn't matter). Thin
+// wrapper over appendDecoRules with the underline predicate/offset/thickness.
+func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
+	return appendDecoRules(dst, ln, func(g *GlyphFragment) bool { return g.Underline && g.Outline != nil }, 0.12, 0.07)
 }
 
 // appendStrikes emits text-decoration:line-through rules for one line: one thin
@@ -490,41 +504,10 @@ func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
 // (pen origin of the first glyph to pen-end of the last), positioned at roughly the
 // glyph's mid-height (≈0.30em above the baseline, near the x-height center) rather than
 // below it. Thickness scales with the run's glyph size (≈0.06em thick). Mirrors
-// appendUnderlines but at a mid-glyph Y. Emitted after the glyphs.
+// appendUnderlines but at a mid-glyph (above-baseline) Y. Emitted after the glyphs.
+// Thin wrapper over appendDecoRules with the strike predicate/offset/thickness.
 func appendStrikes(dst []layout.Item, ln *LineFragment) []layout.Item {
-	i := 0
-	for i < len(ln.Glyphs) {
-		if g := &ln.Glyphs[i]; !g.Strike || g.Outline == nil {
-			i++
-			continue
-		}
-		// Start of a struck run: extend over consecutive struck glyphs.
-		x0 := ln.Glyphs[i].X
-		x1 := ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
-		size := ln.Glyphs[i].SizePt
-		col := ln.Glyphs[i].Color
-		// A super/sub run's strike follows the shifted glyphs (0 for the common case).
-		shift := ln.Glyphs[i].BaselineShiftPt
-		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].Strike && ln.Glyphs[i].Outline != nil; i++ {
-			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
-			if ln.Glyphs[i].SizePt > size {
-				size = ln.Glyphs[i].SizePt // a span uses its tallest glyph's metrics
-			}
-		}
-		thickness := size * 0.06
-		if thickness < 1 {
-			thickness = 1
-		}
-		// The strike sits ~0.30em above the baseline (near the x-height center).
-		yMid := ln.BaselineY - shift - size*0.30
-		if x1 > x0 {
-			dst = append(dst, layout.Item{
-				Kind: layout.RuleKind,
-				Rule: layout.RuleItem{XPt: x0, YPt: yMid, WPt: x1 - x0, HPt: thickness, Color: col},
-			})
-		}
-	}
-	return dst
+	return appendDecoRules(dst, ln, func(g *GlyphFragment) bool { return g.Strike && g.Outline != nil }, -0.30, 0.06)
 }
 
 // appendSelfContent emits this fragment's own inline line glyphs then its replaced
