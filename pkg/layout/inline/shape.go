@@ -46,6 +46,18 @@ type Run struct {
 	// shaper itself does nothing with it. The zero value (false) is the historical
 	// behavior, so a caller (e.g. the DOCX engine) that never sets it is unaffected.
 	Underline bool
+	// Strike marks a run whose text has text-decoration: line-through. Like Underline it
+	// is carried opaquely onto each shaped glyph (Glyph.Strike) for the engine to paint
+	// (a rule at mid-glyph rather than below the baseline); the shaper does nothing with
+	// it. The zero value (false) is the historical behavior, so a caller that never sets
+	// it is unaffected.
+	Strike bool
+	// BaselineShiftPt raises (positive) or lowers (negative) the run's glyphs relative to
+	// the line baseline, in points — vertical-align: super/sub. It is carried opaquely
+	// onto each shaped glyph (Glyph.BaselineShiftPt); the shaper does nothing with it and
+	// it does not affect line-box metrics here. Zero (the default) leaves the run on the
+	// baseline, so a caller (e.g. the DOCX engine) that never sets it is unaffected.
+	BaselineShiftPt float64
 }
 
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
@@ -88,6 +100,15 @@ type Glyph struct {
 	// engine's line emitter to paint as an underline rule. The shaper does not act on
 	// it. Zero (false) for callers that don't set Run.Underline (e.g. DOCX).
 	Underline bool
+	// Strike carries the run's text-decoration: line-through onto the glyph, for the
+	// engine's line emitter to paint as a mid-glyph rule. The shaper does not act on it.
+	// Zero (false) for callers that don't set Run.Strike (e.g. DOCX).
+	Strike bool
+	// BaselineShiftPt carries the run's vertical-align: super/sub shift (points, positive
+	// = up) onto the glyph, for the engine's line emitter to offset the glyph's paint Y
+	// from the line baseline. The shaper does not act on it. Zero for callers that don't
+	// set Run.BaselineShiftPt (e.g. DOCX).
+	BaselineShiftPt float64
 	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
 	// writer embeds Face's program for GID and maps GID -> Runes in /ToUnicode). Face
 	// is nil for whitespace/atomic/break glyphs; a rasterizing backend ignores all
@@ -145,7 +166,7 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 			spaceAdv = sa * r.SizePt
 		}
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
-		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline, Face: face}
+		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
 		for _, rn := range r.Text {
 			switch {
 			case rn == '\n' && preserveNL:

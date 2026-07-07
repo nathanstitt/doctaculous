@@ -339,3 +339,34 @@ func TestLowerRunningEmptyWhenNoHeaderFooter(t *testing.T) {
 		t.Fatalf("running = %v, want empty (byte-identical path)", running)
 	}
 }
+
+func TestLowerTier3RunPropsToStyle(t *testing.T) {
+	d := &docx.Document{
+		Section: docx.SectionProps{PageW: 12240, PageH: 15840, MarginLeft: 1440, MarginRight: 1440, MarginTop: 1440, MarginBottom: 1440},
+		Body: []docx.Block{{Paragraph: &docx.Paragraph{Content: []docx.ParaChild{
+			{Run: &docx.Run{Text: "x", Props: docx.RunProps{
+				Strike: true, HasStrike: true,
+				VertAlign:    docx.VertAlignSuperscript,
+				Highlight:    colorYellow(),
+				HasHighlight: true,
+				Caps:         true, HasCaps: true,
+			}}},
+		}}}},
+	}
+	root := lowerDoc(t, d)
+	tx := root.Children[len(root.Children)-1].Children[0].Children[0]
+	if tx.Style.TextDecorationLine != "line-through" {
+		t.Fatalf("decoration = %q, want line-through", tx.Style.TextDecorationLine)
+	}
+	if tx.Style.VerticalAlign != "super" {
+		t.Fatalf("vertical-align = %q, want super", tx.Style.VerticalAlign)
+	}
+	if tx.Style.BackgroundColor.R != 0xFF || tx.Style.BackgroundColor.G != 0xFF || tx.Style.BackgroundColor.B != 0x00 {
+		t.Fatalf("background = %+v, want yellow", tx.Style.BackgroundColor)
+	}
+	if tx.Style.TextTransform != "uppercase" {
+		t.Fatalf("text-transform = %q, want uppercase", tx.Style.TextTransform)
+	}
+}
+
+func colorYellow() color.RGBA { return color.RGBA{R: 0xFF, G: 0xFF, B: 0x00, A: 0xFF} }

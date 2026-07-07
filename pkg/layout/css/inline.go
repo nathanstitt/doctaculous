@@ -3,6 +3,8 @@ package css
 import (
 	"context"
 	"image/color"
+	"strings"
+	"unicode"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -131,9 +133,11 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			case g.Outline != nil:
 				emitted = append(emitted, GlyphFragment{
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
-					Color:     color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
-					Underline: g.Underline,
-					Face:      g.Face, GID: g.GID, Runes: g.Runes,
+					Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+					Underline:       g.Underline,
+					Strike:          g.Strike,
+					BaselineShiftPt: g.BaselineShiftPt,
+					Face:            g.Face, GID: g.GID, Runes: g.Runes,
 				})
 			}
 			x += g.Advance
@@ -189,14 +193,16 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// A text box carries the parent's inherited font/color/size; only those
 			// fields are meaningful (see makeTextBox) — never its box-level fields.
 			*runs = append(*runs, inline.Run{
-				Text:       child.Text,
-				Family:     child.Style.FontFamily,
-				Bold:       child.Style.Bold,
-				Italic:     child.Style.Italic,
-				SizePt:     child.Style.FontSizePt,
-				Color:      child.Style.Color,
-				WhiteSpace: child.Style.WhiteSpace,
-				Underline:  child.Style.TextDecorationLine == "underline",
+				Text:            applyTextTransform(child.Text, child.Style.TextTransform),
+				Family:          child.Style.FontFamily,
+				Bold:            child.Style.Bold,
+				Italic:          child.Style.Italic,
+				SizePt:          child.Style.FontSizePt,
+				Color:           child.Style.Color,
+				WhiteSpace:      child.Style.WhiteSpace,
+				Underline:       child.Style.TextDecorationLine == "underline",
+				Strike:          child.Style.TextDecorationLine == "line-through",
+				BaselineShiftPt: baselineShiftPt(child.Style),
 			})
 		case child.Kind == cssbox.BoxReplaced:
 			// A replaced inline (e.g. <img>, including an inline-block <img>) sizes via
@@ -250,6 +256,64 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// invariant; skip it defensively rather than misplacing it.
 			e.logf("css layout: unexpected non-inline child in inline formatting context; skipping")
 		}
+	}
+}
+
+// applyTextTransform applies the CSS text-transform to a run's text before shaping.
+// "capitalize" uppercases the first letter of each word; small-caps is handled upstream
+// (mapped to uppercase). The default (including "none" and any unmodeled value) returns
+// s unchanged, so a run without text-transform is byte-identical.
+func applyTextTransform(s, transform string) string {
+	switch transform {
+	case "uppercase":
+		return strings.ToUpper(s)
+	case "lowercase":
+		return strings.ToLower(s)
+	case "capitalize":
+		return capitalizeWords(s)
+	default:
+		return s
+	}
+}
+
+// capitalizeWords uppercases the first rune of each run of letters, leaving the rest
+// unchanged (a pragmatic approximation of CSS "capitalize": a letter preceded by a
+// non-letter starts a word). An apostrophe (U+0027 ' or U+2019 ’) is treated as part
+// of the surrounding word — it does NOT reset the word state — so a contraction like
+// "it's" capitalizes to "It's" rather than "It'S".
+func capitalizeWords(s string) string {
+	var b strings.Builder
+	prevLetter := false
+	for _, r := range s {
+		if !prevLetter && unicode.IsLetter(r) {
+			b.WriteRune(unicode.ToUpper(r))
+		} else {
+			b.WriteRune(r)
+		}
+		// An apostrophe is transparent to word boundaries: leave prevLetter as-is so the
+		// letter after it is not treated as a new word start. Any other non-letter resets
+		// the state, so the next letter begins a word.
+		if r != '\'' && r != '’' {
+			prevLetter = unicode.IsLetter(r)
+		}
+	}
+	return b.String()
+}
+
+// baselineShiftPt returns the baseline shift (points, positive = up) for a box's
+// vertical-align: super/sub. Every other value (baseline/top/middle/bottom/…) yields 0
+// — its line-box effects are handled elsewhere / deferred — so a run without super/sub
+// is unshifted (byte-identical). The shift scales with the run's font size: super ≈
+// +0.33em, sub ≈ −0.20em (browser-plausible). The caller typically also reduces the
+// font size (e.g. a DOCX superscript at 0.75em); this adds only the vertical offset.
+func baselineShiftPt(st gcss.ComputedStyle) float64 {
+	switch st.VerticalAlign {
+	case "super":
+		return st.FontSizePt * 0.33
+	case "sub":
+		return -st.FontSizePt * 0.20
+	default:
+		return 0
 	}
 }
 

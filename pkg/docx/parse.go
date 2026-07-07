@@ -414,6 +414,9 @@ func parsePPr(dec *xml.Decoder) (ParagraphProps, *SectionProps, error) {
 				case "numPr":
 					applyNumPr(&props, dec)
 					continue
+				case "tabs":
+					applyTabs(&props, dec)
+					continue
 				}
 			}
 			if err := dec.Skip(); err != nil {
@@ -473,6 +476,35 @@ func applyNumPr(props *ParagraphProps, dec *xml.Decoder) {
 			_ = dec.Skip()
 		case xml.EndElement:
 			if t.Name.Local == "numPr" {
+				return
+			}
+		}
+	}
+}
+
+// applyTabs reads a w:tabs element's w:tab children into the paragraph's tab
+// stops (position in twips + alignment).
+func applyTabs(props *ParagraphProps, dec *xml.Decoder) {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "tab" {
+				var ts TabStop
+				if v, ok := wAttrInt(t, "pos"); ok {
+					ts.PosTwips = Twips(v)
+				}
+				if a, ok := wAttr(t, "val"); ok {
+					ts.Align = a
+				}
+				props.TabStops = append(props.TabStops, ts)
+			}
+			_ = dec.Skip()
+		case xml.EndElement:
+			if t.Name.Local == "tabs" {
 				return
 			}
 		}
@@ -771,14 +803,16 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 		props.Italic = parseOnOff(wVal(e))
 		props.HasItalic = true
 	case "u":
-		// Any underline val other than "none" turns underline on.
-		props.Underline = wVal(e) != "none" && wVal(e) != ""
-		if wVal(e) == "" {
-			// <w:u/> with no val still means underline on for some producers; but the
-			// schema requires w:val, so treat empty as off to avoid false positives.
-			props.Underline = false
-		}
+		val := wVal(e)
+		props.Underline = val != "none" && val != ""
 		props.HasUnderline = true
+		if val != "" && val != "none" {
+			props.UnderlineStyle = val
+		}
+		if c, ok := parseColor(wColor(e)); ok {
+			props.UnderlineColor = c
+			props.HasUnderlineColor = true
+		}
 	case "sz":
 		if v, ok := wAttrInt(e, "val"); ok {
 			props.SizeHalfPts = v
@@ -795,7 +829,55 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 		} else if v, ok := wAttr(e, "hAnsi"); ok && v != "" {
 			props.Family = v
 		}
+	case "strike", "dstrike":
+		props.Strike = parseOnOff(wVal(e))
+		props.HasStrike = true
+	case "vertAlign":
+		switch wVal(e) {
+		case "superscript":
+			props.VertAlign = VertAlignSuperscript
+		case "subscript":
+			props.VertAlign = VertAlignSubscript
+		default:
+			props.VertAlign = VertAlignBaseline
+		}
+	case "highlight":
+		if c, ok := highlightColor(wVal(e)); ok {
+			props.Highlight = c
+			props.HasHighlight = true
+		}
+	case "caps":
+		props.Caps = parseOnOff(wVal(e))
+		props.HasCaps = true
+	case "smallCaps":
+		props.SmallCaps = parseOnOff(wVal(e))
+		props.HasSmallCaps = true
 	}
+}
+
+// highlightColor maps a w:highlight named color to an RGBA. Unknown names yield
+// ok=false. These are the 16 WordprocessingML highlight names.
+func highlightColor(name string) (color.RGBA, bool) {
+	m := map[string]color.RGBA{
+		"yellow":      {R: 0xFF, G: 0xFF, B: 0x00, A: 0xFF},
+		"green":       {R: 0x00, G: 0xFF, B: 0x00, A: 0xFF},
+		"cyan":        {R: 0x00, G: 0xFF, B: 0xFF, A: 0xFF},
+		"magenta":     {R: 0xFF, G: 0x00, B: 0xFF, A: 0xFF},
+		"blue":        {R: 0x00, G: 0x00, B: 0xFF, A: 0xFF},
+		"red":         {R: 0xFF, G: 0x00, B: 0x00, A: 0xFF},
+		"darkBlue":    {R: 0x00, G: 0x00, B: 0x8B, A: 0xFF},
+		"darkCyan":    {R: 0x00, G: 0x8B, B: 0x8B, A: 0xFF},
+		"darkGreen":   {R: 0x00, G: 0x64, B: 0x00, A: 0xFF},
+		"darkMagenta": {R: 0x8B, G: 0x00, B: 0x8B, A: 0xFF},
+		"darkRed":     {R: 0x8B, G: 0x00, B: 0x00, A: 0xFF},
+		"darkYellow":  {R: 0x80, G: 0x80, B: 0x00, A: 0xFF},
+		"darkGray":    {R: 0xA9, G: 0xA9, B: 0xA9, A: 0xFF},
+		"lightGray":   {R: 0xD3, G: 0xD3, B: 0xD3, A: 0xFF},
+		"black":       {R: 0x00, G: 0x00, B: 0x00, A: 0xFF},
+		"white":       {R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF},
+	}
+	c, ok := m[name]
+	return c, ok
 }
 
 // parseTbl consumes a w:tbl into a Table: its grid, rows, and (Task 2.2) props.
