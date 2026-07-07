@@ -7,6 +7,7 @@ package cssbox
 
 import (
 	"image/color"
+	"strconv"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
@@ -175,6 +176,11 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
 			continue
 		}
 		run := *child.Run
+		if run.FootnoteRef > 0 {
+			er := r.EffectiveRun(p.Props, run.Props)
+			cur.Children = append(cur.Children, footnoteMarker(run.FootnoteRef, er, cur.Style))
+			continue
+		}
 		switch run.Break {
 		case docx.BreakPage:
 			blocks = append(blocks, cur)
@@ -236,6 +242,17 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 		cs.TextDecorationLine = "none"
 	}
 	return &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
+}
+
+// footnoteMarker renders a footnote reference as a superscript number. The note
+// text itself is placed by the (deferred) footnote-collection pass; here we show
+// the in-text marker so the reference is visible and copyable.
+func footnoteMarker(id int, er style.EffectiveRun, para gcss.ComputedStyle) *lcssbox.Box {
+	box := runTextBox(strconv.Itoa(id), er, para)
+	box.Style.VerticalAlign = "super"
+	// Superscripts render smaller; approximate with 0.75em of the run size.
+	box.Style.FontSizePt = er.SizePt * 0.75
+	return box
 }
 
 // linkTextBox lowers a hyperlink run's text into an inline box styled as a link:

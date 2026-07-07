@@ -36,6 +36,8 @@ type Document struct {
 	// content, for a section's HeaderRefDefault/FooterRefDefault to resolve.
 	Headers map[string]*HeaderFooter
 	Footers map[string]*HeaderFooter
+	// Footnotes holds the parsed word/footnotes.xml (note id -> content), or nil.
+	Footnotes *Footnotes
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
@@ -210,6 +212,9 @@ type Run struct {
 	Text string
 	// Break records a w:br within the run (page/column/line); BreakNone when absent.
 	Break BreakKind
+	// FootnoteRef is the id of a footnote this run references (w:footnoteReference
+	// w:id); 0 = none. Such a run has no text; it renders as a superscript marker.
+	FootnoteRef int
 }
 
 // BreakKind classifies a w:br inside a run.

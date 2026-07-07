@@ -58,7 +58,26 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 	doc.Rels = pkg.allRels(mainName)
 	doc.Media = pkg.mediaParts()
 	doc.Headers, doc.Footers = resolveHeadersFooters(pkg, doc.Rels)
+
+	if data, ok := pkg.part(resolveByType(pkg, mainName,
+		"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes",
+		"word/footnotes.xml")); ok {
+		fn, err := parseFootnotes(data)
+		if err != nil {
+			return nil, err
+		}
+		doc.Footnotes = fn
+	}
 	return doc, nil
+}
+
+// resolveByType returns the part name for the first relationship of relType on
+// the main part, falling back to fallback.
+func resolveByType(pkg *pkgReader, mainName, relType, fallback string) string {
+	if rels := pkg.relsForByType(mainName, relType); rels != "" {
+		return rels
+	}
+	return fallback
 }
 
 // resolveHeadersFooters parses every header/footer part referenced by the
@@ -527,6 +546,14 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 				}
 				if dr != nil {
 					drawings = append(drawings, dr)
+				}
+			case "footnoteReference":
+				if id, ok := wAttrInt(t, "id"); ok {
+					flushText()
+					out = append(out, Run{Props: props, FootnoteRef: id})
+				}
+				if err := dec.Skip(); err != nil {
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
 			default:
 				if err := dec.Skip(); err != nil {
