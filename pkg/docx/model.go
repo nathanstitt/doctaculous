@@ -246,6 +246,15 @@ const (
 	JustifyBoth
 )
 
+// VertAlign is a run's vertical alignment (w:vertAlign).
+type VertAlign int
+
+const (
+	VertAlignBaseline VertAlign = iota
+	VertAlignSuperscript
+	VertAlignSubscript
+)
+
 // LineRule selects how the w:spacing w:line value is interpreted (w:lineRule).
 type LineRule int
 
@@ -287,6 +296,17 @@ type ParagraphProps struct {
 	NumID  int
 	ILvl   int
 	HasNum bool
+	// TabStops are the w:tabs stop positions (twips from the margin) with their
+	// alignment, captured for the conversion path. Rendering uses fixed 8-column
+	// stops today (custom positions are a deferred inline-core change).
+	TabStops []TabStop
+}
+
+// TabStop is one w:tab definition inside w:tabs: a position (twips) and its
+// alignment (left/center/right/decimal). Val "clear" removes an inherited stop.
+type TabStop struct {
+	PosTwips Twips
+	Align    string // "left" (default), "center", "right", "decimal", "clear"
 }
 
 // RunProps holds the directly-specified run (character) properties (w:rPr). Bool
@@ -303,6 +323,22 @@ type RunProps struct {
 	HasColor bool
 	// Family is the primary font family (w:rFonts ascii/hAnsi), or "" if unset.
 	Family string
+	// Strike is w:strike/w:dstrike (strikethrough); HasStrike marks it set.
+	Strike, HasStrike bool
+	// VertAlign is w:vertAlign (baseline/superscript/subscript).
+	VertAlign VertAlign
+	// Highlight is the w:highlight color; HasHighlight marks it set.
+	Highlight    color.RGBA
+	HasHighlight bool
+	// Caps/SmallCaps are w:caps/w:smallCaps; Has* mark them set.
+	Caps, HasCaps           bool
+	SmallCaps, HasSmallCaps bool
+	// UnderlineStyle is the w:u val (e.g. "single","double","dotted","wave"), kept
+	// for the conversion path; rendering treats any non-none as a plain underline.
+	UnderlineStyle string
+	// UnderlineColor is the w:u color; HasUnderlineColor marks it set.
+	UnderlineColor    color.RGBA
+	HasUnderlineColor bool
 }
 
 // SectionProps is the page geometry from a w:sectPr: paper size and margins, all
