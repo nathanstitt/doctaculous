@@ -26,10 +26,24 @@ type Document struct {
 	// Numbering holds the parsed word/numbering.xml (list definitions), or nil if
 	// the document has no numbering part.
 	Numbering *Numbering
+	// Rels maps a relationship id (r:id) to its target for the main document part
+	// (external hyperlink URLs, image parts). Empty if the document has no rels.
+	Rels map[string]Relationship
+	// Media maps an image part name (e.g. "word/media/image1.png") to its raw
+	// bytes, for drawings to decode. Empty if the document embeds no media.
+	Media map[string][]byte
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
 	Section SectionProps
+}
+
+// Relationship is one document relationship (Id -> Target), with the external
+// flag set when TargetMode="External" (hyperlinks to URLs).
+type Relationship struct {
+	ID       string
+	Target   string
+	External bool
 }
 
 // Block is a top-level flow item: exactly one field is non-nil. A paragraph
@@ -57,12 +71,18 @@ type ParaChild struct {
 	Drawing   *Drawing
 }
 
-// Hyperlink is a w:hyperlink: a group of runs that link to Target (an external
-// URL resolved from the r:id relationship) or Anchor (an internal bookmark).
-// Later phases populate it; Phase 1 only declares it.
+// Hyperlink is a w:hyperlink: a group of runs linking to an external URL
+// (resolved from RelID via the document relationships) or an internal Anchor
+// (bookmark). The parser sets RelID + Anchor + Runs.
 type Hyperlink struct {
-	Target string
+	// RelID is the r:id relationship id referencing the external target, or "".
+	RelID  string
 	Anchor string
+	// Target is the resolved external URL. It is RESERVED for the conversion path
+	// (DOCX→HTML/markdown), which will resolve RelID through Document.Rels; the
+	// current parse+render path does not populate it (render styles the link inline
+	// and reads only Runs).
+	Target string
 	Runs   []Run
 }
 

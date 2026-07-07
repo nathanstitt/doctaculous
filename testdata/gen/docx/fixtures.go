@@ -1,6 +1,10 @@
 package docx
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"strconv"
 	"strings"
 )
@@ -67,10 +71,27 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: listDocx,
 	},
+	{
+		Name:  "hyperlink",
+		Desc:  "a paragraph with an external hyperlink (link-styled text)",
+		Pages: 1,
+		Build: hyperlinkDocx,
+	},
+	{
+		Name:  "image",
+		Desc:  "a paragraph with an embedded PNG drawing",
+		Pages: 1,
+		Build: imageDocx,
+	},
 }
 
 const docOpen = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`
+
+// docOpenR is docOpen plus the officeDocument relationships namespace, needed by
+// fixtures using r:id (hyperlinks, drawings).
+const docOpenR = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>`
 
 const docClose = `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1440" w:right="1440"/></w:sectPr></w:body></w:document>`
 
@@ -239,3 +260,48 @@ const listNumbering = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
   <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>
 </w:numbering>`
+
+const relHyperlink = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+const relImage = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+
+func hyperlinkDocx() []byte {
+	p := `<w:p>` +
+		`<w:r><w:t xml:space="preserve">Visit </w:t></w:r>` +
+		`<w:hyperlink r:id="rId5"><w:r><w:t>the project</w:t></w:r></w:hyperlink>` +
+		`<w:r><w:t xml:space="preserve"> for more.</w:t></w:r>` +
+		`</w:p>`
+	doc := docOpenR + p + docClose
+	return New().SetDocument(doc).
+		AddRel("rId5", relHyperlink, "https://example.com/", "External").
+		Bytes()
+}
+
+func imageDocx() []byte {
+	p := `<w:p><w:r><w:drawing>` +
+		`<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">` +
+		`<wp:extent cx="1828800" cy="914400"/>` +
+		`<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData>` +
+		`<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+		`<pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill>` +
+		`</pic:pic></a:graphicData></a:graphic></wp:inline>` +
+		`</w:drawing></w:r></w:p>`
+	doc := docOpenR + para("", "", "An embedded image:") + p + docClose
+	return New().SetDocument(doc).
+		AddMedia("media/image1.png", tinyPNG(96, 48)).
+		AddRel("rId7", relImage, "media/image1.png", "").
+		Bytes()
+}
+
+// tinyPNG builds a solid-color PNG of the given pixel size for image fixtures.
+func tinyPNG(w, h int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	fill := color.RGBA{R: 0x33, G: 0x88, B: 0xCC, A: 0xFF}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, fill)
+		}
+	}
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
+}

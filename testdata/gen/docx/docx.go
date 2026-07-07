@@ -22,6 +22,13 @@ type Builder struct {
 	documentXML  string
 	stylesXML    string
 	numberingXML string
+	media        map[string][]byte // part name -> bytes (e.g. "word/media/image1.png")
+	extraRels    []rel             // additional document relationships
+}
+
+// rel is one extra relationship to emit into document.xml.rels.
+type rel struct {
+	id, typ, target, mode string
 }
 
 // New returns a Builder seeded with an empty document body.
@@ -50,6 +57,23 @@ func (b *Builder) SetNumbering(xml string) *Builder {
 	return b
 }
 
+// AddMedia registers an image part (e.g. "media/image1.png", stored under
+// word/) with the given bytes and its file extension's content-type default.
+func (b *Builder) AddMedia(partName string, data []byte) *Builder {
+	if b.media == nil {
+		b.media = map[string][]byte{}
+	}
+	b.media["word/"+partName] = data
+	return b
+}
+
+// AddRel adds a document relationship (id -> target). mode is "" for an internal
+// part or "External" for a URL.
+func (b *Builder) AddRel(id, typ, target, mode string) *Builder {
+	b.extraRels = append(b.extraRels, rel{id: id, typ: typ, target: target, mode: mode})
+	return b
+}
+
 // Bytes serializes the package to .docx bytes. It writes the required OPC parts:
 // [Content_Types].xml, the package and document relationships, the main document,
 // and the optional styles part.
@@ -65,9 +89,9 @@ func (b *Builder) Bytes() []byte {
 		_, _ = w.Write([]byte(content))
 	}
 
-	write("[Content_Types].xml", contentTypes(b.stylesXML != "", b.numberingXML != ""))
+	write("[Content_Types].xml", contentTypes(b.stylesXML != "", b.numberingXML != "", len(b.media) > 0))
 	write("_rels/.rels", rootRels)
-	write("word/_rels/document.xml.rels", docRels(b.stylesXML != "", b.numberingXML != ""))
+	write("word/_rels/document.xml.rels", docRels(b.stylesXML != "", b.numberingXML != "", b.extraRels))
 	write("word/document.xml", b.documentXML)
 	if b.stylesXML != "" {
 		write("word/styles.xml", b.stylesXML)
@@ -75,11 +99,15 @@ func (b *Builder) Bytes() []byte {
 	if b.numberingXML != "" {
 		write("word/numbering.xml", b.numberingXML)
 	}
+	for name, data := range b.media {
+		w, _ := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: fixedModTime})
+		_, _ = w.Write(data)
+	}
 	_ = zw.Close()
 	return buf.Bytes()
 }
 
-func contentTypes(withStyles, withNumbering bool) string {
+func contentTypes(withStyles, withNumbering, withMedia bool) string {
 	s := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -93,6 +121,12 @@ func contentTypes(withStyles, withNumbering bool) string {
 		s += `
   <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>`
 	}
+	if withMedia {
+		s += `
+  <Default Extension="png" ContentType="image/png"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Default Extension="jpg" ContentType="image/jpeg"/>`
+	}
 	return s + "\n</Types>"
 }
 
@@ -101,7 +135,7 @@ const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`
 
-func docRels(withStyles, withNumbering bool) string {
+func docRels(withStyles, withNumbering bool, extra []rel) string {
 	s := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
 	if withStyles {
@@ -111,6 +145,14 @@ func docRels(withStyles, withNumbering bool) string {
 	if withNumbering {
 		s += `
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>`
+	}
+	for _, r := range extra {
+		mode := ""
+		if r.mode != "" {
+			mode = ` TargetMode="` + r.mode + `"`
+		}
+		s += `
+  <Relationship Id="` + r.id + `" Type="` + r.typ + `" Target="` + r.target + `"` + mode + `/>`
 	}
 	return s + "\n</Relationships>"
 }
