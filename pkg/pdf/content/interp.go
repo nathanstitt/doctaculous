@@ -90,6 +90,12 @@ type Interpreter struct {
 	logf   func(string, ...any)
 	maxOps int
 
+	// textSink/graphicsSink are the optional capture sinks (nil = no capture). See
+	// sink.go. They observe the same glyphs/paths the Device is painted with, for
+	// structure-recovery backends; they never affect painting.
+	textSink     TextSink
+	graphicsSink GraphicsSink
+
 	// base maps PDF default (page) user space to device pixels. Pattern matrices
 	// are defined relative to this default space (not the current CTM), so a
 	// shading pattern's effective transform is patternMatrix × base.
@@ -121,6 +127,13 @@ type Options struct {
 	// MaxOps caps the number of operators executed (0 = no cap), a guard against
 	// pathological or hostile content streams.
 	MaxOps int
+	// TextSink, if set, receives every shown glyph (rune + device-space placement) for
+	// structure-recovery backends (PDF → text/Markdown/HTML). nil = no capture, and the
+	// paint path is byte-identical.
+	TextSink TextSink
+	// GraphicsSink, if set, receives every painted vector path for table-ruling
+	// detection. nil = no capture, byte-identical paint.
+	GraphicsSink GraphicsSink
 }
 
 // New creates an Interpreter that draws onto dev using res to resolve resources.
@@ -131,13 +144,15 @@ func New(doc *pdf.Document, dev render.Device, res Resources, base render.Matrix
 		logf = func(string, ...any) {}
 	}
 	return &Interpreter{
-		doc:    doc,
-		dev:    dev,
-		res:    res,
-		logf:   logf,
-		maxOps: opts.MaxOps,
-		base:   base,
-		gs:     newGState(base),
+		doc:          doc,
+		dev:          dev,
+		res:          res,
+		logf:         logf,
+		maxOps:       opts.MaxOps,
+		textSink:     opts.TextSink,
+		graphicsSink: opts.GraphicsSink,
+		base:         base,
+		gs:           newGState(base),
 	}
 }
 
