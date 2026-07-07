@@ -25,8 +25,13 @@ type TextGlyph struct {
 	Advance float64 // horizontal advance in device units
 	IsSpace bool    // the single-byte space (code 32)
 	FontID  string  // opaque per-font identity for run grouping (font pointer address)
-	Bold    bool    // best-effort weight, from the font descriptor when known
-	Italic  bool    // best-effort slant, from the font descriptor when known
+	// Bold/Italic are best-effort weight/slant. They are reserved: the GlyphSource
+	// interface does not yet surface the font descriptor's weight/slant flags, so the
+	// interpreter leaves them false today. Heading detection therefore keys on relative
+	// font SIZE (which is populated); emphasis recovery turns on when a later change
+	// threads the descriptor flags (or the font name) through GlyphSource.
+	Bold   bool
+	Italic bool
 }
 
 // VectorKind classifies a vector op reported to a GraphicsSink for table-ruling

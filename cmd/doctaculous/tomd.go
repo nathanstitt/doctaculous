@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/nathanstitt/doctaculous/pkg/doctaculous"
 )
@@ -37,10 +39,7 @@ func tomdCmd(args []string) error {
 		return err
 	}
 
-	// Markdown always lays the document out unpaginated (one tall page) — pagination
-	// does not affect the semantic tree the conversion walks — so pass an empty page
-	// size to openReflowDocument.
-	doc, err := openReflowDocument(input, "")
+	doc, err := openConvertibleDocument(input)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -59,6 +58,27 @@ func tomdCmd(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// openConvertibleDocument opens the input for a text/markup conversion (tomd/tohtml):
+// an http(s) URL and .html/.htm go through the HTML pipeline, .docx through the DOCX
+// pipeline, and .pdf through the PDF pipeline (its logical structure is recovered by
+// extraction on the first Write call). Unlike openReflowDocument (used by topdf, where a
+// PDF input is meaningless), a .pdf here is a first-class input.
+func openConvertibleDocument(input string) (*doctaculous.Document, error) {
+	if isHTTPURL(input) {
+		return doctaculous.OpenURL(input)
+	}
+	switch strings.ToLower(filepath.Ext(input)) {
+	case ".pdf":
+		return doctaculous.Open(input)
+	case ".docx":
+		return doctaculous.OpenDOCX(input)
+	case ".html", ".htm":
+		return doctaculous.OpenHTMLFile(input)
+	default:
+		return nil, fmt.Errorf("input must be .pdf, .html, .docx, or an http(s) URL (got %q)", input)
+	}
 }
 
 // reorderTomdArgs moves non-flag arguments after flags so the input may appear before

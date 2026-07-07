@@ -34,6 +34,8 @@ func run(args []string) error {
 		return topdfCmd(args[1:])
 	case "tomd":
 		return tomdCmd(args[1:])
+	case "tohtml":
+		return tohtmlCmd(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("doctaculous", version)
 		return nil
@@ -54,6 +56,8 @@ func run(args []string) error {
 			return topdfCmd(args)
 		case "tomd":
 			return tomdCmd(args)
+		case "tohtml":
+			return tohtmlCmd(args)
 		}
 		return rasterizeCmd(args)
 	}
@@ -72,6 +76,8 @@ func inferCommand(args []string) (string, error) {
 		return "topdf", nil
 	case ".md", ".markdown", ".txt":
 		return "tomd", nil
+	case ".html", ".htm":
+		return "tohtml", nil
 	case ".png", ".jpg", ".jpeg":
 		return "rasterize", nil
 	}
@@ -129,7 +135,8 @@ func usage() {
 
 usage:
   doctaculous topdf     --in <file.html|.docx|URL> --out file.pdf [flags]
-  doctaculous tomd      --in <file.html|.docx|URL> [--out file.md] [--plain]
+  doctaculous tomd      --in <file.pdf|.html|.docx|URL> [--out file.md] [--plain]
+  doctaculous tohtml    --in <file.pdf|.html|.docx|URL> [--out file.html] [--fragment]
   doctaculous rasterize  --in <file.pdf|.docx|.html|URL> --out file.png [flags]
   doctaculous --in <input> --out <output>   (subcommand inferred from extensions)
   doctaculous version
