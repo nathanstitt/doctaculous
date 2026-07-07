@@ -193,6 +193,34 @@ type Box struct {
 	// resolved marker for inspection/tests; the marker is actually rendered by
 	// prepending its text as the item's leading inline child (see resolveCounters).
 	Marker *MarkerContent
+
+	// Semantic annotations for the conversion path (markdown / plain-text export).
+	// They are ignored by layout and by the raster/PDF backends — those read only
+	// Style and the layout-intent hints above — so a tree with these set lays out
+	// byte-identically to one without. The frontends populate them at generation
+	// time from facts the visual Style cannot preserve: HTML box generation from the
+	// source element (pkg/layout/css), DOCX lowering from the paragraph style / rels
+	// (pkg/docx/cssbox). A backend that walks the tree for conversion reads them; a
+	// backend that only paints never looks.
+
+	// SemTag is the source semantic role, in a small closed vocabulary a Markdown
+	// writer can represent: "h1".."h6", "p", "a", "blockquote", "pre", "code",
+	// "em", "strong". Empty when the box has no distinguished role (a generic div,
+	// an anonymous box). "b"/"i" and DOCX bold/italic are not recorded here — the
+	// writer reads Style.Bold/Style.Italic for emphasis — so SemTag is reserved for
+	// roles that are otherwise unrecoverable from Style.
+	SemTag string
+	// HeadingLvl is the heading level 1..6 for a heading box, 0 otherwise. It is
+	// redundant with SemTag ("h<n>") but lets a writer branch without parsing the
+	// string. For HTML it is the h1..h6 tag; for DOCX it is derived from the
+	// paragraph style id (e.g. "Heading2"), clamped to 6.
+	HeadingLvl int
+	// Href is the resolved hyperlink target for a link box (SemTag == "a"), empty
+	// otherwise. The visual tree drops link targets (a link is only blue+underline
+	// styling); this carries the URL for the conversion path. HTML reads the href
+	// attribute; DOCX resolves the hyperlink relationship id through the document's
+	// rels.
+	Href string
 }
 
 // MarkerContent is a list item's resolved marker. Text is the already-formatted

@@ -224,6 +224,17 @@ bullet's design doc is in `docs/superpowers/specs/`:
   deterministic output, `@media print` capture (`pkg/css/media.go`). Byte-identical for the raster
   corpus (the new `DrawGlyph` seam rasterizes via the outline). `2026-06-26-html-to-pdf-writer-design.md`.
 
+**HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `ConvertHTMLToMarkdown`/`WriteMarkdown`
++ `WriteText`, CLI `tomd`):
+
+- A conversion backend that walks the shared `cssbox` tree (not the paint seam — it needs structure,
+  not glyphs), so one walker serves HTML and DOCX. Small additive semantic annotations on `cssbox.Box`
+  (`SemTag`/`HeadingLvl`/`Href`) captured by both frontends carry the facts computed style drops
+  (heading level, link URLs, DOCX style identity); layout/raster/PDF ignore them (byte-identical).
+  Emits GFM: headings, bold/italic/strikethrough/code, links, images, blockquotes, fenced code,
+  nested + task lists, thematic breaks, and **high-fidelity pipe tables** (colspan/rowspan expanded by
+  content duplication, alignment, caption). `2026-07-07-html-docx-markdown-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
@@ -239,8 +250,9 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
    and PDF); Symbol/ZapfDingbats have no substitute. Bundle weighted faces + symbol look-alikes;
    ideally AFM widths for exact base-14 metrics. This also fixes DOCX bold/italic fidelity.
 5. **DOCX embedded fonts** — de-obfuscate `word/fonts/*` (also improves bold/italic fidelity).
-6. **PDF/DOCX/HTML text-extraction backend** — a read-side `Device` consuming the same
-   `DrawGlyph`/`GlyphRef` seam the PDF writer emits.
+6. **PDF text-extraction backend** — a read-side `Device` consuming the same `DrawGlyph`/`GlyphRef`
+   seam the PDF writer emits (the reflow HTML/DOCX → text/Markdown path already ships; this is the
+   PDF-input side, which has no `cssbox` tree to walk).
 7. **Fuller paged-media in the PDF-writer path** — carry the CSS Paged Media features into
    `pkg/render/pdfwrite`.
 

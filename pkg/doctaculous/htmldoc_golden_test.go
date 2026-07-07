@@ -1,10 +1,12 @@
 package doctaculous
 
 import (
+	"bytes"
 	"context"
 	"image"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -70,6 +72,49 @@ func TestHTMLDocShowcase(t *testing.T) {
 		if diff, n := compareImages(want, got); diff {
 			t.Errorf("page %d differs from golden %s: %d pixels beyond tolerance (max %d)",
 				i, path, n, int(maxDifferingFraction*float64(got.Bounds().Dx()*got.Bounds().Dy())))
+		}
+	}
+}
+
+// TestHTMLDocMarkdown exports the same multi-file showcase specimen to Markdown and
+// plain text, comparing to committed htmldoc.md / htmldoc.txt goldens. It drives the
+// conversion path end to end on a real, feature-dense document (headings, lists,
+// tables, links, emphasis, images), the text-side counterpart to the raster showcase.
+// Run with -update to regenerate, then eyeball the committed .md/.txt in review.
+func TestHTMLDocMarkdown(t *testing.T) {
+	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
+	defer srv.Close()
+
+	doc, err := OpenURL(srv.URL + "/index.html")
+	if err != nil {
+		t.Fatalf("OpenURL: %v", err)
+	}
+	dir := filepath.Join("testdata", "golden")
+	for _, tc := range []struct {
+		name string
+		opts MarkdownOptions
+	}{
+		{"htmldoc.md", MarkdownOptions{}},
+		{"htmldoc.txt", MarkdownOptions{Plain: true}},
+	} {
+		var out bytes.Buffer
+		if err := doc.WriteMarkdown(context.Background(), &out, tc.opts); err != nil {
+			t.Fatalf("WriteMarkdown(%s): %v", tc.name, err)
+		}
+		path := filepath.Join(dir, tc.name)
+		if *update {
+			if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("updated %s", path)
+			continue
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("missing golden %s; run: go test ./pkg/doctaculous -run TestHTMLDocMarkdown -update", path)
+		}
+		if !bytes.Equal(want, out.Bytes()) {
+			t.Errorf("%s differs from golden; run -update and eyeball the diff", tc.name)
 		}
 	}
 }

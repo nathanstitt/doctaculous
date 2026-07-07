@@ -51,6 +51,10 @@ code, kbd, samp { font-family: monospace; }
    (an <a> with href) so a bare named-anchor <a> is not styled. Author a/a:link rules
    override this (it is the lowest, UA origin). */
 a:link { color: #0000ee; text-decoration: underline; }
+/* Struck-through text: <s>, <strike>, and <del> render with a line-through (the
+   classic browser default). This also gives the markdown/text conversion path its
+   strikethrough signal via text-decoration. */
+s, strike, del { text-decoration: line-through; }
 
 input, textarea, select, button {
 	display: inline-block;

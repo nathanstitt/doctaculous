@@ -44,8 +44,8 @@ func (c *listCounter) next(numID, ilvl int) int {
 // prepending a counter text box. So we mirror that here: after recording the marker
 // on the box, we prepend the marker string as a leading inline text box on the first
 // block so it actually renders in front of the item content.
-func lowerListParagraph(p *docx.Paragraph, r *style.Resolver, num *docx.Numbering, ctr *listCounter) []*lcssbox.Box {
-	blocks := lowerParagraph(p, r)
+func lowerListParagraph(p *docx.Paragraph, r *style.Resolver, num *docx.Numbering, rels map[string]docx.Relationship, ctr *listCounter) []*lcssbox.Box {
+	blocks := lowerParagraph(p, r, rels)
 	if len(blocks) == 0 {
 		return blocks
 	}

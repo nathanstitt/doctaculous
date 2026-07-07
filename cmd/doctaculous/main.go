@@ -1,6 +1,7 @@
 // Command doctaculous is the command-line interface to the doctaculous document
-// toolkit. Subcommands: "rasterize" renders document pages to images, and "topdf"
-// converts a reflow document (HTML/URL/DOCX) to a PDF with searchable text.
+// toolkit. Subcommands: "rasterize" renders document pages to images, "topdf" converts
+// a reflow document (HTML/URL/DOCX) to a PDF with searchable text, and "tomd" converts
+// one to Markdown or plain text.
 package main
 
 import (
@@ -31,6 +32,8 @@ func run(args []string) error {
 		return rasterizeCmd(args[1:])
 	case "topdf":
 		return topdfCmd(args[1:])
+	case "tomd":
+		return tomdCmd(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("doctaculous", version)
 		return nil
@@ -38,15 +41,19 @@ func run(args []string) error {
 		usage()
 		return nil
 	default:
-		// No explicit subcommand: infer topdf vs rasterize from the --in/--out file
-		// extensions (a .pdf output => topdf; an image output => rasterize).
+		// No explicit subcommand: infer the command from the --in/--out file extensions
+		// (a .pdf output => topdf; a .md/.txt output => tomd; an image output =>
+		// rasterize).
 		cmd, err := inferCommand(args)
 		if err != nil {
 			usage()
 			return err
 		}
-		if cmd == "topdf" {
+		switch cmd {
+		case "topdf":
 			return topdfCmd(args)
+		case "tomd":
+			return tomdCmd(args)
 		}
 		return rasterizeCmd(args)
 	}
@@ -63,6 +70,8 @@ func inferCommand(args []string) (string, error) {
 	switch strings.ToLower(filepath.Ext(out)) {
 	case ".pdf":
 		return "topdf", nil
+	case ".md", ".markdown", ".txt":
+		return "tomd", nil
 	case ".png", ".jpg", ".jpeg":
 		return "rasterize", nil
 	}
@@ -120,13 +129,15 @@ func usage() {
 
 usage:
   doctaculous topdf     --in <file.html|.docx|URL> --out file.pdf [flags]
+  doctaculous tomd      --in <file.html|.docx|URL> [--out file.md] [--plain]
   doctaculous rasterize  --in <file.pdf|.docx|.html|URL> --out file.png [flags]
   doctaculous --in <input> --out <output>   (subcommand inferred from extensions)
   doctaculous version
   doctaculous help
 
 The input may be given via --in or as a positional argument. When no subcommand is
-named, it is inferred from the --out extension (.pdf => topdf; .png/.jpg => rasterize).
+named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;
+.png/.jpg => rasterize).
 
 run "doctaculous topdf -h" or "doctaculous rasterize -h" for subcommand flags.
 `)

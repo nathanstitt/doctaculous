@@ -15,6 +15,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/docx/style"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -27,6 +28,12 @@ import (
 // laid-out pages are read-only, so the page fan-out needs no locks.
 type reflowRenderer struct {
 	pages *layout.Pages
+	// root is the finalized cssbox tree the pages were laid out from. It is retained
+	// (read-only, like pages) so the conversion backends (markdown/text) can walk the
+	// document structure; the raster/PDF backends ignore it. nil is tolerated (a
+	// document opened before this field was populated) and yields empty conversion
+	// output.
+	root *cssbox.Box
 }
 
 // OpenDOCX reads and parses a .docx file, lays out all pages, and returns a
@@ -76,7 +83,7 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Document{r: &reflowRenderer{pages: pages}}, nil
+	return &Document{r: &reflowRenderer{pages: pages, root: root}}, nil
 }
 
 // docxPageSheet synthesizes an @page stylesheet carrying the DOCX section's page
@@ -107,6 +114,13 @@ type reflowPages interface{ layoutPages() *layout.Pages }
 
 // layoutPages exposes the laid-out pages for the PDF writer (WritePDF).
 func (r *reflowRenderer) layoutPages() *layout.Pages { return r.pages }
+
+// reflowTree is implemented by renderers that retain their source cssbox tree, so the
+// conversion backends (markdown/text) can walk the document structure.
+type reflowTree interface{ cssboxRoot() *cssbox.Box }
+
+// cssboxRoot exposes the finalized box tree for the conversion backends (WriteMarkdown).
+func (r *reflowRenderer) cssboxRoot() *cssbox.Box { return r.root }
 
 func (r *reflowRenderer) pageCount() int { return len(r.pages.Pages) }
 
