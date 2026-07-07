@@ -222,6 +222,7 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 					return err
 				}
 				doc.Section = sect
+				doc.Sections = append(doc.Sections, sect)
 			default:
 				blk, sect, err := parseBlockChild(dec, t)
 				if err != nil {
@@ -232,6 +233,7 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 				}
 				if sect != nil {
 					doc.Section = *sect
+					doc.Sections = append(doc.Sections, *sect)
 				}
 			}
 		case xml.EndElement:

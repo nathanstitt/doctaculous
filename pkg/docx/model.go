@@ -40,6 +40,10 @@ type Document struct {
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
 	Section SectionProps
+	// Sections lists every section's geometry in document order (each terminating
+	// w:sectPr, body-level or in a paragraph's pPr). doc.Section remains the last
+	// (body) section. Single-section documents have len(Sections)==1.
+	Sections []SectionProps
 }
 
 // Relationship is one document relationship (Id -> Target), with the external
