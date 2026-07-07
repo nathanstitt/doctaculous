@@ -241,6 +241,23 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 	} else {
 		cs.TextDecorationLine = "none"
 	}
+	if er.Strike {
+		cs.TextDecorationLine = "line-through" // wins over underline when both set (rare)
+	}
+	switch er.VertAlign {
+	case docx.VertAlignSuperscript:
+		cs.VerticalAlign = "super"
+		cs.FontSizePt = er.SizePt * 0.75
+	case docx.VertAlignSubscript:
+		cs.VerticalAlign = "sub"
+		cs.FontSizePt = er.SizePt * 0.75
+	}
+	if er.HasHighlight {
+		cs.BackgroundColor = er.Highlight
+	}
+	if er.Caps || er.SmallCaps {
+		cs.TextTransform = "uppercase" // small-caps approximated as uppercase (logged deferral)
+	}
 	return &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
 }
 

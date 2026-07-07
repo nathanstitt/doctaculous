@@ -112,6 +112,12 @@ type EffectiveRun struct {
 	Bold, Italic, Underline bool
 	SizePt                  float64
 	Color                   color.RGBA
+	Strike                  bool
+	VertAlign               docx.VertAlign
+	Highlight               color.RGBA
+	HasHighlight            bool
+	Caps                    bool
+	SmallCaps               bool
 }
 
 // EffectiveParagraph is the fully-resolved paragraph formatting.
@@ -164,6 +170,20 @@ func (r *Resolver) EffectiveRun(p docx.ParagraphProps, run docx.RunProps) Effect
 	}
 	if merged.HasColor {
 		eff.Color = merged.Color
+	}
+	if merged.HasStrike {
+		eff.Strike = merged.Strike
+	}
+	eff.VertAlign = merged.VertAlign
+	if merged.HasHighlight {
+		eff.Highlight = merged.Highlight
+		eff.HasHighlight = true
+	}
+	if merged.HasCaps {
+		eff.Caps = merged.Caps
+	}
+	if merged.HasSmallCaps {
+		eff.SmallCaps = merged.SmallCaps
 	}
 	return eff
 }
@@ -244,6 +264,21 @@ func mergeRun(base, over docx.RunProps) docx.RunProps {
 	}
 	if over.HasColor {
 		out.Color, out.HasColor = over.Color, true
+	}
+	if over.HasStrike {
+		out.Strike, out.HasStrike = over.Strike, true
+	}
+	if over.VertAlign != docx.VertAlignBaseline {
+		out.VertAlign = over.VertAlign
+	}
+	if over.HasHighlight {
+		out.Highlight, out.HasHighlight = over.Highlight, true
+	}
+	if over.HasCaps {
+		out.Caps, out.HasCaps = over.Caps, true
+	}
+	if over.HasSmallCaps {
+		out.SmallCaps, out.HasSmallCaps = over.SmallCaps, true
 	}
 	return out
 }
