@@ -305,3 +305,37 @@ func TestLowerHyperlinkStylesRuns(t *testing.T) {
 func linkWith(text string) *docx.Hyperlink {
 	return &docx.Hyperlink{RelID: "rId5", Runs: []docx.Run{{Text: text}}}
 }
+
+func TestLowerRunningBuildsHeaderFooterBoxes(t *testing.T) {
+	hdr := &docx.HeaderFooter{Blocks: []docx.Block{{Paragraph: paraWith("H")}}}
+	ftr := &docx.HeaderFooter{Blocks: []docx.Block{{Paragraph: paraWith("F")}}}
+	d := &docx.Document{
+		Section: docx.SectionProps{
+			PageW: 12240, PageH: 15840, MarginLeft: 1440, MarginRight: 1440, MarginTop: 1440, MarginBottom: 1440,
+			HeaderRefDefault: "rIdH", FooterRefDefault: "rIdF",
+		},
+		Headers: map[string]*docx.HeaderFooter{"rIdH": hdr},
+		Footers: map[string]*docx.HeaderFooter{"rIdF": ftr},
+	}
+	r := style.NewResolver(d, nil)
+	running := LowerRunning(d, r)
+	if running["docxheader"] == nil {
+		t.Fatalf("running[docxheader] = nil, want a box")
+	}
+	if running["docxfooter"] == nil {
+		t.Fatalf("running[docxfooter] = nil, want a box")
+	}
+	// header box holds the header paragraph -> text "H".
+	hb := running["docxheader"]
+	if len(hb.Children) == 0 {
+		t.Fatalf("header box has no children")
+	}
+}
+
+func TestLowerRunningEmptyWhenNoHeaderFooter(t *testing.T) {
+	d := &docx.Document{Section: docx.SectionProps{PageW: 12240, PageH: 15840}}
+	running := LowerRunning(d, style.NewResolver(d, nil))
+	if len(running) != 0 {
+		t.Fatalf("running = %v, want empty (byte-identical path)", running)
+	}
+}

@@ -32,10 +32,20 @@ type Document struct {
 	// Media maps an image part name (e.g. "word/media/image1.png") to its raw
 	// bytes, for drawings to decode. Empty if the document embeds no media.
 	Media map[string][]byte
+	// Headers/Footers map a header/footer part's relationship id to its parsed
+	// content, for a section's HeaderRefDefault/FooterRefDefault to resolve.
+	Headers map[string]*HeaderFooter
+	Footers map[string]*HeaderFooter
+	// Footnotes holds the parsed word/footnotes.xml (note id -> content), or nil.
+	Footnotes *Footnotes
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
 	Section SectionProps
+	// Sections lists every section's geometry in document order (each terminating
+	// w:sectPr, body-level or in a paragraph's pPr). doc.Section remains the last
+	// (body) section. Single-section documents have len(Sections)==1.
+	Sections []SectionProps
 }
 
 // Relationship is one document relationship (Id -> Target), with the external
@@ -44,6 +54,7 @@ type Relationship struct {
 	ID       string
 	Target   string
 	External bool
+	relType  string
 }
 
 // Block is a top-level flow item: exactly one field is non-nil. A paragraph
@@ -201,6 +212,9 @@ type Run struct {
 	Text string
 	// Break records a w:br within the run (page/column/line); BreakNone when absent.
 	Break BreakKind
+	// FootnoteRef is the id of a footnote this run references (w:footnoteReference
+	// w:id); 0 = none. Such a run has no text; it renders as a superscript marker.
+	FootnoteRef int
 }
 
 // BreakKind classifies a w:br inside a run.
@@ -298,6 +312,11 @@ type SectionProps struct {
 	MarginTop, MarginBottom Twips
 	MarginLeft, MarginRight Twips
 	Header, Footer, Gutter  Twips
+	// HeaderRefDefault/FooterRefDefault are the r:ids of the default header/footer
+	// parts referenced by this section (w:headerReference/w:footerReference
+	// type="default"), or "" when none. (even/first variants are a follow-up.)
+	HeaderRefDefault string
+	FooterRefDefault string
 }
 
 // defaultSection is US Letter (8.5in × 11in) with 1in margins — Word's default —

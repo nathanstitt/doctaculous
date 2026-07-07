@@ -83,6 +83,18 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: imageDocx,
 	},
+	{
+		Name:  "header-footer",
+		Desc:  "a default header and footer rendered in the page margins",
+		Pages: 1,
+		Build: headerFooterDocx,
+	},
+	{
+		Name:  "footnote",
+		Desc:  "a footnote reference (superscript marker) with a parsed note",
+		Pages: 1,
+		Build: footnoteDocx,
+	},
 }
 
 const docOpen = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -304,4 +316,48 @@ func tinyPNG(w, h int) []byte {
 	var buf bytes.Buffer
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()
+}
+
+const ctHeader = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+const ctFooter = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
+const ctFootnotes = "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
+const relHeader = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+const relFooter = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
+const relFootnotes = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+
+// docCloseHF is docClose with header/footer references in the section.
+const docCloseHF = `<w:sectPr>` +
+	`<w:headerReference w:type="default" r:id="rId10"/>` +
+	`<w:footerReference w:type="default" r:id="rId11"/>` +
+	`<w:pgSz w:w="12240" w:h="15840"/>` +
+	`<w:pgMar w:top="1440" w:bottom="1440" w:left="1440" w:right="1440" w:header="720" w:footer="720"/>` +
+	`</w:sectPr></w:body></w:document>`
+
+func headerFooterDocx() []byte {
+	doc := docOpenR +
+		para("", "", "Body text between a header and a footer.") +
+		docCloseHF
+	hdr := `<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		para("", "center", "DOCUMENT HEADER") + `</w:hdr>`
+	ftr := `<?xml version="1.0"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		para("", "center", "Page footer") + `</w:ftr>`
+	return New().SetDocument(doc).
+		AddPart("header1.xml", ctHeader, hdr).
+		AddPart("footer1.xml", ctFooter, ftr).
+		AddRel("rId10", relHeader, "header1.xml", "").
+		AddRel("rId11", relFooter, "footer1.xml", "").
+		Bytes()
+}
+
+func footnoteDocx() []byte {
+	p := `<w:p><w:r><w:t xml:space="preserve">A claim needing a citation</w:t></w:r>` +
+		`<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:footnoteReference w:id="2"/></w:r></w:p>`
+	doc := docOpenR + p + docClose
+	notes := `<?xml version="1.0"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:footnote w:id="2">` + para("", "", "The supporting citation.") + `</w:footnote>` +
+		`</w:footnotes>`
+	return New().SetDocument(doc).
+		AddPart("footnotes.xml", ctFootnotes, notes).
+		AddRel("rId12", relFootnotes, "footnotes.xml", "").
+		Bytes()
 }

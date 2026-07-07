@@ -7,6 +7,7 @@ package cssbox
 
 import (
 	"image/color"
+	"strconv"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
@@ -75,6 +76,53 @@ func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
 	return root
 }
 
+// RunningHeaderName / RunningFooterName are the synthetic running-element names
+// under which a DOCX section's default header/footer are keyed, referenced from
+// the synthesized @page margin boxes via element(name).
+const (
+	RunningHeaderName = "docxheader"
+	RunningFooterName = "docxfooter"
+)
+
+// LowerRunning lowers the document's default header and footer (if any) into
+// running-element boxes keyed by RunningHeaderName/RunningFooterName, for the
+// paged engine's @page margin boxes to paint on every page. Returns an empty map
+// when the section has no header/footer — the byte-identical path (no margin box
+// is synthesized, so element() never fires).
+func LowerRunning(d *docx.Document, r *style.Resolver) map[string]*lcssbox.Box {
+	out := map[string]*lcssbox.Box{}
+	if d == nil {
+		return out
+	}
+	if hf := headerFooterFor(d.Section.HeaderRefDefault, d.Headers); hf != nil {
+		out[RunningHeaderName] = runningBox(hf, r, d.Numbering)
+	}
+	if hf := headerFooterFor(d.Section.FooterRefDefault, d.Footers); hf != nil {
+		out[RunningFooterName] = runningBox(hf, r, d.Numbering)
+	}
+	return out
+}
+
+// headerFooterFor looks up a header/footer by ref id, returning nil when the ref
+// is empty or unresolved.
+func headerFooterFor(refID string, m map[string]*docx.HeaderFooter) *docx.HeaderFooter {
+	if refID == "" || m == nil {
+		return nil
+	}
+	return m[refID]
+}
+
+// runningBox lowers a header/footer's blocks into a single block box (the running
+// element the margin box paints).
+func runningBox(hf *docx.HeaderFooter, r *style.Resolver, num *docx.Numbering) *lcssbox.Box {
+	box := &lcssbox.Box{
+		Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock, Formatting: lcssbox.BlockFC,
+		Style: gcss.InitialStyle(),
+	}
+	box.Children = lowerBlocks(hf.Blocks, r, num, newListCounter())
+	return box
+}
+
 // lowerBlocks lowers a sequence of DOCX blocks (paragraphs, list items, tables).
 // num is the document's numbering (may be nil); ctr threads list-counter state.
 func lowerBlocks(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, ctr *listCounter) []*lcssbox.Box {
@@ -128,6 +176,11 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
 			continue
 		}
 		run := *child.Run
+		if run.FootnoteRef > 0 {
+			er := r.EffectiveRun(p.Props, run.Props)
+			cur.Children = append(cur.Children, footnoteMarker(run.FootnoteRef, er, cur.Style))
+			continue
+		}
 		switch run.Break {
 		case docx.BreakPage:
 			blocks = append(blocks, cur)
@@ -189,6 +242,17 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 		cs.TextDecorationLine = "none"
 	}
 	return &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
+}
+
+// footnoteMarker renders a footnote reference as a superscript number. The note
+// text itself is placed by the (deferred) footnote-collection pass; here we show
+// the in-text marker so the reference is visible and copyable.
+func footnoteMarker(id int, er style.EffectiveRun, para gcss.ComputedStyle) *lcssbox.Box {
+	box := runTextBox(strconv.Itoa(id), er, para)
+	box.Style.VerticalAlign = "super"
+	// Superscripts render smaller; approximate with 0.75em of the run size.
+	box.Style.FontSizePt = er.SizePt * 0.75
+	return box
 }
 
 // linkTextBox lowers a hyperlink run's text into an inline box styled as a link:
