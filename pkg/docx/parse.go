@@ -57,11 +57,15 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 
 	doc.Rels = pkg.allRels(mainName)
 	doc.Media = pkg.mediaParts()
-	doc.Headers, doc.Footers = resolveHeadersFooters(pkg, doc.Rels)
+	headers, footers, err := resolveHeadersFooters(pkg, doc.Rels)
+	if err != nil {
+		return nil, err
+	}
+	doc.Headers, doc.Footers = headers, footers
 
-	if data, ok := pkg.part(resolveByType(pkg, mainName,
-		"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes",
-		"word/footnotes.xml")); ok {
+	// Footnotes part: prefer the relationship target, fall back to the convention.
+	const footnotesType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+	if data, ok := pkg.part(resolveByType(pkg, mainName, footnotesType, "word/footnotes.xml")); ok {
 		fn, err := parseFootnotes(data)
 		if err != nil {
 			return nil, err
@@ -82,33 +86,38 @@ func resolveByType(pkg *pkgReader, mainName, relType, fallback string) string {
 
 // resolveHeadersFooters parses every header/footer part referenced by the
 // document relationships, keyed by relationship id. Header and footer parts are
-// distinguished by relationship type.
-func resolveHeadersFooters(pkg *pkgReader, rels map[string]Relationship) (headers, footers map[string]*HeaderFooter) {
+// distinguished by relationship type. A malformed part is a hard error, matching
+// the other optional parts (styles/numbering/footnotes).
+func resolveHeadersFooters(pkg *pkgReader, rels map[string]Relationship) (headers, footers map[string]*HeaderFooter, err error) {
 	const hdrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
 	const ftrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
 	for id, rel := range rels {
 		switch rel.relType {
 		case hdrType:
 			if data, ok := pkg.part(rel.Target); ok {
-				if hf, err := parseHdrFtr(data, "hdr"); err == nil {
-					if headers == nil {
-						headers = map[string]*HeaderFooter{}
-					}
-					headers[id] = hf
+				hf, err := parseHdrFtr(data, "hdr")
+				if err != nil {
+					return nil, nil, err
 				}
+				if headers == nil {
+					headers = map[string]*HeaderFooter{}
+				}
+				headers[id] = hf
 			}
 		case ftrType:
 			if data, ok := pkg.part(rel.Target); ok {
-				if hf, err := parseHdrFtr(data, "ftr"); err == nil {
-					if footers == nil {
-						footers = map[string]*HeaderFooter{}
-					}
-					footers[id] = hf
+				hf, err := parseHdrFtr(data, "ftr")
+				if err != nil {
+					return nil, nil, err
 				}
+				if footers == nil {
+					footers = map[string]*HeaderFooter{}
+				}
+				footers[id] = hf
 			}
 		}
 	}
-	return headers, footers
+	return headers, footers, nil
 }
 
 // resolveStylesPart finds the styles part name via the main document's
@@ -286,6 +295,39 @@ func parseBlockChild(dec *xml.Decoder, start xml.StartElement) (*Block, *Section
 			return nil, nil, fmt.Errorf("%w: block: %v", ErrMalformedXML, err)
 		}
 		return nil, nil, nil
+	}
+}
+
+// fillBlocksUntil consumes block content until the named end element, appending
+// to blocks. It is the shared block-consumption loop for the header/footer and
+// footnote part parsers (both wrap a run of w:body-grammar blocks in a single
+// container element).
+func fillBlocksUntil(dec *xml.Decoder, end string, blocks *[]Block) error {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
+				}
+				continue
+			}
+			blk, _, err := parseBlockChild(dec, t)
+			if err != nil {
+				return err
+			}
+			if blk != nil {
+				*blocks = append(*blocks, *blk)
+			}
+		case xml.EndElement:
+			if t.Name.Local == end {
+				return nil
+			}
+		}
 	}
 }
 

@@ -31,33 +31,11 @@ func parseHdrFtr(data []byte, root string) (*HeaderFooter, error) {
 		if !ok || se.Name.Space != wNS || se.Name.Local != root {
 			continue
 		}
-		// Consume the root's children with the shared block dispatch.
-		for {
-			tok, err := dec.Token()
-			if err != nil {
-				return nil, fmt.Errorf("%w: %s: %v", ErrMalformedXML, root, err)
-			}
-			switch t := tok.(type) {
-			case xml.StartElement:
-				if t.Name.Space != wNS {
-					if err := dec.Skip(); err != nil {
-						return nil, fmt.Errorf("%w: %s: %v", ErrMalformedXML, root, err)
-					}
-					continue
-				}
-				blk, _, err := parseBlockChild(dec, t)
-				if err != nil {
-					return nil, err
-				}
-				if blk != nil {
-					hf.Blocks = append(hf.Blocks, *blk)
-				}
-			case xml.EndElement:
-				if t.Name.Local == root {
-					return hf, nil
-				}
-			}
+		// Consume the root's children with the shared block-consumption loop.
+		if err := fillBlocksUntil(dec, root, &hf.Blocks); err != nil {
+			return nil, err
 		}
+		return hf, nil
 	}
 	return hf, nil
 }

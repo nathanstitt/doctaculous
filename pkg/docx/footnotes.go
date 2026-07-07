@@ -49,34 +49,3 @@ func parseFootnotes(data []byte) (*Footnotes, error) {
 	}
 	return f, nil
 }
-
-// fillBlocksUntil consumes block content until the named end element, appending
-// to blocks. Shared by footnote parsing.
-func fillBlocksUntil(dec *xml.Decoder, end string, blocks *[]Block) error {
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
-		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			if t.Name.Space != wNS {
-				if err := dec.Skip(); err != nil {
-					return fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
-				}
-				continue
-			}
-			blk, _, err := parseBlockChild(dec, t)
-			if err != nil {
-				return err
-			}
-			if blk != nil {
-				*blocks = append(*blocks, *blk)
-			}
-		case xml.EndElement:
-			if t.Name.Local == end {
-				return nil
-			}
-		}
-	}
-}

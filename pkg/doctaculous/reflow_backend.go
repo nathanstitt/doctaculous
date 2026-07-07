@@ -15,7 +15,6 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/docx/style"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
-	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -64,12 +63,14 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	faces := layoutfont.NewFaceCache()
 	engine := layoutcss.New(faces, docxcssbox.MediaLoader(d), nil)
 	running := docxcssbox.LowerRunning(d, resolver)
+	hasHeader := running[docxcssbox.RunningHeaderName] != nil
+	hasFooter := running[docxcssbox.RunningFooterName] != nil
 	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
 		Paged:        true,
 		FallbackW:    geom.PageWidthPt, // full page; @page size/margins refine below
 		FallbackH:    geom.PageHeightPt,
 		ExplicitSize: false, // let the synthesized @page size apply
-		Pages:        docxPageSheet(geom, running),
+		Pages:        docxPageSheet(geom, hasHeader, hasFooter),
 		Running:      running,
 	})
 	if err != nil {
@@ -82,15 +83,15 @@ func docxDocument(d *docx.Document) (*Document, error) {
 // size and margins, so the CSS paged engine insets DOCX content exactly as it does
 // for an HTML @page rule. Point values are emitted as px (the layout scalar treats
 // px:pt 1:1), preserving DOCX's physical 72dpi-equivalent scale.
-func docxPageSheet(g docxcssbox.PageGeometry, running map[string]*lcssbox.Box) gcss.Stylesheet {
+func docxPageSheet(g docxcssbox.PageGeometry, hasHeader, hasFooter bool) gcss.Stylesheet {
 	// %f (not %g) so a fractional twip→point value can never fall into %g's exponent
 	// notation, which the @page length parser would reject.
 	px := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + "px" }
 	var mb strings.Builder
-	if running[docxcssbox.RunningHeaderName] != nil {
+	if hasHeader {
 		mb.WriteString(" @top-center { content: element(" + docxcssbox.RunningHeaderName + ") }")
 	}
-	if running[docxcssbox.RunningFooterName] != nil {
+	if hasFooter {
 		mb.WriteString(" @bottom-center { content: element(" + docxcssbox.RunningFooterName + ") }")
 	}
 	css := fmt.Sprintf("@page { size: %s %s; margin: %s %s %s %s%s }",
