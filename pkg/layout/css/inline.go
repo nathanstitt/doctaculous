@@ -133,10 +133,11 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			case g.Outline != nil:
 				emitted = append(emitted, GlyphFragment{
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
-					Color:     color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
-					Underline: g.Underline,
-					Strike:    g.Strike,
-					Face:      g.Face, GID: g.GID, Runes: g.Runes,
+					Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+					Underline:       g.Underline,
+					Strike:          g.Strike,
+					BaselineShiftPt: g.BaselineShiftPt,
+					Face:            g.Face, GID: g.GID, Runes: g.Runes,
 				})
 			}
 			x += g.Advance
@@ -192,15 +193,16 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// A text box carries the parent's inherited font/color/size; only those
 			// fields are meaningful (see makeTextBox) — never its box-level fields.
 			*runs = append(*runs, inline.Run{
-				Text:       applyTextTransform(child.Text, child.Style.TextTransform),
-				Family:     child.Style.FontFamily,
-				Bold:       child.Style.Bold,
-				Italic:     child.Style.Italic,
-				SizePt:     child.Style.FontSizePt,
-				Color:      child.Style.Color,
-				WhiteSpace: child.Style.WhiteSpace,
-				Underline:  child.Style.TextDecorationLine == "underline",
-				Strike:     child.Style.TextDecorationLine == "line-through",
+				Text:            applyTextTransform(child.Text, child.Style.TextTransform),
+				Family:          child.Style.FontFamily,
+				Bold:            child.Style.Bold,
+				Italic:          child.Style.Italic,
+				SizePt:          child.Style.FontSizePt,
+				Color:           child.Style.Color,
+				WhiteSpace:      child.Style.WhiteSpace,
+				Underline:       child.Style.TextDecorationLine == "underline",
+				Strike:          child.Style.TextDecorationLine == "line-through",
+				BaselineShiftPt: baselineShiftPt(child.Style),
 			})
 		case child.Kind == cssbox.BoxReplaced:
 			// A replaced inline (e.g. <img>, including an inline-block <img>) sizes via
@@ -289,6 +291,23 @@ func capitalizeWords(s string) string {
 		prevLetter = unicode.IsLetter(r)
 	}
 	return b.String()
+}
+
+// baselineShiftPt returns the baseline shift (points, positive = up) for a box's
+// vertical-align: super/sub. Every other value (baseline/top/middle/bottom/…) yields 0
+// — its line-box effects are handled elsewhere / deferred — so a run without super/sub
+// is unshifted (byte-identical). The shift scales with the run's font size: super ≈
+// +0.33em, sub ≈ −0.20em (browser-plausible). The caller typically also reduces the
+// font size (e.g. a DOCX superscript at 0.75em); this adds only the vertical offset.
+func baselineShiftPt(st gcss.ComputedStyle) float64 {
+	switch st.VerticalAlign {
+	case "super":
+		return st.FontSizePt * 0.33
+	case "sub":
+		return -st.FontSizePt * 0.20
+	default:
+		return 0
+	}
 }
 
 // inlineBlockCBWidth returns the containing-block width to lay a width:auto inline-block

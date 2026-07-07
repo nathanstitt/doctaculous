@@ -209,6 +209,11 @@ type GlyphFragment struct {
 	// struck glyphs on a line are painted with one mid-glyph rule (see appendStrikes,
 	// called alongside appendUnderlines in appendSelfContent).
 	Strike bool
+	// BaselineShiftPt raises (positive) or lowers (negative) this glyph relative to the
+	// line baseline, in page-space points — vertical-align: super/sub. The glyph's paint
+	// Y is ln.BaselineY - BaselineShiftPt (up = smaller Y). Zero (the default) leaves the
+	// glyph on the line baseline, so a run without super/sub is unchanged.
+	BaselineShiftPt float64
 	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
 	// writer). Face is nil for a glyph with no identity; the rasterizer ignores them.
 	Face  *font.Face
@@ -457,6 +462,8 @@ func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
 		// descendant overrides color without re-declaring decoration (a narrow case the
 		// engine does not yet thread the decorating color through — deferred).
 		col := ln.Glyphs[i].Color
+		// A super/sub run's underline follows the shifted glyphs (0 for the common case).
+		shift := ln.Glyphs[i].BaselineShiftPt
 		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].Underline && ln.Glyphs[i].Outline != nil; i++ {
 			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
 			if ln.Glyphs[i].SizePt > size {
@@ -467,7 +474,7 @@ func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
 		if thickness < 1 {
 			thickness = 1
 		}
-		yTop := ln.BaselineY + size*0.12
+		yTop := ln.BaselineY - shift + size*0.12
 		if x1 > x0 {
 			dst = append(dst, layout.Item{
 				Kind: layout.RuleKind,
@@ -496,6 +503,8 @@ func appendStrikes(dst []layout.Item, ln *LineFragment) []layout.Item {
 		x1 := ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
 		size := ln.Glyphs[i].SizePt
 		col := ln.Glyphs[i].Color
+		// A super/sub run's strike follows the shifted glyphs (0 for the common case).
+		shift := ln.Glyphs[i].BaselineShiftPt
 		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].Strike && ln.Glyphs[i].Outline != nil; i++ {
 			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
 			if ln.Glyphs[i].SizePt > size {
@@ -507,7 +516,7 @@ func appendStrikes(dst []layout.Item, ln *LineFragment) []layout.Item {
 			thickness = 1
 		}
 		// The strike sits ~0.30em above the baseline (near the x-height center).
-		yMid := ln.BaselineY - size*0.30
+		yMid := ln.BaselineY - shift - size*0.30
 		if x1 > x0 {
 			dst = append(dst, layout.Item{
 				Kind: layout.RuleKind,
@@ -528,9 +537,12 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			if g.Outline == nil {
 				continue
 			}
+			// vertical-align: super/sub shifts the glyph off the line baseline (up = a
+			// smaller Y). BaselineShiftPt is 0 for the common case, leaving YPt at the
+			// line baseline (byte-identical).
 			dst = append(dst, layout.Item{
 				Kind:  layout.GlyphKind,
-				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes},
+				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY - g.BaselineShiftPt, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes},
 			})
 		}
 		dst = appendUnderlines(dst, ln)
