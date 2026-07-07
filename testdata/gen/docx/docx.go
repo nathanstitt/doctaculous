@@ -24,11 +24,17 @@ type Builder struct {
 	numberingXML string
 	media        map[string][]byte // part name -> bytes (e.g. "word/media/image1.png")
 	extraRels    []rel             // additional document relationships
+	parts        []part            // arbitrary extra parts (headers/footers/footnotes)
 }
 
 // rel is one extra relationship to emit into document.xml.rels.
 type rel struct {
 	id, typ, target, mode string
+}
+
+// part is one arbitrary OPC part with its content-type override.
+type part struct {
+	name, contentType, xml string
 }
 
 // New returns a Builder seeded with an empty document body.
@@ -74,6 +80,13 @@ func (b *Builder) AddRel(id, typ, target, mode string) *Builder {
 	return b
 }
 
+// AddPart registers an extra part under word/ (e.g. "header1.xml") with its XML
+// and content-type override.
+func (b *Builder) AddPart(name, contentType, xml string) *Builder {
+	b.parts = append(b.parts, part{name: "word/" + name, contentType: contentType, xml: xml})
+	return b
+}
+
 // Bytes serializes the package to .docx bytes. It writes the required OPC parts:
 // [Content_Types].xml, the package and document relationships, the main document,
 // and the optional styles part.
@@ -89,7 +102,7 @@ func (b *Builder) Bytes() []byte {
 		_, _ = w.Write([]byte(content))
 	}
 
-	write("[Content_Types].xml", contentTypes(b.stylesXML != "", b.numberingXML != "", len(b.media) > 0))
+	write("[Content_Types].xml", contentTypes(b.stylesXML != "", b.numberingXML != "", len(b.media) > 0, b.parts))
 	write("_rels/.rels", rootRels)
 	write("word/_rels/document.xml.rels", docRels(b.stylesXML != "", b.numberingXML != "", b.extraRels))
 	write("word/document.xml", b.documentXML)
@@ -103,11 +116,14 @@ func (b *Builder) Bytes() []byte {
 		w, _ := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: fixedModTime})
 		_, _ = w.Write(data)
 	}
+	for _, p := range b.parts {
+		write(p.name, p.xml)
+	}
 	_ = zw.Close()
 	return buf.Bytes()
 }
 
-func contentTypes(withStyles, withNumbering, withMedia bool) string {
+func contentTypes(withStyles, withNumbering, withMedia bool, parts []part) string {
 	s := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -126,6 +142,10 @@ func contentTypes(withStyles, withNumbering, withMedia bool) string {
   <Default Extension="png" ContentType="image/png"/>
   <Default Extension="jpeg" ContentType="image/jpeg"/>
   <Default Extension="jpg" ContentType="image/jpeg"/>`
+	}
+	for _, p := range parts {
+		s += `
+  <Override PartName="/` + p.name + `" ContentType="` + p.contentType + `"/>`
 	}
 	return s + "\n</Types>"
 }
