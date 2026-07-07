@@ -32,6 +32,10 @@ type Document struct {
 	// Media maps an image part name (e.g. "word/media/image1.png") to its raw
 	// bytes, for drawings to decode. Empty if the document embeds no media.
 	Media map[string][]byte
+	// Headers/Footers map a header/footer part's relationship id to its parsed
+	// content, for a section's HeaderRefDefault/FooterRefDefault to resolve.
+	Headers map[string]*HeaderFooter
+	Footers map[string]*HeaderFooter
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
@@ -44,6 +48,7 @@ type Relationship struct {
 	ID       string
 	Target   string
 	External bool
+	relType  string
 }
 
 // Block is a top-level flow item: exactly one field is non-nil. A paragraph
@@ -298,6 +303,11 @@ type SectionProps struct {
 	MarginTop, MarginBottom Twips
 	MarginLeft, MarginRight Twips
 	Header, Footer, Gutter  Twips
+	// HeaderRefDefault/FooterRefDefault are the r:ids of the default header/footer
+	// parts referenced by this section (w:headerReference/w:footerReference
+	// type="default"), or "" when none. (even/first variants are a follow-up.)
+	HeaderRefDefault string
+	FooterRefDefault string
 }
 
 // defaultSection is US Letter (8.5in × 11in) with 1in margins — Word's default —

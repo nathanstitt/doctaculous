@@ -57,7 +57,39 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 
 	doc.Rels = pkg.allRels(mainName)
 	doc.Media = pkg.mediaParts()
+	doc.Headers, doc.Footers = resolveHeadersFooters(pkg, doc.Rels)
 	return doc, nil
+}
+
+// resolveHeadersFooters parses every header/footer part referenced by the
+// document relationships, keyed by relationship id. Header and footer parts are
+// distinguished by relationship type.
+func resolveHeadersFooters(pkg *pkgReader, rels map[string]Relationship) (headers, footers map[string]*HeaderFooter) {
+	const hdrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+	const ftrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
+	for id, rel := range rels {
+		switch rel.relType {
+		case hdrType:
+			if data, ok := pkg.part(rel.Target); ok {
+				if hf, err := parseHdrFtr(data, "hdr"); err == nil {
+					if headers == nil {
+						headers = map[string]*HeaderFooter{}
+					}
+					headers[id] = hf
+				}
+			}
+		case ftrType:
+			if data, ok := pkg.part(rel.Target); ok {
+				if hf, err := parseHdrFtr(data, "ftr"); err == nil {
+					if footers == nil {
+						footers = map[string]*HeaderFooter{}
+					}
+					footers[id] = hf
+				}
+			}
+		}
+	}
+	return headers, footers
 }
 
 // resolveStylesPart finds the styles part name via the main document's
@@ -125,6 +157,7 @@ func (p *pkgReader) allRels(partName string) map[string]Relationship {
 			ID         string `xml:"Id,attr"`
 			Target     string `xml:"Target,attr"`
 			TargetMode string `xml:"TargetMode,attr"`
+			Type       string `xml:"Type,attr"`
 		} `xml:"Relationship"`
 	}
 	if err := xml.Unmarshal(data, &doc); err != nil {
@@ -137,7 +170,7 @@ func (p *pkgReader) allRels(partName string) map[string]Relationship {
 		if !external {
 			target = joinPart(dir, r.Target)
 		}
-		out[r.ID] = Relationship{ID: r.ID, Target: target, External: external}
+		out[r.ID] = Relationship{ID: r.ID, Target: target, External: external, relType: r.Type}
 	}
 	return out
 }
@@ -1100,6 +1133,18 @@ func parseSectPr(dec *xml.Decoder) (SectionProps, error) {
 					}
 				case "pgMar":
 					applyPgMar(&sect, t)
+				case "headerReference":
+					if typ, _ := wAttr(t, "type"); typ == "default" || typ == "" {
+						if id, ok := rAttr(t, "id"); ok {
+							sect.HeaderRefDefault = id
+						}
+					}
+				case "footerReference":
+					if typ, _ := wAttr(t, "type"); typ == "default" || typ == "" {
+						if id, ok := rAttr(t, "id"); ok {
+							sect.FooterRefDefault = id
+						}
+					}
 				}
 			}
 			if err := dec.Skip(); err != nil {
