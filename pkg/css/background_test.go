@@ -181,13 +181,20 @@ func TestTextDecorationParsing(t *testing.T) {
 	if cs2.TextDecorationLine != "underline" {
 		t.Errorf("text-decoration shorthand = %q, want underline", cs2.TextDecorationLine)
 	}
-	// none clears it; an unsupported-only line (line-through) reads as none.
+	// none clears it.
 	applyDeclaration(&cs, Declaration{Property: "text-decoration-line", Value: "none"})
 	if cs.TextDecorationLine != "none" {
 		t.Errorf("text-decoration-line:none = %q", cs.TextDecorationLine)
 	}
+	// line-through is now a supported line value (rendered as a mid-glyph rule).
 	applyDeclaration(&cs, Declaration{Property: "text-decoration", Value: "line-through"})
-	if cs.TextDecorationLine != "none" {
-		t.Errorf("unsupported line-through = %q, want none", cs.TextDecorationLine)
+	if cs.TextDecorationLine != "line-through" {
+		t.Errorf("text-decoration:line-through = %q, want line-through", cs.TextDecorationLine)
+	}
+	// An unsupported-only line (overline) still reads as none.
+	cs3 := initialStyle()
+	applyDeclaration(&cs3, Declaration{Property: "text-decoration", Value: "overline"})
+	if cs3.TextDecorationLine != "none" {
+		t.Errorf("unsupported overline = %q, want none", cs3.TextDecorationLine)
 	}
 }

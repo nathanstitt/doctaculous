@@ -29,12 +29,17 @@ type Length struct {
 
 // parseTextDecorationLine extracts the supported text-decoration line from a value
 // (the longhand or the shorthand). It returns "underline" if the underline keyword is
-// present, else "none" — other line keywords (overline/line-through) and the color/
-// style/thickness tokens are not modeled, so a value without "underline" reads as none.
+// present, "line-through" if that keyword is present, else "none" — the other line
+// keyword (overline) and the color/style/thickness tokens are not modeled, so a value
+// carrying neither reads as none. When both underline and line-through are present the
+// first matched keyword wins (a run rarely has both; the glyph flags are independent).
 func parseTextDecorationLine(value string) string {
 	for _, f := range strings.Fields(strings.ToLower(value)) {
 		if f == "underline" {
 			return "underline"
+		}
+		if f == "line-through" {
+			return "line-through"
 		}
 	}
 	return "none"

@@ -205,6 +205,10 @@ type GlyphFragment struct {
 	// underlined glyphs on a line are painted with one underline rule (see
 	// appendSelfContent).
 	Underline bool
+	// Strike marks a glyph whose box has text-decoration: line-through; consecutive
+	// struck glyphs on a line are painted with one mid-glyph rule (see appendStrikes,
+	// called alongside appendUnderlines in appendSelfContent).
+	Strike bool
 	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
 	// writer). Face is nil for a glyph with no identity; the rasterizer ignores them.
 	Face  *font.Face
@@ -474,6 +478,46 @@ func appendUnderlines(dst []layout.Item, ln *LineFragment) []layout.Item {
 	return dst
 }
 
+// appendStrikes emits text-decoration:line-through rules for one line: one thin
+// RuleKind rectangle per contiguous run of struck glyphs, spanning the run's x-extent
+// (pen origin of the first glyph to pen-end of the last), positioned at roughly the
+// glyph's mid-height (≈0.30em above the baseline, near the x-height center) rather than
+// below it. Thickness scales with the run's glyph size (≈0.06em thick). Mirrors
+// appendUnderlines but at a mid-glyph Y. Emitted after the glyphs.
+func appendStrikes(dst []layout.Item, ln *LineFragment) []layout.Item {
+	i := 0
+	for i < len(ln.Glyphs) {
+		if g := &ln.Glyphs[i]; !g.Strike || g.Outline == nil {
+			i++
+			continue
+		}
+		// Start of a struck run: extend over consecutive struck glyphs.
+		x0 := ln.Glyphs[i].X
+		x1 := ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
+		size := ln.Glyphs[i].SizePt
+		col := ln.Glyphs[i].Color
+		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].Strike && ln.Glyphs[i].Outline != nil; i++ {
+			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
+			if ln.Glyphs[i].SizePt > size {
+				size = ln.Glyphs[i].SizePt // a span uses its tallest glyph's metrics
+			}
+		}
+		thickness := size * 0.06
+		if thickness < 1 {
+			thickness = 1
+		}
+		// The strike sits ~0.30em above the baseline (near the x-height center).
+		yMid := ln.BaselineY - size*0.30
+		if x1 > x0 {
+			dst = append(dst, layout.Item{
+				Kind: layout.RuleKind,
+				Rule: layout.RuleItem{XPt: x0, YPt: yMid, WPt: x1 - x0, HPt: thickness, Color: col},
+			})
+		}
+	}
+	return dst
+}
+
 // appendSelfContent emits this fragment's own inline line glyphs then its replaced
 // image (no recursion).
 func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
@@ -490,6 +534,7 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			})
 		}
 		dst = appendUnderlines(dst, ln)
+		dst = appendStrikes(dst, ln)
 	}
 	if f.Image != nil && f.Image.Img != nil {
 		dst = append(dst, layout.Item{

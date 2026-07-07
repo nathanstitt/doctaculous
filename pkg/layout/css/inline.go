@@ -133,6 +133,7 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
 					Color:     color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 					Underline: g.Underline,
+					Strike:    g.Strike,
 					Face:      g.Face, GID: g.GID, Runes: g.Runes,
 				})
 			}
@@ -197,6 +198,7 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				Color:      child.Style.Color,
 				WhiteSpace: child.Style.WhiteSpace,
 				Underline:  child.Style.TextDecorationLine == "underline",
+				Strike:     child.Style.TextDecorationLine == "line-through",
 			})
 		case child.Kind == cssbox.BoxReplaced:
 			// A replaced inline (e.g. <img>, including an inline-block <img>) sizes via

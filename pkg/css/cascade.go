@@ -74,10 +74,11 @@ type ComputedStyle struct {
 	TextIndent Length // first-line indent (signed; negative = hanging). Zero length = none. Inherited.
 
 	// TextDecorationLine is the supported subset of CSS text-decoration: "none"
-	// (initial) or "underline". Modeled as inherited (like Color) so it propagates to
-	// inline descendants of a decorating box — the pragmatic approximation the engine
-	// uses for text styling. Other keywords (overline/line-through/colors/styles) are
-	// not modeled (parsed-and-ignored). Painted by the CSS inline formatting context.
+	// (initial), "underline", or "line-through". Modeled as inherited (like Color) so it
+	// propagates to inline descendants of a decorating box — the pragmatic approximation
+	// the engine uses for text styling. The remaining keyword (overline) and the
+	// colors/styles are not modeled (parsed-and-ignored). Painted by the CSS inline
+	// formatting context (underline below the baseline, line-through at mid-glyph).
 	TextDecorationLine string
 
 	// WhiteSpace is the CSS white-space property: "normal" | "nowrap" | "pre" |
