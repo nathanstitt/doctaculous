@@ -95,6 +95,12 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: footnoteDocx,
 	},
+	{
+		Name:  "run-props",
+		Desc:  "strikethrough, superscript, highlight, and caps runs",
+		Pages: 1,
+		Build: runPropsDocx,
+	},
 }
 
 const docOpen = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -360,4 +366,21 @@ func footnoteDocx() []byte {
 		AddPart("footnotes.xml", ctFootnotes, notes).
 		AddRel("rId12", relFootnotes, "footnotes.xml", "").
 		Bytes()
+}
+
+// runRPr builds a run with a raw w:rPr XML fragment and text.
+func runRPr(rPr, text string) string {
+	return `<w:r><w:rPr>` + rPr + `</w:rPr><w:t xml:space="preserve">` + text + `</w:t></w:r>`
+}
+
+func runPropsDocx() []byte {
+	p := `<w:p>` +
+		runRPr(`<w:strike/>`, "struck ") +
+		`<w:r><w:t xml:space="preserve">normal E=mc</w:t></w:r>` +
+		runRPr(`<w:vertAlign w:val="superscript"/>`, "2") +
+		runRPr(`<w:highlight w:val="yellow"/>`, " highlighted ") +
+		runRPr(`<w:caps/>`, "small caps") +
+		`</w:p>`
+	doc := docOpen + p + docClose
+	return New().SetDocument(doc).Bytes()
 }
