@@ -81,6 +81,12 @@ type ComputedStyle struct {
 	// formatting context (underline below the baseline, line-through at mid-glyph).
 	TextDecorationLine string
 
+	// TextTransform is the CSS text-transform: "none" (initial) | "uppercase" |
+	// "lowercase" | "capitalize". Inherited. Applied to a text run's string at shaping
+	// time by the inline formatting context. small-caps is approximated upstream as
+	// uppercase (true small-caps needs synthesized small capitals — deferred).
+	TextTransform string
+
 	// WhiteSpace is the CSS white-space property: "normal" | "nowrap" | "pre" |
 	// "pre-wrap" | "pre-line". Inherited; initial "normal". Decomposed into three
 	// behaviors by WhiteSpaceFlags (collapse spaces, preserve newlines, wrap).
@@ -412,6 +418,7 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.TextAlign = parent.TextAlign
 	cs.TextIndent = parent.TextIndent
 	cs.TextDecorationLine = parent.TextDecorationLine
+	cs.TextTransform = parent.TextTransform
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.ListStyleType = parent.ListStyleType
 	cs.ListStylePosition = parent.ListStylePosition
@@ -448,6 +455,7 @@ func initialStyle() ComputedStyle {
 		LineHeight:         Length{Unit: UnitAuto},
 		TextAlign:          "left",
 		TextDecorationLine: "none",
+		TextTransform:      "none",
 		WhiteSpace:         "normal",
 		ListStyleType:      "disc",
 		ListStylePosition:  "outside",
@@ -582,9 +590,14 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		// A single length token (px/pt/em/%); may be signed (negative = hanging).
 		setLength(&cs.TextIndent, d.Value)
 	case "text-decoration", "text-decoration-line":
-		// Supported subset: underline / none. The shorthand may carry color/style/
-		// thickness tokens too; we scan for the line keyword. "none" clears it.
+		// Supported subset: underline / line-through / none. The shorthand may carry
+		// color/style/thickness tokens too; we scan for the line keyword. "none" clears it.
 		cs.TextDecorationLine = parseTextDecorationLine(d.Value)
+	case "text-transform":
+		switch d.Value {
+		case "uppercase", "lowercase", "capitalize", "none":
+			cs.TextTransform = d.Value
+		}
 	case "white-space":
 		switch d.Value {
 		case "normal", "nowrap", "pre", "pre-wrap", "pre-line":

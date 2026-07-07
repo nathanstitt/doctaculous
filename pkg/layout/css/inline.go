@@ -3,6 +3,8 @@ package css
 import (
 	"context"
 	"image/color"
+	"strings"
+	"unicode"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -190,7 +192,7 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			// A text box carries the parent's inherited font/color/size; only those
 			// fields are meaningful (see makeTextBox) — never its box-level fields.
 			*runs = append(*runs, inline.Run{
-				Text:       child.Text,
+				Text:       applyTextTransform(child.Text, child.Style.TextTransform),
 				Family:     child.Style.FontFamily,
 				Bold:       child.Style.Bold,
 				Italic:     child.Style.Italic,
@@ -253,6 +255,40 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			e.logf("css layout: unexpected non-inline child in inline formatting context; skipping")
 		}
 	}
+}
+
+// applyTextTransform applies the CSS text-transform to a run's text before shaping.
+// "capitalize" uppercases the first letter of each word; small-caps is handled upstream
+// (mapped to uppercase). The default (including "none" and any unmodeled value) returns
+// s unchanged, so a run without text-transform is byte-identical.
+func applyTextTransform(s, transform string) string {
+	switch transform {
+	case "uppercase":
+		return strings.ToUpper(s)
+	case "lowercase":
+		return strings.ToLower(s)
+	case "capitalize":
+		return capitalizeWords(s)
+	default:
+		return s
+	}
+}
+
+// capitalizeWords uppercases the first rune of each run of letters, leaving the rest
+// unchanged (a pragmatic approximation of CSS "capitalize": a letter preceded by a
+// non-letter starts a word).
+func capitalizeWords(s string) string {
+	var b strings.Builder
+	prevLetter := false
+	for _, r := range s {
+		if !prevLetter && unicode.IsLetter(r) {
+			b.WriteRune(unicode.ToUpper(r))
+		} else {
+			b.WriteRune(r)
+		}
+		prevLetter = unicode.IsLetter(r)
+	}
+	return b.String()
 }
 
 // inlineBlockCBWidth returns the containing-block width to lay a width:auto inline-block
