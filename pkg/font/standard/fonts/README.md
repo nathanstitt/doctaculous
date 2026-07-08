@@ -8,9 +8,16 @@ All are permissively licensed and MIT-compatible — no GPL/AGPL.
 
 | File | Substitutes for | Format | License |
 | --- | --- | --- | --- |
-| `TeXGyreHeros-Regular.pfb` | Helvetica / Arial (all weights → regular) | Classic Type 1 (PFB) | GUST Font License (LPPL-equiv.) — see `GUST-FONT-LICENSE.txt` |
-| `TeXGyreTermes-Regular.pfb` | Times-Roman / TimesNewRoman (all weights → regular) | Classic Type 1 (PFB) | GUST Font License (LPPL-equiv.) — see `GUST-FONT-LICENSE.txt` |
-| `Inconsolata-Regular.ttf` | Courier / CourierNew (all weights → regular) | TrueType (SFNT) | SIL Open Font License 1.1 — see `LICENSE-Inconsolata.txt` |
+| `TeXGyreHeros-Regular.pfb` | Helvetica / Arial (regular) | Classic Type 1 (PFB) | GUST Font License (LPPL-equiv.) — see `GUST-FONT-LICENSE.txt` |
+| `TeXGyreHeros-Bold.pfb` | Helvetica / Arial (bold) | Classic Type 1 (PFB) | GUST Font License |
+| `TeXGyreHeros-Italic.pfb` | Helvetica / Arial (italic / oblique) | Classic Type 1 (PFB) | GUST Font License |
+| `TeXGyreHeros-BoldItalic.pfb` | Helvetica / Arial (bold italic / boldoblique) | Classic Type 1 (PFB) | GUST Font License |
+| `TeXGyreTermes-Regular.pfb` | Times-Roman / TimesNewRoman (regular) | Classic Type 1 (PFB) | GUST Font License |
+| `TeXGyreTermes-Bold.pfb` | Times (bold) | Classic Type 1 (PFB) | GUST Font License |
+| `TeXGyreTermes-Italic.pfb` | Times (italic) | Classic Type 1 (PFB) | GUST Font License |
+| `TeXGyreTermes-BoldItalic.pfb` | Times (bold italic) | Classic Type 1 (PFB) | GUST Font License |
+| `Inconsolata-Regular.ttf` | Courier / CourierNew (regular, italic → regular) | TrueType (SFNT) | SIL Open Font License 1.1 — see `LICENSE-Inconsolata.txt` |
+| `Inconsolata-Bold.ttf` | Courier / CourierNew (bold, bold italic → bold) | TrueType (SFNT) | SIL Open Font License 1.1 |
 
 ## Licensing rationale
 
@@ -24,14 +31,17 @@ All are permissively licensed and MIT-compatible — no GPL/AGPL.
 
 ## Coverage / approximations
 
-- Only **regular weights** are bundled. Bold/italic/oblique variants of a family
-  map to that family's regular face — an intentional approximation. True
-  weight/slant substitutes are a follow-up.
-- **Symbol** and **ZapfDingbats** have no bundled look-alike; the library reports
-  them unavailable and the caller skips the text (graceful degradation).
+- **Regular, bold, italic, and bold-italic** are bundled for the sans (Heros) and
+  serif (Termes) families, so a weighted/slanted standard-14 base font renders in
+  the matching face. The monospace family (Inconsolata) ships regular + bold; its
+  italic and bold-italic fall back to the upright weight (Inconsolata has no
+  upright-italic in this set) — logged.
+- **Symbol** and **ZapfDingbats** have no bundled look-alike; a caller-supplied font
+  provider resolves them when a real face is reachable, otherwise the library
+  reports them unavailable and the caller skips the text (graceful degradation).
 - Widths: the PDF's own `/Widths` are preferred when present; otherwise the
   substitute face's own advances approximate them.
 
-Sources: TeX Gyre collection (GUST e-foundry, via CTAN); Inconsolata (The
-Inconsolata Project Authors). These are copies of the corresponding files already
-committed under `testdata/gen/fonts/`.
+Sources: TeX Gyre collection (GUST e-foundry, via CTAN
+`fonts/tex-gyre/type1/` — `qhv*`/`qtm*`); Inconsolata (The Inconsolata Project
+Authors, via the googlefonts/Inconsolata release).
