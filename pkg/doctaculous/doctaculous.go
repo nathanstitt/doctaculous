@@ -7,6 +7,8 @@ import (
 	"image/color"
 	"runtime"
 	"sync"
+
+	"github.com/nathanstitt/doctaculous/pkg/font"
 )
 
 // Document is an opened document ready for rendering. It is read-only after Open
@@ -42,6 +44,13 @@ type RasterOptions struct {
 	// Logf, if set, receives debug messages about unsupported features. It must be
 	// safe for concurrent use; RasterizePages calls it from multiple goroutines.
 	Logf func(string, ...any)
+	// FontProvider, if set, resolves a non-embedded font (a standard-14 /BaseFont or
+	// an unknown family) to real font bytes before the bundled substitute is tried —
+	// letting a caller supply system fonts, exact-metric faces, or a face for a family
+	// the bundle has no look-alike for (Symbol, ZapfDingbats). nil (the default) uses
+	// the bundled weighted substitutes only, keeping rendering hermetic. A
+	// layoutfont.DiskFontProvider satisfies this.
+	FontProvider font.Provider
 }
 
 func (o RasterOptions) dpi() float64 {

@@ -12,6 +12,25 @@ func TextPDF() []byte {
 	return buildSinglePage(content, `<< >>`)
 }
 
+// WeightedFontsPDF returns a single-page PDF that draws three lines with three
+// non-embedded standard-14 base fonts — Helvetica (regular), Helvetica-Bold, and
+// Times-Italic — so a renderer must substitute the matching WEIGHTED/SLANTED bundled
+// face (not collapse them all to a regular face). None embed a program, exercising the
+// standardSubstituteProgram path; the golden shows the bold line heavier and the italic
+// line slanted relative to the regular line.
+func WeightedFontsPDF() []byte {
+	resources := `<< /Font <<
+		/F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+		/F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+		/F3 << /Type /Font /Subtype /Type1 /BaseFont /Times-Italic >>
+	>> >>`
+	content := []byte(
+		"BT /F1 28 Tf 72 700 Td (Regular Helvetica) Tj ET\n" +
+			"BT /F2 28 Tf 72 640 Td (Bold Helvetica) Tj ET\n" +
+			"BT /F3 28 Tf 72 580 Td (Italic Times) Tj ET")
+	return buildSinglePage(content, resources)
+}
+
 // SeparationColorPDF returns a single-page PDF that fills a rectangle with a
 // Separation ("spot") color at full ink (scn 1). The /Separation color space's
 // tint-transform /Function (an inline Type 2 exponential) maps tint t to CMYK
