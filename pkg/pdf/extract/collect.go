@@ -26,6 +26,7 @@ import (
 	"errors"
 	"image"
 	"math"
+	"unicode"
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
@@ -110,11 +111,26 @@ func (c *collector) text(g content.TextGlyph) {
 		x1:      g.X + g.Advance,
 		size:    g.SizePt,
 		advance: g.Advance,
-		isSpace: g.IsSpace,
+		isSpace: isWhitespaceGlyph(g),
 		fontID:  g.FontID,
 		bold:    g.Bold,
 		italic:  g.Italic,
 	})
+}
+
+// isWhitespaceGlyph reports whether a shown glyph is genuinely whitespace (and so
+// should act as a hard word break that emits no character). The interpreter sets
+// TextGlyph.IsSpace for byte code 32 to drive PDF word-spacing (Tw), but a subset
+// font routinely remaps code 32 to a real glyph (e.g. "R"): such a glyph carries a
+// non-space Unicode rune and is real content, not a break. We therefore treat a
+// glyph as whitespace only when the interpreter flagged it AND its decoded rune is
+// absent (unmapped, rune 0) or an actual Unicode space — never when it maps to a
+// visible character.
+func isWhitespaceGlyph(g content.TextGlyph) bool {
+	if !g.IsSpace {
+		return false
+	}
+	return g.Rune == 0 || unicode.IsSpace(g.Rune)
 }
 
 // vector is the GraphicsSink: it inspects one painted path and, when it looks like

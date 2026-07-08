@@ -235,6 +235,18 @@ bullet's design doc is in `docs/superpowers/specs/`:
   nested + task lists, thematic breaks, and **high-fidelity pipe tables** (colspan/rowspan expanded by
   content duplication, alignment, caption). `2026-07-07-html-docx-markdown-design.md`.
 
+**PDF → Markdown & HTML** (`pkg/pdf/extract`, `pkg/render/htmlwrite`, `ConvertPDFToMarkdown`/
+`ConvertPDFToHTML` + `WriteHTML`, CLI `tomd <pdf>` / `tohtml`):
+
+- Structure recovery from a PDF's positioned glyphs + vector paths. The content interpreter gains
+  optional, paint-neutral capture sinks (`content.Options.TextSink`/`GraphicsSink`, nil =
+  byte-identical); `pkg/pdf/extract` reconstructs words→lines→**XY-cut** reading-order blocks (columns
+  handled) + **automatic table recognition** (lattice from ruling lines + stream from whitespace,
+  auto-selected), lowering to a synthetic `cssbox` tree the Markdown writer reuses. A new
+  `pkg/render/htmlwrite` serializes `cssbox`→HTML (native `colspan`/`rowspan`). PDF `Document`
+  satisfies `reflowTree` via lazy extraction. ToUnicode CMaps (Type0/CID text), font weight/slant, and
+  scanned-PDF OCR are follow-ups. `2026-07-08-pdf-to-html-markdown-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
@@ -250,9 +262,10 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
    and PDF); Symbol/ZapfDingbats have no substitute. Bundle weighted faces + symbol look-alikes;
    ideally AFM widths for exact base-14 metrics. This also fixes DOCX bold/italic fidelity.
 5. **DOCX embedded fonts** — de-obfuscate `word/fonts/*` (also improves bold/italic fidelity).
-6. **PDF text-extraction backend** — a read-side `Device` consuming the same `DrawGlyph`/`GlyphRef`
-   seam the PDF writer emits (the reflow HTML/DOCX → text/Markdown path already ships; this is the
-   PDF-input side, which has no `cssbox` tree to walk).
+6. **PDF-extraction quality** — the PDF → Markdown/HTML path ships (`pkg/pdf/extract`); the top lifts
+   are **ToUnicode CMap parsing** (Type0/CID text — CJK / subsetted fonts currently yield `Rune==0`),
+   font weight/slant through `GlyphSource` (emphasis + weight-based heading detection), and
+   scanned-PDF OCR.
 7. **Fuller paged-media in the PDF-writer path** — carry the CSS Paged Media features into
    `pkg/render/pdfwrite`.
 

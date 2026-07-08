@@ -57,18 +57,96 @@ func lowerPage(pc *pageContent, logf func(string, ...any)) []*cssbox.Box {
 
 	// Detect tables over the ruled region(s). A page may draw one table; we detect a
 	// single lattice/stream table spanning the ruled area, then remove its lines.
-	var out []*cssbox.Box
+	var tblBox *cssbox.Box
+	var tblYTop float64
 	tbl := detect(lines, pc.rules, logf)
 	if tbl != nil {
-		out = append(out, lowerTable(tbl))
+		tblBox = lowerTable(tbl)
+		tblYTop = tbl.yTop
 		lines = removeTableLines(lines, tbl)
 	}
 
+	// Order and lower the surrounding prose. The table is spliced back in at its own
+	// vertical position (before the first block that starts at or below the table's
+	// top) so the emitted tree preserves reading order — heading, paragraph, TABLE,
+	// heading, list — rather than hoisting the table to the front.
 	blocks := orderBlocks(lines, pc.width, pc.height, bodySize)
+	var out []*cssbox.Box
+	inserted := tblBox == nil
 	for _, b := range blocks {
+		if !inserted && blockTop(b) >= tblYTop {
+			out = append(out, tblBox)
+			inserted = true
+		}
 		out = append(out, lowerBlock(b))
 	}
+	if !inserted {
+		out = append(out, tblBox) // table sits below every block (or there are none)
+	}
+
+	// Group runs of consecutive list-item boxes under a synthetic list container, so
+	// the tree matches what real HTML/DOCX frontends produce (list items always sit
+	// inside a <ul>/<ol>). Without this the downstream writers' isListContainer sees
+	// the body itself as a list and drop every non-item sibling.
+	return groupListItems(out)
+}
+
+// blockTop returns the block's topmost baseline (smallest y in the y-down device
+// frame), used to splice a detected table into reading order among the prose blocks.
+func blockTop(b block) float64 {
+	if len(b.lines) == 0 {
+		return 0
+	}
+	top := b.lines[0].y
+	for _, l := range b.lines[1:] {
+		if l.y < top {
+			top = l.y
+		}
+	}
+	return top
+}
+
+// groupListItems wraps each maximal run of consecutive DisplayListItem boxes in a
+// synthetic list-container block, leaving other boxes untouched. The extractor emits
+// list items as flat siblings of headings/paragraphs/tables; the Markdown and HTML
+// writers, however, treat any box whose children include a list item as a list
+// container and render ONLY its item children — silently dropping every non-item
+// sibling. Nesting the items under their own container restores the invariant those
+// writers rely on and keeps the surrounding blocks in the output.
+func groupListItems(boxes []*cssbox.Box) []*cssbox.Box {
+	var out []*cssbox.Box
+	i := 0
+	for i < len(boxes) {
+		if boxes[i].Display != cssbox.DisplayListItem {
+			out = append(out, boxes[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(boxes) && boxes[j].Display == cssbox.DisplayListItem {
+			j++
+		}
+		container := blockBox(cssbox.BlockFC)
+		container.SemTag = listTag(boxes[i])
+		container.Children = append([]*cssbox.Box(nil), boxes[i:j]...)
+		out = append(out, container)
+		i = j
+	}
 	return out
+}
+
+// listTag picks the semantic container tag ("ol" for an ordered first item, else
+// "ul") for a synthetic list wrapper. The downstream writers actually choose ul/ol
+// from each item's marker, so this only labels the tree for readers that inspect
+// SemTag; it never overrides the marker-derived rendering.
+func listTag(item *cssbox.Box) string {
+	if item.Marker != nil {
+		m := strings.TrimSpace(item.Marker.Text)
+		if m != "" && (strings.HasSuffix(m, ".") || strings.HasSuffix(m, ")")) {
+			return "ol"
+		}
+	}
+	return "ul"
 }
 
 // removeTableLines drops the lines that fall within the detected table's vertical

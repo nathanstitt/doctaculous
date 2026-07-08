@@ -45,6 +45,23 @@ var pdfxGoldens = []struct {
 		<div class="col"><p>Left column first paragraph.</p><p>Left column second paragraph.</p></div>
 		<div class="col"><p>Right column first paragraph.</p><p>Right column second paragraph.</p></div>
 	</body></html>`},
+	// The specimen: one document exercising the whole extractor end to end (heading,
+	// paragraphs, a ruled table, and a list), the PDF-extraction counterpart to the
+	// htmldoc raster showcase. Its committed .md/.html are the reviewable artifact.
+	{"specimen", `<!DOCTYPE html><html><head><style>body{margin:0}
+		h1{font-size:30px} h2{font-size:22px}
+		table{border-collapse:collapse} td,th{border:1px solid black;padding:6px}</style></head><body>
+		<h1>Field Report</h1>
+		<p>This specimen exercises every part of the PDF extraction pipeline in one document.</p>
+		<h2>Measurements</h2>
+		<table>
+			<tr><th>Site</th><th>Depth</th><th>Reading</th></tr>
+			<tr><td>North</td><td>10m</td><td>4.2</td></tr>
+			<tr><td>South</td><td>15m</td><td>5.8</td></tr>
+		</table>
+		<h2>Next steps</h2>
+		<ol><li>Review the anomalies.</li><li>Schedule a follow-up survey.</li></ol>
+	</body></html>`},
 }
 
 // TestPDFExtractMarkdownGolden renders each fixture to a PDF, extracts it to Markdown, and

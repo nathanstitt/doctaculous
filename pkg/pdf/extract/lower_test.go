@@ -31,15 +31,25 @@ func TestLowerPageShape(t *testing.T) {
 	if boxes[0].SemTag != "h1" || boxes[0].HeadingLvl != 1 {
 		t.Errorf("box0 = SemTag %q lvl %d, want h1/1", boxes[0].SemTag, boxes[0].HeadingLvl)
 	}
-	// A list-item box must exist with a marker.
+	// A list-item box must exist with a marker. List items are nested under a
+	// synthetic list container (so the downstream writers do not treat the whole body
+	// as a list and drop non-item siblings), so search recursively.
 	var foundList bool
-	for _, b := range boxes {
+	var walk func(b *cssbox.Box)
+	walk = func(b *cssbox.Box) {
 		if b.Display == cssbox.DisplayListItem {
 			foundList = true
 			if b.Marker == nil || b.Marker.Text != "- " {
 				t.Errorf("list marker = %+v, want '- '", b.Marker)
 			}
+			return
 		}
+		for _, c := range b.Children {
+			walk(c)
+		}
+	}
+	for _, b := range boxes {
+		walk(b)
 	}
 	if !foundList {
 		t.Error("no DisplayListItem box produced")
