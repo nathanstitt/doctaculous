@@ -8,13 +8,27 @@ import (
 )
 
 // Style selects a weight/slant variant of a font family. Bold and Italic combine
-// (Bold && Italic selects a bold-italic face where available). Only regular
-// weights are currently bundled, so for now Bold/Italic are recorded but resolve
-// to the family's regular face — the same documented approximation as the PDF
-// standard-14 substitutes (see package standard).
+// (Bold && Italic selects a bold-italic face where available). The bundled standard
+// substitutes ship regular/bold/italic/bold-italic (see package standard), and a
+// Provider may supply a weighted face for a family the bundle does not cover.
 type Style struct {
 	Bold   bool
 	Italic bool
+}
+
+// Provider resolves a font family + style to raw font-program bytes (sfnt/TrueType,
+// bare CFF, or classic Type1/PFB — the caller detects the format via LoadSFNT or the
+// PDF program parser). It is the injectable resolution layer both pipelines consult
+// before falling back to the bundled standard substitutes, so a caller can point the
+// toolkit at system fonts or a fonts directory — including families the bundle has no
+// look-alike for (Symbol, ZapfDingbats) and exact-metric real faces. The interface is
+// defined here, in the low font layer, so both pkg/font (PDF) and the higher reflow
+// engine can depend on it without a layer inversion; pkg/layout/font's DiskFontProvider
+// implements it. ok is false when the provider has no match, and the caller proceeds to
+// the bundled fallback.
+type Provider interface {
+	// LoadStyled returns the raw program bytes for family in the given weight/slant.
+	LoadStyled(family string, bold, italic bool) (data []byte, ok bool)
 }
 
 // ProgramKind identifies the embedded font-program format of a Face's bytes, so a
@@ -54,14 +68,17 @@ type Face struct {
 // LoadStandard returns a Face for a named font family, substituting a bundled
 // permissively-licensed look-alike. It resolves the standard-14 names and common
 // aliases (Arial, Times New Roman, Courier New, and the Office defaults Calibri
-// and Cambria) via standard.Lookup; family matching is case-insensitive and
+// and Cambria) via standard.LookupStyled; family matching is case-insensitive and
 // tolerant of spaces and a subset prefix. ok is false when no substitute is
 // bundled for the family (e.g. Symbol, Wingdings), so the caller skips the run.
 //
-// style is recorded on the lookup but currently does not change the bundled face
-// (only regular weights ship); true weighted/slanted substitutes are a follow-up.
+// style selects the weight/slant variant of the bundled family: the sans and serif
+// substitutes ship regular/bold/italic/bold-italic, so a bold or italic run resolves
+// to the matching weighted face (the monospace family reuses its upright weight for
+// italic — see package standard). A family that lacks the exact variant falls back to
+// the nearest bundled weight.
 func LoadStandard(family string, style Style) (*Face, bool) {
-	sub, ok := standard.Lookup(family)
+	sub, ok := standard.LookupStyled(family, style.Bold, style.Italic)
 	if !ok {
 		return nil, false
 	}

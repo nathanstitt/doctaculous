@@ -70,8 +70,9 @@ func (r *pdfRenderer) renderPage(ctx context.Context, index int, opts RasterOpti
 		return nil, fmt.Errorf("page %d: %w", index, err)
 	}
 	return raster.RenderPage(ctx, pg, raster.Options{
-		DPI:        opts.dpi(),
-		Background: opts.Background,
-		Logf:       opts.Logf,
+		DPI:          opts.dpi(),
+		Background:   opts.Background,
+		Logf:         opts.Logf,
+		FontProvider: opts.FontProvider,
 	})
 }

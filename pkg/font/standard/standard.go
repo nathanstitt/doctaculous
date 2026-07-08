@@ -20,11 +20,14 @@
 // # Coverage
 //
 // Helvetica/Arial -> Heros; Times/TimesNewRoman -> Termes; Courier/CourierNew ->
-// Inconsolata. Only regular weights are bundled, so bold/italic/oblique variants
-// of a family currently map to that family's regular face — an intentional
-// approximation; true weight/slant substitutes are a follow-up. The Symbol and
-// ZapfDingbats fonts have no permissively-licensed look-alike bundled here, so
-// they are reported as unavailable and the caller skips them.
+// Inconsolata. Regular, bold, italic, and bold-italic are bundled for the sans and
+// serif families, so a weighted/slanted base font resolves to the matching face; the
+// monospace family ships regular + bold (its italic reuses the upright weight, as
+// Inconsolata has no upright-italic here). Lookup infers the variant from the /BaseFont
+// name; LookupStyled takes an explicit weight/slant (the reflow path). The Symbol and
+// ZapfDingbats fonts have no permissively-licensed look-alike bundled here, so they are
+// reported as unavailable and a caller-supplied font provider or graceful skip handles
+// them.
 package standard
 
 import (
@@ -35,11 +38,32 @@ import (
 //go:embed fonts/TeXGyreHeros-Regular.pfb
 var herosPFB []byte
 
+//go:embed fonts/TeXGyreHeros-Bold.pfb
+var herosBoldPFB []byte
+
+//go:embed fonts/TeXGyreHeros-Italic.pfb
+var herosItalicPFB []byte
+
+//go:embed fonts/TeXGyreHeros-BoldItalic.pfb
+var herosBoldItalicPFB []byte
+
 //go:embed fonts/TeXGyreTermes-Regular.pfb
 var termesPFB []byte
 
+//go:embed fonts/TeXGyreTermes-Bold.pfb
+var termesBoldPFB []byte
+
+//go:embed fonts/TeXGyreTermes-Italic.pfb
+var termesItalicPFB []byte
+
+//go:embed fonts/TeXGyreTermes-BoldItalic.pfb
+var termesBoldItalicPFB []byte
+
 //go:embed fonts/Inconsolata-Regular.ttf
 var inconsolataTTF []byte
+
+//go:embed fonts/Inconsolata-Bold.ttf
+var inconsolataBoldTTF []byte
 
 // Kind identifies the on-disk font-program format of a bundled substitute so the
 // caller can hand it to the matching parser (classic Type1 PFB vs. TrueType).
@@ -65,12 +89,52 @@ type Substitute struct {
 	Kind Kind
 }
 
-// The three bundled faces. Bold/italic variants of each family map here too
-// (regular-weight approximation; see package doc).
+// family holds the four weight/slant variants of a bundled font family. A missing
+// variant (nil-data) is never stored: a family that lacks a real variant repeats the
+// nearest available face (e.g. the monospace italic reuses its upright weight), so
+// pick always returns a usable Substitute.
+type family struct {
+	regular, bold, italic, boldItalic Substitute
+}
+
+// pick returns the variant matching bold/italic, falling back to the nearest bundled
+// weight when the exact variant is not shipped (recorded via the returned Substitute's
+// Name so the caller can log the approximation).
+func (f family) pick(bold, italic bool) Substitute {
+	switch {
+	case bold && italic:
+		return f.boldItalic
+	case bold:
+		return f.bold
+	case italic:
+		return f.italic
+	default:
+		return f.regular
+	}
+}
+
+// The three bundled families, each with its weight/slant variants. Heros (sans) and
+// Termes (serif) ship all four; Inconsolata (mono) ships regular + bold, so its italic
+// and bold-italic reuse the upright weight (see package doc).
 var (
-	heros  = Substitute{Name: "TeXGyreHeros-Regular", Data: herosPFB, Kind: KindType1}
-	termes = Substitute{Name: "TeXGyreTermes-Regular", Data: termesPFB, Kind: KindType1}
-	mono   = Substitute{Name: "Inconsolata-Regular", Data: inconsolataTTF, Kind: KindTrueType}
+	heros = family{
+		regular:    Substitute{Name: "TeXGyreHeros-Regular", Data: herosPFB, Kind: KindType1},
+		bold:       Substitute{Name: "TeXGyreHeros-Bold", Data: herosBoldPFB, Kind: KindType1},
+		italic:     Substitute{Name: "TeXGyreHeros-Italic", Data: herosItalicPFB, Kind: KindType1},
+		boldItalic: Substitute{Name: "TeXGyreHeros-BoldItalic", Data: herosBoldItalicPFB, Kind: KindType1},
+	}
+	termes = family{
+		regular:    Substitute{Name: "TeXGyreTermes-Regular", Data: termesPFB, Kind: KindType1},
+		bold:       Substitute{Name: "TeXGyreTermes-Bold", Data: termesBoldPFB, Kind: KindType1},
+		italic:     Substitute{Name: "TeXGyreTermes-Italic", Data: termesItalicPFB, Kind: KindType1},
+		boldItalic: Substitute{Name: "TeXGyreTermes-BoldItalic", Data: termesBoldItalicPFB, Kind: KindType1},
+	}
+	mono = family{
+		regular:    Substitute{Name: "Inconsolata-Regular", Data: inconsolataTTF, Kind: KindTrueType},
+		bold:       Substitute{Name: "Inconsolata-Bold", Data: inconsolataBoldTTF, Kind: KindTrueType},
+		italic:     Substitute{Name: "Inconsolata-Regular", Data: inconsolataTTF, Kind: KindTrueType},  // no upright-italic bundled
+		boldItalic: Substitute{Name: "Inconsolata-Bold", Data: inconsolataBoldTTF, Kind: KindTrueType}, // bold-italic → bold
+	}
 )
 
 // Lookup returns the bundled substitute face for a font family name, resolving
@@ -85,6 +149,27 @@ var (
 // substitute — notably Symbol, ZapfDingbats, and Wingdings, and any unrecognized
 // name.
 func Lookup(baseFont string) (Substitute, bool) {
+	bold, italic := styleFromName(baseFont)
+	return LookupStyled(baseFont, bold, italic)
+}
+
+// LookupStyled is Lookup with an explicit weight/slant, for callers (the reflow engine)
+// that carry the computed style separately from the family name. It resolves the family
+// exactly as Lookup, then returns that family's bold / italic / bold-italic variant
+// (falling back to the nearest bundled weight for a family that lacks the exact one —
+// see family.pick). bold/italic passed here override any weight/slant encoded in the
+// name. ok is false for families with no bundled substitute (Symbol, ZapfDingbats,
+// Wingdings, or an unrecognized name).
+func LookupStyled(baseFont string, bold, italic bool) (Substitute, bool) {
+	fam, ok := familyOf(baseFont)
+	if !ok {
+		return Substitute{}, false
+	}
+	return fam.pick(bold, italic), true
+}
+
+// familyOf resolves a base-font / family name to its bundled family, or ok=false.
+func familyOf(baseFont string) (family, bool) {
 	name := canonical(baseFont)
 	// Generic CSS family keywords (the default a reflow frontend computes when no
 	// concrete family is named) map to the matching substitute style: serif->Termes,
@@ -117,8 +202,21 @@ func Lookup(baseFont string) (Substitute, bool) {
 		strings.HasPrefix(name, "texgyreheros"): // the bundled sans's own name
 		return heros, true
 	default:
-		return Substitute{}, false
+		return family{}, false
 	}
+}
+
+// styleFromName infers weight/slant from a PDF /BaseFont name, which conventionally
+// encodes the variant as a suffix ("Helvetica-Bold", "Times-BoldItalic",
+// "Courier-Oblique", "Arial,BoldItalic", "ArialMT-Italic"). Matching is on the
+// canonicalized (lowercased, space-stripped) name so all the punctuation styles reduce
+// to substring tests. It is best-effort: a name with no weight/slant token yields
+// (false, false), and an explicit style passed to LookupStyled overrides this.
+func styleFromName(baseFont string) (bold, italic bool) {
+	n := canonical(baseFont)
+	bold = strings.Contains(n, "bold")
+	italic = strings.Contains(n, "italic") || strings.Contains(n, "oblique")
+	return bold, italic
 }
 
 // canonical lowercases baseFont and removes a subset tag ("ABCDEF+") and any

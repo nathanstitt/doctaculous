@@ -74,6 +74,40 @@ func TestGolden(t *testing.T) {
 	}
 }
 
+// TestWeightedFontsGolden renders the weighted-substitute fixture (non-embedded
+// Helvetica / Helvetica-Bold / Times-Italic) and compares to a committed PNG. It locks
+// the standard-14 weight/slant substitution: the bold line must render heavier and the
+// italic line slanted, rather than all three collapsing to a regular face. Run with
+// -update to regenerate, then eyeball the PNG.
+func TestWeightedFontsGolden(t *testing.T) {
+	dir := filepath.Join("testdata", "golden")
+	doc, err := pdf.Parse(gen.WeightedFontsPDF())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	pg, err := doc.Page(0)
+	if err != nil {
+		t.Fatalf("page: %v", err)
+	}
+	got, err := RenderPage(context.Background(), pg, Options{DPI: goldenDPI})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	path := filepath.Join(dir, "weighted-fonts.png")
+	if *update {
+		writePNG(t, path, got)
+		t.Logf("updated %s", path)
+		return
+	}
+	want := readPNG(t, path)
+	if want == nil {
+		t.Fatalf("missing golden %s; run: go test ./pkg/render/raster -run TestWeightedFontsGolden -update", path)
+	}
+	if diff, n := compareImages(want, got); diff {
+		t.Errorf("render differs from golden %s: %d pixels beyond tolerance", path, n)
+	}
+}
+
 // compareImages returns whether the two images differ beyond tolerance, plus the
 // count of pixels that exceeded the per-pixel tolerance.
 func compareImages(want, got *image.RGBA) (differ bool, beyond int) {

@@ -120,7 +120,11 @@ its `docs/superpowers/specs/` doc (and in git history).
 - **Fonts** (`github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), symbolic subset
   TrueType, and non-embedded base-14 via bundled substitutes (`pkg/font/standard`: TeX Gyre
-  Heros/Termes, Inconsolata).
+  Heros/Termes, Inconsolata) — with **regular/bold/italic/bold-italic** variants, selected from the
+  `/BaseFont` name + descriptor `/Flags` (PDF) or the computed `Style` (reflow). An injectable
+  `font.Provider` (`RasterOptions.FontProvider`; reflow `WithSystemFontProvider`) resolves system /
+  directory fonts — and families with no bundled look-alike (Symbol/ZapfDingbats) — ahead of the
+  bundled fallback. `2026-07-08-weighted-base14-fonts-design.md`.
 - **Transparency**: ExtGState alpha `/ca`/`/CA` + all PDF blend modes (separable + non-separable)
   via `/BM` (`pkg/render/raster/blend.go`).
 - **Shadings** (`pkg/render/raster/shading.go`, `render.Shader`): axial/radial/function-based via
@@ -258,9 +262,10 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
    masks (`/SMask` in ExtGState), and transparency groups.
 3. **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
    `/Crypt` overrides, `/Perms` validation.
-4. **Base-14 weights & symbol fonts** — bold/italic/oblique map to the regular face (affects DOCX
-   and PDF); Symbol/ZapfDingbats have no substitute. Bundle weighted faces + symbol look-alikes;
-   ideally AFM widths for exact base-14 metrics. This also fixes DOCX bold/italic fidelity.
+4. **Base-14 residuals** — weighted/slanted substitutes now ship (see Done); a caller-supplied
+   `FontProvider` resolves Symbol/ZapfDingbats and exact-metric faces. Remaining, low-value: a bundled
+   OFL Symbol look-alike for the no-provider case, AFM tables for exact base-14 advances when a PDF
+   omits `/Widths`, and synthetic emboldening/obliquing for a family missing a real variant.
 5. **DOCX embedded fonts** — de-obfuscate `word/fonts/*` (also improves bold/italic fidelity).
 6. **PDF-extraction quality** — the PDF → Markdown/HTML path ships (`pkg/pdf/extract`); the top lifts
    are **ToUnicode CMap parsing** (Type0/CID text — CJK / subsetted fonts currently yield `Rune==0`),

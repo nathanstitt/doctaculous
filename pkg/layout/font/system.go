@@ -4,7 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
 )
+
+// DiskFontProvider implements pkgfont.Provider (the injectable font-resolution layer).
+var _ pkgfont.Provider = DiskFontProvider{}
 
 // SystemFontProvider resolves an @font-face local() name to font bytes (raw sfnt
 // or a WOFF container — the caller unwraps via font.LoadSFNT). A nil provider, or
@@ -25,6 +30,38 @@ var fontExts = []string{".ttf", ".otf", ".woff2", ".woff"}
 // value (empty Dir) never matches.
 type DiskFontProvider struct {
 	Dir string
+}
+
+// LoadStyled implements pkgfont.Provider: it resolves family + weight/slant to font
+// bytes by probing conventional style-suffixed base names in preference order
+// ("Family-BoldItalic", "Family-Bold", "Family", ...) against the recognized
+// extensions, so a directory laid out like "Arial-Bold.ttf" is matched. It reuses
+// LoadLocal's exact + scan matching per candidate. A family with only a regular file
+// still resolves (the bare-family candidate), giving the caller the upright face when a
+// weighted file is absent.
+func (d DiskFontProvider) LoadStyled(family string, bold, italic bool) ([]byte, bool) {
+	for _, cand := range styleCandidates(family, bold, italic) {
+		if b, ok := d.LoadLocal(cand); ok {
+			return b, true
+		}
+	}
+	return nil, false
+}
+
+// styleCandidates lists base-name candidates for a family+style, most-specific first,
+// so LoadStyled prefers an exact weighted file but degrades to a less-specific one.
+func styleCandidates(family string, bold, italic bool) []string {
+	f := strings.TrimSpace(family)
+	var out []string
+	switch {
+	case bold && italic:
+		out = append(out, f+"-BoldItalic", f+"-BoldOblique", f+"-Bold", f+"-Italic")
+	case bold:
+		out = append(out, f+"-Bold")
+	case italic:
+		out = append(out, f+"-Italic", f+"-Oblique")
+	}
+	return append(out, f) // the bare family (regular) is always the final fallback
 }
 
 // LoadLocal implements SystemFontProvider.

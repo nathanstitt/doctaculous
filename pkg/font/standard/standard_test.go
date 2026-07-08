@@ -9,17 +9,24 @@ func TestLookup(t *testing.T) {
 		wantOK   bool
 	}{
 		{"Helvetica", "TeXGyreHeros-Regular", true},
-		{"Helvetica-Bold", "TeXGyreHeros-Regular", true},
-		{"Helvetica-BoldOblique", "TeXGyreHeros-Regular", true},
+		// Weight/slant encoded in the /BaseFont name now selects the matching variant.
+		{"Helvetica-Bold", "TeXGyreHeros-Bold", true},
+		{"Helvetica-Oblique", "TeXGyreHeros-Italic", true},
+		{"Helvetica-BoldOblique", "TeXGyreHeros-BoldItalic", true},
 		{"Arial", "TeXGyreHeros-Regular", true},
+		{"Arial-BoldMT", "TeXGyreHeros-Bold", true},
+		{"Arial-ItalicMT", "TeXGyreHeros-Italic", true},
 		{"ArialMT", "TeXGyreHeros-Regular", true},
 		{"ABCDEF+Helvetica", "TeXGyreHeros-Regular", true},
 		{"Times-Roman", "TeXGyreTermes-Regular", true},
-		{"Times-BoldItalic", "TeXGyreTermes-Regular", true},
+		{"Times-Bold", "TeXGyreTermes-Bold", true},
+		{"Times-Italic", "TeXGyreTermes-Italic", true},
+		{"Times-BoldItalic", "TeXGyreTermes-BoldItalic", true},
 		{"TimesNewRoman", "TeXGyreTermes-Regular", true},
 		{"TimesNewRomanPSMT", "TeXGyreTermes-Regular", true},
 		{"Courier", "Inconsolata-Regular", true},
-		{"Courier-Bold", "Inconsolata-Regular", true},
+		{"Courier-Bold", "Inconsolata-Bold", true},
+		{"Courier-Oblique", "Inconsolata-Regular", true}, // no upright-italic mono → regular
 		{"CourierNew", "Inconsolata-Regular", true},
 		// Generic CSS family keywords.
 		{"serif", "TeXGyreTermes-Regular", true},
@@ -51,5 +58,48 @@ func TestLookup(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestLookupStyled covers the explicit-style path the reflow engine uses: the family is
+// resolved from the (style-free) name and the variant from the bold/italic flags.
+func TestLookupStyled(t *testing.T) {
+	tests := []struct {
+		family       string
+		bold, italic bool
+		wantName     string
+		wantOK       bool
+	}{
+		{"Arial", false, false, "TeXGyreHeros-Regular", true},
+		{"Arial", true, false, "TeXGyreHeros-Bold", true},
+		{"Arial", false, true, "TeXGyreHeros-Italic", true},
+		{"Arial", true, true, "TeXGyreHeros-BoldItalic", true},
+		{"Times", true, false, "TeXGyreTermes-Bold", true},
+		{"Times", true, true, "TeXGyreTermes-BoldItalic", true},
+		{"serif", false, true, "TeXGyreTermes-Italic", true},
+		{"sans-serif", true, false, "TeXGyreHeros-Bold", true},
+		// Monospace has no upright-italic: italic falls back to regular, bold-italic to bold.
+		{"monospace", false, false, "Inconsolata-Regular", true},
+		{"monospace", true, false, "Inconsolata-Bold", true},
+		{"monospace", false, true, "Inconsolata-Regular", true},
+		{"monospace", true, true, "Inconsolata-Bold", true},
+		// An explicit style overrides the name's own weight token.
+		{"Helvetica-Bold", false, false, "TeXGyreHeros-Regular", true},
+		{"Symbol", true, false, "", false},
+	}
+	for _, tc := range tests {
+		sub, ok := LookupStyled(tc.family, tc.bold, tc.italic)
+		if ok != tc.wantOK {
+			t.Errorf("LookupStyled(%q,%v,%v) ok = %v, want %v", tc.family, tc.bold, tc.italic, ok, tc.wantOK)
+			continue
+		}
+		if ok {
+			if sub.Name != tc.wantName {
+				t.Errorf("LookupStyled(%q,%v,%v) = %q, want %q", tc.family, tc.bold, tc.italic, sub.Name, tc.wantName)
+			}
+			if len(sub.Data) == 0 {
+				t.Errorf("LookupStyled(%q,%v,%v) returned empty Data", tc.family, tc.bold, tc.italic)
+			}
+		}
 	}
 }
