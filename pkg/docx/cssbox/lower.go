@@ -8,6 +8,7 @@ package cssbox
 import (
 	"image/color"
 	"strconv"
+	"strings"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/docx"
@@ -72,7 +73,7 @@ func Lower(d *docx.Document, r *style.Resolver) *lcssbox.Box {
 	if d == nil || r == nil {
 		return root
 	}
-	body.Children = lowerBlocks(d.Body, r, d.Numbering, newListCounter())
+	body.Children = lowerBlocks(d.Body, r, d.Numbering, d.Rels, newListCounter())
 	return root
 }
 
@@ -119,24 +120,26 @@ func runningBox(hf *docx.HeaderFooter, r *style.Resolver, num *docx.Numbering) *
 		Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock, Formatting: lcssbox.BlockFC,
 		Style: gcss.InitialStyle(),
 	}
-	box.Children = lowerBlocks(hf.Blocks, r, num, newListCounter())
+	box.Children = lowerBlocks(hf.Blocks, r, num, nil, newListCounter())
 	return box
 }
 
 // lowerBlocks lowers a sequence of DOCX blocks (paragraphs, list items, tables).
-// num is the document's numbering (may be nil); ctr threads list-counter state.
-func lowerBlocks(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, ctr *listCounter) []*lcssbox.Box {
+// num is the document's numbering (may be nil); rels resolves hyperlink relationship
+// ids to their target URLs for the conversion path (may be nil — headers/footers pass
+// nil, so their links carry no Href); ctr threads list-counter state.
+func lowerBlocks(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, rels map[string]docx.Relationship, ctr *listCounter) []*lcssbox.Box {
 	var out []*lcssbox.Box
 	for _, blk := range blocks {
 		switch {
 		case blk.Paragraph != nil:
 			if blk.Paragraph.Props.HasNum && num != nil {
-				out = append(out, lowerListParagraph(blk.Paragraph, r, num, ctr)...)
+				out = append(out, lowerListParagraph(blk.Paragraph, r, num, rels, ctr)...)
 			} else {
-				out = append(out, lowerParagraph(blk.Paragraph, r)...)
+				out = append(out, lowerParagraph(blk.Paragraph, r, rels)...)
 			}
 		case blk.Table != nil:
-			out = append(out, lowerTable(blk.Table, r, num))
+			out = append(out, lowerTable(blk.Table, r, num, rels))
 		}
 	}
 	return out
@@ -147,24 +150,27 @@ func lowerBlocks(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, ct
 // boxes. A page break inside a run splits the paragraph into two blocks, the second
 // carrying break-before:page so flow continues onto a new page; a line/column break
 // lowers to a preserved-newline text box (the IFC hard-break mechanism).
-func lowerParagraph(p *docx.Paragraph, r *style.Resolver) []*lcssbox.Box {
+func lowerParagraph(p *docx.Paragraph, r *style.Resolver, rels map[string]docx.Relationship) []*lcssbox.Box {
 	eff := r.EffectiveParagraph(p.Props)
+	semTag, headingLvl := paragraphSemantics(p.Props.StyleID)
 	newBlock := func() *lcssbox.Box {
 		return &lcssbox.Box{
 			Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock,
 			Formatting: lcssbox.InlineFC, Style: paragraphStyle(eff),
+			SemTag: semTag, HeadingLvl: headingLvl,
 		}
 	}
 	var blocks []*lcssbox.Box
 	cur := newBlock()
 	for _, child := range p.Content {
 		if child.Hyperlink != nil {
+			href := hyperlinkURL(child.Hyperlink, rels)
 			for _, run := range child.Hyperlink.Runs {
 				if run.Text == "" {
 					continue
 				}
 				er := r.EffectiveRun(p.Props, run.Props)
-				cur.Children = append(cur.Children, linkTextBox(run.Text, er, cur.Style))
+				cur.Children = append(cur.Children, linkTextBox(run.Text, er, cur.Style, href))
 			}
 			continue
 		}
@@ -274,13 +280,70 @@ func footnoteMarker(id int, er style.EffectiveRun, para gcss.ComputedStyle) *lcs
 
 // linkTextBox lowers a hyperlink run's text into an inline box styled as a link:
 // the run's own formatting, overlaid with link blue + underline (the HTML a:link
-// UA default). The URL is not carried on the cssbox tree; it survives on the docx
-// model for the conversion path.
-func linkTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lcssbox.Box {
+// UA default). href is the resolved target URL (may be "" for an internal anchor or
+// an unresolvable rel); it is carried as SemTag "a" + Href for the conversion path and
+// ignored by the visual backends.
+func linkTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle, href string) *lcssbox.Box {
 	box := runTextBox(text, er, para)
 	box.Style.Color = color.RGBA{R: 0x00, G: 0x00, B: 0xEE, A: 0xFF}
 	box.Style.TextDecorationLine = "underline"
+	box.SemTag = "a"
+	box.Href = href
 	return box
+}
+
+// hyperlinkURL resolves a hyperlink's target URL for the conversion path. It prefers
+// the pre-resolved Target, then looks up RelID in rels (external relationships carry a
+// URL Target). An internal-anchor link (no RelID, only Anchor) or an unresolvable id
+// yields "", so the writer degrades to plain text.
+func hyperlinkURL(h *docx.Hyperlink, rels map[string]docx.Relationship) string {
+	if h == nil {
+		return ""
+	}
+	if h.Target != "" {
+		return h.Target
+	}
+	if h.RelID != "" && rels != nil {
+		if rel, ok := rels[h.RelID]; ok {
+			return rel.Target
+		}
+	}
+	return ""
+}
+
+// docxHeadingStyles maps Word's built-in style ids to a SemTag role. Heading1..Heading9
+// are handled separately (they derive a numeric level); this covers the fixed roles.
+// Keys are the canonical camel-case style ids Word emits; matching is done after
+// stripping spaces and lowercasing so "Heading 1"/"heading1" display forms also match.
+var docxHeadingStyles = map[string]string{
+	"title":        "h1",
+	"subtitle":     "h2",
+	"quote":        "blockquote",
+	"intensequote": "blockquote",
+}
+
+// paragraphSemantics derives a SemTag and heading level from a paragraph's style id.
+// DOCX heading semantics live in the named style ("Heading1", "Title", ...), not in the
+// resolved font size, so this is the only place a heading level is recoverable. It
+// returns ("", 0) for an ordinary paragraph. HeadingN with N>6 clamps to 6 (Markdown's
+// maximum depth).
+func paragraphSemantics(styleID string) (semTag string, level int) {
+	key := strings.ToLower(strings.ReplaceAll(styleID, " ", ""))
+	if key == "" {
+		return "", 0
+	}
+	if strings.HasPrefix(key, "heading") {
+		if n, err := strconv.Atoi(key[len("heading"):]); err == nil && n >= 1 {
+			if n > 6 {
+				n = 6
+			}
+			return "h" + strconv.Itoa(n), n
+		}
+	}
+	if role, ok := docxHeadingStyles[key]; ok {
+		return role, 0
+	}
+	return "", 0
 }
 
 // hardBreakBox lowers a DOCX line/column break to a preserved-newline text box. Only

@@ -1,0 +1,4 @@
+| Region | City |
+| --- | --- |
+| West | Portland |
+| West | Seattle |

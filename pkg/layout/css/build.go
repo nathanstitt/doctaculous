@@ -172,6 +172,8 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running 
 	}
 	applyBlockify(b, cs) // CSS 9.7: a float OR an abs/fixed box blockifies an inline-level box
 
+	applySemantics(b, e) // markdown/text conversion annotations (SemTag/HeadingLvl/Href)
+
 	// HTML presentational span attributes onto table-part boxes (CSS does not carry
 	// these). colspan/rowspan apply to a cell; <col span>/<colgroup span> reuse ColSpan.
 	switch b.Display {
@@ -267,6 +269,50 @@ func attrSpan(e *html.Element, name string) int {
 		return 1
 	}
 	return n
+}
+
+// semTags maps an HTML tag name to the SemTag role a Markdown/text writer can
+// represent. Tags absent from the map get no SemTag (a generic block/inline). "b"/"i"
+// are normalized to "strong"/"em"; the writer treats them identically and also honors
+// Style.Bold/Style.Italic, so this only needs to fire for the semantic elements that
+// carry no distinguishing computed style. Headings are handled separately (they also
+// set HeadingLvl).
+var semTags = map[string]string{
+	"p":          "p",
+	"a":          "a",
+	"blockquote": "blockquote",
+	"pre":        "pre",
+	"code":       "code",
+	"em":         "em",
+	"i":          "em",
+	"strong":     "strong",
+	"b":          "strong",
+	"s":          "s",
+	"strike":     "s",
+	"del":        "s",
+	"hr":         "hr",
+}
+
+// applySemantics records the conversion-path annotations (SemTag/HeadingLvl/Href) on b
+// from its source element e. These fields are ignored by layout; they only feed the
+// markdown/text export walker. A heading h1..h6 sets both SemTag and HeadingLvl; an <a>
+// with an href sets SemTag "a" and Href. Everything else falls through the semTags map
+// (or stays unannotated), leaving the box byte-identical for the render backends.
+func applySemantics(b *cssbox.Box, e *html.Element) {
+	tag := e.Tag()
+	if len(tag) == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6' {
+		b.SemTag = tag
+		b.HeadingLvl = int(tag[1] - '0')
+		return
+	}
+	if role, ok := semTags[tag]; ok {
+		b.SemTag = role
+		if tag == "a" {
+			if href, ok := e.Attr("href"); ok {
+				b.Href = strings.TrimSpace(href)
+			}
+		}
+	}
 }
 
 // elemAttrs returns the attributes classifyControl consults (currently just type).
