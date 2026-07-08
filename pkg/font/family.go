@@ -68,14 +68,17 @@ type Face struct {
 // LoadStandard returns a Face for a named font family, substituting a bundled
 // permissively-licensed look-alike. It resolves the standard-14 names and common
 // aliases (Arial, Times New Roman, Courier New, and the Office defaults Calibri
-// and Cambria) via standard.Lookup; family matching is case-insensitive and
+// and Cambria) via standard.LookupStyled; family matching is case-insensitive and
 // tolerant of spaces and a subset prefix. ok is false when no substitute is
 // bundled for the family (e.g. Symbol, Wingdings), so the caller skips the run.
 //
-// style is recorded on the lookup but currently does not change the bundled face
-// (only regular weights ship); true weighted/slanted substitutes are a follow-up.
+// style selects the weight/slant variant of the bundled family: the sans and serif
+// substitutes ship regular/bold/italic/bold-italic, so a bold or italic run resolves
+// to the matching weighted face (the monospace family reuses its upright weight for
+// italic — see package standard). A family that lacks the exact variant falls back to
+// the nearest bundled weight.
 func LoadStandard(family string, style Style) (*Face, bool) {
-	sub, ok := standard.Lookup(family)
+	sub, ok := standard.LookupStyled(family, style.Bold, style.Italic)
 	if !ok {
 		return nil, false
 	}

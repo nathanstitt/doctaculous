@@ -393,7 +393,9 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 	if fontDict == nil {
 		return nil
 	}
-	src, err := font.New(r.doc, fontDict, r.logf)
+	// Extraction has no font-provider wiring (it recovers text/structure, not exact
+	// visual faces); pass nil so the bundled substitutes resolve non-embedded fonts.
+	src, err := font.New(r.doc, fontDict, nil, r.logf)
 	if err != nil {
 		if r.logf != nil {
 			r.logf("extract: font %q: %v", name, err)

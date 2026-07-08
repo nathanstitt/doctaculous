@@ -26,6 +26,12 @@ type Options struct {
 	Background color.Color
 	// Logf, if set, receives debug messages for unsupported features.
 	Logf func(string, ...any)
+	// FontProvider, if set, resolves a non-embedded standard-14 /BaseFont to raw
+	// font-program bytes before the bundled substitute is tried, letting a caller
+	// point the rasterizer at system fonts or a fonts directory (including the
+	// families the bundle has no look-alike for, e.g. Symbol). Nil keeps the
+	// historical bundled-substitute-only behavior.
+	FontProvider font.Provider
 }
 
 // RenderPage rasterizes a single page to an *image.RGBA at the requested DPI,
@@ -114,7 +120,7 @@ func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (out *image.RGB
 		return img, nil
 	}
 
-	res := &pageResources{doc: pg.Doc(), dict: pg.Resources, logf: opts.Logf}
+	res := &pageResources{doc: pg.Doc(), dict: pg.Resources, logf: opts.Logf, provider: opts.FontProvider}
 	interp := content.New(pg.Doc(), dev, res, base, content.Options{
 		Logf:   opts.Logf,
 		MaxOps: 5_000_000,
@@ -163,9 +169,10 @@ func pageMatrix(pg *pdf.Page, scale, wpt, hpt float64) render.Matrix {
 // /Resources. The same type backs nested form resources (see Form), so form
 // content resolves names against its own /Resources, falling back to the page's.
 type pageResources struct {
-	doc  *pdf.Document
-	dict pdf.Dict
-	logf func(string, ...any)
+	doc      *pdf.Document
+	dict     pdf.Dict
+	logf     func(string, ...any)
+	provider font.Provider // caller-supplied substitute resolver; nil = bundled only
 }
 
 // Font resolves a font resource by name to a GlyphSource. Unsupported or
@@ -180,7 +187,7 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 	if fontDict == nil {
 		return nil
 	}
-	src, err := font.New(r.doc, fontDict, r.logf)
+	src, err := font.New(r.doc, fontDict, r.provider, r.logf)
 	if err != nil {
 		if r.logf != nil {
 			r.logf("raster: font %q: %v", name, err)
@@ -220,7 +227,7 @@ func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Mat
 	if childDict == nil {
 		childDict = r.dict
 	}
-	child := &pageResources{doc: r.doc, dict: childDict, logf: r.logf}
+	child := &pageResources{doc: r.doc, dict: childDict, logf: r.logf, provider: r.provider}
 
 	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), formBBox(r.doc, s.Dict["BBox"]), true
 }

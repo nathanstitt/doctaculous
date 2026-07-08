@@ -98,12 +98,17 @@ func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, 
 }
 
 // resolveList tries each comma-separated candidate in the font-family list in
-// order, returning the first face that resolves. For each candidate it tries the
-// @font-face sources first (so a downloaded face beats a bundled look-alike of the
-// same name), then the bundled substitute. Caller holds c.mu.
+// order, returning the first face that resolves. For each candidate the resolution
+// chain is: @font-face sources (so a downloaded face beats a bundled look-alike of
+// the same name), then the injected Provider's style-aware lookup (system/disk fonts,
+// including weighted real faces and families the bundle has no look-alike for), then
+// the bundled substitute. Caller holds c.mu.
 func (c *FaceCache) resolveList(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
 	for _, name := range splitFamilyList(family) {
 		if face, ok := c.resolveFontFace(name, style); ok {
+			return face, true
+		}
+		if face, ok := c.resolveProvider(name, style); ok {
 			return face, true
 		}
 		if face, ok := pkgfont.LoadStandard(name, style); ok {
@@ -111,6 +116,33 @@ func (c *FaceCache) resolveList(family string, style pkgfont.Style) (*pkgfont.Fa
 		}
 	}
 	return nil, false
+}
+
+// resolveProvider consults the injected Provider (when the configured sys also
+// implements pkgfont.Provider) for a style-aware, non-@font-face face: the disk or
+// system provider serves a weighted real face for the family, which beats the bundled
+// look-alike. It decodes the returned bytes via pkgfont.LoadSFNT, so it handles
+// TrueType/OpenType and WOFF1/WOFF2 program bytes; a provider that returns any other
+// program format (e.g. a classic Type1 PFB) is logged and skipped, and resolution
+// falls through to the bundled substitute — pkg/font exposes no general public loader
+// for arbitrary program bytes, and the bundled DiskFontProvider only serves sfnt/WOFF
+// files. Returns false when no Provider is configured or it has no match. Caller holds
+// c.mu.
+func (c *FaceCache) resolveProvider(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
+	prov, ok := c.sys.(pkgfont.Provider)
+	if !ok || prov == nil {
+		return nil, false
+	}
+	raw, ok := prov.LoadStyled(family, style.Bold, style.Italic)
+	if !ok {
+		return nil, false
+	}
+	face, err := pkgfont.LoadSFNT(raw)
+	if err != nil {
+		c.logf("font provider %q: decode failed (non-sfnt program?): %v", family, err)
+		return nil, false
+	}
+	return face, true
 }
 
 // splitFamilyList splits a (already-cleaned) comma-separated font-family list into

@@ -58,7 +58,7 @@ func fontDict(t *testing.T, pdfBytes []byte) (*pdf.Document, pdf.Dict) {
 
 func TestSimpleTrueTypeDecodes(t *testing.T) {
 	doc, fd := fontDict(t, gen.EmbeddedTrueTypePDF())
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestSimpleTrueTypeDecodes(t *testing.T) {
 
 func TestSimpleCFFDecodes(t *testing.T) {
 	doc, fd := fontDict(t, gen.EmbeddedCFFPDF())
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSimpleCFFDecodes(t *testing.T) {
 
 func TestType0Decodes(t *testing.T) {
 	doc, fd := fontDict(t, gen.EmbeddedType0PDF())
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestErrorPaths(t *testing.T) {
 	doc := &pdf.Document{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := New(doc, tc.dict, nil)
+			_, err := New(doc, tc.dict, nil, nil)
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("err = %v, want %v", err, tc.wantErr)
 			}
@@ -292,7 +292,7 @@ func TestType1ProgramOutlines(t *testing.T) {
 // capability that benoitkugler/textlayout adds over the old sfnt-only pipeline.
 func TestClassicType1Decodes(t *testing.T) {
 	doc, fd := fontDict(t, gen.EmbeddedType1PDF())
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestClassicType1Decodes(t *testing.T) {
 // /Helvetica, the exact base-14 gap this feature closes.
 func TestStandardSubstituteDecodes(t *testing.T) {
 	doc, fd := fontDict(t, gen.TextPDF())
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestStandardSubstituteFamilies(t *testing.T) {
 	render := func(t *testing.T, baseFont string) content.GlyphSource {
 		t.Helper()
 		dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name(baseFont)}
-		src, err := New(doc, dict, nil)
+		src, err := New(doc, dict, nil, nil)
 		if err != nil {
 			t.Fatalf("New(%s): %v", baseFont, err)
 		}
@@ -364,7 +364,7 @@ func TestStandardSubstituteFamilies(t *testing.T) {
 	for _, baseFont := range []string{"Symbol", "ZapfDingbats", "NotAStandardFont"} {
 		t.Run("unsupported/"+baseFont, func(t *testing.T) {
 			dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name(baseFont)}
-			if _, err := New(doc, dict, nil); !errors.Is(err, ErrNoEmbeddedProgram) {
+			if _, err := New(doc, dict, nil, nil); !errors.Is(err, ErrNoEmbeddedProgram) {
 				t.Errorf("err = %v, want ErrNoEmbeddedProgram", err)
 			}
 		})
@@ -376,7 +376,7 @@ func TestStandardSubstituteFamilies(t *testing.T) {
 // raw-code/symbol cmap or the code-as-GID fallback rather than code→rune→GID.
 func TestSymbolicTrueTypeDecodes(t *testing.T) {
 	doc, fd := fontDict(t, gen.EmbeddedSymbolicTrueTypePDF())
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestSymbolicTrueTypeDecodes(t *testing.T) {
 // GID 0 (.notdef) rather than to the arbitrary glyph at that index.
 func TestNonSymbolicUnmappedStaysNotdef(t *testing.T) {
 	doc, fd := fontDict(t, gen.EmbeddedTrueTypePDF()) // WinAnsi, non-symbolic
-	src, err := New(doc, fd, nil)
+	src, err := New(doc, fd, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestMalformedFontFileGraceful(t *testing.T) {
 			"FontFile": &pdf.Stream{Dict: pdf.Dict{}, Raw: []byte("not a font")},
 		},
 	}
-	_, err := New(doc, dict, nil)
+	_, err := New(doc, dict, nil, nil)
 	if !errors.Is(err, ErrUnsupportedFontProgram) {
 		t.Errorf("malformed FontFile err = %v, want ErrUnsupportedFontProgram", err)
 	}
@@ -446,6 +446,194 @@ func TestType0WidthForms(t *testing.T) {
 	for cid, wv := range want {
 		if math.Abs(got[cid]-wv) > 1e-9 {
 			t.Errorf("CID %d width = %v, want %v", cid, got[cid], wv)
+		}
+	}
+}
+
+// hOutlineFingerprint returns a geometry fingerprint of the 'H' glyph (segment
+// count + summed coordinate magnitude) resolved through prog's own glyph-name
+// map. It differs between weight/slant variants of a family (the bold face has
+// thicker stems → different coordinates), so it tells bundled variants apart
+// even when their advances happen to match.
+func hOutlineFingerprint(t *testing.T, prog *program) (segs int, sum float64) {
+	t.Helper()
+	names := prog.nameToGID()
+	gid, ok := names["H"]
+	if !ok {
+		t.Fatalf("no 'H' glyph in program")
+	}
+	out := prog.outline(gid)
+	if out == nil {
+		t.Fatalf("no outline for 'H'")
+	}
+	for _, s := range out.Segments {
+		segs++
+		for _, p := range []render.Point{s.P0, s.P1, s.P2} {
+			sum += math.Abs(p.X) + math.Abs(p.Y)
+		}
+	}
+	return segs, sum
+}
+
+// sameFace reports whether two programs render 'H' identically (same weight).
+func sameFace(t *testing.T, a, b *program) bool {
+	sa, xa := hOutlineFingerprint(t, a)
+	sb, xb := hOutlineFingerprint(t, b)
+	return sa == sb && math.Abs(xa-xb) < 1e-9
+}
+
+// TestStandardSubstituteStyleFromName verifies that a name-suffixed /BaseFont
+// (/Helvetica-Bold) with a nil provider selects the BUNDLED BOLD face, distinct
+// from the regular weight.
+func TestStandardSubstituteStyleFromName(t *testing.T) {
+	doc := &pdf.Document{}
+	regDict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name("Helvetica")}
+	boldDict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name("Helvetica-Bold")}
+
+	reg, err := standardSubstituteProgram(doc, regDict, nil, nil)
+	if err != nil {
+		t.Fatalf("regular: %v", err)
+	}
+	bold, err := standardSubstituteProgram(doc, boldDict, nil, nil)
+	if err != nil {
+		t.Fatalf("bold: %v", err)
+	}
+	if sameFace(t, reg, bold) {
+		t.Errorf("Helvetica-Bold resolved to same face as Helvetica; bold variant not selected")
+	}
+}
+
+// TestStandardSubstituteStyleFromFlags proves the FontDescriptor-/Flags path: a
+// plain /Helvetica name whose descriptor sets the ForceBold flag (bit 19) still
+// resolves to the bundled BOLD face.
+func TestStandardSubstituteStyleFromFlags(t *testing.T) {
+	doc := &pdf.Document{}
+	plain := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name("Helvetica")}
+	forceBold := pdf.Dict{
+		"Subtype":        pdf.Name("Type1"),
+		"BaseFont":       pdf.Name("Helvetica"),
+		"FontDescriptor": pdf.Dict{"Flags": pdf.Integer(fontFlagForceBold)},
+	}
+
+	reg, err := standardSubstituteProgram(doc, plain, nil, nil)
+	if err != nil {
+		t.Fatalf("plain: %v", err)
+	}
+	bold, err := standardSubstituteProgram(doc, forceBold, nil, nil)
+	if err != nil {
+		t.Fatalf("forceBold: %v", err)
+	}
+	if sameFace(t, reg, bold) {
+		t.Errorf("ForceBold-flagged /Helvetica resolved to regular face; flags path not honored")
+	}
+}
+
+// stubProvider returns fixed bytes for a set of families, recording the last
+// (family, bold, italic) it was asked for so tests can assert the strip/derive
+// logic.
+type stubProvider struct {
+	faces      map[string][]byte
+	lastFamily string
+	lastBold   bool
+	lastItalic bool
+	calledFor  int
+}
+
+func (p *stubProvider) LoadStyled(family string, bold, italic bool) ([]byte, bool) {
+	p.lastFamily, p.lastBold, p.lastItalic = family, bold, italic
+	p.calledFor++
+	b, ok := p.faces[family]
+	return b, ok
+}
+
+// TestProviderTakesPriority verifies the provider is consulted before the bundle
+// and wins: it supplies a distinct TrueType face for "Helvetica" (a real sfnt,
+// which the bundled Helvetica substitute is NOT — that is a Type1 PFB), so a
+// successful provider hit is observable by the resolved program differing from
+// the bundle, and by the family/style handed to the provider being the stripped
+// "Helvetica" with bold=true.
+func TestProviderTakesPriority(t *testing.T) {
+	doc := &pdf.Document{}
+	prov := &stubProvider{faces: map[string][]byte{"Helvetica": gen.RobotoTTF()}}
+	dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name("Helvetica-Bold")}
+
+	prog, err := standardSubstituteProgram(doc, dict, prov, nil)
+	if err != nil {
+		t.Fatalf("standardSubstituteProgram: %v", err)
+	}
+	if prov.calledFor != 1 {
+		t.Fatalf("provider consulted %d times, want 1", prov.calledFor)
+	}
+	if prov.lastFamily != "Helvetica" {
+		t.Errorf("provider family = %q, want %q (style suffix must be stripped)", prov.lastFamily, "Helvetica")
+	}
+	if !prov.lastBold || prov.lastItalic {
+		t.Errorf("provider style = (bold=%v italic=%v), want (true,false)", prov.lastBold, prov.lastItalic)
+	}
+	// The provider's Roboto sfnt must be what got parsed, not the bundled Heros PFB.
+	// Roboto has a 'g' glyph reachable by its own cmap; compare against a direct parse.
+	want, err := parseProgram(gen.RobotoTTF(), progTrueType)
+	if err != nil {
+		t.Fatalf("parse Roboto: %v", err)
+	}
+	if prog.numGlyphs() != want.numGlyphs() {
+		t.Errorf("provider face numGlyphs = %d, want Roboto's %d (bundle used instead?)", prog.numGlyphs(), want.numGlyphs())
+	}
+}
+
+// TestProviderResolvesSymbol verifies that a family the bundle has NO look-alike
+// for (Symbol) resolves when a provider supplies bytes — and still returns
+// ErrNoEmbeddedProgram when no provider is given (graceful skip preserved).
+func TestProviderResolvesSymbol(t *testing.T) {
+	doc := &pdf.Document{}
+	dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name("Symbol")}
+
+	// No provider: unchanged graceful skip.
+	if _, err := New(doc, dict, nil, nil); !errors.Is(err, ErrNoEmbeddedProgram) {
+		t.Errorf("Symbol with nil provider: err = %v, want ErrNoEmbeddedProgram", err)
+	}
+
+	// With a provider that supplies Symbol bytes: resolves to a real font.
+	prov := &stubProvider{faces: map[string][]byte{"Symbol": gen.RobotoTTF()}}
+	src, err := New(doc, dict, prov, nil)
+	if err != nil {
+		t.Fatalf("Symbol with provider: %v", err)
+	}
+	if src == nil {
+		t.Fatal("Symbol with provider: nil GlyphSource")
+	}
+}
+
+// TestProviderFallsBackToBundle verifies that when the provider has no match, the
+// bundled substitute is still used (a standard family renders).
+func TestProviderFallsBackToBundle(t *testing.T) {
+	doc := &pdf.Document{}
+	prov := &stubProvider{faces: map[string][]byte{}} // matches nothing
+	dict := pdf.Dict{"Subtype": pdf.Name("Type1"), "BaseFont": pdf.Name("Helvetica")}
+
+	src, err := New(doc, dict, prov, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if glyphs := src.DecodeString([]byte("H")); len(glyphs) != 1 || glyphs[0].Outline == nil {
+		t.Errorf("bundle fallback did not render 'H'")
+	}
+}
+
+// TestStripStyleSuffix covers the family-name stripping handed to a provider.
+func TestStripStyleSuffix(t *testing.T) {
+	cases := map[string]string{
+		"Helvetica":             "Helvetica",
+		"Helvetica-Bold":        "Helvetica",
+		"Times-BoldItalic":      "Times",
+		"Courier-Oblique":       "Courier",
+		"Arial,BoldItalic":      "Arial",
+		"ABCDEF+Helvetica-Bold": "Helvetica",
+		"TimesNewRomanPSMT":     "TimesNewRomanPSMT", // no style token → unchanged
+	}
+	for in, want := range cases {
+		if got := stripStyleSuffix(in); got != want {
+			t.Errorf("stripStyleSuffix(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

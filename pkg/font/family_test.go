@@ -1,6 +1,44 @@
 package font
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
+
+// LoadStandard now selects a weighted/slanted bundled variant from style, so a bold
+// or italic request must resolve to a different font program than the regular face.
+func TestLoadStandardStyleSelectsWeightedFace(t *testing.T) {
+	reg, ok := LoadStandard("Arial", Style{})
+	if !ok {
+		t.Fatal("LoadStandard(Arial, regular): want ok=true")
+	}
+	regData, _ := reg.ProgramBytes()
+
+	for _, tc := range []struct {
+		name  string
+		style Style
+	}{
+		{"bold", Style{Bold: true}},
+		{"italic", Style{Italic: true}},
+		{"bold-italic", Style{Bold: true, Italic: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			face, ok := LoadStandard("Arial", tc.style)
+			if !ok {
+				t.Fatalf("LoadStandard(Arial, %+v): want ok=true", tc.style)
+			}
+			data, _ := face.ProgramBytes()
+			if len(data) == 0 {
+				t.Fatal("ProgramBytes: want the retained program bytes")
+			}
+			// The weighted variant is a distinct font program (Heros ships all four),
+			// so its embedded bytes differ from the regular face's.
+			if bytes.Equal(data, regData) {
+				t.Errorf("LoadStandard(Arial, %+v) program bytes equal the regular face; want the weighted variant", tc.style)
+			}
+		})
+	}
+}
 
 func TestLoadStandardArial(t *testing.T) {
 	face, ok := LoadStandard("Arial", Style{})

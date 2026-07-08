@@ -207,6 +207,98 @@ func TestResolveFallbackListSkipsUnresolvable(t *testing.T) {
 	}
 }
 
+// stubProvider is a SystemFontProvider that also implements pkgfont.Provider, serving
+// fixed sfnt bytes per (family, style) so a test can prove the provider route wins over
+// the bundled fallback and that style selects the right bytes. LoadLocal is unused here
+// (the provider is consulted via the style-aware route, not @font-face local()).
+type stubProvider struct {
+	regular []byte
+	bold    []byte
+	calls   []string // records the families requested, for ordering assertions
+}
+
+func (s *stubProvider) LoadLocal(name string) ([]byte, bool) { return nil, false }
+
+func (s *stubProvider) LoadStyled(family string, bold, italic bool) ([]byte, bool) {
+	s.calls = append(s.calls, family)
+	if bold {
+		if s.bold == nil {
+			return nil, false
+		}
+		return s.bold, true
+	}
+	if s.regular == nil {
+		return nil, false
+	}
+	return s.regular, true
+}
+
+// An injected Provider resolves a family BEFORE the bundled fallback: even for a
+// base-14 alias like Arial (which LoadStandard would resolve), the provider's face wins.
+func TestResolveProviderBeatsBundled(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	prov := &stubProvider{regular: ttf}
+	c := NewFaceCacheWithFonts(nil, nil, prov, nil)
+
+	// Arial IS a bundled alias, so a hit here that consulted the provider proves the
+	// provider route runs before LoadStandard.
+	if _, ok := c.Resolve("Arial", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(Arial) miss, want the provider face")
+	}
+	if len(prov.calls) == 0 || prov.calls[0] != "Arial" {
+		t.Fatalf("provider not consulted first for Arial; calls=%v", prov.calls)
+	}
+}
+
+// The provider route is style-aware: a bold request calls LoadStyled with bold=true and
+// resolves, distinct from the regular request.
+func TestResolveProviderStyleAware(t *testing.T) {
+	ttf, err := os.ReadFile(filepath.Join(fontsDir(), "webfont.ttf"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	// Provider serves only a bold face: a regular request must miss the provider and
+	// fall through to the bundled Arial substitute (still ok), a bold request hits it.
+	prov := &stubProvider{bold: ttf}
+	c := NewFaceCacheWithFonts(nil, nil, prov, nil)
+
+	if _, ok := c.Resolve("Arial", pkgfont.Style{Bold: true}); !ok {
+		t.Fatal("Resolve(Arial, bold) miss, want the provider's bold face")
+	}
+	if _, ok := c.Resolve("Arial", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(Arial, regular) miss, want the bundled fallback after provider skip")
+	}
+}
+
+// A provider that returns bytes LoadSFNT cannot decode (here, garbage) is logged and
+// skipped, and resolution falls through to the bundled substitute rather than failing.
+func TestResolveProviderNonSFNTFallsThrough(t *testing.T) {
+	prov := &stubProvider{regular: []byte("not a font program")}
+	c := NewFaceCacheWithFonts(nil, nil, prov, nil)
+	if _, ok := c.Resolve("Arial", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(Arial) miss, want the bundled fallback after the undecodable provider bytes")
+	}
+}
+
+// plainSystemProvider implements only SystemFontProvider (LoadLocal), NOT pkgfont.Provider,
+// so the style-aware provider route's type assertion must skip it entirely.
+type plainSystemProvider struct{}
+
+func (plainSystemProvider) LoadLocal(name string) ([]byte, bool) { return nil, false }
+
+// A plain SystemFontProvider (LoadLocal only, no LoadStyled) leaves the provider route
+// inert (the type assertion to pkgfont.Provider fails): resolution still works via the
+// bundled fallback, unchanged from before this change.
+func TestResolvePlainSystemProviderUnchanged(t *testing.T) {
+	c := NewFaceCacheWithFonts(nil, nil, plainSystemProvider{}, nil)
+	if _, ok := c.Resolve("Arial", pkgfont.Style{}); !ok {
+		t.Fatal("Resolve(Arial) miss, want the bundled fallback with a plain (LoadLocal-only) provider")
+	}
+}
+
 // A downloaded @font-face named later in the fallback list is used when the earlier
 // candidates do not resolve — the resolver tries @font-face per candidate, not just
 // for the first name.
