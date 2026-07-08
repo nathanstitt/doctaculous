@@ -83,6 +83,9 @@ func (it *Interpreter) fillPath(rule render.FillRule) {
 		Rule:      rule,
 		BlendMode: it.gs.blendMode,
 	})
+	if it.graphicsSink != nil {
+		it.graphicsSink(VectorOp{Kind: VectorFill, Path: it.path.Clone()})
+	}
 }
 
 func (it *Interpreter) strokePath() {
@@ -105,6 +108,9 @@ func (it *Interpreter) strokePath() {
 		DashArray:  dash,
 		DashPhase:  it.gs.dashPhase * it.gs.ctm.ScaleFactor(),
 	})
+	if it.graphicsSink != nil {
+		it.graphicsSink(VectorOp{Kind: VectorStroke, Path: it.path.Clone(), StrokeWidth: w})
+	}
 }
 
 // endPath finalizes the current path: it applies any pending W/W* clip, then

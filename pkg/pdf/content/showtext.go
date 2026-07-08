@@ -1,9 +1,21 @@
 package content
 
 import (
+	"fmt"
+	"math"
+
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
+
+// hypot is math.Hypot, aliased for brevity in the glyph-placement math.
+func hypot(x, y float64) float64 { return math.Hypot(x, y) }
+
+// fontIdentity returns an opaque per-font key used to group glyphs into runs. The
+// GlyphSource pointer is stable for the life of a page's interpretation (fonts are
+// resolved once and cached by the resource provider), so its address distinguishes
+// fonts without the interpreter needing any font-format knowledge.
+func fontIdentity(src GlyphSource) string { return fmt.Sprintf("%p", src) }
 
 // setFont handles "Tf": /Name size.
 func (it *Interpreter) setFont(operands []pdf.Object) {
@@ -92,6 +104,14 @@ func (it *Interpreter) drawGlyphs(s []byte) {
 // paints nothing — both never crash). Mode 3 (and the no-outline case) paint nothing.
 func (it *Interpreter) drawGlyph(g Glyph) {
 	ts := &it.gs.text
+	// Report the glyph to a text-extraction sink before the paint-mode gates. This is
+	// intentionally emitted even for render mode 3 (invisible text) and glyphs with no
+	// outline: an invisible OCR text layer over a scanned image is exactly the text an
+	// extractor wants, and a missing-outline glyph still carries a rune and advance.
+	// The sink never affects painting (the gates below are unchanged).
+	if it.textSink != nil {
+		it.emitTextGlyph(g)
+	}
 	if g.Outline == nil || ts.renderMode == 3 {
 		return
 	}
@@ -128,6 +148,41 @@ func (it *Interpreter) drawGlyph(g Glyph) {
 			DashPhase:  it.gs.dashPhase * it.gs.ctm.ScaleFactor(),
 		})
 	}
+}
+
+// emitTextGlyph reports glyph g to the text sink in device space. It derives the glyph
+// origin, effective font size, and advance from the same text-rendering matrix drawGlyph
+// uses to place the outline, so a captured glyph sits exactly where it is painted. The
+// origin is the pen position (0,0 in text space) mapped through the TRM; the effective
+// size and advance are the lengths of the size and advance vectors mapped through the
+// TRM's linear part, so page scaling and non-uniform CTMs are honored.
+func (it *Interpreter) emitTextGlyph(g Glyph) {
+	ts := &it.gs.text
+	trm := render.Matrix{
+		A: ts.fontSize * ts.hScale, B: 0,
+		C: 0, D: ts.fontSize,
+		E: 0, F: ts.rise,
+	}.Mul(ts.matrix).Mul(it.gs.ctm)
+	ox, oy := trm.Apply(0, 0)
+	// Effective size = |TRM · (0,1)| measured from the origin (the y basis length);
+	// advance = |TRM · (advEm, 0)| (the x basis scaled by the em advance).
+	sx, sy := trm.Apply(0, 1)
+	size := hypot(sx-ox, sy-oy)
+	ax, ay := trm.Apply(g.Width, 0)
+	adv := hypot(ax-ox, ay-oy)
+	var fontID string
+	if ts.font != nil {
+		fontID = fontIdentity(ts.font.src)
+	}
+	it.textSink(TextGlyph{
+		Rune:    g.Rune,
+		X:       ox,
+		Y:       oy,
+		SizePt:  size,
+		Advance: adv,
+		IsSpace: g.IsSpace,
+		FontID:  fontID,
+	})
 }
 
 // textModeFills reports whether a text render mode paints a fill (modes 0, 2, 4, 6).

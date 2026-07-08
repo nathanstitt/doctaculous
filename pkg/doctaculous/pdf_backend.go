@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"sync"
 
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/doctaculous/pkg/pdf/extract"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
 )
 
@@ -13,6 +16,13 @@ import (
 // parsing, so it is shared across the page fan-out without locks.
 type pdfRenderer struct {
 	doc *pdf.Document
+
+	// extractOnce/extractRoot lazily hold the structure-recovery cssbox tree, built on
+	// the first WriteMarkdown/WriteText/WriteHTML (extraction is expensive and most
+	// callers only rasterize). The tree is read-only once built. This makes a PDF
+	// document satisfy reflowTree, so the conversion backends work on PDF inputs.
+	extractOnce sync.Once
+	extractRoot *cssbox.Box
 }
 
 // Open reads and parses a PDF document from a file path. For DOCX and other
@@ -36,6 +46,23 @@ func OpenBytes(data []byte) (*Document, error) {
 }
 
 func (r *pdfRenderer) pageCount() int { return r.doc.PageCount() }
+
+// cssboxRoot lazily extracts the PDF's logical structure (paragraphs, headings, lists,
+// tables) into a cssbox tree the conversion backends walk, satisfying reflowTree so
+// WriteMarkdown/WriteText/WriteHTML work on PDF inputs. Extraction runs once and is
+// cached; it never panics (the extractor recovers per page). A nil result (extraction
+// failure) yields an empty document downstream rather than an error, matching the
+// degrade-gracefully rule.
+func (r *pdfRenderer) cssboxRoot() *cssbox.Box {
+	r.extractOnce.Do(func() {
+		root, err := extract.Lower(r.doc, nil)
+		if err != nil {
+			return // extractRoot stays nil; downstream writes an empty document
+		}
+		r.extractRoot = root
+	})
+	return r.extractRoot
+}
 
 func (r *pdfRenderer) renderPage(ctx context.Context, index int, opts RasterOptions) (image.Image, error) {
 	pg, err := r.doc.Page(index)

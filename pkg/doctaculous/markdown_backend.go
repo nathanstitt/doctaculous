@@ -53,9 +53,9 @@ func ConvertHTMLToText(ctx context.Context, in io.Reader, out io.Writer, opts Ma
 }
 
 // WriteMarkdown writes an opened reflow document (HTML or DOCX) to out as GitHub-
-// Flavored Markdown. It returns an error if the document is not a reflow document (e.g.
-// an opened PDF, which has no semantic box tree to convert). Set opts.Plain for plain
-// text.
+// Flavored Markdown. It works on any document that can produce a cssbox tree: an opened
+// HTML or DOCX reflow document, or an opened PDF (whose logical structure is recovered by
+// extraction). Set opts.Plain for plain text.
 func (d *Document) WriteMarkdown(_ context.Context, out io.Writer, opts MarkdownOptions) error {
 	rt, ok := d.r.(reflowTree)
 	if !ok {
