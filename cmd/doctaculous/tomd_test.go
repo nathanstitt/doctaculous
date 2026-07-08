@@ -52,14 +52,47 @@ func TestTomdCmdPlain(t *testing.T) {
 	}
 }
 
-// TestTomdCmdRejectsPDFInput asserts a PDF input is rejected.
-func TestTomdCmdRejectsPDFInput(t *testing.T) {
-	in := filepath.Join(t.TempDir(), "x.pdf")
-	if err := os.WriteFile(in, []byte("%PDF-1.7"), 0o644); err != nil {
+// TestTomdCmdPDFInput asserts a real PDF input is converted to Markdown (structure
+// recovered by extraction), carrying the expected text.
+func TestTomdCmdPDFInput(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.pdf")
+	writeTestPDF(t, in, `<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body>
+		<h1>Extract Me</h1>
+		<p>A paragraph of body text to recover.</p>
+	</body></html>`)
+	out := filepath.Join(dir, "out.md")
+	if err := tomdCmd([]string{in, "--out", out}); err != nil {
+		t.Fatalf("tomdCmd on PDF: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{"Extract Me", "body text to recover"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("markdown from PDF missing %q\n%s", want, got)
+		}
+	}
+}
+
+// TestTomdCmdRejectsUnknownInput asserts an unrecognized extension is rejected.
+func TestTomdCmdRejectsUnknownInput(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "x.rtf")
+	if err := os.WriteFile(in, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := tomdCmd([]string{in, "--out", filepath.Join(t.TempDir(), "o.md")}); err == nil {
-		t.Fatal("expected tomd to reject a .pdf input")
+		t.Fatal("expected tomd to reject a .rtf input")
+	}
+}
+
+// TestInferCommandTomdPDFInput asserts a .pdf input with a .md output infers tomd.
+func TestInferCommandTomdPDFInput(t *testing.T) {
+	got, err := inferCommand([]string{"--in", "a.pdf", "--out", "a.md"})
+	if err != nil || got != "tomd" {
+		t.Errorf("inferCommand(--in a.pdf --out a.md) = %q, %v; want tomd", got, err)
 	}
 }
 

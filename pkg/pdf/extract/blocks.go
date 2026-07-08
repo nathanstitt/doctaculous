@@ -59,11 +59,74 @@ func orderBlocks(lines []line, width, height, bodySize float64) []block {
 	if len(lines) == 0 {
 		return nil
 	}
+	// Split any line that straddles a column gutter (a same-baseline line fusing
+	// text from two columns) at its internal gutter-width word gaps, so the
+	// column-level x-intervals fed to cutVertical actually expose the gutter.
+	// Ordinary prose lines (no gutter-width internal gap) pass through unchanged.
+	split := make([]line, 0, len(lines))
+	for _, l := range lines {
+		split = append(split, splitAtGutters(l, width)...)
+	}
 	var out []block
-	xyCut(lines, width, height, true, func(region []line) {
+	xyCut(split, width, height, true, func(region []line) {
 		out = append(out, groupRegion(region, bodySize)...)
 	})
 	return out
+}
+
+// splitAtGutters divides a line into one sub-line per column when its words are
+// separated by a gutter-width gap (a whitespace valley at least as wide as the
+// column threshold used by cutVertical). A line whose words have no such gap is
+// returned unchanged as a single element, so ordinary inter-word and
+// inter-sentence spacing is never split — only a genuine column gutter is. width
+// is the region/page width the threshold is measured against.
+func splitAtGutters(l line, width float64) []line {
+	if len(l.words) < 2 {
+		return []line{l}
+	}
+	threshold := maxf(minColGapAbs, minColGapFrac*width)
+	// Words are assembled left-to-right, but sort defensively before scanning.
+	ws := make([]word, len(l.words))
+	copy(ws, l.words)
+	sort.SliceStable(ws, func(i, j int) bool { return ws[i].x0 < ws[j].x0 })
+
+	var groups [][]word
+	cur := []word{ws[0]}
+	runMax := ws[0].x1
+	for _, w := range ws[1:] {
+		if w.x0-runMax >= threshold {
+			groups = append(groups, cur)
+			cur = nil
+		}
+		cur = append(cur, w)
+		if w.x1 > runMax {
+			runMax = w.x1
+		}
+	}
+	if len(cur) > 0 {
+		groups = append(groups, cur)
+	}
+	if len(groups) < 2 {
+		return []line{l} // no gutter: ordinary prose, unchanged
+	}
+	out := make([]line, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, lineFromWords(g, l))
+	}
+	return out
+}
+
+// lineFromWords builds a sub-line from a contiguous group of a source line's
+// words, recomputing the sub-line's x-extent from those words while inheriting
+// the source line's baseline and representative size.
+func lineFromWords(words []word, src line) line {
+	return line{
+		y:     src.y,
+		x0:    lineLeft(words),
+		x1:    lineRight(words),
+		size:  src.size,
+		words: words,
+	}
 }
 
 // xyCut recursively splits region at the widest whitespace valley, calling emit on

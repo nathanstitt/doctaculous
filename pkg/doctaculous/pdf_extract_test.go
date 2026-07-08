@@ -68,6 +68,33 @@ func TestPDFToHTMLRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPDFTableRoundTrip(t *testing.T) {
+	// A ruled HTML table → PDF → extracted back to a GFM pipe table. This exercises the
+	// lattice table detector end to end (the borders become the ruling grid the detector
+	// finds). The headline feature: a table survives the round trip as a table.
+	html := `<!DOCTYPE html><html><head><style>body{margin:0}
+		table{border-collapse:collapse} td,th{border:1px solid black;padding:6px}</style></head><body>
+		<table>
+			<tr><th>Name</th><th>Qty</th></tr>
+			<tr><td>Apples</td><td>3</td></tr>
+			<tr><td>Pears</td><td>7</td></tr>
+		</table>
+	</body></html>`
+	pdf := roundTripPDF(t, html)
+
+	var out bytes.Buffer
+	if err := ConvertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("ConvertPDFToMarkdown: %v", err)
+	}
+	got := out.String()
+	// A GFM pipe table with the header separator and all cells present.
+	for _, want := range []string{"| Name | Qty |", "| --- | --- |", "| Apples | 3 |", "| Pears | 7 |"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("extracted table missing %q\n---\n%s", want, got)
+		}
+	}
+}
+
 func TestPDFDocumentSatisfiesWriteMarkdown(t *testing.T) {
 	// An opened PDF must now support WriteMarkdown/WriteText/WriteHTML (it satisfies
 	// reflowTree via lazy extraction), where previously it errored.

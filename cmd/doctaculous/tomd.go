@@ -12,10 +12,10 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/doctaculous"
 )
 
-// tomdCmd parses flags for the "tomd" subcommand, which converts a reflow document
-// (HTML file, http(s) URL, or DOCX) into GitHub-Flavored Markdown, or plain text with
-// --plain. PDF inputs are rejected — conversion reads the reflow engine's semantic box
-// tree, which a parsed PDF does not provide.
+// tomdCmd parses flags for the "tomd" subcommand, which converts a document (PDF file,
+// HTML file, http(s) URL, or DOCX) into GitHub-Flavored Markdown, or plain text with
+// --plain. A PDF's logical structure (paragraphs, headings, lists, tables) is recovered
+// by extraction; HTML/DOCX read the reflow engine's semantic box tree directly.
 func tomdCmd(args []string) error {
 	fs := flag.NewFlagSet("tomd", flag.ContinueOnError)
 	var (
