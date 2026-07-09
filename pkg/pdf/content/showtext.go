@@ -94,7 +94,7 @@ func (it *Interpreter) drawGlyphs(s []byte) {
 	}
 }
 
-// renderingMatrix is the text-rendering matrix in force for the next glyph:
+// renderingMatrix returns the text-rendering matrix in force for the next glyph:
 // glyph space scaled by font size / horizontal scale / rise, through the text
 // matrix, through the CTM. drawGlyph (painting) and emitTextGlyph (extraction
 // capture) MUST use the same TRM or captured positions desync from paint.
