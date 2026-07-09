@@ -15,7 +15,7 @@ func flexContainer(children ...*cssbox.Box) *cssbox.Box {
 func TestFlexFixupWrapsBareText(t *testing.T) {
 	txt := &cssbox.Box{Kind: cssbox.BoxText, Text: "hello"}
 	fc := flexContainer(txt)
-	fixupFlex(fc)
+	fixupFlexGrid(fc)
 	if len(fc.Children) != 1 {
 		t.Fatalf("want 1 child, got %d", len(fc.Children))
 	}
@@ -32,7 +32,7 @@ func TestFlexFixupBlockifiesInlineChild(t *testing.T) {
 	span := &cssbox.Box{Kind: cssbox.BoxInline, Display: cssbox.DisplayInline,
 		Formatting: cssbox.InlineFC, Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: "x"}}}
 	fc := flexContainer(span)
-	fixupFlex(fc)
+	fixupFlexGrid(fc)
 	if len(fc.Children) != 1 {
 		t.Fatalf("want 1 child, got %d", len(fc.Children))
 	}
@@ -46,7 +46,7 @@ func TestFlexFixupDropsWhitespaceBetweenBlocks(t *testing.T) {
 	ws := &cssbox.Box{Kind: cssbox.BoxText, Text: "   "}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}
 	fc := flexContainer(a, ws, b)
-	fixupFlex(fc)
+	fixupFlexGrid(fc)
 	if len(fc.Children) != 2 {
 		t.Fatalf("whitespace between block items should be dropped; want 2 children, got %d", len(fc.Children))
 	}
@@ -56,7 +56,7 @@ func TestFlexFixupLeavesBlockChildren(t *testing.T) {
 	a := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}
 	fc := flexContainer(a, b)
-	fixupFlex(fc)
+	fixupFlexGrid(fc)
 	if len(fc.Children) != 2 || fc.Children[0] != a || fc.Children[1] != b {
 		t.Errorf("block children should pass through unchanged")
 	}

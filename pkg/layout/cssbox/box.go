@@ -80,13 +80,13 @@ const (
 	DisplayFlex
 	// DisplayInlineFlex is an inline-level flex container (display:inline-flex).
 	// Box generation wiring arrives in a later task; the constant is defined here
-	// because fixupFlex reads it.
+	// because fixupFlexGrid reads it.
 	DisplayInlineFlex
 	// DisplayGrid is a block-level grid container (display:grid).
 	DisplayGrid
 	// DisplayInlineGrid is an inline-level grid container (display:inline-grid).
 	// Box generation wiring arrives in a later task; the constant is defined here
-	// because fixupGrid reads it.
+	// because fixupFlexGrid reads it.
 	DisplayInlineGrid
 	// DisplayNone is never emitted as a box (display:none subtrees are pruned);
 	// it exists so a DisplayKind can round-trip the value if needed.
