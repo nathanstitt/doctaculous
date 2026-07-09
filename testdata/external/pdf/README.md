@@ -30,6 +30,21 @@ Attribution: PDF samples © the py-pdf/sample-files contributors, CC-BY-SA-4.0.
 | `cropped-rotated-scaled.pdf` | pypdf (rewritten) | classic xref table | All four `/Rotate` values (0/90/180/270), cropping/scaling; rotated-render + rewritten structure. **Also carries blend state** (`/BM /Multiply`, `/ca 0.5`) — see note below |
 | `pdflatex-forms.pdf` | pdfTeX 1.40.23 | classic xref table | **AcroForm** interactive fields (`Tx` text, `Btn` button/checkbox) + the Form XObject appearance streams that back them |
 | `libreoffice-form.pdf` | LibreOffice 6.4 | classic xref table | **AcroForm** with the widest field coverage (`Tx`, `Btn`, `Ch` choice/dropdown) + Form XObjects, from a different producer |
+| `jbig2-scan.pdf` | generated wrapper (testdata/gen) | classic xref table | Embedded **JBIG2** (`/JBIG2Decode`) bi-level scan image — exercises the full parse → JBIG2-decode → raster path (see separate license note below) |
+
+## Note: `jbig2-scan.pdf` — different provenance & license (Apache-2.0)
+
+`jbig2-scan.pdf` is **not** from py-pdf/sample-files and is **not** CC-BY-SA-4.0.
+It is a small one-page PDF **generated** by this repo's hermetic
+`testdata/gen` generator (`gen.JBIG2ImagePDF()`), which wraps a real embedded
+**JBIG2** image payload (`testdata/gen/jbig2/generic.jb2`, 2550×3305, generic
+region coding) in a valid `/JBIG2Decode` image XObject. That JBIG2 payload comes
+from the **Apache PDFBox** JBIG2 test resources and is licensed **Apache-2.0**
+(a permissive license compatible with this repo). It is a test input only — never
+linked into the shipped module — so it does not affect the library's MIT
+licensing. This file exists so the external-corpus tests exercise the real
+parse → JBIG2-decode → raster path on a document, not just the generated unit
+fixture in `testdata/gen`.
 
 Deliberately excluded from py-pdf/sample-files: the encrypted fixture
 (`005-…-password`, encryption is out of scope for v1) and the 117-page GeoTopo
