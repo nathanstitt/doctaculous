@@ -7,6 +7,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
+	"github.com/nathanstitt/doctaculous/pkg/pdf/pageres"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -217,14 +218,7 @@ func (s *shading) initFunctionBased(doc *pdf.Document, dict pdf.Dict) error {
 	}
 	// /Matrix maps shading space to the function's domain; we invert it to take
 	// device-derived shading-space points back into domain coords.
-	m := render.Identity
-	if mm := doc.GetArray(dict["Matrix"]); len(mm) == 6 {
-		var v [6]float64
-		for i, e := range mm {
-			v[i], _ = pdf.Number(doc.Resolve(e))
-		}
-		m = render.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
-	}
+	m := pageres.FormMatrix(doc, dict["Matrix"])
 	if inv, ok := invert(m); ok {
 		s.fnInv, s.fnHasInv = inv, true
 	}
