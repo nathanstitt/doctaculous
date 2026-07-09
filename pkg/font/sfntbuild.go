@@ -12,16 +12,32 @@ type sfntTable struct {
 	data []byte
 }
 
-// buildSFNT reassembles a valid sfnt (TrueType/OpenType) byte stream from decoded
-// tables: an offset table, a tag-sorted table directory with correct offsets and
-// checksums, and the 4-byte-aligned table data. flavor is the sfnt version tag
-// (0x00010000 for TrueType, "OTTO" for CFF). This is the common tail both the
+// buildSFNT reassembles an sfnt from decoded tables; the common tail both the
 // WOFF1 and WOFF2 decoders feed their decoded tables into.
 func buildSFNT(flavor uint32, tables []sfntTable) []byte {
-	sort.Slice(tables, func(i, j int) bool {
-		return binary.BigEndian.Uint32(tables[i].tag[:]) < binary.BigEndian.Uint32(tables[j].tag[:])
-	})
-	n := len(tables)
+	// Duplicate tags in a malformed container collapse here (last wins); the old
+	// slice-based builder emitted both directory entries.
+	m := make(map[string][]byte, len(tables))
+	for _, t := range tables {
+		m[string(t.tag[:])] = t.data
+	}
+	return BuildSFNT(flavor, m)
+}
+
+// BuildSFNT reassembles a valid sfnt (TrueType/OpenType) byte stream from a
+// tag->bytes table map: an offset table, a tag-sorted table directory with
+// correct offsets and checksums, and the 4-byte-aligned table data. flavor is
+// the sfnt version tag (0x00010000 for TrueType, "OTTO" for CFF). This is the
+// one SFNT assembler used by the WOFF1/WOFF2 decoders and the PDF glyf
+// subsetter.
+func BuildSFNT(flavor uint32, tables map[string][]byte) []byte {
+	tags := make([]string, 0, len(tables))
+	for tag := range tables {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+
+	n := len(tags)
 	// searchRange = (largest power of 2 <= n) * 16; entrySelector = log2 of that
 	// power; rangeShift = n*16 - searchRange. (OpenType offset-table fields.)
 	pow2, exp := 1, 0
@@ -36,10 +52,10 @@ func buildSFNT(flavor uint32, tables []sfntTable) []byte {
 	headerLen := 12 + 16*n
 	offset := headerLen
 	// 4-byte-align each table's start; record padded offsets.
-	offsets := make([]int, n)
-	for i := range tables {
-		offsets[i] = offset
-		offset += len(tables[i].data)
+	offsets := make(map[string]int, n)
+	for _, tag := range tags {
+		offsets[tag] = offset
+		offset += len(tables[tag])
 		offset = (offset + 3) &^ 3
 	}
 	total := offset
@@ -50,13 +66,13 @@ func buildSFNT(flavor uint32, tables []sfntTable) []byte {
 	binary.BigEndian.PutUint16(buf[6:], searchRange)
 	binary.BigEndian.PutUint16(buf[8:], entrySelector)
 	binary.BigEndian.PutUint16(buf[10:], rangeShift)
-	for i, t := range tables {
+	for i, tag := range tags {
 		rec := 12 + 16*i
-		copy(buf[rec:rec+4], t.tag[:])
-		binary.BigEndian.PutUint32(buf[rec+4:], tableChecksum(t.data))
-		binary.BigEndian.PutUint32(buf[rec+8:], uint32(offsets[i]))
-		binary.BigEndian.PutUint32(buf[rec+12:], uint32(len(t.data)))
-		copy(buf[offsets[i]:], t.data)
+		copy(buf[rec:rec+4], tag)
+		binary.BigEndian.PutUint32(buf[rec+4:], tableChecksum(tables[tag]))
+		binary.BigEndian.PutUint32(buf[rec+8:], uint32(offsets[tag]))
+		binary.BigEndian.PutUint32(buf[rec+12:], uint32(len(tables[tag])))
+		copy(buf[offsets[tag]:], tables[tag])
 	}
 	return buf
 }
