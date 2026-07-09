@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+
+	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
 // Blend modes implement the PDF (ISO 32000-1 §11.3.5) separable and
@@ -206,17 +208,5 @@ func blendSource(dst, src color.RGBA, sep sepBlend, nonsep nonsepBlend, isSep bo
 		out := nonsep([3]float64{dr, dg, db}, [3]float64{sr, sg, sb})
 		br, bg, bb = out[0], out[1], out[2]
 	}
-	return color.RGBA{R: to8(br), G: to8(bg), B: to8(bb), A: src.A}
-}
-
-// to8 converts a [0,1] component to an 8-bit value with clamping.
-func to8(v float64) uint8 {
-	switch {
-	case v <= 0:
-		return 0
-	case v >= 1:
-		return 255
-	default:
-		return uint8(v*255 + 0.5)
-	}
+	return color.RGBA{R: render.Clamp8(br), G: render.Clamp8(bg), B: render.Clamp8(bb), A: src.A}
 }

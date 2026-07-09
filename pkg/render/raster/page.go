@@ -680,7 +680,7 @@ func applyDCTDecode(doc *pdf.Document, img image.Image, decodeObj pdf.Object) im
 	// remap8 maps a 0..255 sample through the [min,max] pair for component c.
 	remap8 := func(s uint8, c int) uint8 {
 		lo, hi := dec[2*c], dec[2*c+1]
-		return clamp8f(lo + float64(s)/255*(hi-lo))
+		return render.Clamp8(lo + float64(s)/255*(hi-lo))
 	}
 	b := img.Bounds()
 	switch src := img.(type) {

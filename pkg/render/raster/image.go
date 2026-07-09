@@ -6,6 +6,7 @@ import (
 	"image/color"
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
 // csKind classifies an image color space by how its samples map to RGB. Indexed
@@ -241,25 +242,12 @@ func componentsToRGBA(kind csKind, comps []float64) color.RGBA {
 	}
 	switch kind {
 	case csGray:
-		v := clamp8f(get(0))
-		return color.RGBA{v, v, v, 0xFF}
+		return render.GrayToRGBA(get(0))
 	case csCMYK:
 		c, m, yy, k := get(0), get(1), get(2), get(3)
-		return color.RGBA{clamp8f((1 - c) * (1 - k)), clamp8f((1 - m) * (1 - k)), clamp8f((1 - yy) * (1 - k)), 0xFF}
+		return render.CMYKToRGBA(c, m, yy, k)
 	default: // csRGB
-		return color.RGBA{clamp8f(get(0)), clamp8f(get(1)), clamp8f(get(2)), 0xFF}
-	}
-}
-
-// clamp8f maps a component in [0,1] to an 8-bit value, clamping out-of-range.
-func clamp8f(v float64) uint8 {
-	switch {
-	case v <= 0:
-		return 0
-	case v >= 1:
-		return 255
-	default:
-		return uint8(v*255 + 0.5)
+		return render.RGBToRGBA(get(0), get(1), get(2))
 	}
 }
 
