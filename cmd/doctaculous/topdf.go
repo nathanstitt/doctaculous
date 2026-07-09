@@ -29,6 +29,8 @@ func topdfCmd(args []string) error {
 		title    = fs.String("title", "", "PDF /Title metadata")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
 		pageSize = fs.String("page-size", "letter", "HTML pagination: \"letter\" paginates; empty for one tall page")
+
+		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous topdf <input.html|.docx|URL> --out file.pdf [flags]\n") //nolint:errcheck // stderr write
@@ -55,7 +57,7 @@ func topdfCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or empty)", *pageSize)
 	}
 
-	doc, err := openReflowDocument(input, *pageSize)
+	doc, err := openReflowDocument(input, *pageSize, *bundledFonts)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -73,6 +75,7 @@ func topdfCmd(args []string) error {
 		Print:        *print,
 		Title:        *title,
 		Workers:      *workers,
+		BundledFonts: *bundledFonts,
 	}
 
 	f, err := os.Create(*out)
@@ -90,15 +93,15 @@ func topdfCmd(args []string) error {
 // accepts): an http(s) URL and .html/.htm files go through the HTML pipeline, .docx
 // through the DOCX pipeline. A .pdf (or any other extension) is rejected — the PDF
 // writer emits from the reflow engine, not from a parsed PDF.
-func openReflowDocument(input, pageSize string) (*doctaculous.Document, error) {
+func openReflowDocument(input, pageSize string, bundledFonts bool) (*doctaculous.Document, error) {
 	if isHTTPURL(input) {
-		return doctaculous.OpenURL(input, htmlOpts(pageSize)...)
+		return doctaculous.OpenURL(input, htmlOpts(pageSize, bundledFonts)...)
 	}
 	switch strings.ToLower(filepath.Ext(input)) {
 	case ".docx":
 		return doctaculous.OpenDOCX(input)
 	case ".html", ".htm":
-		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize)...)
+		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize, bundledFonts)...)
 	default:
 		return nil, fmt.Errorf("topdf input must be .html, .docx, or an http(s) URL (got %q)", input)
 	}

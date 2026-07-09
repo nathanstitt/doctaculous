@@ -31,6 +31,8 @@ func rasterizeCmd(args []string) error {
 		format   = fs.String("format", "png", "output image format: png or jpg")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
 		pageSize = fs.String("page-size", "letter", "HTML page size: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page (HTML only)")
+
+		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous rasterize <input.pdf|.docx|.html|URL> [flags]\n") //nolint:errcheck // stderr write
@@ -66,7 +68,7 @@ func rasterizeCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or \"tall\")", *pageSize)
 	}
 
-	doc, err := openDocument(input, *pageSize)
+	doc, err := openDocument(input, *pageSize, *bundledFonts)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -77,7 +79,7 @@ func rasterizeCmd(args []string) error {
 		return err
 	}
 
-	opts := doctaculous.RasterOptions{DPI: *dpi, Workers: *workers}
+	opts := doctaculous.RasterOptions{DPI: *dpi, Workers: *workers, BundledFonts: *bundledFonts}
 	results := doc.RasterizePages(context.Background(), indices, opts)
 
 	multi := len(indices) > 1
@@ -120,15 +122,15 @@ func rasterizeCmd(args []string) error {
 // pipeline, and everything else is treated as PDF. The HTML page size (pageSize —
 // "letter" paginates onto US-Letter pages, "tall" renders one tall page) applies to
 // the URL and HTML paths and is ignored for PDF/DOCX.
-func openDocument(input, pageSize string) (*doctaculous.Document, error) {
+func openDocument(input, pageSize string, bundledFonts bool) (*doctaculous.Document, error) {
 	if isHTTPURL(input) {
-		return doctaculous.OpenURL(input, htmlOpts(pageSize)...)
+		return doctaculous.OpenURL(input, htmlOpts(pageSize, bundledFonts)...)
 	}
 	switch strings.ToLower(filepath.Ext(input)) {
 	case ".docx":
 		return doctaculous.OpenDOCX(input)
 	case ".html", ".htm":
-		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize)...)
+		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize, bundledFonts)...)
 	default:
 		return doctaculous.Open(input)
 	}
@@ -145,13 +147,15 @@ func isHTTPURL(input string) bool {
 // htmlOpts builds the HTML layout options shared by the URL and local-HTML paths:
 // pageSize "letter" (the CLI default) paginates onto US-Letter pages; "tall" (or an
 // empty value) renders a single tall page.
-func htmlOpts(pageSize string) []doctaculous.HTMLOption {
+func htmlOpts(pageSize string, bundledFonts bool) []doctaculous.HTMLOption {
+	var opts []doctaculous.HTMLOption
 	if pageSize == "letter" {
-		return []doctaculous.HTMLOption{
-			doctaculous.WithPageSize(doctaculous.LetterWidthPt, doctaculous.LetterHeightPt),
-		}
+		opts = append(opts, doctaculous.WithPageSize(doctaculous.LetterWidthPt, doctaculous.LetterHeightPt))
 	}
-	return nil
+	if bundledFonts {
+		opts = append(opts, doctaculous.WithBundledFonts())
+	}
+	return opts
 }
 
 // resolvePages converts the --pages/--page flags into zero-based, in-range page

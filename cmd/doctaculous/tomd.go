@@ -22,6 +22,8 @@ func tomdCmd(args []string) error {
 		in    = fs.String("in", "", "input document (alternative to the positional argument)")
 		out   = fs.String("out", "", "output file (default: stdout)")
 		plain = fs.Bool("plain", false, "emit plain text instead of Markdown")
+
+		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous tomd <input.html|.docx|URL> [--out file.md] [--plain]\n") //nolint:errcheck // stderr write
@@ -39,7 +41,7 @@ func tomdCmd(args []string) error {
 		return err
 	}
 
-	doc, err := openConvertibleDocument(input)
+	doc, err := openConvertibleDocument(input, *bundledFonts)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -65,9 +67,9 @@ func tomdCmd(args []string) error {
 // pipeline, and .pdf through the PDF pipeline (its logical structure is recovered by
 // extraction on the first Write call). Unlike openReflowDocument (used by topdf, where a
 // PDF input is meaningless), a .pdf here is a first-class input.
-func openConvertibleDocument(input string) (*doctaculous.Document, error) {
+func openConvertibleDocument(input string, bundledFonts bool) (*doctaculous.Document, error) {
 	if isHTTPURL(input) {
-		return doctaculous.OpenURL(input)
+		return doctaculous.OpenURL(input, htmlOpts("", bundledFonts)...)
 	}
 	switch strings.ToLower(filepath.Ext(input)) {
 	case ".pdf":
@@ -75,7 +77,7 @@ func openConvertibleDocument(input string) (*doctaculous.Document, error) {
 	case ".docx":
 		return doctaculous.OpenDOCX(input)
 	case ".html", ".htm":
-		return doctaculous.OpenHTMLFile(input)
+		return doctaculous.OpenHTMLFile(input, htmlOpts("", bundledFonts)...)
 	default:
 		return nil, fmt.Errorf("input must be .pdf, .html, .docx, or an http(s) URL (got %q)", input)
 	}
