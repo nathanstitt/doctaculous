@@ -1,0 +1,9 @@
+version: "2"
+
+# Exclude vendored third-party code from linting. pkg/pdf/filter/jbig2/ is a faithful
+# copy of github.com/xiaoqidun/jbig2 (Apache-2.0, see that dir's README); we do not modify
+# it, so linting it is noise and would fail CI on upstream style we intentionally preserve.
+linters:
+  exclusions:
+    paths:
+      - "pkg/pdf/filter/jbig2"

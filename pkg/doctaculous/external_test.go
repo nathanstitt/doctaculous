@@ -38,6 +38,7 @@ var externalFixtures = []struct {
 	{"cropped-rotated-scaled.pdf", 4, true}, // /Rotate + crop/scale, Form-XObject-heavy (Do in content)
 	{"pdflatex-forms.pdf", 1, true},         // page text in an embedded classic Type1 font (now renders)
 	{"libreoffice-form.pdf", 1, true},       // labels in symbolic subset TrueType fonts (now render)
+	{"jbig2-scan.pdf", 1, true},             // embedded JBIG2 (/JBIG2Decode) image — exercises the JBIG2 decode path
 }
 
 // imageHasInk reports whether img has any pixel darker/more-colored than near

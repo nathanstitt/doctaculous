@@ -12,6 +12,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/doctaculous/pkg/pdf/filter"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
@@ -572,6 +573,21 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, fill render.FillColor,
 		return nil, fmt.Errorf("bad dimensions %dx%d", w, h)
 	}
 
+	// JBIG2Decode: decode to a 1-bpp buffer up front and treat the image as a normal
+	// 1-bpc bilevel image thereafter. This MUST happen before the /ImageMask and raw
+	// branches, which consume `data` directly — a JBIG2 /ImageMask would otherwise get
+	// the undecoded stream. On failure the whole image is skipped (returned error →
+	// caller logs + draws nothing).
+	if imgFilter == "JBIG2Decode" {
+		globals := jbig2Globals(doc, s.Dict)
+		buf, jerr := filter.DecodeJBIG2(data, globals, w, h)
+		if jerr != nil {
+			return nil, jerr
+		}
+		data = buf
+		imgFilter = "" // now a raw 1-bpp bilevel image
+	}
+
 	// /ImageMask: a 1-bit stencil. Sample 0 paints the fill color, 1 is
 	// transparent (default /Decode [0 1]); /Decode [1 0] inverts that.
 	if isImageMask(doc, s.Dict) {
@@ -612,6 +628,51 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, fill render.FillColor,
 
 	applySoftMask(doc, s, base, logf)
 	return base, nil
+}
+
+// jbig2Globals returns the decoded bytes of a JBIG2 image's /JBIG2Globals stream (shared
+// segment dictionary), or nil when absent. The globals live in the image's /DecodeParms
+// (or /DP) — either a single parameter dict (a lone JBIG2Decode filter) or a parallel
+// array of per-filter parameter dicts (JBIG2Decode in a multi-filter chain). We locate
+// the parameter dict carrying /JBIG2Globals in either form.
+func jbig2Globals(doc *pdf.Document, dict pdf.Dict) []byte {
+	pd := jbig2ParmsDict(doc, dict["DecodeParms"])
+	if pd == nil {
+		pd = jbig2ParmsDict(doc, dict["DP"])
+	}
+	if pd == nil {
+		return nil
+	}
+	gs := doc.GetStream(pd["JBIG2Globals"])
+	if gs == nil {
+		return nil
+	}
+	b, _, err := doc.DecodedStream(gs)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// jbig2ParmsDict resolves a /DecodeParms (or /DP) value to the parameter dict that
+// carries /JBIG2Globals. It accepts the single-dict form directly, or scans the parallel
+// array form (a JBIG2Decode in a filter chain) for the element dict that has a
+// JBIG2Globals key. Returns nil when neither form yields one.
+func jbig2ParmsDict(doc *pdf.Document, parms pdf.Object) pdf.Dict {
+	if d := doc.GetDict(parms); d != nil {
+		if _, ok := d["JBIG2Globals"]; ok {
+			return d
+		}
+		return nil
+	}
+	for _, e := range doc.GetArray(parms) {
+		if d := doc.GetDict(e); d != nil {
+			if _, ok := d["JBIG2Globals"]; ok {
+				return d
+			}
+		}
+	}
+	return nil
 }
 
 // decodeInlineImage decodes a normalized inline image (full-key dict + verbatim

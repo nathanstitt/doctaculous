@@ -174,6 +174,12 @@ var Core = []CoreFixture{
 		Build: CCITTImagePDF,
 	},
 	{
+		Name:  "image-jbig2",
+		Desc:  "1-bpp bilevel image via JBIG2Decode (real payload, generated wrapper)",
+		Pages: 1,
+		Build: JBIG2ImagePDF,
+	},
+	{
 		Name:  "image-smask",
 		Desc:  "DeviceRGB image with a DeviceGray /SMask (left opaque, right transparent)",
 		Pages: 1,

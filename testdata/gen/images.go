@@ -2,6 +2,7 @@ package gen
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"image"
 	"image/color"
@@ -192,6 +193,21 @@ func CCITTImagePDF() []byte {
 	return buildImagePage(w, h, enc, dict)
 }
 
+//go:embed jbig2/generic.jb2
+var jbig2Generic []byte
+
+// JBIG2ImagePDF returns a one-page PDF whose single image XObject is JBIG2-compressed
+// (/Filter /JBIG2Decode), a 1-bpc DeviceGray bilevel image. The compressed payload is a
+// real JBIG2 bitstream (committed under gen/jbig2/, provenance noted there); the PDF
+// wrapper is generated here so the fixture is deterministic. Width/Height MUST match the
+// JBIG2 page's dimensions — confirmed by the vendored-package smoke test (a later task);
+// if you swap the payload, update these to the new page's size.
+func JBIG2ImagePDF() []byte {
+	const w, h = 2550, 3305
+	return buildImagePage(w, h, jbig2Generic,
+		"/Filter /JBIG2Decode /ColorSpace /DeviceGray /BitsPerComponent 1")
+}
+
 // ImageMaskPDF returns a single-page PDF drawing a 1-bit /ImageMask stencil under
 // a green fill color. The mask's left half is "paint" (sample 0) and right half
 // is "don't paint" (sample 1), so the result is a green left half with the white
@@ -223,6 +239,59 @@ func ImageMaskPDF() []byte {
 		pagesNum, imgNum, contentNum))
 	if page != pageNum {
 		panic("gen: page object number mismatch in ImageMaskPDF")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
+// JBIG2ImageMaskPDF returns a one-page PDF drawing the JBIG2 payload as a 1-bit
+// /ImageMask stencil in a green fill. It exercises the decode-before-mask ordering: the
+// JBIG2 stream must be decoded before the ImageMask branch consumes it.
+func JBIG2ImageMaskPDF() []byte {
+	const w, h = 2550, 3305 // must match generic.jb2's page dims (see JBIG2ImagePDF)
+	b := newBuilder()
+	imgNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/ImageMask true /BitsPerComponent 1 /Filter /JBIG2Decode", w, h),
+		jbig2Generic)
+	content := []byte("0 1 0 rg q 400 0 0 400 100 200 cm /Im0 Do Q")
+	contentNum := b.addStream("", content)
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << /XObject << /Im0 %d 0 R >> >> /Contents %d 0 R >>",
+		pagesNum, imgNum, contentNum))
+	if page != pageNum {
+		panic("gen: page object number mismatch in JBIG2ImageMaskPDF")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
+// JBIG2GarbagePDF returns a one-page PDF whose JBIG2 image stream is deliberately corrupt,
+// for the graceful-degradation path: the decoder fails, the image is skipped, the page
+// still renders. It also draws a text run so the page has other content.
+func JBIG2GarbagePDF() []byte {
+	const w, h = 8, 8
+	b := newBuilder()
+	imgNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode", w, h),
+		[]byte("this is not a valid jbig2 stream"))
+	content := []byte("q 400 0 0 400 100 200 cm /Im0 Do Q BT /F1 24 Tf 72 100 Td (ok) Tj ET")
+	contentNum := b.addStream("", content)
+	fontNum := b.addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << /XObject << /Im0 %d 0 R >> /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
+		pagesNum, imgNum, fontNum, contentNum))
+	if page != pageNum {
+		panic("gen: page object number mismatch in JBIG2GarbagePDF")
 	}
 	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
 	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))

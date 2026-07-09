@@ -28,6 +28,10 @@ pipeline is the reflow target.)
   `github.com/benoitkugler/textlayout` (font parsing), `golang.org/x/net/html` (HTML parse),
   `github.com/andybalholm/brotli` (MIT, pure-Go — WOFF2 Brotli decompression only). Add new deps
   only if pure-Go + permissive; record the reason in the PR.
+- Vendored (copied into the tree, not a `go get` dep): `github.com/xiaoqidun/jbig2` (Apache-2.0, pure
+  Go — JBIG2 image decode) in `pkg/pdf/filter/jbig2/`, vendored because it is new/solo-authored (see
+  that dir's README + NOTICE); its only dep is `golang.org/x/image` (already used). Excluded from
+  golangci-lint via `.golangci.yml` as an unmodified third-party copy.
 - **Concurrency-first.** Multi-page work fans out across goroutines (bounded worker pool sized to
   `GOMAXPROCS`). A parsed `*Document` is read-only after Open so it's shared without locks.
 - Module path: `github.com/nathanstitt/doctaculous`.
@@ -109,7 +113,9 @@ its `docs/superpowers/specs/` doc (and in git history).
   (V1/V2), AES-128 (V4/AESV2), AES-256 (V5/R6/AESV3). Real-password docs →
   `ErrEncryptedNeedsPassword`; unsupported handlers → `ErrEncrypted`.
 - **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors), CCITTFax
-  (Group 4 / Group 3 1D+2D), DCTDecode (JPEG). JBIG2 and JPX/JPEG2000 pending (`ErrUnsupported`).
+  (Group 4 / Group 3 1D+2D), DCTDecode (JPEG), JBIG2 (vendored pure-Go Apache-2.0 decoder,
+  `pkg/pdf/filter/jbig2`; wired at `decodeImageXObject`). JPX/JPEG2000 pending (`ErrUnsupported`; no
+  viable pure-Go decoder). `2026-07-09-jbig2-image-decoding-design.md`.
 - **Content interpreter** (`pkg/pdf/content`): path construction/painting, graphics state, device
   color + Separation/DeviceN spot color (tint-transform `/Function`), clipping, text operators
   (incl. text render modes), `Do` XObjects.
@@ -260,7 +266,8 @@ bullet's design doc is in `docs/superpowers/specs/`:
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
 
-1. **Remaining scan filters** — JBIG2 and JPX/JPEG2000 (`pkg/pdf/filter/filter.go`, `ErrUnsupported`).
+1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
+   viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),
    higher-fidelity Coons/tensor patches (Types 6/7, currently bilinear-corner), luminosity soft
    masks (`/SMask` in ExtGState), and transparency groups.
