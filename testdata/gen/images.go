@@ -245,6 +245,59 @@ func ImageMaskPDF() []byte {
 	return b.finish(catalog)
 }
 
+// JBIG2ImageMaskPDF returns a one-page PDF drawing the JBIG2 payload as a 1-bit
+// /ImageMask stencil in a green fill. It exercises the decode-before-mask ordering: the
+// JBIG2 stream must be decoded before the ImageMask branch consumes it.
+func JBIG2ImageMaskPDF() []byte {
+	const w, h = 2550, 3305 // must match generic.jb2's page dims (see JBIG2ImagePDF)
+	b := newBuilder()
+	imgNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/ImageMask true /BitsPerComponent 1 /Filter /JBIG2Decode", w, h),
+		jbig2Generic)
+	content := []byte("0 1 0 rg q 400 0 0 400 100 200 cm /Im0 Do Q")
+	contentNum := b.addStream("", content)
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << /XObject << /Im0 %d 0 R >> >> /Contents %d 0 R >>",
+		pagesNum, imgNum, contentNum))
+	if page != pageNum {
+		panic("gen: page object number mismatch in JBIG2ImageMaskPDF")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
+// JBIG2GarbagePDF returns a one-page PDF whose JBIG2 image stream is deliberately corrupt,
+// for the graceful-degradation path: the decoder fails, the image is skipped, the page
+// still renders. It also draws a text run so the page has other content.
+func JBIG2GarbagePDF() []byte {
+	const w, h = 8, 8
+	b := newBuilder()
+	imgNum := b.addStream(fmt.Sprintf(
+		" /Type /XObject /Subtype /Image /Width %d /Height %d "+
+			"/ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode", w, h),
+		[]byte("this is not a valid jbig2 stream"))
+	content := []byte("q 400 0 0 400 100 200 cm /Im0 Do Q BT /F1 24 Tf 72 100 Td (ok) Tj ET")
+	contentNum := b.addStream("", content)
+	fontNum := b.addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	pageNum := len(b.offsets)
+	pagesNum := pageNum + 1
+	page := b.addObject(fmt.Sprintf(
+		"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
+			"/Resources << /XObject << /Im0 %d 0 R >> /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
+		pagesNum, imgNum, fontNum, contentNum))
+	if page != pageNum {
+		panic("gen: page object number mismatch in JBIG2GarbagePDF")
+	}
+	pages := b.addObject(fmt.Sprintf("<< /Type /Pages /Kids [ %d 0 R ] /Count 1 >>", page))
+	catalog := b.addObject(fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pages))
+	return b.finish(catalog)
+}
+
 // buildImagePage assembles a one-page PDF that paints a single image XObject
 // (with the given width/height, stream data, and image-dict extras) scaled to
 // 400x400 user units near the page origin.
