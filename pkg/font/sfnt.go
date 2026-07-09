@@ -50,6 +50,13 @@ func LoadSFNT(data []byte) (*Face, error) {
 	// Retain the (decompressed) sfnt bytes for PDF embedding. A CFF-flavored sfnt
 	// (an OTTO container with a "CFF " table) embeds as /FontFile3 OpenType, a
 	// glyf-flavored one as /FontFile2; sniff the table directory to tell them apart.
+	//
+	// For a ttcf collection, progData is the raw collection bytes (parseProgram above
+	// already extracts the first face for rasterization). Those raw bytes are NOT a
+	// standalone embeddable sfnt, so the PDF-embed path would need a reserialized
+	// standalone sfnt for the selected face — a documented follow-up. This is fine for
+	// the rasterization-only system-font use case; the PDF writer embeds its own faces
+	// and falls back to drawing outlines when a program isn't embeddable.
 	kind := ProgramKindTrueType
 	if sfntHasTable(sfnt, "CFF ") {
 		kind = ProgramKindCFF
