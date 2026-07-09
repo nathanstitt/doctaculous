@@ -41,3 +41,22 @@ func TestOSFontProviderMissReturnsFalse(t *testing.T) {
 		t.Fatal("LoadStyled reported ok with empty bytes")
 	}
 }
+
+func TestStyleQuery(t *testing.T) {
+	cases := []struct {
+		family       string
+		bold, italic bool
+		want         string
+	}{
+		{"Arial", false, false, "Arial"},
+		{"Arial", true, false, "Arial Bold"},
+		{"Times New Roman", false, true, "Times New Roman Italic"},
+		{"Helvetica", true, true, "Helvetica Bold Italic"},
+		{"  Georgia  ", false, false, "Georgia"},
+	}
+	for _, c := range cases {
+		if got := styleQuery(c.family, c.bold, c.italic); got != c.want {
+			t.Errorf("styleQuery(%q,%v,%v) = %q, want %q", c.family, c.bold, c.italic, got, c.want)
+		}
+	}
+}
