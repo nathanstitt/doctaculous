@@ -39,9 +39,7 @@ func (it *Interpreter) tintTransform(operands []pdf.Object) *TintTransform {
 	if name == "" || it.res == nil {
 		return nil
 	}
-	switch name {
-	case "DeviceGray", "G", "CalGray", "DeviceRGB", "RGB", "CalRGB", "Lab",
-		"DeviceCMYK", "CMYK", "Pattern":
+	if it.colorSpaceByName(operands) != csOther {
 		return nil // device/pattern spaces carry no tint transform
 	}
 	if t, ok := it.res.ColorSpace(name); ok {
