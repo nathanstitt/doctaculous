@@ -2,6 +2,7 @@ package gen
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"image"
 	"image/color"
@@ -190,6 +191,21 @@ func CCITTImagePDF() []byte {
 		"/Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns %d /Rows %d >> "+
 			"/ColorSpace /DeviceGray /BitsPerComponent 1", w, h)
 	return buildImagePage(w, h, enc, dict)
+}
+
+//go:embed jbig2/generic.jb2
+var jbig2Generic []byte
+
+// JBIG2ImagePDF returns a one-page PDF whose single image XObject is JBIG2-compressed
+// (/Filter /JBIG2Decode), a 1-bpc DeviceGray bilevel image. The compressed payload is a
+// real JBIG2 bitstream (committed under gen/jbig2/, provenance noted there); the PDF
+// wrapper is generated here so the fixture is deterministic. Width/Height MUST match the
+// JBIG2 page's dimensions — confirmed by the vendored-package smoke test (a later task);
+// if you swap the payload, update these to the new page's size.
+func JBIG2ImagePDF() []byte {
+	const w, h = 2550, 3305
+	return buildImagePage(w, h, jbig2Generic,
+		"/Filter /JBIG2Decode /ColorSpace /DeviceGray /BitsPerComponent 1")
 }
 
 // ImageMaskPDF returns a single-page PDF drawing a 1-bit /ImageMask stencil under
