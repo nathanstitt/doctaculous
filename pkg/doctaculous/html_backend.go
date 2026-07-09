@@ -29,6 +29,9 @@ type htmlConfig struct {
 	explicitSize bool
 	loader       resource.ResourceLoader
 	sys          layoutfont.SystemFontProvider
+	// bundledFonts selects hermetic bundled-font mode (no OS system-font lookup). Default
+	// false = system mode. Set by WithBundledFonts.
+	bundledFonts bool
 	logf         func(string, ...any)
 	// media is the cascade media context. It defaults to css.MediaScreen (the
 	// interactive/HTML render); WithPrintMedia switches it to css.MediaPrint so
@@ -111,6 +114,15 @@ func WithResourceLoader(l resource.ResourceLoader) HTMLOption {
 // supplies a DiskFontProvider rooted at the document's directory.
 func WithSystemFontProvider(p layoutfont.SystemFontProvider) HTMLOption {
 	return func(c *htmlConfig) { c.sys = p }
+}
+
+// WithBundledFonts selects hermetic bundled-font mode: non-embedded families resolve
+// only from the bundled substitutes, never the host's installed OS fonts. The default
+// (without this option) is system mode, which uses installed OS fonts and falls back to
+// the bundled substitutes when none match. The golden/reference tests use this option
+// for reproducibility.
+func WithBundledFonts() HTMLOption {
+	return func(c *htmlConfig) { c.bundledFonts = true }
 }
 
 // WithLogf sets a logger for layout/degradation diagnostics (may be called during
@@ -213,7 +225,15 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
 	}
-	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, cfg.sys, cfg.logf)
+	// System mode (the default): if the caller did not supply their own font provider,
+	// install an OSFontProvider so installed OS fonts resolve non-embedded families
+	// (falling back to the bundled substitutes when none match). Bundled mode leaves
+	// sys as-is, so resolveProvider finds no pkgfont.Provider and uses the bundle only.
+	sys := cfg.sys
+	if !cfg.bundledFonts && sys == nil {
+		sys = layoutfont.NewOSFontProviderWithLogf(cfg.logf)
+	}
+	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, sys, cfg.logf)
 	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
 	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
 		Paged:        cfg.paged,
