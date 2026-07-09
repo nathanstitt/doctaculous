@@ -86,8 +86,8 @@ func lowerPage(pc *pageContent, logf func(string, ...any)) []*cssbox.Box {
 
 	// Group runs of consecutive list-item boxes under a synthetic list container, so
 	// the tree matches what real HTML/DOCX frontends produce (list items always sit
-	// inside a <ul>/<ol>). Without this the downstream writers' isListContainer sees
-	// the body itself as a list and drop every non-item sibling.
+	// inside a <ul>/<ol>). Without this the downstream writers' boxwalk.IsListContainer
+	// sees the body itself as a list and drop every non-item sibling.
 	return groupListItems(out)
 }
 

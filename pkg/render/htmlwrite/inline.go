@@ -49,10 +49,11 @@ func imageMarkup(rc *cssbox.ReplacedContent) string {
 	return s + ">"
 }
 
-// renderRun emits one styled run with its HTML tags. Tag nesting order is link-outermost,
-// then strong, then em, then strike, then code, which produces well-formed markup like
-// "<a href="url"><strong>text</strong></a>". Inline code is verbatim (unescaped inside
-// <code>, as browsers render it literally); other text is HTML-escaped.
+// renderRun emits one styled run with its HTML tags. Tag nesting order, outermost to
+// innermost, is link, then strike, then em, then strong, then code, which produces
+// well-formed markup like "<a href="url"><s><strong>text</strong></s></a>". Inline code
+// is verbatim (unescaped inside <code>, as browsers render it literally); other text is
+// HTML-escaped.
 func renderRun(r boxwalk.StyledRun) string {
 	if r.Literal != "" {
 		return r.Literal

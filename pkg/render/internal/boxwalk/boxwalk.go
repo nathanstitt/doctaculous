@@ -15,10 +15,10 @@ func IsBlockContainer(b *cssbox.Box) bool {
 
 // HasInlineContent reports whether a block box's children are inline-level (text /
 // inline boxes), i.e. it forms a single paragraph rather than containing further
-// blocks. A box with no children is treated as inline (an empty paragraph, dropped by
-// the writers' inline serialization). A box mixing levels is normalized by box
-// generation, so checking the first non-anonymous child is sufficient in practice; we
-// scan for any block-level child to be safe.
+// blocks. A box with no children reports false; callers then recurse into its (empty)
+// children, so it emits nothing. A box mixing levels is normalized by box generation,
+// so checking the first non-anonymous child is sufficient in practice; we scan for any
+// block-level child to be safe.
 func HasInlineContent(b *cssbox.Box) bool {
 	if len(b.Children) == 0 {
 		return false

@@ -47,8 +47,8 @@ func imageMarkup(rc *cssbox.ReplacedContent) string {
 
 // renderRun emits one styled run with its Markdown markers. In plain mode all markers
 // and the link URL are dropped, leaving the text (a link renders as its label). Marker
-// nesting order is link-outermost, then bold, then italic, then code, which produces
-// well-formed GFM like "[**text**](url)".
+// nesting order, outermost to innermost, is link, then strike, then italic, then bold,
+// then code, which produces well-formed GFM like "[~~_**text**_~~](url)".
 func (w *writer) renderRun(r boxwalk.StyledRun) string {
 	if r.Literal != "" {
 		if w.opts.Plain {

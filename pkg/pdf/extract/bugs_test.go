@@ -16,10 +16,10 @@ import (
 // The failure mode this guards against was two-fold: (1) the table box was hoisted
 // to the front of the output rather than spliced in at its own vertical position,
 // and (2) the list items were emitted as flat siblings of the headings/paragraphs,
-// so the downstream Markdown/HTML writers (whose isListContainer treats any box with
-// a list-item child as a list) rendered only the list and silently dropped every
-// other sibling. We assert both the ordering and that list items are nested under a
-// list container so no sibling can be dropped.
+// so the downstream Markdown/HTML writers (whose boxwalk.IsListContainer treats any
+// box with a list-item child as a list) rendered only the list and silently dropped
+// every other sibling. We assert both the ordering and that list items are nested
+// under a list container so no sibling can be dropped.
 func TestLowerPageKeepsAllBlocksWithTable(t *testing.T) {
 	var g []glyph
 	// Heading (24pt) at the top.
@@ -166,8 +166,8 @@ func boxText(b *cssbox.Box) string {
 	return strings.Join(parts, " ")
 }
 
-// isListContainerTest mirrors the writers' isListContainer for test assertions: a box
-// (not itself a list item) whose direct children include a list item.
+// isListContainerTest mirrors the writers' boxwalk.IsListContainer for test assertions:
+// a box (not itself a list item) whose direct children include a list item.
 func isListContainerTest(b *cssbox.Box) bool {
 	if b.Display == cssbox.DisplayListItem {
 		return false
