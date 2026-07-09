@@ -27,7 +27,7 @@ func tohtmlCmd(args []string) error {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous tohtml <input.pdf|.html|.docx|URL> [--out file.html] [--fragment]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderTomdArgs(args)); err != nil {
+	if err := fs.Parse(reorderArgs(args, tomdValueFlags)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil // -h/--help printed usage; not an error
 		}

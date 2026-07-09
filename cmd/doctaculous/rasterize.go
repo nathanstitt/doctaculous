@@ -41,7 +41,7 @@ func rasterizeCmd(args []string) error {
 	// Go's flag package stops at the first non-flag argument, so reorder the
 	// positional input to the end. This lets the input PDF appear before flags
 	// (e.g. "rasterize in.pdf --out o.png") as users naturally expect.
-	if err := fs.Parse(reorderArgs(args)); err != nil {
+	if err := fs.Parse(reorderArgs(args, rasterizeValueFlags)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil // -h/--help printed usage; not an error
 		}
@@ -266,38 +266,15 @@ func writeImage(path string, img image.Image, format string) (err error) {
 	return err
 }
 
-// reorderArgs moves non-flag arguments after flag arguments so the flag package
-// (which stops at the first non-flag token) sees all flags. Flags that take a
-// value as a separate token (e.g. "--out file") keep that value adjacent.
-//
-// It assumes flags use a single value token at most via the "--flag value" form;
-// the "--flag=value" form is always safe. Among our flags only boolean-free
-// value flags exist, so a token following a known value flag is treated as its
-// value.
-func reorderArgs(args []string) []string {
-	valueFlags := map[string]bool{
-		"-in": true, "--in": true,
-		"-page": true, "--page": true,
-		"-pages": true, "--pages": true,
-		"-out": true, "--out": true,
-		"-dpi": true, "--dpi": true,
-		"-format": true, "--format": true,
-		"-workers": true, "--workers": true,
-		"-page-size": true, "--page-size": true,
-	}
-	var flags, positional []string
-	for i := 0; i < len(args); i++ { //nolint:intrange // index i is mutated inside the loop
-		a := args[i]
-		if len(a) > 0 && a[0] == '-' {
-			flags = append(flags, a)
-			// If this is a value flag in "--flag value" form, pull the next token too.
-			if valueFlags[a] && i+1 < len(args) {
-				flags = append(flags, args[i+1])
-				i++
-			}
-			continue
-		}
-		positional = append(positional, a)
-	}
-	return append(flags, positional...)
+// rasterizeValueFlags lists the "rasterize" flags that take their value as a
+// separate token, for reorderArgs.
+var rasterizeValueFlags = map[string]bool{
+	"-in": true, "--in": true,
+	"-page": true, "--page": true,
+	"-pages": true, "--pages": true,
+	"-out": true, "--out": true,
+	"-dpi": true, "--dpi": true,
+	"-format": true, "--format": true,
+	"-workers": true, "--workers": true,
+	"-page-size": true, "--page-size": true,
 }

@@ -29,7 +29,7 @@ func tomdCmd(args []string) error {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous tomd <input.html|.docx|URL> [--out file.md] [--plain]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderTomdArgs(args)); err != nil {
+	if err := fs.Parse(reorderArgs(args, tomdValueFlags)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil // -h/--help printed usage; not an error
 		}
@@ -83,25 +83,10 @@ func openConvertibleDocument(input string, bundledFonts bool) (*doctaculous.Docu
 	}
 }
 
-// reorderTomdArgs moves non-flag arguments after flags so the input may appear before
-// flags ("tomd in.html --out o.md"), matching reorderTopdfArgs.
-func reorderTomdArgs(args []string) []string {
-	valueFlags := map[string]bool{
-		"-in": true, "--in": true,
-		"-out": true, "--out": true,
-	}
-	var flags, positional []string
-	for i := 0; i < len(args); i++ { //nolint:intrange // index i is mutated inside the loop
-		a := args[i]
-		if len(a) > 0 && a[0] == '-' {
-			flags = append(flags, a)
-			if valueFlags[a] && i+1 < len(args) {
-				flags = append(flags, args[i+1])
-				i++
-			}
-			continue
-		}
-		positional = append(positional, a)
-	}
-	return append(flags, positional...)
+// tomdValueFlags lists the "tomd" flags that take their value as a separate
+// token, for reorderArgs. tohtml shares this map (its flags are the same shape:
+// --in/--out plus boolean flags).
+var tomdValueFlags = map[string]bool{
+	"-in": true, "--in": true,
+	"-out": true, "--out": true,
 }
