@@ -12,11 +12,14 @@ import (
 )
 
 // writeTestPDF renders html to a PDF on disk at path via ConvertHTMLToPDF. It is the
-// shared helper the tohtml/tomd CLI tests use to produce a real .pdf input.
+// shared helper the tohtml/tomd CLI tests use to produce a real .pdf input. It pins
+// bundled-font mode so the generated PDF embeds the bundled substitutes (stable
+// ToUnicode), making the round-tripped text reliably extractable regardless of the
+// host's installed fonts.
 func writeTestPDF(t *testing.T, path, html string) {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := doctaculous.ConvertHTMLToPDF(context.Background(), strings.NewReader(html), &buf, doctaculous.PDFOptions{}); err != nil {
+	if err := doctaculous.ConvertHTMLToPDF(context.Background(), strings.NewReader(html), &buf, doctaculous.PDFOptions{BundledFonts: true}); err != nil {
 		t.Fatalf("ConvertHTMLToPDF: %v", err)
 	}
 	if buf.Len() == 0 {
