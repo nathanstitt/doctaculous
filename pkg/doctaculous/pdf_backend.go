@@ -6,7 +6,9 @@ import (
 	"image"
 	"sync"
 
+	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/extract"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
@@ -73,6 +75,20 @@ func (r *pdfRenderer) renderPage(ctx context.Context, index int, opts RasterOpti
 		DPI:          opts.dpi(),
 		Background:   opts.Background,
 		Logf:         opts.Logf,
-		FontProvider: opts.FontProvider,
+		FontProvider: opts.fontProvider(),
 	})
+}
+
+// fontProvider resolves the font provider for a rasterize call per the mode precedence:
+// an explicit FontProvider always wins; else bundled mode (BundledFonts) installs no
+// provider (bundled-only); else the default installs an OSFontProvider so installed OS
+// fonts are used, falling through to the bundled substitute when none match.
+func (o RasterOptions) fontProvider() font.Provider {
+	if o.FontProvider != nil {
+		return o.FontProvider
+	}
+	if o.BundledFonts {
+		return nil
+	}
+	return layoutfont.NewOSFontProviderWithLogf(o.Logf)
 }
