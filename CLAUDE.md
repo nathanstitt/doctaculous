@@ -121,10 +121,14 @@ its `docs/superpowers/specs/` doc (and in git history).
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), symbolic subset
   TrueType, and non-embedded base-14 via bundled substitutes (`pkg/font/standard`: TeX Gyre
   Heros/Termes, Inconsolata) — with **regular/bold/italic/bold-italic** variants, selected from the
-  `/BaseFont` name + descriptor `/Flags` (PDF) or the computed `Style` (reflow). An injectable
-  `font.Provider` (`RasterOptions.FontProvider`; reflow `WithSystemFontProvider`) resolves system /
-  directory fonts — and families with no bundled look-alike (Symbol/ZapfDingbats) — ahead of the
-  bundled fallback. `2026-07-08-weighted-base14-fonts-design.md`.
+  `/BaseFont` name + descriptor `/Flags` (PDF) or the computed `Style` (reflow). **Installed system
+  fonts are the DEFAULT** source for non-embedded fonts — an `OSFontProvider` (`pkg/layout/font`, via
+  `adrg/sysfont`, live-scanning the OS font dirs incl. macOS `.ttc` collections) resolves them, with
+  the bundled substitutes as the fall-through. Hermetic **bundled-only** mode is an opt-out:
+  `--bundled-fonts` (CLI), `RasterOptions.BundledFonts` / `PDFOptions.BundledFonts` /
+  `WithBundledFonts()` (library); the golden tests pin it. An explicit
+  `RasterOptions.FontProvider` (or reflow `WithSystemFontProvider`) still overrides both.
+  `2026-07-08-weighted-base14-fonts-design.md`, `2026-07-08-system-font-loading-design.md`.
 - **Transparency**: ExtGState alpha `/ca`/`/CA` + all PDF blend modes (separable + non-separable)
   via `/BM` (`pkg/render/raster/blend.go`).
 - **Shadings** (`pkg/render/raster/shading.go`, `render.Shader`): axial/radial/function-based via
@@ -266,7 +270,9 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
    `FontProvider` resolves Symbol/ZapfDingbats and exact-metric faces. Remaining, low-value: a bundled
    OFL Symbol look-alike for the no-provider case, AFM tables for exact base-14 advances when a PDF
    omits `/Widths`, and synthetic emboldening/obliquing for a family missing a real variant.
-5. **DOCX embedded fonts** — de-obfuscate `word/fonts/*` (also improves bold/italic fidelity).
+5. **DOCX fonts** — de-obfuscate embedded `word/fonts/*` (improves bold/italic fidelity), and give
+   DOCX the system-font default (it currently resolves bundled-only; the `OSFontProvider` seam exists,
+   it is just not installed in `docxDocument`).
 6. **PDF-extraction quality** — the PDF → Markdown/HTML path ships (`pkg/pdf/extract`); the top lifts
    are **ToUnicode CMap parsing** (Type0/CID text — CJK / subsetted fonts currently yield `Rune==0`),
    font weight/slant through `GlyphSource` (emphasis + weight-based heading detection), and
