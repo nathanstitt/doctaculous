@@ -28,7 +28,7 @@ type StyledRun struct {
 // StyledRun for each text leaf. Bold/italic come from the computed style (so DOCX
 // bold, which has no <strong> tag, is honored) as well as the SemTag; code and href
 // come from SemTag/Href. image renders an <img> replaced box to the writer's
-// format (its result is a Literal run).
+// format (its result is a Literal run); image must be non-nil.
 func CollectRuns(b *cssbox.Box, st InlineState, image func(*cssbox.ReplacedContent) string, out *[]StyledRun) {
 	if b.Style.Bold {
 		st.Bold = true

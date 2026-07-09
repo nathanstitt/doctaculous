@@ -35,7 +35,7 @@ htmlwrite (fuller) behavior — that is the fix.
 - Modify: `pkg/render/markdown/markdown.go`, `inline.go`, `list.go`, `table.go`
 - Test: `pkg/render/markdown/markdown_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pkg/render/markdown/markdown_test.go` (uses the existing `renderHTML` helper at the top of that file):
 
@@ -57,12 +57,12 @@ func TestStrikethroughSemantic(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+- [x] **Step 2: Run it to make sure it fails**
 
 Run: `go test ./pkg/render/markdown -run TestStrikethroughSemantic -v`
 Expected: FAIL — first assertion gets `"old gone text\n"` (no `~~`).
 
-- [ ] **Step 3: Create `pkg/render/internal/boxwalk`**
+- [x] **Step 3: Create `pkg/render/internal/boxwalk`**
 
 `boxwalk.go` — move these functions **verbatim** from `pkg/render/markdown` (they are
 byte-identical to the htmlwrite copies; spot-check with diff if unsure), exporting each:
@@ -188,7 +188,7 @@ func RawText(b *cssbox.Box) string {
 }
 ```
 
-- [ ] **Step 4: Repoint `pkg/render/markdown`**
+- [x] **Step 4: Repoint `pkg/render/markdown`**
 
 Delete every moved declaration from `markdown.go`/`inline.go`/`list.go`/`table.go`
 (including `inlineState`, `styledRun`, `collectRuns`, `coalesce`, `collapseSpaces`,
@@ -198,12 +198,12 @@ Delete every moved declaration from `markdown.go`/`inline.go`/`list.go`/`table.g
 - `buildGrid`, `cellData`, `tableModel`, and the GFM/plain emit stay; they now call `boxwalk.CollectRows`/`ClampSpan`/`IsHeaderCell`/`CellBoxesOf`/`FilterEmpty`.
 - List: `itemLines`/`itemMarker` stay; structural helpers come from boxwalk.
 
-- [ ] **Step 5: Markdown tests pass (including the new one)**
+- [x] **Step 5: Markdown tests pass (including the new one)**
 
 Run: `go test ./pkg/render/markdown ./pkg/render/internal/boxwalk -v`
 Expected: PASS, including `TestStrikethroughSemantic`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/render/internal/boxwalk pkg/render/markdown
@@ -215,7 +215,7 @@ git commit -m "refactor: extract shared boxwalk layer from markdown writer; fix 
 **Files:**
 - Modify: `pkg/render/htmlwrite/html.go`, `inline.go`, `list.go`, `table.go`
 
-- [ ] **Step 1: Delete htmlwrite's copies, repoint to boxwalk**
+- [x] **Step 1: Delete htmlwrite's copies, repoint to boxwalk**
 
 Same mechanical substitution as Task 1 Step 4: delete `inlineState`, `styledRun`,
 `collectRuns`, `coalesce`, `collapseSpaces`, `rawText`, `hasInlineContent`,
@@ -226,12 +226,12 @@ Same mechanical substitution as Task 1 Step 4: delete `inlineState`, `styledRun`
 `markerText`, and all `<tag>` emission stay. `inlineOpt` passes htmlwrite's
 `imageMarkup` to `boxwalk.CollectRuns`.
 
-- [ ] **Step 2: Tests pass; conversion goldens unchanged**
+- [x] **Step 2: Tests pass; conversion goldens unchanged**
 
 Run: `go test ./pkg/render/htmlwrite ./pkg/render/markdown ./pkg/doctaculous`
 Expected: PASS. htmlwrite output must be byte-identical (it already had the `"s"` case).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add pkg/render/htmlwrite

@@ -16,9 +16,9 @@ func IsBlockContainer(b *cssbox.Box) bool {
 // HasInlineContent reports whether a block box's children are inline-level (text /
 // inline boxes), i.e. it forms a single paragraph rather than containing further
 // blocks. A box with no children is treated as inline (an empty paragraph, dropped by
-// emit). A box mixing levels is normalized by box generation, so checking the first
-// non-anonymous child is sufficient in practice; we scan for any block-level child to
-// be safe.
+// the writers' inline serialization). A box mixing levels is normalized by box
+// generation, so checking the first non-anonymous child is sufficient in practice; we
+// scan for any block-level child to be safe.
 func HasInlineContent(b *cssbox.Box) bool {
 	if len(b.Children) == 0 {
 		return false
@@ -123,10 +123,11 @@ func IsListContainer(b *cssbox.Box) bool {
 }
 
 // WithoutNestedLists returns a shallow copy of item whose children exclude nested list
-// containers, so inline() renders just the item's own inline content (which, in the box
-// tree, may sit inside an anonymous block wrapper — we keep that; only the nested list
-// subtree is removed). The leading marker run that box generation prepends is stripped
-// from the rendered string afterwards by stripMarkerPrefix.
+// containers, so the writers' inline serialization renders just the item's own inline
+// content (which, in the box tree, may sit inside an anonymous block wrapper — we keep
+// that; only the nested list subtree is removed). The leading marker run that box
+// generation prepends is stripped from the rendered string afterwards by
+// StripMarkerPrefix.
 func WithoutNestedLists(item *cssbox.Box) *cssbox.Box {
 	clone := *item
 	clone.Children = nil
@@ -141,9 +142,9 @@ func WithoutNestedLists(item *cssbox.Box) *cssbox.Box {
 
 // StripMarkerPrefix removes a leading marker string from an item's rendered inline text.
 // Box generation prepends the marker as the item's first inline run (HTML via
-// resolveCounters, DOCX via lowerListParagraph); inline() collapses whitespace, so the
-// rendered text begins with the marker's non-space glyphs. We match against the marker's
-// trimmed form to tolerate the collapsed trailing space.
+// resolveCounters, DOCX via lowerListParagraph); the writers' inline serialization
+// collapses whitespace, so the rendered text begins with the marker's non-space glyphs. We
+// match against the marker's trimmed form to tolerate the collapsed trailing space.
 func StripMarkerPrefix(text string, marker *cssbox.MarkerContent) string {
 	if marker == nil {
 		return text
@@ -157,7 +158,7 @@ func StripMarkerPrefix(text string, marker *cssbox.MarkerContent) string {
 
 // LeadingCheckbox reports whether a list item's content begins with a checkbox control
 // (a <input type=checkbox>), and whether it is checked. It scans the item's non-list
-// descendants for the first replaced control; a checkbox there marks a GFM task item.
+// descendants for the first replaced control; a checkbox there marks a task-list item.
 func LeadingCheckbox(item *cssbox.Box) (checked, ok bool) {
 	var found *cssbox.ReplacedContent
 	var walk func(b *cssbox.Box)
