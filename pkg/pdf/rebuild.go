@@ -29,10 +29,9 @@ func (d *Document) rebuildXref() error {
 		// readObjHeaderBackward expects the offset of the byte just past the
 		// header's trailing whitespace, i.e. the 'o' position works because it
 		// first skips whitespace backward.
-		num, gen, start, ok := readObjHeaderBackward(data, pos)
+		num, _, start, ok := readObjHeaderBackward(data, pos)
 		if ok {
 			d.xref[num] = xrefEntry{offset: int64(start)}
-			_ = gen
 		}
 		i = pos + 3
 	}
