@@ -83,3 +83,13 @@ third-party test inputs licensed **CC-BY-SA-4.0** (from
 there with their own license text. They are test fixtures only — never compiled
 into or shipped with the module — so they don't affect the MIT licensing of the
 library. See that directory's README for details and attribution.
+
+### Third-party / vendored code
+
+JBIG2 image decoding is provided by
+[xiaoqidun/jbig2](https://github.com/xiaoqidun/jbig2) — a pure-Go JBIG2 (ITU T.88)
+decoder under the **Apache License 2.0** — vendored into
+[`pkg/pdf/filter/jbig2/`](pkg/pdf/filter/jbig2/) (a copy in-tree, not a module
+dependency). Apache-2.0 is MIT-compatible; the vendored directory retains the
+upstream `LICENSE` and `NOTICE`, and its `README.md` records the exact source and
+version. See that directory for full attribution.
