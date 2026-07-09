@@ -177,3 +177,19 @@ func TestPlainText(t *testing.T) {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
 }
+
+func TestStrikethroughSemantic(t *testing.T) {
+	// <s>/<del> must strike via their semantic role even when author CSS overrides
+	// the UA line-through (SemTag "s" — previously only honored by htmlwrite).
+	got := renderHTML(t, `<html><body><p>old <s style="text-decoration: underline">gone</s> text</p></body></html>`, false)
+	want := "old ~~gone~~ text\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+	// The styled path (UA line-through) must keep working too.
+	got = renderHTML(t, `<html><body><p>a <del>cut</del> word</p></body></html>`, false)
+	want = "a ~~cut~~ word\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}

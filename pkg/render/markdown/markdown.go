@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
 )
 
 // Options configures Markdown/text rendering.
@@ -88,16 +89,16 @@ func (w *writer) block(b *cssbox.Box, depth int) {
 		w.thematicBreak()
 	case b.Display == cssbox.DisplayTable:
 		w.table(b)
-	case isListContainer(b):
+	case boxwalk.IsListContainer(b):
 		w.list(b, depth)
 	case b.Display == cssbox.DisplayListItem:
 		// A stray list item not inside a recognized list container (rare); render it
 		// as a one-item list.
 		w.list(&cssbox.Box{Children: []*cssbox.Box{b}}, depth)
-	case isBlockContainer(b):
+	case boxwalk.IsBlockContainer(b):
 		// A block that holds inline content (an inline formatting context, or a
 		// paragraph) becomes one paragraph; a block holding further blocks recurses.
-		if hasInlineContent(b) {
+		if boxwalk.HasInlineContent(b) {
 			w.paragraph(b, depth)
 		} else {
 			w.children(b, depth)
@@ -172,7 +173,7 @@ func (w *writer) blockquote(b *cssbox.Box, depth int) {
 // children2 renders a box's block children into this writer, treating a blockquote's
 // own inline content (a blockquote directly containing text) as a paragraph.
 func (w *writer) children2(b *cssbox.Box, depth int) {
-	if hasInlineContent(b) {
+	if boxwalk.HasInlineContent(b) {
 		w.paragraph(b, depth)
 		return
 	}
@@ -182,7 +183,7 @@ func (w *writer) children2(b *cssbox.Box, depth int) {
 // codeBlock emits a fenced code block from a <pre> box, preserving its text verbatim.
 // In plain mode the fences are dropped.
 func (w *writer) codeBlock(b *cssbox.Box) {
-	text := strings.TrimRight(rawText(b), "\n")
+	text := strings.TrimRight(boxwalk.RawText(b), "\n")
 	if text == "" {
 		return
 	}
@@ -191,28 +192,4 @@ func (w *writer) codeBlock(b *cssbox.Box) {
 		return
 	}
 	w.emit("```\n" + text + "\n```")
-}
-
-// isBlockContainer reports whether a box participates as a block-level box (so its
-// content should be treated as one or more blocks, not inline).
-func isBlockContainer(b *cssbox.Box) bool {
-	return b.Kind.IsBlockLevel()
-}
-
-// hasInlineContent reports whether a block box's children are inline-level (text /
-// inline boxes), i.e. it forms a single paragraph rather than containing further
-// blocks. A box with no children is treated as inline (an empty paragraph, dropped by
-// emit). A box mixing levels is normalized by box generation, so checking the first
-// non-anonymous child is sufficient in practice; we scan for any block-level child to
-// be safe.
-func hasInlineContent(b *cssbox.Box) bool {
-	if len(b.Children) == 0 {
-		return false
-	}
-	for _, c := range b.Children {
-		if c.Kind.IsBlockLevel() && c.Display != cssbox.DisplayInline {
-			return false
-		}
-	}
-	return true
 }
