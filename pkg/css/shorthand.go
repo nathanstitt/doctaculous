@@ -333,49 +333,19 @@ func applyGapShorthand(cs *ComputedStyle, val string) {
 	cs.RowGap, cs.ColumnGap = row, col
 }
 
-// applyPlaceItems expands `place-items: <align-items> [<justify-items>]`.
-// One value sets both. Two values set align-items then justify-items.
-func applyPlaceItems(cs *ComputedStyle, val string) {
+// applyPlacePair expands a `place-*: <align> [<justify>]` shorthand into its two
+// longhands. One value sets both; two values set align then justify.
+func applyPlacePair(cs *ComputedStyle, val, alignProp, justifyProp string) {
 	fields := splitComponents(val)
 	if len(fields) == 0 || len(fields) > 2 {
 		return
 	}
-	applyDeclaration(cs, Declaration{Property: "align-items", Value: fields[0]})
-	ji := fields[0]
+	applyDeclaration(cs, Declaration{Property: alignProp, Value: fields[0]})
+	j := fields[0]
 	if len(fields) == 2 {
-		ji = fields[1]
+		j = fields[1]
 	}
-	applyDeclaration(cs, Declaration{Property: "justify-items", Value: ji})
-}
-
-// applyPlaceContent expands `place-content: <align-content> [<justify-content>]`.
-// One value sets both. Two values set align-content then justify-content.
-func applyPlaceContent(cs *ComputedStyle, val string) {
-	fields := splitComponents(val)
-	if len(fields) == 0 || len(fields) > 2 {
-		return
-	}
-	applyDeclaration(cs, Declaration{Property: "align-content", Value: fields[0]})
-	jc := fields[0]
-	if len(fields) == 2 {
-		jc = fields[1]
-	}
-	applyDeclaration(cs, Declaration{Property: "justify-content", Value: jc})
-}
-
-// applyPlaceSelf expands `place-self: <align-self> [<justify-self>]`.
-// One value sets both. Two values set align-self then justify-self.
-func applyPlaceSelf(cs *ComputedStyle, val string) {
-	fields := splitComponents(val)
-	if len(fields) == 0 || len(fields) > 2 {
-		return
-	}
-	applyDeclaration(cs, Declaration{Property: "align-self", Value: fields[0]})
-	js := fields[0]
-	if len(fields) == 2 {
-		js = fields[1]
-	}
-	applyDeclaration(cs, Declaration{Property: "justify-self", Value: js})
+	applyDeclaration(cs, Declaration{Property: justifyProp, Value: j})
 }
 
 // applyGridTemplate expands `grid-template: <rows> / <columns>`. It locates the

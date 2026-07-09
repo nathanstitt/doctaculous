@@ -72,9 +72,8 @@ func parsePageSize(value string) (w, h float64, ok bool) {
 		case "auto":
 			continue
 		}
-		if dims, isKeyword := pageSizeKeywords[f]; isKeyword {
+		if _, isKeyword := pageSizeKeywords[f]; isKeyword {
 			keyword = f
-			_ = dims
 			continue
 		}
 		if v, lok := parseAbsLengthPx(f); lok {
@@ -108,26 +107,18 @@ func parsePageSize(value string) (w, h float64, ok bool) {
 // scalar. ok is false if any component is not an absolute length (percentages on page
 // margins are rare and treated as unsupported here → caller keeps defaults).
 func parsePageMarginShorthand(value string) (top, right, bottom, left float64, ok bool) {
-	fields := strings.Fields(strings.TrimSpace(value))
-	vals := make([]float64, 0, 4)
-	for _, f := range fields {
-		v, lok := parseAbsLengthPx(f)
-		if !lok {
-			return 0, 0, 0, 0, false
-		}
-		vals = append(vals, v)
+	t, r, b, l, ok := expandBox(strings.Fields(strings.TrimSpace(value)))
+	if !ok {
+		return 0, 0, 0, 0, false
 	}
-	switch len(vals) {
-	case 1:
-		return vals[0], vals[0], vals[0], vals[0], true
-	case 2:
-		return vals[0], vals[1], vals[0], vals[1], true
-	case 3:
-		return vals[0], vals[1], vals[2], vals[1], true
-	case 4:
-		return vals[0], vals[1], vals[2], vals[3], true
+	vt, okT := parseAbsLengthPx(t)
+	vr, okR := parseAbsLengthPx(r)
+	vb, okB := parseAbsLengthPx(b)
+	vl, okL := parseAbsLengthPx(l)
+	if !okT || !okR || !okB || !okL {
+		return 0, 0, 0, 0, false
 	}
-	return 0, 0, 0, 0, false
+	return vt, vr, vb, vl, true
 }
 
 // parseAbsLengthPx parses a single absolute-length token (e.g. "2cm", "1in", "72pt",

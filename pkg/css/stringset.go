@@ -34,9 +34,9 @@ func parseStringSet(value string) []StringSetEntry {
 				seenContent = true
 			case len(tok) >= 2 && (tok[0] == '"' || tok[0] == '\''):
 				if seenContent {
-					e.Suffix += unquoteString(tok)
+					e.Suffix += unquote(tok)
 				} else {
-					e.Prefix += unquoteString(tok)
+					e.Prefix += unquote(tok)
 				}
 			}
 		}
@@ -90,11 +90,4 @@ func splitStringSetTokens(s string) []string {
 	}
 	flush()
 	return out
-}
-
-func unquoteString(s string) string {
-	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
-		return s[1 : len(s)-1]
-	}
-	return s
 }
