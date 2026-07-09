@@ -240,8 +240,8 @@ git commit -m "refactor: htmlwrite uses shared boxwalk layer"
 
 ### Task 3: PR 1 checks and PR
 
-- [ ] Run: `gofmt -l . && go vet ./... && golangci-lint run && go test -race ./...` — all clean/PASS. `git status` shows no golden changes.
-- [ ] Push and open a PR titled "Extract shared writer analysis layer (boxwalk)". Description: 2-3 sentences (dedupe + the `<s>` fix). Per user preference: keep it short, no Claude credit.
+- [x] Run: `gofmt -l . && go vet ./... && golangci-lint run && go test -race ./...` — all clean/PASS. `git status` shows no golden changes.
+- [x] Push and open a PR titled "Extract shared writer analysis layer (boxwalk)". Description: 2-3 sentences (dedupe + the `<s>` fix). Per user preference: keep it short, no Claude credit.
 
 ---
 
@@ -254,7 +254,7 @@ Start: `git checkout main && git checkout -b refactor/pdf-font-dedupe`
 **Files:**
 - Modify: `pkg/font/sfntbuild.go`, `pkg/render/pdfwrite/subset.go`, `pkg/font/sfnt.go`
 
-- [ ] **Step 1: Export the builder from pkg/font**
+- [x] **Step 1: Export the builder from pkg/font**
 
 In `pkg/font/sfntbuild.go`, add exported `BuildSFNT(flavor uint32, tables map[string][]byte) []byte` — this is `buildSFNTBytes` from `pkg/render/pdfwrite/subset.go:203-246` moved verbatim (rename `sfntTableChecksum`→ the existing `tableChecksum`). Rewrite the internal slice-based `buildSFNT` as a thin converter (same output: both sort by tag bytes):
 
@@ -272,16 +272,16 @@ func buildSFNT(flavor uint32, tables []sfntTable) []byte {
 
 Also move `parseSFNTTables` (`subset.go:88-110`) into `pkg/font/sfnt.go` as exported `ParseSFNTTables(data []byte) (map[string][]byte, bool)`, verbatim. Leave `sfntHasTable` unchanged (single-tag scan, no allocation — deliberately not unified).
 
-- [ ] **Step 2: Delete the pdfwrite copies**
+- [x] **Step 2: Delete the pdfwrite copies**
 
 In `subset.go`: delete `buildSFNTBytes`, `sfntTableChecksum`, `parseSFNTTables`; call `font.BuildSFNT` / `font.ParseSFNTTables` (pdfwrite already imports `pkg/font`).
 
-- [ ] **Step 3: Verify byte-identical output**
+- [x] **Step 3: Verify byte-identical output**
 
 Run: `go test ./pkg/font ./pkg/render/pdfwrite ./pkg/doctaculous`
 Expected: PASS (PDF-writer output is deterministic; its tests would catch any byte drift).
 
-- [ ] **Step 4: Commit** — `git commit -am "refactor: single SFNT builder/parser in pkg/font"`
+- [x] **Step 4: Commit** — `git commit -am "refactor: single SFNT builder/parser in pkg/font"`
 
 ### Task 5: Shared PDF page-resource resolution (pkg/pdf/pageres)
 
@@ -289,7 +289,7 @@ Expected: PASS (PDF-writer output is deterministic; its tests would catch any by
 - Create: `pkg/pdf/pageres/pageres.go`
 - Modify: `pkg/render/raster/page.go:169-263,401,469-483`, `pkg/render/raster/shading.go:220-227`, `pkg/pdf/extract/collect.go:377-495`
 
-- [ ] **Step 1: Create the package**
+- [x] **Step 1: Create the package**
 
 `pkg/pdf/pageres` (imports `pdf`, `pdf/content`, `font`, `render` — no cycles; `font` already imports `content`). Free functions, so each backend keeps its own resource type (raster's must still carry Image/Shading/etc.):
 
@@ -316,27 +316,27 @@ func FormBBox(doc *pdf.Document, o pdf.Object) *[4]float64
 
 Bodies: move verbatim from `pkg/render/raster/page.go` (`Font` 183-199, `Form` 206-234 minus the child construction, `formMatrix` 469-483, `formBBox` 240-263), with the log calls becoming `logf(logPrefix+": font %q: %v", ...)` / `logf(logPrefix+": form %q: %v", ...)` and every `logf` call nil-guarded (the extract copy guards; the raster copy must too once shared).
 
-- [ ] **Step 2: Repoint raster**
+- [x] **Step 2: Repoint raster**
 
 `raster.pageResources.Font` → `return pageres.ResolveFont(r.doc, r.dict, name, r.provider, "raster", r.logf)`.
 `Form` → call `pageres.ResolveForm(...)`; on ok, wrap `childRes` in `&pageResources{doc: r.doc, dict: childRes, logf: r.logf, provider: r.provider}` and return. Delete raster's `formMatrix`/`formBBox`; `patternMatrix` (page.go:401) and `initFunctionBased`'s inline `/Matrix` parse (`shading.go:220-227`) both become `pageres.FormMatrix(doc, dict["Matrix"])`.
 
-- [ ] **Step 3: Repoint extract**
+- [x] **Step 3: Repoint extract**
 
 Same shape in `extract/collect.go` with `nil` provider and `"extract"` prefix; delete its `formMatrix`/`formBBox`. The stub methods (`Image`, `Shading`, …) stay.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `go test ./pkg/render/raster ./pkg/pdf/extract ./pkg/doctaculous`
 Expected: PASS, zero golden diffs (`git status` on `testdata`/golden dirs is clean).
 
-- [ ] **Step 5: Commit** — `git commit -am "refactor: shared page-resource resolution in pkg/pdf/pageres"`
+- [x] **Step 5: Commit** — `git commit -am "refactor: shared page-resource resolution in pkg/pdf/pageres"`
 
 ### Task 6: Single text-rendering-matrix build
 
 **Files:** Modify: `pkg/pdf/content/showtext.go:124-128,161-165`
 
-- [ ] **Step 1: Extract the method and use it at both sites**
+- [x] **Step 1: Extract the method and use it at both sites**
 
 ```go
 // renderingMatrix is the text-rendering matrix in force for the next glyph:
@@ -355,8 +355,8 @@ func (it *Interpreter) renderingMatrix() render.Matrix {
 
 Replace both inline builds with `trm := it.renderingMatrix()`.
 
-- [ ] **Step 2: Verify** — `go test ./pkg/pdf/content ./pkg/render/raster ./pkg/pdf/extract` → PASS.
-- [ ] **Step 3: Commit** — `git commit -am "refactor: single text-rendering-matrix builder"`
+- [x] **Step 2: Verify** — `go test ./pkg/pdf/content ./pkg/render/raster ./pkg/pdf/extract` → PASS.
+- [x] **Step 3: Commit** — `git commit -am "refactor: single text-rendering-matrix builder"`
 
 ### Task 7: Shared device color math in pkg/render
 
@@ -364,7 +364,7 @@ Replace both inline builds with `trm := it.renderingMatrix()`.
 - Create: `pkg/render/color.go`
 - Modify: `pkg/pdf/content/colorspace.go:23-81`, `pkg/render/raster/image.go:235-264`, `pkg/render/raster/blend.go:205-222`
 
-- [ ] **Step 1: Add the shared helpers**
+- [x] **Step 1: Add the shared helpers**
 
 `pkg/render/color.go` (naive device conversions — the single place a future colorimetry fix lands):
 
@@ -401,22 +401,22 @@ func CMYKToRGBA(c, m, y, k float64) color.RGBA {
 
 (Confirm exact rounding/edge behavior against the existing `clamp8`/`clamp8f`/`to8` bodies before deleting them — they were verified byte-identical in the audit.)
 
-- [ ] **Step 2: Repoint the three copies**
+- [x] **Step 2: Repoint the three copies**
 
 - `content/colorspace.go`: `grayToRGBA`/`cmykToRGBA`/`clamp8` bodies delegate to (or are deleted in favor of) `render.GrayToRGBA`/`render.CMYKToRGBA`/`render.Clamp8`; `colorFromComponents` keeps its switch, arms call the shared funcs.
 - `raster/image.go`: `componentsToRGBA` arms call the shared funcs; delete `clamp8f`.
 - `raster/blend.go`: delete `to8`; the `compositeBlend` tail uses `render.Clamp8`.
 
-- [ ] **Step 3: Verify (hot path — goldens are the check)**
+- [x] **Step 3: Verify (hot path — goldens are the check)**
 
 Run: `go test ./pkg/pdf/content ./pkg/render/... ./pkg/doctaculous` → PASS, zero golden diffs.
 
-- [ ] **Step 4: Commit** — `git commit -am "refactor: shared device color conversion in pkg/render"`
+- [x] **Step 4: Commit** — `git commit -am "refactor: shared device color conversion in pkg/render"`
 
 ### Task 8: PR 2 checks and PR
 
-- [ ] `gofmt -l . && go vet ./... && golangci-lint run && go test -race ./...` all clean; no golden changes.
-- [ ] Push; open PR "Dedupe drift-prone PDF/font pairs". Short description, no Claude credit.
+- [x] `gofmt -l . && go vet ./... && golangci-lint run && go test -race ./...` all clean; no golden changes.
+- [x] Push; open PR "Dedupe drift-prone PDF/font pairs". Short description, no Claude credit.
 
 ---
 
@@ -431,7 +431,7 @@ Start: `git checkout main && git checkout -b refactor/mechanical-dedupe`
 - Delete: `pkg/layout/css/flexfix.go`, `pkg/layout/css/gridfix.go`
 - Modify: `pkg/layout/css/build.go` (the `fixupFlex`/`fixupGrid` call sites — grep for them)
 
-- [ ] **Step 1: Write the merged fixup**
+- [x] **Step 1: Write the merged fixup**
 
 `itemfix.go`: one walker replacing both files. `containerItems` is `flexItems`
 (`flexfix.go:23-63`) moved verbatim with `cssbox.BoxAnonFlexItem` replaced by the
@@ -463,14 +463,14 @@ func containerItems(kids []*cssbox.Box, anonKind cssbox.BoxKind) []*cssbox.Box {
 
 Replace the two `Build` calls (`fixupFlex(root)`, `fixupGrid(root)`) with one `fixupFlexGrid(root)`.
 
-- [ ] **Step 2: Verify** — `go test ./pkg/layout/... ./pkg/doctaculous` → PASS, zero golden diffs.
-- [ ] **Step 3: Commit** — `git commit -am "refactor: merge flexfix/gridfix into one item fixup"`
+- [x] **Step 2: Verify** — `go test ./pkg/layout/... ./pkg/doctaculous` → PASS, zero golden diffs.
+- [x] **Step 3: Commit** — `git commit -am "refactor: merge flexfix/gridfix into one item fixup"`
 
 ### Task 10: shiftFragment delegates to translateFragment
 
 **Files:** Modify: `pkg/layout/css/block.go:1309-1331`
 
-- [ ] **Step 1:** Replace `shiftFragment`'s body (keep the function — it has ~10 call sites):
+- [x] **Step 1:** Replace `shiftFragment`'s body (keep the function — it has ~10 call sites):
 
 ```go
 // shiftFragment translates one fragment and its descendants by dy. It is
@@ -481,22 +481,22 @@ func shiftFragment(f *Fragment, dy float64) { translateFragment(f, 0, dy) }
 
 (`translateFragment` at `inline.go:628` is a strict superset — its dx work is a no-op at dx=0, and its `dx==0 && dy==0` early return is behavior-neutral. `shiftFragmentSelf` is deliberately different; leave it.)
 
-- [ ] **Step 2: Verify** — `go test ./pkg/layout/... ./pkg/doctaculous` → PASS, zero golden diffs.
-- [ ] **Step 3: Commit** — `git commit -am "refactor: shiftFragment delegates to translateFragment"`
+- [x] **Step 2: Verify** — `go test ./pkg/layout/... ./pkg/doctaculous` → PASS, zero golden diffs.
+- [x] **Step 3: Commit** — `git commit -am "refactor: shiftFragment delegates to translateFragment"`
 
 ### Task 11: Builtin min/max replace hand-rolled helpers
 
 **Files:** Modify: `pkg/layout/css/control.go:150-166,234-239`, `pkg/layout/css/replaced.go:113-115,140-145`, `pkg/layout/css/grid.go:68,93,97-98,537`, `pkg/render/pdfwrite/page.go:306,492`
 
-- [ ] **Step 1:** Delete `max2`, `max0`, `maxi`, `maxFloat`; replace call sites: `max2(a,b)`→`max(a,b)`, `max0(v)`→`max(0, v)`, `maxi(0, n-1)`→`max(0, n-1)`, `maxFloat(total, contentH)`→`max(total, contentH)`. (Go 1.26 builtins; keep `clampF`/`clampMaxMin` — they carry real logic.)
-- [ ] **Step 2: Verify** — `go vet ./... && go test ./pkg/layout/... ./pkg/render/pdfwrite` → PASS.
-- [ ] **Step 3: Commit** — `git commit -am "refactor: use builtin min/max"`
+- [x] **Step 1:** Delete `max2`, `max0`, `maxi`, `maxFloat`; replace call sites: `max2(a,b)`→`max(a,b)`, `max0(v)`→`max(0, v)`, `maxi(0, n-1)`→`max(0, n-1)`, `maxFloat(total, contentH)`→`max(total, contentH)`. (Go 1.26 builtins; keep `clampF`/`clampMaxMin` — they carry real logic.)
+- [x] **Step 2: Verify** — `go vet ./... && go test ./pkg/layout/... ./pkg/render/pdfwrite` → PASS.
+- [x] **Step 3: Commit** — `git commit -am "refactor: use builtin min/max"`
 
 ### Task 12: pkg/css batch
 
 **Files:** Modify: `pkg/css/cascade.go:47-48,1148-1153`, `pkg/css/fontface.go:153-160`, `pkg/css/stringset.go:95-100`, `pkg/css/shorthand.go:338-379` (+ the three `applyDeclaration` dispatch cases), `pkg/css/pagesize.go:75-78,110-131`
 
-- [ ] **Step 1: One unquote helper.** Keep `unquote` (fontface.go) but give it the tighter matching-pair body (identical semantics — all three verified equivalent in the audit); delete `trimQuotes` (cascade.go:1148) and `unquoteString` (stringset.go:95); repoint all call sites (13 total — `grep -rn 'trimQuotes(\|unquoteString(' pkg/css`).
+- [x] **Step 1: One unquote helper.** Keep `unquote` (fontface.go) but give it the tighter matching-pair body (identical semantics — all three verified equivalent in the audit); delete `trimQuotes` (cascade.go:1148) and `unquoteString` (stringset.go:95); repoint all call sites (13 total — `grep -rn 'trimQuotes(\|unquoteString(' pkg/css`).
 
 ```go
 // unquote strips one matching pair of surrounding single or double quotes.
@@ -508,7 +508,7 @@ func unquote(s string) string {
 }
 ```
 
-- [ ] **Step 2: One place-* applier.** Replace `applyPlaceItems`/`applyPlaceContent`/`applyPlaceSelf` (shorthand.go:338-379) with:
+- [x] **Step 2: One place-* applier.** Replace `applyPlaceItems`/`applyPlaceContent`/`applyPlaceSelf` (shorthand.go:338-379) with:
 
 ```go
 // applyPlacePair expands a `place-*: <align> [<justify>]` shorthand into its two
@@ -529,7 +529,7 @@ func applyPlacePair(cs *ComputedStyle, val, alignProp, justifyProp string) {
 
 Dispatch cases become `applyPlacePair(cs, d.Value, "align-items", "justify-items")` (and content/self equivalents — match the variable names actually used at the dispatch site).
 
-- [ ] **Step 3: Page-margin shorthand reuses expandBox** (pagesize.go:110-131):
+- [x] **Step 3: Page-margin shorthand reuses expandBox** (pagesize.go:110-131):
 
 ```go
 func parsePageMarginShorthand(value string) (top, right, bottom, left float64, ok bool) {
@@ -550,17 +550,17 @@ func parsePageMarginShorthand(value string) (top, right, bottom, left float64, o
 
 (Keep the original doc comment. Same accept/reject set: empty and 5+ fields fail via expandBox; any non-absolute length fails the whole value.)
 
-- [ ] **Step 4: Dead store** (pagesize.go:75-78): `if _, isKeyword := pageSizeKeywords[f]; isKeyword { keyword = f; continue }` — drop the `dims`/`_ = dims` dance.
+- [x] **Step 4: Dead store** (pagesize.go:75-78): `if _, isKeyword := pageSizeKeywords[f]; isKeyword { keyword = f; continue }` — drop the `dims`/`_ = dims` dance.
 
-- [ ] **Step 5: Fix the stale inherited-set comment** (cascade.go:47-48). Replace the two-line enumeration with:
+- [x] **Step 5: Fix the stale inherited-set comment** (cascade.go:47-48). Replace the two-line enumeration with:
 
 ```go
 // Inherited properties (CSS) carry over from the parent in inheritFrom, which is
 // the single source of truth for which fields inherit.
 ```
 
-- [ ] **Step 6: Verify** — `go test ./pkg/css ./pkg/layout/... ./pkg/doctaculous` → PASS, zero golden diffs.
-- [ ] **Step 7: Commit** — `git commit -am "refactor: pkg/css dedupe batch (unquote, place-*, page margin, stale comment)"`
+- [x] **Step 6: Verify** — `go test ./pkg/css ./pkg/layout/... ./pkg/doctaculous` → PASS, zero golden diffs.
+- [x] **Step 7: Commit** — `git commit -am "refactor: pkg/css dedupe batch (unquote, place-*, page margin, stale comment)"`
 
 ### Task 13: One CLI reorderArgs
 
@@ -568,7 +568,7 @@ func parsePageMarginShorthand(value string) (top, right, bottom, left float64, o
 - Create: `cmd/doctaculous/args.go`
 - Modify: `cmd/doctaculous/rasterize.go:270-303`, `cmd/doctaculous/topdf.go:113-138`, `cmd/doctaculous/tomd.go:86-107`, plus the callers (`grep -n 'reorderArgs(\|reorderTopdfArgs(\|reorderTomdArgs(' cmd/doctaculous/*.go` — includes `tohtml.go:30`)
 
-- [ ] **Step 1:** `args.go` gets the shared function (move rasterize.go's doc comment, generalized):
+- [x] **Step 1:** `args.go` gets the shared function (move rasterize.go's doc comment, generalized):
 
 ```go
 // reorderArgs moves non-flag arguments after flags so positional inputs may
@@ -595,14 +595,14 @@ func reorderArgs(args []string, valueFlags map[string]bool) []string {
 
 Delete the three per-command functions; each caller passes its own `valueFlags` map (moved from the deleted function into a package-level `var rasterizeValueFlags = map[string]bool{...}` / `topdfValueFlags` / `tomdValueFlags` next to each command, contents unchanged; `tohtml.go` keeps sharing tomd's).
 
-- [ ] **Step 2: Verify** — `go build ./cmd/... && go test ./cmd/...` → PASS.
-- [ ] **Step 3: Commit** — `git commit -am "refactor: single CLI arg reorder helper"`
+- [x] **Step 2: Verify** — `go build ./cmd/... && go test ./cmd/...` → PASS.
+- [x] **Step 3: Commit** — `git commit -am "refactor: single CLI arg reorder helper"`
 
 ### Task 14: PDF small fixes
 
 **Files:** Modify: `pkg/pdf/rebuild.go:78-129` (+ its `rebuildXref` callers), `pkg/pdf/extract/tables.go:277,373-376`, `pkg/pdf/content/xobject.go:36-51`
 
-- [ ] **Step 1: Merge the backward header scan.** Change `readObjHeaderBackward` to also return the header start (it already computes `numStart`):
+- [x] **Step 1: Merge the backward header scan.** Change `readObjHeaderBackward` to also return the header start (it already computes `numStart`):
 
 ```go
 // readObjHeaderBackward reads "N G" immediately before the " obj" at objPos,
@@ -614,9 +614,9 @@ func readObjHeaderBackward(data []byte, objPos int) (num, gen, start int, ok boo
 
 Delete `objHeaderStart`; update the `rebuildXref` call sites (grep `objHeaderStart(`) to use the returned `start`.
 
-- [ ] **Step 2: Inline `columnIndex`** (tables.go:373-376): replace the single call at tables.go:277 with `sort.SearchFloat64s(bounds, cx)` (verify the wrapper body is exactly that before inlining) and delete the function + its misleading comment.
+- [x] **Step 2: Inline `columnIndex`** (tables.go:373-376): replace the single call at tables.go:277 with `sort.SearchFloat64s(bounds, cx)` (verify the wrapper body is exactly that before inlining) and delete the function + its misleading comment.
 
-- [ ] **Step 3: tintTransform reuses colorSpaceByName** (xobject.go:42-46) — the device-name list is a copy of `colorSpaceByName`'s:
+- [x] **Step 3: tintTransform reuses colorSpaceByName** (xobject.go:42-46) — the device-name list is a copy of `colorSpaceByName`'s:
 
 ```go
 func (it *Interpreter) tintTransform(operands []pdf.Object) *TintTransform {
@@ -634,13 +634,13 @@ func (it *Interpreter) tintTransform(operands []pdf.Object) *TintTransform {
 }
 ```
 
-- [ ] **Step 4: Verify** — `go test ./pkg/pdf/... ./pkg/render/raster` → PASS.
-- [ ] **Step 5: Commit** — `git commit -am "refactor: pdf small dedupes (header scan, columnIndex, tint device names)"`
+- [x] **Step 4: Verify** — `go test ./pkg/pdf/... ./pkg/render/raster` → PASS.
+- [x] **Step 5: Commit** — `git commit -am "refactor: pdf small dedupes (header scan, columnIndex, tint device names)"`
 
 ### Task 15: PR 3 checks and PR
 
-- [ ] `gofmt -l . && go vet ./... && golangci-lint run && go test -race ./...` all clean; no golden changes.
-- [ ] Push; open PR "Mechanical dedupe batch". Short description, no Claude credit.
+- [x] `gofmt -l . && go vet ./... && golangci-lint run && go test -race ./...` all clean; no golden changes.
+- [x] Push; open PR "Mechanical dedupe batch". Short description, no Claude credit.
 
 ---
 
