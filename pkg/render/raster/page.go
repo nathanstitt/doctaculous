@@ -632,16 +632,18 @@ func decodeImageXObject(doc *pdf.Document, s *pdf.Stream, fill render.FillColor,
 
 // jbig2Globals returns the decoded bytes of a JBIG2 image's /JBIG2Globals stream (shared
 // segment dictionary), or nil when absent. The globals live in the image's /DecodeParms
-// (or /DP) dict as an indirect stream reference.
+// (or /DP) — either a single parameter dict (a lone JBIG2Decode filter) or a parallel
+// array of per-filter parameter dicts (JBIG2Decode in a multi-filter chain). We locate
+// the parameter dict carrying /JBIG2Globals in either form.
 func jbig2Globals(doc *pdf.Document, dict pdf.Dict) []byte {
-	parms := doc.GetDict(dict["DecodeParms"])
-	if parms == nil {
-		parms = doc.GetDict(dict["DP"])
+	pd := jbig2ParmsDict(doc, dict["DecodeParms"])
+	if pd == nil {
+		pd = jbig2ParmsDict(doc, dict["DP"])
 	}
-	if parms == nil {
+	if pd == nil {
 		return nil
 	}
-	gs := doc.GetStream(parms["JBIG2Globals"])
+	gs := doc.GetStream(pd["JBIG2Globals"])
 	if gs == nil {
 		return nil
 	}
@@ -650,6 +652,27 @@ func jbig2Globals(doc *pdf.Document, dict pdf.Dict) []byte {
 		return nil
 	}
 	return b
+}
+
+// jbig2ParmsDict resolves a /DecodeParms (or /DP) value to the parameter dict that
+// carries /JBIG2Globals. It accepts the single-dict form directly, or scans the parallel
+// array form (a JBIG2Decode in a filter chain) for the element dict that has a
+// JBIG2Globals key. Returns nil when neither form yields one.
+func jbig2ParmsDict(doc *pdf.Document, parms pdf.Object) pdf.Dict {
+	if d := doc.GetDict(parms); d != nil {
+		if _, ok := d["JBIG2Globals"]; ok {
+			return d
+		}
+		return nil
+	}
+	for _, e := range doc.GetArray(parms) {
+		if d := doc.GetDict(e); d != nil {
+			if _, ok := d["JBIG2Globals"]; ok {
+				return d
+			}
+		}
+	}
+	return nil
 }
 
 // decodeInlineImage decodes a normalized inline image (full-key dict + verbatim
