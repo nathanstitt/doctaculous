@@ -13,7 +13,7 @@ import (
 func roundTripPDF(t *testing.T, html string) []byte {
 	t.Helper()
 	var pdfBuf bytes.Buffer
-	err := ConvertHTMLToPDF(context.Background(), strings.NewReader(html), &pdfBuf, PDFOptions{})
+	err := ConvertHTMLToPDF(context.Background(), strings.NewReader(html), &pdfBuf, PDFOptions{BundledFonts: true})
 	if err != nil {
 		t.Fatalf("ConvertHTMLToPDF: %v", err)
 	}
