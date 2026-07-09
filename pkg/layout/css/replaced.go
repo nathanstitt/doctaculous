@@ -110,9 +110,9 @@ func constrainRatio(w, h, minW, maxW float64, hasMaxW bool, minH, maxH float64, 
 	case gtMaxW && gtMaxH:
 		// Both exceed max: shrink by the more-constraining ratio.
 		if mw/w <= mh/h {
-			return mw, max0(mw * h / w)
+			return mw, max(0, mw*h/w)
 		}
-		return max0(mh * w / h), mh
+		return max(0, mh*w/h), mh
 	case ltMinW && ltMinH:
 		// Both below min: grow by the more-constraining ratio.
 		if minW/w >= minH/h {
@@ -134,14 +134,6 @@ func constrainRatio(w, h, minW, maxW float64, hasMaxW bool, minH, maxH float64, 
 		return clampMaxMin(minH*w/h, minW, mw, true), minH
 	}
 	return w, h
-}
-
-// max0 floors a value at 0.
-func max0(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	return v
 }
 
 // intrinsicSize returns b's replaced image's intrinsic pixel size (treated 1:1 as

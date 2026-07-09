@@ -303,7 +303,7 @@ func fragment(lp *layout.Page, contentH float64, logf func(string, ...any)) []yB
 		total = itemsExtent(lp)
 	}
 	if total <= contentH || contentH <= 0 {
-		return []yBand{{0, maxFloat(total, contentH)}}
+		return []yBand{{0, max(total, contentH)}}
 	}
 
 	// Each item occupies a vertical [top,bottom] interval. A band cut at Y=c must not
@@ -487,11 +487,4 @@ func fallbackSize(o Options) (w, h float64) {
 		h = 792
 	}
 	return w, h
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }
