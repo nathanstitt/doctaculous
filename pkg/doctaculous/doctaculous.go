@@ -51,6 +51,12 @@ type RasterOptions struct {
 	// the bundled weighted substitutes only, keeping rendering hermetic. A
 	// layoutfont.DiskFontProvider satisfies this.
 	FontProvider font.Provider
+	// BundledFonts selects hermetic bundled-font mode: non-embedded fonts resolve only
+	// from the bundled substitutes (pkg/font/standard), never the host's installed
+	// fonts. Default false = system mode, which installs an OSFontProvider so real
+	// installed fonts are used. Ignored when FontProvider is set explicitly (that
+	// provider always wins). The golden/reference tests set this true for reproducibility.
+	BundledFonts bool
 }
 
 func (o RasterOptions) dpi() float64 {

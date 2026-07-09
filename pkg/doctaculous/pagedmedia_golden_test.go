@@ -169,7 +169,7 @@ func TestHTMLPagedMediaGolden(t *testing.T) {
 	dir := filepath.Join("testdata", "golden")
 	for _, f := range pagedMediaGoldens {
 		t.Run(f.name, func(t *testing.T) {
-			doc, err := OpenHTMLBytes([]byte(f.html), WithDefaultPaged())
+			doc, err := OpenHTMLBytes([]byte(f.html), WithDefaultPaged(), WithBundledFonts())
 			if err != nil {
 				t.Fatalf("OpenHTMLBytes: %v", err)
 			}
@@ -177,7 +177,7 @@ func TestHTMLPagedMediaGolden(t *testing.T) {
 				t.Fatalf("PageCount = %d, want %d", doc.PageCount(), f.wantPgs)
 			}
 			for i := 0; i < doc.PageCount(); i++ {
-				img, err := doc.RasterizePage(context.Background(), i, RasterOptions{DPI: goldenDPI})
+				img, err := doc.RasterizePage(context.Background(), i, RasterOptions{DPI: goldenDPI, BundledFonts: true})
 				if err != nil {
 					t.Fatalf("RasterizePage(%d): %v", i, err)
 				}

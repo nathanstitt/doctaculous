@@ -20,6 +20,8 @@ func tohtmlCmd(args []string) error {
 		in       = fs.String("in", "", "input document (alternative to the positional argument)")
 		out      = fs.String("out", "", "output file (default: stdout)")
 		fragment = fs.Bool("fragment", false, "emit only body markup (no <html>/<head> wrapper)")
+
+		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous tohtml <input.pdf|.html|.docx|URL> [--out file.html] [--fragment]\n") //nolint:errcheck // stderr write
@@ -37,7 +39,7 @@ func tohtmlCmd(args []string) error {
 		return err
 	}
 
-	doc, err := openConvertibleDocument(input)
+	doc, err := openConvertibleDocument(input, *bundledFonts)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}

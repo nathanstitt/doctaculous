@@ -26,6 +26,12 @@ type PDFOptions struct {
 	Workers int
 	// Logf receives degradation diagnostics (nil -> no-op).
 	Logf func(string, ...any)
+	// BundledFonts selects hermetic bundled-font mode for the HTML layout that feeds the
+	// PDF writer: non-embedded families resolve only from the bundled substitutes, never
+	// the host's installed OS fonts. Default false = system mode. Set this for
+	// reproducible, reliably-extractable output (the bundled faces have stable ToUnicode
+	// mappings). Ignored for a DOCX input (DOCX layout is already bundled-only).
+	BundledFonts bool
 }
 
 // defaultMarginPt is the 0.5in content margin applied when PDFOptions.MarginPt is
@@ -65,6 +71,9 @@ func ConvertHTMLToPDF(ctx context.Context, in io.Reader, out io.Writer, opts PDF
 	}
 	if opts.Logf != nil {
 		htmlOpts = append(htmlOpts, WithLogf(opts.Logf))
+	}
+	if opts.BundledFonts {
+		htmlOpts = append(htmlOpts, WithBundledFonts())
 	}
 	doc, err := OpenHTMLBytes(data, htmlOpts...)
 	if err != nil {

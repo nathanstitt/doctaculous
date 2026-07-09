@@ -46,7 +46,7 @@ func TestDOCXGolden(t *testing.T) {
 			if doc.PageCount() != f.Pages {
 				t.Errorf("page count = %d, want %d", doc.PageCount(), f.Pages)
 			}
-			img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI})
+			img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI, BundledFonts: true})
 			if err != nil {
 				t.Fatalf("RasterizePage: %v", err)
 			}

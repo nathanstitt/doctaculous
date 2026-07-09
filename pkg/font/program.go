@@ -210,7 +210,7 @@ const (
 func newGlyphProgram(data []byte, kind progKind) (glyphProgram, error) {
 	switch kind {
 	case progTrueType:
-		f, err := truetype.Parse(bytes.NewReader(data))
+		f, err := parseTrueTypeOrCollection(data)
 		if err != nil {
 			return nil, wrapProgErr(err)
 		}
@@ -230,6 +230,34 @@ func newGlyphProgram(data []byte, kind progKind) (glyphProgram, error) {
 	default:
 		return nil, ErrUnsupportedFontProgram
 	}
+}
+
+// isTrueTypeCollection reports whether data begins with the "ttcf" TrueType Collection
+// signature.
+func isTrueTypeCollection(data []byte) bool {
+	return len(data) >= 4 && data[0] == 't' && data[1] == 't' && data[2] == 'c' && data[3] == 'f'
+}
+
+// parseTrueTypeOrCollection parses a TrueType/OpenType program, transparently handling a
+// TrueType Collection (.ttc/.otc) by returning its first face. truetype.Parse cannot read
+// a collection wrapper, so a collection is loaded via truetype.Load (which the upstream
+// package documents as collection-aware) and the first *truetype.Font is used.
+func parseTrueTypeOrCollection(data []byte) (*truetype.Font, error) {
+	if !isTrueTypeCollection(data) {
+		return truetype.Parse(bytes.NewReader(data))
+	}
+	faces, err := truetype.Load(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if len(faces) == 0 {
+		return nil, fmt.Errorf("truetype collection contains no faces")
+	}
+	f, ok := faces[0].(*truetype.Font)
+	if !ok {
+		return nil, fmt.Errorf("truetype collection face is %T, not *truetype.Font", faces[0])
+	}
+	return f, nil
 }
 
 // outlineSegments extracts segments from a fonts.GlyphData (the common shape

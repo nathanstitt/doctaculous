@@ -875,7 +875,7 @@ func TestHTMLGolden(t *testing.T) {
 	}
 	for _, f := range htmlGoldens {
 		t.Run(f.name, func(t *testing.T) {
-			opts := []HTMLOption{WithViewportWidth(f.viewportPx)}
+			opts := []HTMLOption{WithViewportWidth(f.viewportPx), WithBundledFonts()}
 			if f.loader != nil {
 				opts = append(opts, WithResourceLoader(f.loader))
 			}
@@ -886,7 +886,7 @@ func TestHTMLGolden(t *testing.T) {
 			if doc.PageCount() != 1 {
 				t.Errorf("PageCount = %d, want 1", doc.PageCount())
 			}
-			img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI})
+			img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI, BundledFonts: true})
 			if err != nil {
 				t.Fatalf("RasterizePage: %v", err)
 			}

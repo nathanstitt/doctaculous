@@ -131,7 +131,7 @@ func TestHTMLToPDFFidelity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reopen generated PDF: %v", err)
 			}
-			img, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+			img, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72, BundledFonts: true})
 			if err != nil {
 				t.Fatalf("rasterize generated PDF: %v", err)
 			}

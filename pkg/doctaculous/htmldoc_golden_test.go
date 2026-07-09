@@ -38,7 +38,7 @@ func TestHTMLDocShowcase(t *testing.T) {
 	// WithDefaultPaged drives pagination from the document's own @page rule (Letter
 	// size, a bottom margin band, and a running page-counter footer) — exercising the
 	// full paged-media path end to end, not just fixed-height slicing.
-	doc, err := OpenURL(srv.URL+"/index.html", WithDefaultPaged())
+	doc, err := OpenURL(srv.URL+"/index.html", WithDefaultPaged(), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenURL: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestHTMLDocShowcase(t *testing.T) {
 
 	dir := filepath.Join("testdata", "golden")
 	for i := 0; i < doc.PageCount(); i++ {
-		img, err := doc.RasterizePage(context.Background(), i, RasterOptions{DPI: goldenDPI})
+		img, err := doc.RasterizePage(context.Background(), i, RasterOptions{DPI: goldenDPI, BundledFonts: true})
 		if err != nil {
 			t.Fatalf("RasterizePage(%d): %v", i, err)
 		}
@@ -85,7 +85,7 @@ func TestHTMLDocMarkdown(t *testing.T) {
 	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
 	defer srv.Close()
 
-	doc, err := OpenURL(srv.URL + "/index.html")
+	doc, err := OpenURL(srv.URL+"/index.html", WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenURL: %v", err)
 	}
