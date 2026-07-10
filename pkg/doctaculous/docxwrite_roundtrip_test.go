@@ -51,6 +51,24 @@ func TestDOCXWriteRoundTripParity(t *testing.T) {
 		{"blockquote", `<html><body><blockquote><p>a quoted line</p></blockquote></body></html>`},
 		{"code block", "<html><body><pre>line one\nline two</pre></body></html>"},
 		{"rule", `<html><body><p>above</p><hr><p>below</p></body></html>`},
+		{"table", `<html><body><table>
+			<tr><th>Item</th><th>Qty</th></tr>
+			<tr><td>Widgets</td><td>5</td></tr>
+			<tr><td>Gadgets</td><td>7</td></tr>
+			</table></body></html>`},
+		{"table colspan", `<html><body><table>
+			<tr><th colspan="2">Wide Header</th></tr>
+			<tr><td>a</td><td>b</td></tr>
+			</table></body></html>`},
+		{"table rowspan", `<html><body><table>
+			<tr><th>K</th><th>V</th></tr>
+			<tr><td rowspan="2">tall</td><td>r1</td></tr>
+			<tr><td>r2</td></tr>
+			</table></body></html>`},
+		{"table caption", `<html><body><table>
+			<caption>Quarterly</caption>
+			<tr><th>Q</th></tr><tr><td>1</td></tr>
+			</table></body></html>`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
