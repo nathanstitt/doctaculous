@@ -356,6 +356,21 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   extraction). Capability gate for hosts = `FormatFromMIME(mt).ValidInput()`.
   `2026-07-10-mime-reader-open-design.md`.
 
+**DOCX reader fidelity — the public-model PR 1/3** (`pkg/docx`, toward a supported read+write
+document model consumed externally by tinycld/text):
+
+- Tracked changes (w:ins/w:del as `ParaChild.Revision` containers; `w:delText`;
+  rPr/pPr/tcPr `*Change` before-states; cellIns/cellDel), comments (part + range markers +
+  reference runs; markers inside hyperlinks hoist outward), endnotes (`Notes` container with
+  exported `ByID`, shared footnote/endnote parser), drop-cap frames, anchored-drawing wrap
+  facts, `Border.Style` names, paragraph-attached `SectPr`, numbering restructure
+  (`Abstract`/`Instances`/`Start`/`StartAt`), run `Shd`, `Relationship.Type`,
+  `Hyperlink.Target` resolved at parse, `Style.Name`, `Document.ExtraParts` (customXml
+  preserved verbatim). Rendering pins: revisions render FINAL state ("No Markup"), comments
+  invisible, drop cap degrades; upgrades: endnote markers, run shading, list start/override
+  seeding, anchored square-wrap images → CSS floats. `fidelity` core fixture + golden.
+  `2026-07-10-docx-model-fidelity-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
