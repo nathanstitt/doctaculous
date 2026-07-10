@@ -161,7 +161,7 @@ usage:
 
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, xlsx, html, md, txt, csv, tsv, http(s) URLs. Outputs: pdf, docx,
+pdf, docx, xlsx, rtf, html, md, txt, csv, tsv, http(s) URLs. Outputs: pdf, docx,
 xlsx, md, txt, html, csv, tsv, png, jpg. CSV/TSV/XLSX output carries the
 document's tables (prose is dropped). Converting a document to its own format
 is not supported.

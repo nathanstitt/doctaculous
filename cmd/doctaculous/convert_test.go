@@ -301,11 +301,22 @@ func TestRasterizeCmdSniffsExtensionless(t *testing.T) {
 		t.Errorf("output missing or empty (err=%v)", err)
 	}
 
+	// A recognized extension with mismatched content fails in that format's
+	// parser (RTF is a real format now, so junk.rtf errors precisely).
 	junk := filepath.Join(dir, "junk.rtf")
 	if err := os.WriteFile(junk, []byte("not a document"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	err := rasterizeCmd([]string{junk, "--out", out})
+	if err == nil || !strings.Contains(err.Error(), "not an RTF document") {
+		t.Errorf("garbage .rtf: want the RTF parser's error, got %v", err)
+	}
+	// A completely unrecognizable file still reports a detection failure.
+	noext := filepath.Join(dir, "junkfile")
+	if err := os.WriteFile(noext, []byte{0x00, 0x01, 0xFE, 0xBA}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = rasterizeCmd([]string{noext, "--out", out})
 	if err == nil || !strings.Contains(err.Error(), "format") {
 		t.Errorf("garbage input: want a format-detection error, got %v", err)
 	}
