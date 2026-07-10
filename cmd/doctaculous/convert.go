@@ -24,7 +24,7 @@ func convertCmd(args []string) error {
 	var (
 		in   = fs.String("in", "", "input document or http(s) URL (alternative to the first positional argument)")
 		out  = fs.String("out", "", "output file (alternative to the second positional argument; \"-\" writes to stdout and requires --to)")
-		from = fs.String("from", "", "input format override: pdf, docx, or html (default: detected from content and extension)")
+		from = fs.String("from", "", "input format override: pdf, docx, html, md, or txt (default: detected from content and extension)")
 		to   = fs.String("to", "", "output format override: pdf, md, txt, html, png, or jpg (default: from the output extension)")
 
 		pageSize = fs.String("page-size", "letter", "HTML pagination: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page")
@@ -52,7 +52,7 @@ func convertCmd(args []string) error {
 		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: doctaculous convert <input.pdf|.docx|.html|URL> <output.pdf|.md|.txt|.html|.png|.jpg> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: doctaculous convert <input.pdf|.docx|.html|.md|.txt|URL> <output.pdf|.md|.txt|.html|.png|.jpg> [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderArgs(args, convertValueFlags)); err != nil {
@@ -108,6 +108,12 @@ func convertCmd(args []string) error {
 			Raster:  doctaculous.RasterOptions{DPI: *dpi, Workers: *workers, BundledFonts: *bundledFonts},
 		}
 		return renderPages(doc, indices, output, imgOpts)
+	}
+
+	// Validate the pair before creating the output, so a rejected conversion
+	// (e.g. same-format) leaves no empty file behind.
+	if err := doctaculous.CanConvert(doc.Format(), toFormat); err != nil {
+		return err
 	}
 
 	// The margin flag uses -1 as "unset" so 0 can mean "no margin"; PDFOptions

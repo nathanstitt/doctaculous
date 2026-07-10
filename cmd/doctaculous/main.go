@@ -90,7 +90,7 @@ func inferCommand(args []string) (string, error) {
 		return "topdf", nil
 	}
 	switch strings.ToLower(filepath.Ext(in)) {
-	case ".html", ".htm", ".docx":
+	case ".html", ".htm", ".docx", ".md", ".markdown", ".txt", ".text":
 		return "topdf", nil
 	case ".pdf":
 		return "rasterize", nil
@@ -150,8 +150,8 @@ usage:
 
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, html, http(s) URLs. Outputs: pdf, md, txt, html, png, jpg. Converting
-a document to its own format is not supported.
+pdf, docx, html, md, txt, http(s) URLs. Outputs: pdf, md, txt, html, png, jpg.
+Converting a document to its own format is not supported.
 
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;
