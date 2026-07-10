@@ -40,7 +40,14 @@ func (d *Document) WriteDOCX(ctx context.Context, out io.Writer, opts DOCXOption
 	if !ok {
 		return fmt.Errorf("doctaculous: WriteDOCX: document has no convertible structure")
 	}
-	if err := docxwrite.Write(ctx, rt.cssboxRoot(), out, opts.toWriterOptions()); err != nil {
+	wopts := opts.toWriterOptions()
+	// Embed images through the source's own resource loader when the backend
+	// retained one (HTML/Markdown files and URLs, DOCX media); without one the
+	// writer degrades images to their alt text.
+	if rr, ok := d.r.(reflowResources); ok {
+		wopts.Loader = rr.resourceLoader()
+	}
+	if err := docxwrite.Write(ctx, rt.cssboxRoot(), out, wopts); err != nil {
 		return fmt.Errorf("doctaculous: write docx: %w", err)
 	}
 	return nil

@@ -27,9 +27,10 @@ func (w *writer) inlineRuns(b *cssbox.Box) []boxwalk.StyledRun {
 	runs := raw[:0]
 	for _, r := range raw {
 		if r.Literal != "" {
-			// A literal is pre-formatted content (an image's alt text today);
-			// carry it as plain run text.
-			r.Text, r.Literal = r.Literal, ""
+			// A literal is pre-built run XML from the image callback (a drawing,
+			// or an alt-text run); it passes through verbatim.
+			runs = append(runs, r)
+			continue
 		}
 		r.Text = collapseWS(r.Text)
 		if r.Text == "" {
@@ -38,22 +39,14 @@ func (w *writer) inlineRuns(b *cssbox.Box) []boxwalk.StyledRun {
 		runs = append(runs, r)
 	}
 	if len(runs) > 0 {
-		runs[0].Text = strings.TrimLeft(runs[0].Text, " ")
-		last := len(runs) - 1
-		runs[last].Text = strings.TrimRight(runs[last].Text, " ")
+		if runs[0].Literal == "" {
+			runs[0].Text = strings.TrimLeft(runs[0].Text, " ")
+		}
+		if last := len(runs) - 1; runs[last].Literal == "" {
+			runs[last].Text = strings.TrimRight(runs[last].Text, " ")
+		}
 	}
 	return runs
-}
-
-// imageRun is the CollectRuns image callback. Images are not embedded yet (the
-// media path lands with tables/images); the alt text is kept as plain text so
-// content survives, and the degradation is logged.
-func (w *writer) imageRun(rc *cssbox.ReplacedContent) string {
-	if rc.Tag != "img" {
-		return ""
-	}
-	w.opts.Logf("docxwrite: image %q not embedded yet; keeping its alt text", rc.Attrs["src"])
-	return rc.Attrs["alt"]
 }
 
 // emitParagraph writes one w:p: the paragraph properties (style, numbering,
@@ -97,11 +90,21 @@ func (w *writer) emitParagraph(runs []boxwalk.StyledRun, pStyle, numPr, jc strin
 	w.body.WriteString("</w:p>")
 }
 
-// run writes one w:r with its direct run properties. Character formatting is
-// always direct rPr (the reader models no character-style cascade); inline code
-// additionally carries the CodeChar style id, which the reader maps back to the
-// code semantic.
+// run writes one styled run: a literal (pre-built run XML — a drawing or an
+// alt-text run) verbatim, everything else through the property emitter.
 func (w *writer) run(r boxwalk.StyledRun) {
+	if r.Literal != "" {
+		w.body.WriteString(r.Literal)
+		return
+	}
+	w.textRun(r)
+}
+
+// textRun writes one w:r with its direct run properties. Character formatting
+// is always direct rPr (the reader models no character-style cascade); inline
+// code additionally carries the CodeChar style id, which the reader maps back
+// to the code semantic.
+func (w *writer) textRun(r boxwalk.StyledRun) {
 	w.body.WriteString("<w:r>")
 	var props strings.Builder
 	if r.Code {
