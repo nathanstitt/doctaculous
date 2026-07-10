@@ -33,6 +33,8 @@ type ConvertOptions struct {
 	DOCX DOCXOptions
 	// Markdown applies when To == FormatMarkdown or FormatText.
 	Markdown MarkdownOptions
+	// CSV applies when To == FormatCSV or FormatTSV.
+	CSV CSVOptions
 	// HTMLOut applies when To == FormatHTML.
 	HTMLOut HTMLWriteOptions
 	// Image applies when To == FormatPNG or FormatJPEG; Image.Page selects the
@@ -190,6 +192,15 @@ func (d *Document) Write(ctx context.Context, out io.Writer, to Format, opts Con
 			return d.WriteText(ctx, out, mdOpts)
 		}
 		return d.WriteMarkdown(ctx, out, mdOpts)
+	case FormatCSV, FormatTSV:
+		csvOpts := opts.CSV
+		if csvOpts.Logf == nil {
+			csvOpts.Logf = opts.Logf
+		}
+		if to == FormatTSV {
+			return d.WriteTSV(ctx, out, csvOpts)
+		}
+		return d.WriteCSV(ctx, out, csvOpts)
 	case FormatHTML:
 		htmlOpts := opts.HTMLOut
 		if htmlOpts.Logf == nil {
