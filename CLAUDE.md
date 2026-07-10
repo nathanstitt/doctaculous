@@ -322,15 +322,26 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   which makes **PDF → CSV table extraction** work via the existing lattice/stream recognizer
   (pinned by test). `csv-specimen` golden. `2026-07-09-csv-tsv-io-design.md`.
 
+**XLSX input** (`pkg/xlsx` hand-rolled reader + `pkg/doctaculous/xlsx_frontend.go`,
+`OpenXLSX*`, `testdata/gen/xlsx` fixture builder):
+
+- Read-only cached-value extraction (no formula evaluation; the dep audit that ruled out
+  excelize/tealeg is in the spec): OPC container mirroring `pkg/docx/zip.go`, shared/rich strings,
+  styles (bold/italic/fill/alignment), dates via builtin + heuristic numFmt codes against the
+  1900 (Lotus-leap-safe) or 1904 epoch, General/percent number rendering, `mergeCells` → native
+  spans, hidden sheets skipped (hidden rows/cols render — view state, not data). Visible sheets →
+  `<h2>`-headed ruled tables through the HTML pipeline; a bold first row becomes the header row
+  via the writers' existing detector. ZIP detection generalized to an OPC classifier
+  (`word/`→DOCX, `xl/`→XLSX). `xlsx-specimen` golden. `2026-07-09-xlsx-input-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
 
-0. **XLSX input + output** (planned; enum/detection groundwork shipped with CSV/TSV): a hand-rolled
-   read-only `pkg/xlsx` reader (cached values, dates via numFmt, merged cells, visible sheets —
-   dep audit ruled out excelize/tealeg trees) and a `pkg/render/xlsxwrite` writer (one sheet per
-   table, native mergeCells, bold headers), each its own PR.
+0. **XLSX output** (`pkg/render/xlsxwrite`, planned — input is Done): one sheet per table, native
+   mergeCells, bold header xf, inlineStr + numeric cells, deterministic OPC; round-trip parity via
+   the `pkg/xlsx` reader.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),
