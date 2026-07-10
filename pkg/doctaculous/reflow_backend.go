@@ -83,7 +83,7 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Document{r: &reflowRenderer{pages: pages, root: root}}, nil
+	return &Document{r: &reflowRenderer{pages: pages, root: root}, format: FormatDOCX}, nil
 }
 
 // docxPageSheet synthesizes an @page stylesheet carrying the DOCX section's page

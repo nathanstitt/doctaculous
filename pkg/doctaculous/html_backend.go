@@ -246,5 +246,5 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)
 	}
-	return &Document{r: &reflowRenderer{pages: pages, root: root}}, nil
+	return &Document{r: &reflowRenderer{pages: pages, root: root}, format: FormatHTML}, nil
 }
