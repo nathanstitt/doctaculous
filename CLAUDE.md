@@ -371,6 +371,18 @@ document model consumed externally by tinycld/text):
   seeding, anchored square-wrap images → CSS floats. `fidelity` core fixture + golden.
   `2026-07-10-docx-model-fidelity-design.md`.
 
+**DOCX model writer — the public-model PR 2/3** (`pkg/docx` `Write`/`Bytes`):
+
+- Full-vocabulary deterministic OPC emitter in pkg/docx itself (stdlib-only; schema-ordered
+  props; rels preserved + structural/hyperlink rels allocated; tabs/delText/xml:space
+  mirrored; Word-complete drawing scaffold; zero SectionProps → Letter defaults;
+  `ErrInvalidDocument` hard-fails instead of dropping content). `DefaultStyles()`/`AddImage`
+  constructors; package doc declares the vocabulary + additive-only stability promise.
+  Round-trip contract Parse∘Write ≡ id pinned by: 15-fixture modelCore corpus, 200-doc seeded
+  randomized sweep, per-fixture determinism, and a byte-level second-write fixed point over
+  the gen corpus; `model-specimen` core fixture renders the construct→Write→reopen path into
+  a golden. `2026-07-10-docx-model-writer-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
