@@ -56,12 +56,15 @@ func TestFontColorSizeTables(t *testing.T) {
 {\cf2\highlight1 green on red}\par
 }`)
 	wants(t, out,
-		"font-family:'Courier New'",
+		// A monospace font selection reads as inline code (the semantic our own
+		// writer round-trips); non-mono fonts stay font-family spans.
+		"<code>red courier ten</code>",
 		"font-size:10pt",
 		"color:#FF0000",
 		"color:#008000",
 		"background-color:#FF0000",
 	)
+	rejects(t, out, "font-family:'Courier New'")
 }
 
 func TestAlignmentAndIndents(t *testing.T) {
@@ -166,4 +169,71 @@ func TestNotRTF(t *testing.T) {
 	if _, err := ToHTML([]byte("plain text, no signature"), nil); !errors.Is(err, ErrNotRTF) {
 		t.Errorf("want ErrNotRTF, got %v", err)
 	}
+}
+
+func TestStyleSheetHeadingsAndBlocks(t *testing.T) {
+	out := convertOK(t, `{\rtf1\ansi
+{\stylesheet{\s0 Normal;}{\s1 heading 1;}{\s2 heading 2;}{\s15 Quote;}{\s16 CodeBlock;}{\s17 HorizontalRule;}}
+{\pard\s1\b\fs48 Top Title\par}
+{\pard\s2\b\fs36 Section\par}
+{\pard\s15\li720 a quoted line\par}
+{\pard\s16 code text\par}
+{\pard\s17 \par}
+{\pard plain body\par}
+}`)
+	wants(t, out,
+		// The heading tag comes from the style name; bold+size ride along.
+		`<h1><span style="font-size:24pt"><b>Top Title</b></span></h1>`,
+		"<h2>",
+		"<blockquote><p",
+		"a quoted line",
+		"<pre>",
+		"code text",
+		"<hr>",
+		"<p>plain body</p>",
+	)
+}
+
+func TestOutlineLevelHeadingFallback(t *testing.T) {
+	// No stylesheet at all: \outlinelevel still marks the heading (Word emits
+	// it on heading paragraphs).
+	out := convertOK(t, `{\rtf1\ansi
+{\pard\outlinelevel0\b Fallback Title\par}
+}`)
+	wants(t, out, "<h1>", "Fallback Title")
+}
+
+func TestLists(t *testing.T) {
+	out := convertOK(t, `{\rtf1\ansi
+{\pard{\pntext \bullet\tab}\ilvl0\ls1 one\par}
+{\pard{\pntext \bullet\tab}\ilvl0\ls1 two\par}
+{\pard{\pntext \bullet\tab}\ilvl1\ls1 nested\par}
+{\pard after\par}
+{\pard{\pntext 1.\tab}\ilvl0\ls2 first\par}
+{\pard{\pntext 2.\tab}\ilvl0\ls2 second\par}
+}`)
+	wants(t, out,
+		"<ul><li>one</li><li>two<ul><li>nested</li></ul></li></ul>",
+		"<ol><li>first</li><li>second</li></ol>",
+	)
+	// The marker text itself must not leak into the item content.
+	rejects(t, out, "<li>• one", "<li>1. first")
+}
+
+func TestAdjacentListsStaySeparate(t *testing.T) {
+	out := convertOK(t, `{\rtf1\ansi
+{\pard{\pntext 1.\tab}\ilvl0\ls2 alpha\par}
+{\pard{\pntext 1.\tab}\ilvl0\ls3 beta\par}
+}`)
+	wants(t, out, "<ol><li>alpha</li></ol><ol><li>beta</li></ol>")
+}
+
+func TestTableHeaderRow(t *testing.T) {
+	out := convertOK(t, `{\rtf1\ansi
+\trowd\trhdr\cellx4000\cellx8000
+{\intbl {\b Item}\cell}{\intbl {\b Qty}\cell}\row
+\trowd\cellx4000\cellx8000
+{\intbl Widgets\cell}{\intbl 5\cell}\row
+}`)
+	wants(t, out, "<th style=", "Item", "<td style=", "Widgets")
 }
