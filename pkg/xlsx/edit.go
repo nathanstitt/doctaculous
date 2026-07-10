@@ -198,6 +198,32 @@ func (f *File) mutatePart(name string) (*xmlpart.Part, error) {
 	return p, nil
 }
 
+// setPart REPLACES a part's content wholesale (parsed through the fidelity
+// layer so Save's dirty path emits it, whether the part is an original entry
+// or a new one).
+func (f *File) setPart(name string, data []byte) error {
+	p, err := xmlpart.Parse(data)
+	if err != nil {
+		return fmt.Errorf("xlsx: part %s: %w", name, err)
+	}
+	f.parsed[name] = p
+	f.dirty[name] = true
+	if _, ok := f.added[name]; !ok && !f.originalPart(name) {
+		f.added[name] = data
+	}
+	return nil
+}
+
+// originalPart reports whether name exists in the source zip.
+func (f *File) originalPart(name string) bool {
+	for _, zf := range f.zr.File {
+		if zf.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Save serializes the workbook: untouched original parts are copied
 // byte-verbatim (raw compressed streams — a no-op Edit+Save round-trip is
 // part-for-part byte-identical), dirty parts re-serialize through xmlpart,
