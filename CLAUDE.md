@@ -478,6 +478,16 @@ out-of-scope note):
   `sheetRelTarget` reads current bytes; `File.setPart` lets an original part be regenerated
   through the dirty machinery. `2026-07-10-xlsx-cf-comments-design.md`.
 
+**XLSX pivots + defined-names write — calc-adoption PR 5/5** (`pkg/xlsx`):
+
+- `PivotTables()` read (definition joined with its cache for source + field names),
+  `RemovePivotTables()` (clean slate — parts, rels, workbook caches, CTs), `AddPivotTable`
+  (cache w/ `refreshOnLoad` + empty records — definitions round-trip, values recompute; full
+  wiring in one call; axis/value fields by source header name, hard error on unknowns).
+  `SetDefinedNames`/`DefinedNames()` replace/read the workbook names (sheet-local + hidden).
+  Editor-core fix: `setPart` resurrects a deleted part (remove-then-add in one session — calc's
+  save shape). `2026-07-10-xlsx-pivots-names-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
