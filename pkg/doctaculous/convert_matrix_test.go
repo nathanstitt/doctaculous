@@ -159,6 +159,28 @@ func TestConvertMatrix(t *testing.T) {
 				if !strings.Contains(out.String(), wantText[from]) {
 					t.Errorf("%s: output missing %q:\n%s", name, wantText[from], out.String())
 				}
+			case FormatXLSX:
+				if !bytes.HasPrefix(out.Bytes(), []byte("PK\x03\x04")) {
+					t.Errorf("%s: output is not a ZIP package", name)
+					break
+				}
+				// The workbook must reopen through our own reader; table-carrying
+				// inputs must round-trip their text (tables-only output, so
+				// table-less fixtures yield an empty sheet by design).
+				doc, err := OpenXLSXBytes(out.Bytes())
+				if err != nil {
+					t.Errorf("%s: reopening produced xlsx: %v", name, err)
+					break
+				}
+				if tableless[from] {
+					break
+				}
+				var text bytes.Buffer
+				if err := doc.WriteText(ctx, &text, MarkdownOptions{}); err != nil {
+					t.Errorf("%s: reading produced xlsx: %v", name, err)
+				} else if !strings.Contains(text.String(), wantText[from]) {
+					t.Errorf("%s: reopened xlsx missing %q:\n%s", name, wantText[from], text.String())
+				}
 			}
 		}
 	}

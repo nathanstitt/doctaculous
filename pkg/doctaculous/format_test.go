@@ -109,9 +109,9 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatText:     true,
 		FormatCSV:      true,
 		FormatTSV:      true,
-		// FormatXLSX flips true when its writer lands.
-		FormatPNG:  true,
-		FormatJPEG: true,
+		FormatXLSX:     true,
+		FormatPNG:      true,
+		FormatJPEG:     true,
 	}
 	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatPNG, FormatJPEG}
 
