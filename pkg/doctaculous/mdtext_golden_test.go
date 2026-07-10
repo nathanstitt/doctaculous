@@ -31,6 +31,17 @@ var mdTextGoldens = []struct {
 		src:        specimenMD,
 	},
 	{
+		// CSV: a ruled table with the first row as its header, quoted fields
+		// (embedded comma), and literal markup — the spreadsheet-family look.
+		name:       "csv-specimen",
+		viewportPx: 420,
+		open:       OpenCSVBytes,
+		src: "Product,Qty,Notes\n" +
+			"Widgets,5,\"solid, reliable\"\n" +
+			"Gadgets,7,<b>literal</b>\n" +
+			"Gizmos,12,\n",
+	},
+	{
 		// Plain text: hard line breaks and column alignment preserved verbatim
 		// in monospace; the over-long line soft-wraps (pre-wrap) instead of
 		// clipping at the right edge.

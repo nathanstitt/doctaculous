@@ -194,6 +194,44 @@ func TestConvertCmdTextInput(t *testing.T) {
 	}
 }
 
+func TestConvertCmdCSVInput(t *testing.T) {
+	in := writeConvertInput(t, "data.csv", []byte("Name,Qty\nWidgets,5\n"))
+	out := filepath.Join(t.TempDir(), "out.md")
+	if err := convertCmd([]string{in, out}); err != nil {
+		t.Fatalf("csv->md: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	if !strings.Contains(string(data), "| Name | Qty |") || !strings.Contains(string(data), "| Widgets | 5 |") {
+		t.Errorf("csv->md table wrong:\n%s", data)
+	}
+}
+
+func TestConvertCmdCSVOutput(t *testing.T) {
+	in := writeConvertInput(t, "in.html", []byte(`<html><body>
+	<p>prose to drop</p>
+	<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>
+	</body></html>`))
+	out := filepath.Join(t.TempDir(), "out.csv")
+	if err := convertCmd([]string{in, out}); err != nil {
+		t.Fatalf("html->csv: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	if string(data) != "A,B\n1,2\n" {
+		t.Errorf("html->csv = %q", data)
+	}
+}
+
+func TestRunInfersConvertForCSVOutput(t *testing.T) {
+	in := writeConvertInput(t, "in.html", []byte(`<html><body><table><tr><td>x</td></tr></table></body></html>`))
+	out := filepath.Join(t.TempDir(), "out.csv")
+	if err := run([]string{in, "--out", out}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if data, _ := os.ReadFile(out); string(data) != "x\n" {
+		t.Errorf("inferred csv output = %q", data)
+	}
+}
+
 func TestConvertCmdHelpExitsClean(t *testing.T) {
 	if err := convertCmd([]string{"-h"}); err != nil {
 		t.Errorf("-h should exit clean, got %v", err)
