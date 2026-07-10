@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"runtime"
 	"sync"
 
@@ -33,10 +34,26 @@ type renderer interface {
 	pageCount() int
 	// renderPage rasterizes one zero-based page to an image.
 	renderPage(ctx context.Context, index int, opts RasterOptions) (image.Image, error)
+	// pageSize reports the rendered size of page index in points — post-/Rotate
+	// for PDF — i.e. the geometry a raster at DPI d maps to
+	// ceil(w·d/72) × ceil(h·d/72) pixels.
+	pageSize(index int) (wPt, hPt float64, err error)
 }
 
 // PageCount returns the number of pages.
 func (d *Document) PageCount() int { return d.r.pageCount() }
+
+// PageSize returns page index's size in points (1/72 inch — document space).
+// For PDF pages the size reflects /Rotate — a 90°-rotated portrait page
+// reports landscape — so it is always the aspect ratio the rasterized page
+// image has. Reflow documents report their laid-out page size.
+func (d *Document) PageSize(index int) (widthPt, heightPt float64, err error) {
+	w, h, err := d.r.pageSize(index)
+	if err != nil {
+		return 0, 0, fmt.Errorf("doctaculous: page size %d: %w", index, err)
+	}
+	return w, h, nil
+}
 
 // RasterOptions controls rasterization.
 type RasterOptions struct {
@@ -64,6 +81,19 @@ type RasterOptions struct {
 	// installed fonts are used. Ignored when FontProvider is set explicitly (that
 	// provider always wins). The golden/reference tests set this true for reproducibility.
 	BundledFonts bool
+	// MaxWidthPx / MaxHeightPx, when either is > 0, switch sizing from "render
+	// at DPI" to "render to fit within this pixel box, aspect preserved": each
+	// page is rendered at exactly the resolution that makes it fit, so a
+	// thumbnail is a direct sharp render, never a downscaled bitmap. With only
+	// one side set, only that axis constrains. DPI then becomes an optional
+	// resolution CEILING: zero (the default) means the page always fills the
+	// box — a small page scales up, which for a vector re-render costs no
+	// quality — while a positive DPI caps the render so pages already smaller
+	// than the box at that DPI are not upscaled (classic downscale-only
+	// thumbnail behavior, e.g. {MaxWidthPx: 480, MaxHeightPx: 360, DPI: 300}).
+	// With both fields zero, DPI keeps its existing meaning (default 150).
+	MaxWidthPx  int
+	MaxHeightPx int
 }
 
 func (o RasterOptions) dpi() float64 {
@@ -73,8 +103,55 @@ func (o RasterOptions) dpi() float64 {
 	return o.DPI
 }
 
+// fitRaster resolves MaxWidthPx/MaxHeightPx against page index's geometry into
+// a concrete DPI, returning opts with DPI substituted and the Max fields
+// cleared — so the backends only ever see a DPI. With neither Max field set it
+// returns opts untouched (the exact pre-existing DPI path).
+func (d *Document) fitRaster(index int, opts RasterOptions) (RasterOptions, error) {
+	if opts.MaxWidthPx <= 0 && opts.MaxHeightPx <= 0 {
+		return opts, nil
+	}
+	wPt, hPt, err := d.r.pageSize(index)
+	if err != nil {
+		return opts, err
+	}
+	// Pixels per point: the tightest constrained axis wins.
+	scale := math.Inf(1)
+	if opts.MaxWidthPx > 0 {
+		scale = float64(opts.MaxWidthPx) / wPt
+	}
+	if opts.MaxHeightPx > 0 {
+		if s := float64(opts.MaxHeightPx) / hPt; s < scale {
+			scale = s
+		}
+	}
+	// A positive DPI is a resolution ceiling: a page smaller than the box at
+	// that DPI is not upscaled.
+	if opts.DPI > 0 && opts.DPI/72 < scale {
+		scale = opts.DPI / 72
+	}
+	// Ceil-safety: the backends size images as ceil(pt·scale), and float
+	// artifacts can push an exact fit one pixel past the box (612 × (480/612)
+	// can round up). Step the scale down until the ceiling fits.
+	for range 4 {
+		overW := opts.MaxWidthPx > 0 && math.Ceil(wPt*scale) > float64(opts.MaxWidthPx)
+		overH := opts.MaxHeightPx > 0 && math.Ceil(hPt*scale) > float64(opts.MaxHeightPx)
+		if !overW && !overH {
+			break
+		}
+		scale = math.Nextafter(scale, 0)
+	}
+	opts.DPI = scale * 72
+	opts.MaxWidthPx, opts.MaxHeightPx = 0, 0
+	return opts, nil
+}
+
 // RasterizePage renders a single page (zero-based index) to an image.
 func (d *Document) RasterizePage(ctx context.Context, index int, opts RasterOptions) (image.Image, error) {
+	opts, err := d.fitRaster(index, opts)
+	if err != nil {
+		return nil, fmt.Errorf("doctaculous: rasterize page %d: %w", index, err)
+	}
 	img, err := d.r.renderPage(ctx, index, opts)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: rasterize page %d: %w", index, err)
@@ -121,7 +198,14 @@ func (d *Document) RasterizePages(ctx context.Context, indices []int, opts Raste
 					results[pos].Err = err
 					continue
 				}
-				img, err := d.r.renderPage(ctx, indices[pos], opts)
+				// Fit sizing resolves per page — pages in one document can differ
+				// in size, and each must fit the box independently.
+				pageOpts, err := d.fitRaster(indices[pos], opts)
+				if err != nil {
+					results[pos].Err = fmt.Errorf("doctaculous: rasterize page %d: %w", indices[pos], err)
+					continue
+				}
+				img, err := d.r.renderPage(ctx, indices[pos], pageOpts)
 				if err != nil {
 					results[pos].Err = fmt.Errorf("doctaculous: rasterize page %d: %w", indices[pos], err)
 					continue

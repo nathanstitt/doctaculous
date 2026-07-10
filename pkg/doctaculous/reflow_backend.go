@@ -143,6 +143,15 @@ func (r *reflowRenderer) resourceLoader() resource.ResourceLoader { return r.loa
 
 func (r *reflowRenderer) pageCount() int { return len(r.pages.Pages) }
 
+// pageSize reports the laid-out page's size in points.
+func (r *reflowRenderer) pageSize(index int) (float64, float64, error) {
+	if index < 0 || index >= len(r.pages.Pages) {
+		return 0, 0, errPageOutOfRange(index, len(r.pages.Pages))
+	}
+	pg := &r.pages.Pages[index]
+	return pg.WidthPt, pg.HeightPt, nil
+}
+
 func (r *reflowRenderer) renderPage(_ context.Context, index int, opts RasterOptions) (image.Image, error) {
 	if index < 0 || index >= len(r.pages.Pages) {
 		return nil, errPageOutOfRange(index, len(r.pages.Pages))
