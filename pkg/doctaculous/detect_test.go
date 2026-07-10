@@ -69,7 +69,7 @@ func TestDetectFormatMagic(t *testing.T) {
 		{"docx named zip", gendocx.Core[0].Bytes(), "archive.zip", FormatDOCX},
 		// Unrecognized ZIPs are not documents.
 		{"plain zip", buildZip(t, "a.txt", "dir/b.txt"), "", FormatUnknown},
-		{"pptx-shaped zip", buildZip(t, "[Content_Types].xml", "ppt/presentation.xml"), "", FormatUnknown},
+		{"pptx-shaped zip", buildZip(t, "[Content_Types].xml", "ppt/presentation.xml"), "", FormatPPTX},
 		// SpreadsheetML packages classify as XLSX, at the conventional location
 		// or rels-redirected.
 		{"xlsx", genxlsx.Core[0].Bytes(), "", FormatXLSX},
