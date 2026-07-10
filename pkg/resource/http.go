@@ -59,6 +59,18 @@ func (h HTTPLoader) Load(ctx context.Context, ref string) ([]byte, string, error
 	}
 }
 
+// LoadDataURL decodes a raw data: URI — the loader-independent entry point
+// (a data: URI carries its own bytes, so resolving one must not require any
+// configured loader; the layout engine uses this for data: image sources).
+// A non-data: URL or a malformed URI returns ErrNotFound (wrapped).
+func LoadDataURL(rawURL string) ([]byte, string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "data" {
+		return nil, "", fmt.Errorf("%q: not a data URI: %w", rawURL, ErrNotFound)
+	}
+	return decodeDataURL(u)
+}
+
 // decodeDataURL decodes a data: URI per RFC 2397:
 // data:[<mediatype>][;base64],<payload>. A ;base64 payload is base64-decoded;
 // otherwise the payload is percent-decoded text. A missing media type defaults to
