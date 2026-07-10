@@ -49,7 +49,7 @@ func OpenDOCX(path string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	return docxDocument(d)
+	return docxDocument(context.Background(), d)
 }
 
 // OpenDOCXBytes parses a .docx from an in-memory byte slice and lays it out.
@@ -58,19 +58,18 @@ func OpenDOCXBytes(data []byte) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	return docxDocument(d)
+	return docxDocument(context.Background(), d)
 }
 
 // docxDocument lowers a parsed DOCX through the style cascade into the recursive
 // cssbox tree and runs the shared CSS layout engine, wrapping the result for
 // rasterization. The DOCX section's page size and margins are carried into the CSS
 // paged engine as a synthesized @page stylesheet (docxPageSheet), reusing the exact
-// margin-inset machinery HTML uses for a real @page rule.
-func docxDocument(d *docx.Document) (*Document, error) {
+// margin-inset machinery HTML uses for a real @page rule. ctx bounds the layout.
+func docxDocument(ctx context.Context, d *docx.Document) (*Document, error) {
 	resolver := style.NewResolver(d, nil)
 	root := docxcssbox.Lower(d, resolver)
 	geom := docxcssbox.Geometry(d)
-	ctx := context.Background()
 	faces := layoutfont.NewFaceCache()
 	engine := layoutcss.New(faces, docxcssbox.MediaLoader(d), nil)
 	running := docxcssbox.LowerRunning(d, resolver)
@@ -86,6 +85,11 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	// As in htmlDocument: layout degrades on cancellation rather than erroring,
+	// so the open boundary must not hand back a silently truncated document.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("doctaculous: open docx: %w", err)
 	}
 	return &Document{r: &reflowRenderer{pages: pages, root: root, loader: docxcssbox.MediaLoader(d)}, format: FormatDOCX}, nil
 }
