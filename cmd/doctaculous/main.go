@@ -161,9 +161,10 @@ usage:
 
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, xlsx, html, md, txt, csv, tsv, http(s) URLs. Outputs: pdf, docx, md,
-txt, html, csv, tsv, png, jpg. CSV/TSV output carries the document's tables
-(prose is dropped). Converting a document to its own format is not supported.
+pdf, docx, xlsx, html, md, txt, csv, tsv, http(s) URLs. Outputs: pdf, docx,
+xlsx, md, txt, html, csv, tsv, png, jpg. CSV/TSV/XLSX output carries the
+document's tables (prose is dropped). Converting a document to its own format
+is not supported.
 
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;

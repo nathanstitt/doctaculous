@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nathanstitt/doctaculous/pkg/doctaculous"
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
 	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
@@ -253,6 +254,26 @@ func TestConvertCmdXLSXInput(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(out2); !strings.Contains(string(data), "Name,Qty") {
 		t.Errorf("xlsx->csv wrong:\n%s", data)
+	}
+}
+
+func TestConvertCmdXLSXOutput(t *testing.T) {
+	in := writeConvertInput(t, "in.html", []byte(`<html><body>
+	<table><tr><th>A</th></tr><tr><td>1</td></tr></table></body></html>`))
+	out := filepath.Join(t.TempDir(), "out.xlsx")
+	if err := convertCmd([]string{in, out}); err != nil {
+		t.Fatalf("html->xlsx: %v", err)
+	}
+	doc, err := doctaculous.OpenXLSX(out)
+	if err != nil {
+		t.Fatalf("produced xlsx does not open: %v", err)
+	}
+	var sb strings.Builder
+	if err := doc.WriteText(t.Context(), &sb, doctaculous.MarkdownOptions{}); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(sb.String(), "A") || !strings.Contains(sb.String(), "1") {
+		t.Errorf("xlsx content lost:\n%s", sb.String())
 	}
 }
 
