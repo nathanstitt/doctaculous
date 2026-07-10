@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
+	genpptx "github.com/nathanstitt/doctaculous/testdata/gen/pptx"
 	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
 )
 
@@ -30,6 +31,18 @@ func matrixXLSX() []byte {
 <row r="2"><c r="A2" t="inlineStr"><is><t>Matrix Title</t></is></c><c r="B2"><v>5</v></c></row>
 </sheetData></worksheet>`
 	return genxlsx.New().AddSheet("Data", sheet).Bytes()
+}
+
+// matrixPPTX builds a one-slide deck carrying the matrix marker text.
+func matrixPPTX() []byte {
+	slide := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+<p:cSld><p:spTree>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+<p:spPr><a:xfrm><a:off x="609600" y="342900"/><a:ext cx="10972800" cy="822960"/></a:xfrm></p:spPr>
+<p:txBody><a:bodyPr/><a:p><a:r><a:t>Matrix Title</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld></p:sld>`
+	return genpptx.New().AddSlide(slide).Bytes()
 }
 
 // matrixPDF renders matrixHTML to PDF bytes with bundled fonts, so the text is
@@ -61,6 +74,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatTSV:      []byte("Name\tQty\nMatrix Title\t5\n"),
 		FormatXLSX:     matrixXLSX(),
 		FormatRTF:      []byte(`{\rtf1\ansi {\b Matrix Title}\par An introductory paragraph.\par}`),
+		FormatPPTX:     matrixPPTX(),
 		FormatPNG:      encodeTinyImage(t, FormatPNG),
 		FormatJPEG:     encodeTinyImage(t, FormatJPEG),
 	}
@@ -76,6 +90,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatTSV:      "Matrix Title",
 		FormatXLSX:     "Matrix Title",
 		FormatRTF:      "Matrix Title",
+		FormatPPTX:     "Matrix Title",
 	}
 	// CSV/TSV output carries tables only; inputs whose fixture has no table
 	// legitimately produce empty output there.
@@ -86,11 +101,12 @@ func TestConvertMatrix(t *testing.T) {
 		FormatText:     true,
 		FormatDOCX:     true, // the paragraph fixture
 		FormatRTF:      true, // the paragraph fixture
+		FormatPPTX:     true, // the title-and-text fixture
 		FormatPNG:      true, // an image is not a table
 		FormatJPEG:     true,
 	}
 	sentinels := []error{ErrUnknownFormat, ErrUnsupportedFormat, ErrSameFormat}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPPTX, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -167,6 +183,26 @@ func TestConvertMatrix(t *testing.T) {
 			case FormatMarkdown, FormatText, FormatHTML:
 				if !strings.Contains(out.String(), wantText[from]) {
 					t.Errorf("%s: output missing %q:\n%s", name, wantText[from], out.String())
+				}
+			case FormatPPTX:
+				if !bytes.HasPrefix(out.Bytes(), []byte("PK\x03\x04")) {
+					t.Errorf("%s: output is not a ZIP package", name)
+					break
+				}
+				doc, err := OpenBytes(out.Bytes())
+				if err != nil {
+					t.Errorf("%s: reopening produced pptx: %v", name, err)
+					break
+				}
+				if doc.Format() != FormatPPTX {
+					t.Errorf("%s: produced package detected as %s", name, doc.Format())
+					break
+				}
+				var text bytes.Buffer
+				if err := doc.WriteText(ctx, &text, MarkdownOptions{}); err != nil {
+					t.Errorf("%s: reading produced pptx: %v", name, err)
+				} else if !strings.Contains(text.String(), wantText[from]) {
+					t.Errorf("%s: reopened pptx missing %q:\n%s", name, wantText[from], text.String())
 				}
 			case FormatRTF:
 				if !bytes.HasPrefix(out.Bytes(), []byte(`{\rtf1`)) {

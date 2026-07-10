@@ -39,6 +39,8 @@ type ConvertOptions struct {
 	XLSX XLSXOptions
 	// RTF applies when To == FormatRTF.
 	RTF RTFOptions
+	// PPTX applies when To == FormatPPTX.
+	PPTX PPTXOptions
 	// HTMLOut applies when To == FormatHTML.
 	HTMLOut HTMLWriteOptions
 	// Image applies when To == FormatPNG or FormatJPEG; Image.Page selects the
@@ -217,6 +219,12 @@ func (d *Document) Write(ctx context.Context, out io.Writer, to Format, opts Con
 			rtfOpts.Logf = opts.Logf
 		}
 		return d.WriteRTF(ctx, out, rtfOpts)
+	case FormatPPTX:
+		pptxOpts := opts.PPTX
+		if pptxOpts.Logf == nil {
+			pptxOpts.Logf = opts.Logf
+		}
+		return d.WritePPTX(ctx, out, pptxOpts)
 	case FormatHTML:
 		htmlOpts := opts.HTMLOut
 		if htmlOpts.Logf == nil {
