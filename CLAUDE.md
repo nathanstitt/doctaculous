@@ -291,15 +291,29 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   (`pkg/layout/inline` shape/break; all prior goldens byte-identical).
   `2026-07-09-markdown-text-input-design.md`.
 
+**DOCX writer** (`pkg/render/docxwrite`, `WriteDOCX`/`ConvertHTMLToDOCX`, CLI `todocx` +
+`convert ... out.docx`):
+
+- Everything → .docx (HTML/Markdown/text, and PDF via extraction) — a cssbox STRUCTURE writer
+  (boxwalk-based, like the Markdown one; not layout-faithful) emitting native Word constructs
+  chosen so our own reader round-trips them: HeadingN pStyles (+ rPr scale), direct-rPr emphasis,
+  `w:hyperlink` + External rels, Quote/CodeBlock/HorizontalRule styles (reader maps the latter two
+  to pre/hr; `w:rStyle` now parsed so CodeChar marks inline code), one-paragraph code blocks via
+  `w:br`, per-instance ordered-list numbering, deterministic OPC output. Round-trip parity matrix
+  (HTML→docx→md ≡ HTML→md) + reopen-verified units + `docxout-basic` golden. Landed with a
+  cross-cutting lowering fix: consecutive DOCX list paragraphs now group into nested list-container
+  boxes (mixed bodies no longer drop non-list content from Markdown/HTML conversion; nested lists
+  keep their depth). Tables + embedded images are the follow-up PR (content degrades to paragraphs /
+  alt text + log). `2026-07-09-docx-writer-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
 
-0. **Any-to-any conversion: DOCX output** (the conversion core and the Markdown/plain-text input
-   frontends are Done; design + sibling contract in `2026-07-09-unified-conversion-core-design.md`):
-   `pkg/render/docxwrite`, a cssbox structure writer like the Markdown one — one capability-bit
-   flip + one `Document.Write` case.
+0. **DOCX writer: tables + embedded images** (`2026-07-09-docx-writer-design.md` — the core writer
+   is Done): `w:tbl`/`gridSpan`/`vMerge` via a boxwalk occupancy grid, media parts + `wp:inline`
+   drawings, htmldoc-showcase round-trip golden.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),
