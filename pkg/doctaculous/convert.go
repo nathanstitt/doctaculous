@@ -41,6 +41,8 @@ type ConvertOptions struct {
 	RTF RTFOptions
 	// PPTX applies when To == FormatPPTX.
 	PPTX PPTXOptions
+	// EPUB applies when To == FormatEPUB.
+	EPUB EPUBOptions
 	// HTMLOut applies when To == FormatHTML.
 	HTMLOut HTMLWriteOptions
 	// Image applies when To == FormatPNG or FormatJPEG; Image.Page selects the
@@ -225,6 +227,12 @@ func (d *Document) Write(ctx context.Context, out io.Writer, to Format, opts Con
 			pptxOpts.Logf = opts.Logf
 		}
 		return d.WritePPTX(ctx, out, pptxOpts)
+	case FormatEPUB:
+		epubOpts := opts.EPUB
+		if epubOpts.Logf == nil {
+			epubOpts.Logf = opts.Logf
+		}
+		return d.WriteEPUB(ctx, out, epubOpts)
 	case FormatHTML:
 		htmlOpts := opts.HTMLOut
 		if htmlOpts.Logf == nil {
