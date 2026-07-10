@@ -23,6 +23,11 @@ func TestParseFormat(t *testing.T) {
 		{"text", FormatText},
 		{"txt", FormatText},
 		{"plain", FormatText},
+		{"csv", FormatCSV},
+		{"tsv", FormatTSV},
+		{"tab", FormatTSV},
+		{"xlsx", FormatXLSX},
+		{"xlsm", FormatXLSX},
 		{"png", FormatPNG},
 		{"jpeg", FormatJPEG},
 		{"jpg", FormatJPEG},
@@ -61,6 +66,11 @@ func TestFormatFromPath(t *testing.T) {
 		{"notes.markdown", FormatMarkdown},
 		{"notes.txt", FormatText},
 		{"notes.text", FormatText},
+		{"data.csv", FormatCSV},
+		{"data.tsv", FormatTSV},
+		{"data.tab", FormatTSV},
+		{"book.xlsx", FormatXLSX},
+		{"book.xlsm", FormatXLSX},
 		{"img.png", FormatPNG},
 		{"img.jpg", FormatJPEG},
 		{"img.jpeg", FormatJPEG},
@@ -87,6 +97,9 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatHTML:     true,
 		FormatMarkdown: true,
 		FormatText:     true,
+		FormatCSV:      true,
+		FormatTSV:      true,
+		// FormatXLSX flips true when its reader lands.
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,
@@ -94,10 +107,13 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatHTML:     true,
 		FormatMarkdown: true,
 		FormatText:     true,
-		FormatPNG:      true,
-		FormatJPEG:     true,
+		FormatCSV:      true,
+		FormatTSV:      true,
+		// FormatXLSX flips true when its writer lands.
+		FormatPNG:  true,
+		FormatJPEG: true,
 	}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {

@@ -26,6 +26,13 @@ const (
 	FormatMarkdown Format = "markdown"
 	// FormatText is plain text.
 	FormatText Format = "text"
+	// FormatCSV is comma-separated values (one table per document, or the
+	// document's tables on output).
+	FormatCSV Format = "csv"
+	// FormatTSV is tab-separated values.
+	FormatTSV Format = "tsv"
+	// FormatXLSX is a SpreadsheetML (.xlsx) workbook.
+	FormatXLSX Format = "xlsx"
 	// FormatPNG is a PNG image (a rasterized page).
 	FormatPNG Format = "png"
 	// FormatJPEG is a JPEG image (a rasterized page).
@@ -57,6 +64,9 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatHTML:     {input: true, output: true},
 	FormatMarkdown: {input: true, output: true},
 	FormatText:     {input: true, output: true},
+	FormatCSV:      {input: true, output: true},
+	FormatTSV:      {input: true, output: true},
+	FormatXLSX:     {input: false, output: false}, // input flips with the reader PR, output with the writer PR
 	FormatPNG:      {input: false, output: true},
 	FormatJPEG:     {input: false, output: true},
 }
@@ -110,6 +120,12 @@ func ParseFormat(s string) (Format, error) {
 		return FormatMarkdown, nil
 	case "text", "txt", "plain":
 		return FormatText, nil
+	case "csv":
+		return FormatCSV, nil
+	case "tsv", "tab":
+		return FormatTSV, nil
+	case "xlsx", "xlsm":
+		return FormatXLSX, nil
 	case "png":
 		return FormatPNG, nil
 	case "jpeg", "jpg":
@@ -135,6 +151,12 @@ func FormatFromPath(path string) Format {
 		return FormatMarkdown
 	case ".txt", ".text":
 		return FormatText
+	case ".csv":
+		return FormatCSV
+	case ".tsv", ".tab":
+		return FormatTSV
+	case ".xlsx", ".xlsm":
+		return FormatXLSX
 	case ".png":
 		return FormatPNG
 	case ".jpg", ".jpeg":
