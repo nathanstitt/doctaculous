@@ -43,6 +43,13 @@ func Break(glyphs []Glyph, maxWidthPt, firstWidthPt float64) []Line {
 
 	for _, g := range glyphs {
 		if g.Break {
+			if len(cur) == 0 {
+				// An empty forced line (consecutive hard breaks): keep the break glyph
+				// itself on the line. It draws nothing (no outline, zero advance) but
+				// carries its run's font metrics, giving the blank line a CSS strut
+				// height rather than a zero-height collapse.
+				cur = append(cur, g)
+			}
 			emit()
 			continue
 		}
@@ -106,6 +113,11 @@ func BreakNextWrap(glyphs []Glyph, widthPt float64, wrap bool) (line, rest []Gly
 		// No width breaking: consume up to (and through) the first hard break, else all.
 		for i := 0; i < len(glyphs); i++ {
 			if glyphs[i].Break {
+				if i == 0 {
+					// Empty forced line: keep the metrics-carrying break glyph so the
+					// blank line gets a strut height (see Break).
+					return glyphs[0:1], glyphs[1:]
+				}
 				return glyphs[:i], glyphs[i+1:]
 			}
 		}
@@ -118,6 +130,11 @@ func BreakNextWrap(glyphs []Glyph, widthPt float64, wrap bool) (line, rest []Gly
 	for i := 0; i < len(glyphs); i++ {
 		g := glyphs[i]
 		if g.Break {
+			if i == 0 {
+				// Empty forced line: keep the metrics-carrying break glyph so the blank
+				// line gets a strut height (see Break).
+				return glyphs[0:1], glyphs[1:]
+			}
 			// Forced break: line is everything before the break glyph; the break glyph
 			// itself is consumed (not carried to the next line).
 			return glyphs[:i], glyphs[i+1:]

@@ -171,7 +171,11 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 			switch {
 			case rn == '\n' && preserveNL:
 				// A preserved newline becomes a hard break and re-bases the tab column.
-				out = append(out, Glyph{Break: true})
+				// The break glyph carries the run's font metrics so an empty forced line
+				// (a blank line in pre/pre-wrap/pre-line) gets a CSS strut height — see
+				// the empty-forced-line rule in Break/BreakNextWrap — instead of
+				// collapsing to zero height.
+				out = append(out, Glyph{Break: true, SizePt: r.SizePt, AscentPt: base.AscentPt, DescentPt: base.DescentPt, LineGapPt: base.LineGapPt})
 				lineCol = 0
 			case rn == '\t' && preserveNL:
 				// A preserved tab advances to the next tab stop from the current column.
