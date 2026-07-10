@@ -8,6 +8,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
+	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
 )
 
 const convertTestHTML = `<!DOCTYPE html><html><body>
@@ -229,6 +230,29 @@ func TestRunInfersConvertForCSVOutput(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(out); string(data) != "x\n" {
 		t.Errorf("inferred csv output = %q", data)
+	}
+}
+
+func TestConvertCmdXLSXInput(t *testing.T) {
+	in := writeConvertInput(t, "book.xlsx", genxlsx.Core[0].Bytes())
+	out := filepath.Join(t.TempDir(), "out.md")
+	if err := convertCmd([]string{in, out}); err != nil {
+		t.Fatalf("xlsx->md: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	for _, want := range []string{"Name", "42.5", "inline text"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("xlsx->md missing %q:\n%s", want, data)
+		}
+	}
+	// Content detection works without the extension.
+	inNoExt := writeConvertInput(t, "mystery-book", genxlsx.Core[0].Bytes())
+	out2 := filepath.Join(t.TempDir(), "out2.csv")
+	if err := convertCmd([]string{inNoExt, out2}); err != nil {
+		t.Fatalf("extension-less xlsx->csv: %v", err)
+	}
+	if data, _ := os.ReadFile(out2); !strings.Contains(string(data), "Name,Qty") {
+		t.Errorf("xlsx->csv wrong:\n%s", data)
 	}
 }
 
