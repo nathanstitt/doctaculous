@@ -8,7 +8,8 @@ func reorderArgs(args []string, valueFlags map[string]bool) []string {
 	var flags, positional []string
 	for i := 0; i < len(args); i++ { //nolint:intrange // index i is mutated inside the loop
 		a := args[i]
-		if len(a) > 0 && a[0] == '-' {
+		// A bare "-" is the conventional stdout marker, not a flag.
+		if len(a) > 1 && a[0] == '-' {
 			flags = append(flags, a)
 			if valueFlags[a] && i+1 < len(args) {
 				flags = append(flags, args[i+1])

@@ -39,7 +39,7 @@ func tohtmlCmd(args []string) error {
 		return err
 	}
 
-	doc, err := openConvertibleDocument(input, *bundledFonts)
+	doc, err := openInput(input, doctaculous.FormatUnknown, "", *bundledFonts, false)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
