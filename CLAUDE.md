@@ -278,16 +278,28 @@ bullet's design doc is in `docs/superpowers/specs/`:
   case in `openDetected`/`Write` — see the sibling contract in
   `2026-07-09-unified-conversion-core-design.md`.
 
+**Markdown + plain-text input** (`pkg/markdown` via goldmark (MIT, pure Go, zero transitive
+deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
+
+- `.md` (CommonMark + GFM: tables, strikethrough, task lists, autolinks, raw-HTML
+  passthrough) and `.txt` (escaped `<pre>` + `pre-wrap`; hard line breaks preserved, long
+  lines soft-wrap, .txt→.md is a lossless fenced block) open through the HTML pipeline —
+  `OpenMarkdown*`/`OpenText*`, every `HTMLOption` applies, md→md round-trips are a fixed
+  point. Detection is extension-only (no content magic; the hint step outranks HTML
+  sniffing by design). Landed with a cross-cutting inline-core fix: empty forced lines
+  (blank lines in pre/pre-wrap/pre-line) now get a CSS strut height instead of collapsing
+  (`pkg/layout/inline` shape/break; all prior goldens byte-identical).
+  `2026-07-09-markdown-text-input-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
 
-0. **Any-to-any conversion siblings** (the conversion core is Done; design + sibling contract in
-   `2026-07-09-unified-conversion-core-design.md`): **Markdown input** (goldmark → HTML pipeline),
-   **plain-text input** (`<pre>` wrap → HTML pipeline), and **DOCX output** (`pkg/render/docxwrite`,
-   a cssbox structure writer like the Markdown one). Each is one capability-bit flip + one switch
-   case, in its own PR.
+0. **Any-to-any conversion: DOCX output** (the conversion core and the Markdown/plain-text input
+   frontends are Done; design + sibling contract in `2026-07-09-unified-conversion-core-design.md`):
+   `pkg/render/docxwrite`, a cssbox structure writer like the Markdown one — one capability-bit
+   flip + one `Document.Write` case.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),
