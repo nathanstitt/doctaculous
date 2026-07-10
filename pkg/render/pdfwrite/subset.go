@@ -3,7 +3,8 @@ package pdfwrite
 import (
 	"encoding/binary"
 	"fmt"
-	"sort"
+
+	"github.com/nathanstitt/doctaculous/pkg/font"
 )
 
 // subsetTrueType returns an SFNT containing only the glyph programs for keep (plus
@@ -13,7 +14,7 @@ import (
 // data is not a parseable glyf-flavored SFNT (the caller then embeds the whole
 // program).
 func subsetTrueType(data []byte, keep []uint16) ([]byte, error) {
-	tables, flavor, err := parseSFNTTables(data)
+	tables, flavor, err := font.ParseSFNTTables(data)
 	if err != nil {
 		return nil, err
 	}
@@ -82,31 +83,7 @@ func subsetTrueType(data []byte, keep []uint16) ([]byte, error) {
 	tables["glyf"] = newGlyf
 	tables["loca"] = encodeLoca(newLoca, longLoca)
 
-	return buildSFNTBytes(flavor, tables), nil
-}
-
-// parseSFNTTables reads the offset table and table directory into a tag->bytes map.
-func parseSFNTTables(data []byte) (map[string][]byte, uint32, error) {
-	if len(data) < 12 {
-		return nil, 0, fmt.Errorf("pdfwrite: subset: short sfnt")
-	}
-	flavor := binary.BigEndian.Uint32(data[0:4])
-	numTables := int(binary.BigEndian.Uint16(data[4:6]))
-	tables := make(map[string][]byte, numTables)
-	for i := 0; i < numTables; i++ {
-		rec := 12 + 16*i
-		if rec+16 > len(data) {
-			return nil, 0, fmt.Errorf("pdfwrite: subset: truncated table directory")
-		}
-		tag := string(data[rec : rec+4])
-		off := int(binary.BigEndian.Uint32(data[rec+8 : rec+12]))
-		length := int(binary.BigEndian.Uint32(data[rec+12 : rec+16]))
-		if off < 0 || length < 0 || off+length > len(data) {
-			return nil, 0, fmt.Errorf("pdfwrite: subset: table %q out of range", tag)
-		}
-		tables[tag] = data[off : off+length]
-	}
-	return tables, flavor, nil
+	return font.BuildSFNT(flavor, tables), nil
 }
 
 // parseLoca decodes the loca table into numGlyphs+1 glyf offsets.
@@ -195,66 +172,4 @@ func compositeComponents(glyf []byte, loca []uint32, g int) []int {
 		}
 	}
 	return comps
-}
-
-// buildSFNTBytes reassembles an sfnt from a tag->bytes table map: offset table,
-// tag-sorted directory with offsets/checksums, and 4-byte-aligned data. It mirrors
-// pkg/font's internal builder (kept local so the subsetter is self-contained).
-func buildSFNTBytes(flavor uint32, tables map[string][]byte) []byte {
-	tags := make([]string, 0, len(tables))
-	for tag := range tables {
-		tags = append(tags, tag)
-	}
-	sort.Strings(tags)
-
-	n := len(tags)
-	pow2, exp := 1, 0
-	for pow2*2 <= n {
-		pow2 *= 2
-		exp++
-	}
-	searchRange := uint16(pow2 * 16)
-	entrySelector := uint16(exp)
-	rangeShift := uint16(n*16) - searchRange
-
-	headerLen := 12 + 16*n
-	offset := headerLen
-	offsets := make(map[string]int, n)
-	for _, tag := range tags {
-		offsets[tag] = offset
-		offset += len(tables[tag])
-		offset = (offset + 3) &^ 3
-	}
-	total := offset
-
-	buf := make([]byte, total)
-	binary.BigEndian.PutUint32(buf[0:], flavor)
-	binary.BigEndian.PutUint16(buf[4:], uint16(n))
-	binary.BigEndian.PutUint16(buf[6:], searchRange)
-	binary.BigEndian.PutUint16(buf[8:], entrySelector)
-	binary.BigEndian.PutUint16(buf[10:], rangeShift)
-	for i, tag := range tags {
-		rec := 12 + 16*i
-		copy(buf[rec:rec+4], tag)
-		binary.BigEndian.PutUint32(buf[rec+4:], sfntTableChecksum(tables[tag]))
-		binary.BigEndian.PutUint32(buf[rec+8:], uint32(offsets[tag]))
-		binary.BigEndian.PutUint32(buf[rec+12:], uint32(len(tables[tag])))
-		copy(buf[offsets[tag]:], tables[tag])
-	}
-	return buf
-}
-
-// sfntTableChecksum is the OpenType per-table checksum (sum of big-endian 32-bit
-// words, zero-padded to 4 bytes).
-func sfntTableChecksum(b []byte) uint32 {
-	var sum uint32
-	for i := 0; i+4 <= len(b); i += 4 {
-		sum += binary.BigEndian.Uint32(b[i:])
-	}
-	if rem := len(b) % 4; rem != 0 {
-		var tail [4]byte
-		copy(tail[:], b[len(b)-rem:])
-		sum += binary.BigEndian.Uint32(tail[:])
-	}
-	return sum
 }

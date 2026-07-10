@@ -94,6 +94,19 @@ func (it *Interpreter) drawGlyphs(s []byte) {
 	}
 }
 
+// renderingMatrix returns the text-rendering matrix in force for the next glyph:
+// glyph space scaled by font size / horizontal scale / rise, through the text
+// matrix, through the CTM. drawGlyph (painting) and emitTextGlyph (extraction
+// capture) MUST use the same TRM or captured positions desync from paint.
+func (it *Interpreter) renderingMatrix() render.Matrix {
+	ts := &it.gs.text
+	return render.Matrix{
+		A: ts.fontSize * ts.hScale, B: 0,
+		C: 0, D: ts.fontSize,
+		E: 0, F: ts.rise,
+	}.Mul(ts.matrix).Mul(it.gs.ctm)
+}
+
 // drawGlyph renders one glyph's outline (if any) through the text rendering matrix
 // and CTM, honoring the PDF text render mode (Tr): 0 fill, 1 stroke, 2 fill+stroke,
 // 3 invisible, 4 fill+clip, 5 stroke+clip, 6 fill+stroke+clip, 7 clip. The paint
@@ -121,11 +134,7 @@ func (it *Interpreter) drawGlyph(g Glyph) {
 		return // mode 7 (clip-only): no paint in this slice
 	}
 	// Text rendering matrix: scale by fontSize/hScale/rise, then text matrix, CTM.
-	trm := render.Matrix{
-		A: ts.fontSize * ts.hScale, B: 0,
-		C: 0, D: ts.fontSize,
-		E: 0, F: ts.rise,
-	}.Mul(ts.matrix).Mul(it.gs.ctm)
+	trm := it.renderingMatrix()
 
 	out := transformOutline(g.Outline, trm)
 	if fill {
@@ -151,18 +160,14 @@ func (it *Interpreter) drawGlyph(g Glyph) {
 }
 
 // emitTextGlyph reports glyph g to the text sink in device space. It derives the glyph
-// origin, effective font size, and advance from the same text-rendering matrix drawGlyph
-// uses to place the outline, so a captured glyph sits exactly where it is painted. The
-// origin is the pen position (0,0 in text space) mapped through the TRM; the effective
-// size and advance are the lengths of the size and advance vectors mapped through the
-// TRM's linear part, so page scaling and non-uniform CTMs are honored.
+// origin, effective font size, and advance from renderingMatrix, the same TRM drawGlyph
+// paints with, so a captured glyph sits exactly where it is painted. The origin is the
+// pen position (0,0 in text space) mapped through the TRM; the effective size and
+// advance are the lengths of the size and advance vectors mapped through the TRM's
+// linear part, so page scaling and non-uniform CTMs are honored.
 func (it *Interpreter) emitTextGlyph(g Glyph) {
 	ts := &it.gs.text
-	trm := render.Matrix{
-		A: ts.fontSize * ts.hScale, B: 0,
-		C: 0, D: ts.fontSize,
-		E: 0, F: ts.rise,
-	}.Mul(ts.matrix).Mul(it.gs.ctm)
+	trm := it.renderingMatrix()
 	ox, oy := trm.Apply(0, 0)
 	// Effective size = |TRM · (0,1)| measured from the origin (the y basis length);
 	// advance = |TRM · (advEm, 0)| (the x basis scaled by the em advance).

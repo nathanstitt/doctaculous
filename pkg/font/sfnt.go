@@ -2,6 +2,7 @@ package font
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
@@ -62,6 +63,32 @@ func LoadSFNT(data []byte) (*Face, error) {
 		kind = ProgramKindCFF
 	}
 	return &Face{prog: prog, names: prog.nameToGID(), progData: sfnt, progKind: kind}, nil
+}
+
+// ParseSFNTTables reads the offset table and table directory into a tag->bytes
+// map, also returning the sfnt flavor (version tag). Table values alias data
+// (zero-copy sub-slices).
+func ParseSFNTTables(data []byte) (map[string][]byte, uint32, error) {
+	if len(data) < 12 {
+		return nil, 0, errors.New("font: sfnt: short sfnt")
+	}
+	flavor := binary.BigEndian.Uint32(data[0:4])
+	numTables := int(binary.BigEndian.Uint16(data[4:6]))
+	tables := make(map[string][]byte, numTables)
+	for i := 0; i < numTables; i++ {
+		rec := 12 + 16*i
+		if rec+16 > len(data) {
+			return nil, 0, errors.New("font: sfnt: truncated table directory")
+		}
+		tag := string(data[rec : rec+4])
+		off := int(binary.BigEndian.Uint32(data[rec+8 : rec+12]))
+		length := int(binary.BigEndian.Uint32(data[rec+12 : rec+16]))
+		if off < 0 || length < 0 || off+length > len(data) {
+			return nil, 0, fmt.Errorf("font: sfnt: table %q out of range", tag)
+		}
+		tables[tag] = data[off : off+length]
+	}
+	return tables, flavor, nil
 }
 
 // sfntHasTable reports whether the sfnt table directory in data declares a table

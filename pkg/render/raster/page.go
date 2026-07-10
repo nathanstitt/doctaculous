@@ -14,6 +14,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/filter"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
+	"github.com/nathanstitt/doctaculous/pkg/pdf/pageres"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -180,22 +181,7 @@ type pageResources struct {
 // malformed fonts (non-embedded base-14, classic Type1, non-Identity Type0
 // CMaps) return nil, so the interpreter advances the cursor without drawing.
 func (r *pageResources) Font(name string) content.GlyphSource {
-	fonts := r.doc.GetDict(r.dict["Font"])
-	if fonts == nil {
-		return nil
-	}
-	fontDict := r.doc.GetDict(fonts[pdf.Name(name)])
-	if fontDict == nil {
-		return nil
-	}
-	src, err := font.New(r.doc, fontDict, r.provider, r.logf)
-	if err != nil {
-		if r.logf != nil {
-			r.logf("raster: font %q: %v", name, err)
-		}
-		return nil
-	}
-	return src
+	return pageres.ResolveFont(r.doc, r.dict, name, r.provider, "raster", r.logf)
 }
 
 // Form resolves a form XObject by name to its decoded content stream, its scoped
@@ -204,57 +190,12 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 // the PDF spec a form without its own /Resources inherits the page's, so the
 // child pageResources falls back to this dict.
 func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool) {
-	xobjs := r.doc.GetDict(r.dict["XObject"])
-	if xobjs == nil {
+	data, childRes, m, bbox, ok := pageres.ResolveForm(r.doc, r.dict, name, "raster", r.logf)
+	if !ok {
 		return nil, nil, render.Identity, nil, false
 	}
-	s := r.doc.GetStream(xobjs[pdf.Name(name)])
-	if s == nil {
-		return nil, nil, render.Identity, nil, false
-	}
-	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Form" {
-		return nil, nil, render.Identity, nil, false
-	}
-	data, _, err := r.doc.DecodedStream(s)
-	if err != nil {
-		if r.logf != nil {
-			r.logf("raster: form %q: %v", name, err)
-		}
-		return nil, nil, render.Identity, nil, false
-	}
-
-	// A form's /Resources is optional; fall back to the page's so names resolve.
-	childDict := r.doc.GetDict(s.Dict["Resources"])
-	if childDict == nil {
-		childDict = r.dict
-	}
-	child := &pageResources{doc: r.doc, dict: childDict, logf: r.logf, provider: r.provider}
-
-	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), formBBox(r.doc, s.Dict["BBox"]), true
-}
-
-// formBBox reads a form XObject's /BBox [llx lly urx ury] into a normalized
-// [minX minY maxX maxY] rectangle, or nil when the array is absent or not 4 numbers
-// (degrade to no clip). The corners are normalized so min<=max regardless of the
-// array's corner order.
-func formBBox(doc *pdf.Document, o pdf.Object) *[4]float64 {
-	arr := doc.GetArray(o)
-	if len(arr) != 4 {
-		return nil
-	}
-	var v [4]float64
-	for i := range v {
-		v[i], _ = pdf.Number(doc.Resolve(arr[i]))
-	}
-	minX, maxX := v[0], v[2]
-	if minX > maxX {
-		minX, maxX = maxX, minX
-	}
-	minY, maxY := v[1], v[3]
-	if minY > maxY {
-		minY, maxY = maxY, minY
-	}
-	return &[4]float64{minX, minY, maxX, maxY}
+	child := &pageResources{doc: r.doc, dict: childRes, logf: r.logf, provider: r.provider}
+	return data, child, m, bbox, true
 }
 
 // ColorSpace resolves a named /ColorSpace resource that is a Separation or DeviceN space
@@ -397,9 +338,9 @@ func shadingDict(doc *pdf.Document, o pdf.Object) (pdf.Dict, bool) {
 }
 
 // patternMatrix reads a pattern's /Matrix (six numbers), returning identity when
-// absent or malformed (the PDF default). Shares the parsing of formMatrix.
+// absent or malformed (the PDF default). Shares the parsing of pageres.FormMatrix.
 func patternMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
-	return formMatrix(doc, o)
+	return pageres.FormMatrix(doc, o)
 }
 
 // ExtGState resolves a named entry of the /ExtGState resource dict, reporting the
@@ -462,24 +403,6 @@ func clampAlpha(a float64) float64 {
 	default:
 		return a
 	}
-}
-
-// formMatrix reads a form XObject's /Matrix (six numbers) into a render.Matrix,
-// returning identity when absent or malformed (the PDF default).
-func formMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
-	arr := doc.GetArray(o)
-	if len(arr) != 6 {
-		return render.Identity
-	}
-	var v [6]float64
-	for i, e := range arr {
-		f, ok := pdf.Number(doc.Resolve(e))
-		if !ok {
-			return render.Identity
-		}
-		v[i] = f
-	}
-	return render.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
 }
 
 func (r *pageResources) Image(name string, fill render.FillColor) (image.Image, bool) {
@@ -757,7 +680,7 @@ func applyDCTDecode(doc *pdf.Document, img image.Image, decodeObj pdf.Object) im
 	// remap8 maps a 0..255 sample through the [min,max] pair for component c.
 	remap8 := func(s uint8, c int) uint8 {
 		lo, hi := dec[2*c], dec[2*c+1]
-		return clamp8f(lo + float64(s)/255*(hi-lo))
+		return render.Clamp8(lo + float64(s)/255*(hi-lo))
 	}
 	b := img.Bounds()
 	switch src := img.(type) {

@@ -28,9 +28,9 @@ import (
 	"math"
 	"unicode"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
 	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/doctaculous/pkg/pdf/pageres"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -368,10 +368,9 @@ func minmax(a, b float64) (float64, float64) {
 	return b, a
 }
 
-// pageResources is the extractor's content.Resources implementation. It reuses the
-// exact resolution logic the raster backend uses (fonts, forms, colorspaces,
-// etc.) but lives here because raster.pageResources is unexported. Only Font and
-// Form matter for text/rule capture — images, shadings, and patterns paint into
+// pageResources is the extractor's content.Resources implementation. Font and
+// Form delegate to pkg/pdf/pageres, shared with the raster backend. Only those
+// two matter for text/rule capture — images, shadings, and patterns paint into
 // the nullDevice and are irrelevant to structure — so those return "unresolved",
 // which the interpreter handles gracefully (it skips the op).
 type pageResources struct {
@@ -384,55 +383,24 @@ type pageResources struct {
 // decode show-strings into runes and advances. This is the one resource the
 // extractor genuinely needs. Unsupported fonts return nil (the interpreter still
 // advances the pen, so column geometry survives even for unmappable text).
+//
+// Extraction has no font-provider wiring (it recovers text/structure, not exact
+// visual faces), so it passes a nil provider — the bundled substitutes resolve
+// non-embedded fonts.
 func (r *pageResources) Font(name string) content.GlyphSource {
-	fonts := r.doc.GetDict(r.dict["Font"])
-	if fonts == nil {
-		return nil
-	}
-	fontDict := r.doc.GetDict(fonts[pdf.Name(name)])
-	if fontDict == nil {
-		return nil
-	}
-	// Extraction has no font-provider wiring (it recovers text/structure, not exact
-	// visual faces); pass nil so the bundled substitutes resolve non-embedded fonts.
-	src, err := font.New(r.doc, fontDict, nil, r.logf)
-	if err != nil {
-		if r.logf != nil {
-			r.logf("extract: font %q: %v", name, err)
-		}
-		return nil
-	}
-	return src
+	return pageres.ResolveFont(r.doc, r.dict, name, nil, "extract", r.logf)
 }
 
 // Form resolves a form XObject to its decoded content, scoped resources, matrix,
 // and BBox, so text inside a form (a common wrapper) is captured too. A form
 // without its own /Resources inherits the page's.
 func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool) {
-	xobjs := r.doc.GetDict(r.dict["XObject"])
-	if xobjs == nil {
+	data, childRes, m, bbox, ok := pageres.ResolveForm(r.doc, r.dict, name, "extract", r.logf)
+	if !ok {
 		return nil, nil, render.Identity, nil, false
 	}
-	s := r.doc.GetStream(xobjs[pdf.Name(name)])
-	if s == nil {
-		return nil, nil, render.Identity, nil, false
-	}
-	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Form" {
-		return nil, nil, render.Identity, nil, false
-	}
-	data, _, err := r.doc.DecodedStream(s)
-	if err != nil {
-		if r.logf != nil {
-			r.logf("extract: form %q: %v", name, err)
-		}
-		return nil, nil, render.Identity, nil, false
-	}
-	childDict := r.doc.GetDict(s.Dict["Resources"])
-	if childDict == nil {
-		childDict = r.dict
-	}
-	child := &pageResources{doc: r.doc, dict: childDict, logf: r.logf}
-	return data, child, formMatrix(r.doc, s.Dict["Matrix"]), formBBox(r.doc, s.Dict["BBox"]), true
+	child := &pageResources{doc: r.doc, dict: childRes, logf: r.logf}
+	return data, child, m, bbox, true
 }
 
 // Image reports "not an image" — the extractor discards raster content.
@@ -459,37 +427,3 @@ func (r *pageResources) ExtGState(string) (content.ExtGStateParams, bool) {
 // ColorSpace reports "not a Separation/DeviceN space": tint transforms only affect
 // paint color, which the extractor ignores.
 func (r *pageResources) ColorSpace(string) (*content.TintTransform, bool) { return nil, false }
-
-// formMatrix reads a form XObject's /Matrix (six numbers) into a render.Matrix,
-// returning identity when absent or malformed (the PDF default).
-func formMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
-	arr := doc.GetArray(o)
-	if len(arr) != 6 {
-		return render.Identity
-	}
-	var v [6]float64
-	for i, e := range arr {
-		f, ok := pdf.Number(doc.Resolve(e))
-		if !ok {
-			return render.Identity
-		}
-		v[i] = f
-	}
-	return render.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
-}
-
-// formBBox reads a form XObject's /BBox [llx lly urx ury] into a normalized
-// [minX minY maxX maxY] rectangle, or nil when absent/malformed (degrade to no clip).
-func formBBox(doc *pdf.Document, o pdf.Object) *[4]float64 {
-	arr := doc.GetArray(o)
-	if len(arr) != 4 {
-		return nil
-	}
-	var v [4]float64
-	for i := range v {
-		v[i], _ = pdf.Number(doc.Resolve(arr[i]))
-	}
-	minX, maxX := minmax(v[0], v[2])
-	minY, maxY := minmax(v[1], v[3])
-	return &[4]float64{minX, minY, maxX, maxY}
-}
