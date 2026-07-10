@@ -462,6 +462,19 @@ document model consumed externally by tinycld/text):
   opens INSIDE its parent `<li>` (structure writers previously dropped nested items).
   `2026-07-10-pptx-output-design.md`.
 
+**EPUB output** (`pkg/render/epubwrite`, `WriteEPUB`/`ConvertHTMLToEPUB`, `convert ... out.epub`)
+— **completes the any⇄any table: all 13 formats are both inputs AND outputs**:
+
+- Deterministic EPUB 3 built ON htmlwrite (content documents ARE XHTML — a new byte-identical
+  `XHTML` mode self-closes voids, a new `ImageSrc` hook rewrites srcs during serialization):
+  stored `mimetype` first entry, container.xml, OPF (title from option → first `<h1>` →
+  "Document"; fixed dcterms:modified), `nav.xhtml` TOC, chapter split at `<h1>` (heading-less
+  → one chapter), images as deduped manifest items via the loader seam (data: URIs stay
+  inline and round-trip verbatim). Pinned by the STRICT parity bar — 17-case
+  html→epub→md ≡ html→md exact equality — plus package-shape pins (stored-mimetype-first,
+  nav links, chapters ⇒ pages), md→epub→md loop, `epubout-basic` golden; EPUB joins the
+  convert matrix as input AND output. `2026-07-10-epub-output-design.md`.
+
 **PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx ...`):
 
 - Hand-rolled PresentationML reader: visible slides' shape trees (text frames with
