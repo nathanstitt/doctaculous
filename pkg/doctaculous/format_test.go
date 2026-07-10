@@ -90,12 +90,12 @@ func TestCanConvertMatrix(t *testing.T) {
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,
+		FormatDOCX:     true,
 		FormatHTML:     true,
 		FormatMarkdown: true,
 		FormatText:     true,
 		FormatPNG:      true,
 		FormatJPEG:     true,
-		// FormatDOCX flips true when the DOCX writer lands.
 	}
 	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatPNG, FormatJPEG}
 
