@@ -274,7 +274,10 @@ func detectStream(lines []line) *table {
 		filled := 0
 		for _, w := range l.words {
 			cx := (w.x0 + w.x1) / 2
-			ci := columnIndex(bounds, cx)
+			// bucket cx into the column whose boundary interval contains it —
+			// SearchFloat64s returns the insertion index (column i is between
+			// bounds[i-1] and bounds[i]).
+			ci := sort.SearchFloat64s(bounds, cx)
 			if row[ci].text == "" {
 				row[ci].text = w.text
 			} else {
@@ -366,13 +369,6 @@ func crossesAnyWord(lines []line, x float64) bool {
 		}
 	}
 	return false
-}
-
-// columnIndex returns the column a center x falls in, given the ascending gutter
-// boundaries (column i is between boundaries[i-1] and boundaries[i]).
-func columnIndex(boundaries []float64, x float64) int {
-	i := sort.SearchFloat64s(boundaries, x)
-	return i
 }
 
 // populatedColumns counts how many columns hold non-empty text in at least one row.

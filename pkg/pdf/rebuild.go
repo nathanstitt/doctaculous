@@ -26,16 +26,12 @@ func (d *Document) rebuildXref() error {
 			i = pos + 3
 			continue
 		}
-		// readObjHeaderBackward and objHeaderStart expect the offset of the byte
-		// just past the header's trailing whitespace, i.e. the 'o' position works
-		// because they first skip whitespace backward.
-		num, gen, ok := readObjHeaderBackward(data, pos)
+		// readObjHeaderBackward expects the offset of the byte just past the
+		// header's trailing whitespace, i.e. the 'o' position works because it
+		// first skips whitespace backward.
+		num, _, start, ok := readObjHeaderBackward(data, pos)
 		if ok {
-			start := objHeaderStart(data, pos)
-			if start >= 0 {
-				d.xref[num] = xrefEntry{offset: int64(start)}
-				_ = gen
-			}
+			d.xref[num] = xrefEntry{offset: int64(start)}
 		}
 		i = pos + 3
 	}
@@ -75,8 +71,9 @@ func (d *Document) findTrailerForRebuild() error {
 	return fmt.Errorf("pdf: no trailer or catalog found during rebuild")
 }
 
-// readObjHeaderBackward reads "N G" immediately before the " obj" at objPos.
-func readObjHeaderBackward(data []byte, objPos int) (num, gen int, ok bool) {
+// readObjHeaderBackward reads "N G" immediately before the " obj" at objPos,
+// also returning the byte offset where the object number starts.
+func readObjHeaderBackward(data []byte, objPos int) (num, gen, start int, ok bool) {
 	j := objPos
 	// skip spaces before "obj"
 	for j > 0 && isWhitespace(data[j-1]) {
@@ -88,7 +85,7 @@ func readObjHeaderBackward(data []byte, objPos int) (num, gen int, ok bool) {
 	}
 	genStart := j
 	if genStart == genEnd {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	for j > 0 && isWhitespace(data[j-1]) {
 		j--
@@ -99,31 +96,12 @@ func readObjHeaderBackward(data []byte, objPos int) (num, gen int, ok bool) {
 	}
 	numStart := j
 	if numStart == numEnd {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	num, err1 := strconv.Atoi(string(data[numStart:numEnd]))
 	gen, err2 := strconv.Atoi(string(data[genStart:genEnd]))
 	if err1 != nil || err2 != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
-	return num, gen, true
-}
-
-// objHeaderStart returns the byte offset of the object number that precedes the
-// " obj" at objPos.
-func objHeaderStart(data []byte, objPos int) int {
-	j := objPos
-	for j > 0 && isWhitespace(data[j-1]) {
-		j--
-	}
-	for j > 0 && data[j-1] >= '0' && data[j-1] <= '9' { // generation
-		j--
-	}
-	for j > 0 && isWhitespace(data[j-1]) {
-		j--
-	}
-	for j > 0 && data[j-1] >= '0' && data[j-1] <= '9' { // number
-		j--
-	}
-	return j
+	return num, gen, numStart, true
 }

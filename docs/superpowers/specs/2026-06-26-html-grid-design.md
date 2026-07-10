@@ -100,7 +100,7 @@ Grid touches these places, in dependency order:
 3. **`pkg/layout/css/gridfix.go`** (new) — the anonymous-grid-item fixup: wrap contiguous in-flow inline
    runs/text inside a grid container as anonymous block-level grid items; blockify inline-level child boxes
    (CSS Grid §6). Structurally modeled on `flexfix.go`. Called from `Build` right after `fixupFlex(root)`
-   (`build.go:65`).
+   (`build.go:65`) (flexfix.go and gridfix.go have since been merged into itemfix.go's fixupFlexGrid).
 4. **`pkg/layout/css/grid.go`** (new) — `layoutGrid(...)`, registered as `case cssbox.GridFC` in `block.go`'s
    FC switch (replacing the `default` block-fallback for grid). Contains the six-phase algorithm + the pure
    `resolveTrackSizes`. Reuses `measure.go` (min/max-content) and `e.layoutBlock` (item contents → BFC).

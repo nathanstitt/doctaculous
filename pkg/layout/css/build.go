@@ -110,8 +110,7 @@ func finalizeBoxTree(b *cssbox.Box) {
 	resolveCounters(b) // list-item markers + CSS counter()/counters() content (counters.go)
 	normalize(b)       // anonymous-box fixups + whitespace handling (anon.go)
 	fixupTables(b)     // anonymous TABLE-box fixups (CSS 17.2.1, tablefix.go)
-	fixupFlex(b)       // anonymous FLEX-item fixups (CSS Flexbox 4, flexfix.go)
-	fixupGrid(b)       // anonymous GRID-item fixups (CSS Grid §6, gridfix.go)
+	fixupFlexGrid(b)   // anonymous FLEX/GRID-item fixups (CSS Flexbox §4 / Grid §6, itemfix.go)
 }
 
 // assembleSheets returns the origin-ordered sheets AND the aggregated @font-face and

@@ -88,8 +88,8 @@ func normalize(b *cssbox.Box) {
 	// reconcile even though it is inline-level OUTERLY (its parent's FC partitioning,
 	// handled by the per-child outer-level checks, is a separate question).
 	// A flex/grid/table container does NOT wrap its inline children into anonymous
-	// blocks here: its items are created by the format-specific fixups (fixupFlex /
-	// fixupGrid / fixupTables), which coalesce inline runs into anonymous FLEX/GRID
+	// blocks here: its items are created by the format-specific fixups (fixupFlexGrid /
+	// fixupTables), which coalesce inline runs into anonymous FLEX/GRID
 	// items and keep block/replaced children as their own items. Running the generic
 	// block-level wrap first would coalesce a row's label span AND its adjacent control
 	// into one anonymous block, corrupting the item-to-cell mapping. (handleWhitespace

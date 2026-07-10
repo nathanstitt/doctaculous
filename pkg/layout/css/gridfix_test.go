@@ -15,7 +15,7 @@ func gridContainer(children ...*cssbox.Box) *cssbox.Box {
 func TestGridFixupWrapsBareText(t *testing.T) {
 	txt := &cssbox.Box{Kind: cssbox.BoxText, Text: "hello"}
 	gc := gridContainer(txt)
-	fixupGrid(gc)
+	fixupFlexGrid(gc)
 	if len(gc.Children) != 1 {
 		t.Fatalf("want 1 child, got %d", len(gc.Children))
 	}
@@ -32,7 +32,7 @@ func TestGridFixupBlockifiesInlineChild(t *testing.T) {
 	span := &cssbox.Box{Kind: cssbox.BoxInline, Display: cssbox.DisplayInline,
 		Formatting: cssbox.InlineFC, Children: []*cssbox.Box{{Kind: cssbox.BoxText, Text: "x"}}}
 	gc := gridContainer(span)
-	fixupGrid(gc)
+	fixupFlexGrid(gc)
 	if len(gc.Children) != 1 {
 		t.Fatalf("want 1 child, got %d", len(gc.Children))
 	}
@@ -46,7 +46,7 @@ func TestGridFixupDropsWhitespaceBetweenBlocks(t *testing.T) {
 	ws := &cssbox.Box{Kind: cssbox.BoxText, Text: "   "}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}
 	gc := gridContainer(a, ws, b)
-	fixupGrid(gc)
+	fixupFlexGrid(gc)
 	if len(gc.Children) != 2 {
 		t.Fatalf("whitespace between block items should be dropped; want 2 children, got %d", len(gc.Children))
 	}
@@ -56,7 +56,7 @@ func TestGridFixupLeavesBlockChildren(t *testing.T) {
 	a := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}
 	b := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC}
 	gc := gridContainer(a, b)
-	fixupGrid(gc)
+	fixupFlexGrid(gc)
 	if len(gc.Children) != 2 || gc.Children[0] != a || gc.Children[1] != b {
 		t.Errorf("block children should pass through unchanged")
 	}
@@ -68,7 +68,7 @@ func TestGridFixupInlineGridContainer(t *testing.T) {
 	txt := &cssbox.Box{Kind: cssbox.BoxText, Text: "hi"}
 	gc := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayInlineGrid,
 		Formatting: cssbox.GridFC, Style: gcss.ComputedStyle{}, Children: []*cssbox.Box{txt}}
-	fixupGrid(gc)
+	fixupFlexGrid(gc)
 	if len(gc.Children) != 1 || gc.Children[0].Kind != cssbox.BoxAnonGridItem {
 		t.Fatalf("inline-grid should wrap bare text into a BoxAnonGridItem; got %d children", len(gc.Children))
 	}

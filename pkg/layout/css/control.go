@@ -147,23 +147,23 @@ func (e *Engine) controlIntrinsicSize(ctx context.Context, b *cssbox.Box) (w, h 
 		labelW := e.textWidth(b, buttonLabel(b))
 		w = labelW + 2*ctrlBtnPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinButtonW), max2(h, ctrlMinFieldH)
+		return max(w, ctrlMinButtonW), max(h, ctrlMinFieldH)
 	case cssbox.CtrlTextarea:
 		cols := attrIntOr(b, "cols", 20)
 		rows := attrIntOr(b, "rows", 2)
 		w = float64(cols)*ch + 2*ctrlPadX + 2*ctrlBorder
 		h = float64(rows)*line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinTextareaW), max2(h, ctrlMinTextareaH)
+		return max(w, ctrlMinTextareaW), max(h, ctrlMinTextareaH)
 	case cssbox.CtrlSelect:
 		textW := e.textWidth(b, b.Replaced.Text)
 		w = textW + ctrlSelectTri + 2*ctrlPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinTextW), max2(h, ctrlMinFieldH)
+		return max(w, ctrlMinTextW), max(h, ctrlMinFieldH)
 	default: // CtrlText, CtrlPassword
 		size := attrIntOr(b, "size", 20)
 		w = float64(size)*ch + 2*ctrlPadX + 2*ctrlBorder
 		h = line + 2*ctrlPadY + 2*ctrlBorder
-		return max2(w, ctrlMinTextW), max2(h, ctrlMinFieldH)
+		return max(w, ctrlMinTextW), max(h, ctrlMinFieldH)
 	}
 }
 
@@ -229,13 +229,6 @@ func attrIntOr(b *cssbox.Box, key string, def int) int {
 		}
 	}
 	return def
-}
-
-func max2(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // ControlContent is a form control's paint payload carried on a Fragment, painted

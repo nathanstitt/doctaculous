@@ -1306,29 +1306,10 @@ func shiftFragments(frags []*Fragment, dy float64) {
 	}
 }
 
-// shiftFragment translates one fragment and its descendants (children and inline
-// line baselines) by dy. Block children were positioned in page-space X already, so
-// only Y moves. Floats are recursed separately from Children because a nested BFC's
-// floats live in Floats (not Children) and must ride any repositioning of the BFC subtree.
-func shiftFragment(f *Fragment, dy float64) {
-	f.Y += dy
-	for li := range f.Lines {
-		f.Lines[li].BaselineY += dy
-	}
-	if f.Image != nil {
-		f.Image.CY += dy
-	}
-	if f.Control != nil {
-		f.Control.CY += dy
-	}
-	for _, c := range f.Children {
-		shiftFragment(c, dy)
-	}
-	for _, fl := range f.Floats {
-		shiftFragment(fl, dy)
-	}
-	shiftFragmentExtras(f, 0, dy)
-}
+// shiftFragment translates one fragment and its descendants by dy. It is
+// translateFragment restricted to the block-flow case: block children were
+// positioned in page-space X already, so only Y moves.
+func shiftFragment(f *Fragment, dy float64) { translateFragment(f, 0, dy) }
 
 // shiftFragmentSelf translates ONLY a fragment's own border box (Y — its border edges and
 // background derive from Y) by dy, WITHOUT recursing Children, Floats, or Positioned and
@@ -1346,10 +1327,10 @@ func shiftFragmentSelf(f *Fragment, dy float64) {
 // reachable through Children/Floats/Lines/Image — by (dx,dy): the box's own clip
 // rectangle (ClipRect), its border-collapse grid strips (Collapsed), each positioned
 // descendant's clip-escape chain (PositionedInfo[].ClipChain), and its out-of-flow
-// positioned descendants (the abs/fixed entries of Positioned). It is shared by
-// shiftFragment (dx==0) and translateFragment (dx may be non-zero) so the two stay in
-// lock-step; both call it AFTER recursing Children/Floats so a Positioned entry that is
-// abs/fixed (out of flow, NOT aliased by any Children entry) is moved exactly once.
+// positioned descendants (the abs/fixed entries of Positioned). shiftFragment delegates
+// to translateFragment (dx==0), so this is called from translateFragment alone; it is
+// called AFTER recursing Children/Floats so a Positioned entry that is abs/fixed (out of
+// flow, NOT aliased by any Children entry) is moved exactly once.
 //
 // A position:relative entry of Positioned is deliberately SKIPPED here: a relative box
 // stays in flow, so the SAME *Fragment pointer is also a Children entry and already moved
@@ -1386,11 +1367,7 @@ func shiftFragmentExtras(f *Fragment, dx, dy float64) {
 		if isRelativeFragment(p) {
 			continue // in flow → also a Children entry → already shifted there
 		}
-		if dx != 0 {
-			translateFragment(p, dx, dy)
-		} else {
-			shiftFragment(p, dy)
-		}
+		translateFragment(p, dx, dy)
 	}
 }
 

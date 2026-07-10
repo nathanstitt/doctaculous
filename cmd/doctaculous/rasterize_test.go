@@ -82,7 +82,7 @@ func TestOutputPath(t *testing.T) {
 
 func TestReorderArgs(t *testing.T) {
 	// Input before flags should be moved to the end.
-	got := reorderArgs([]string{"in.pdf", "--out", "o.png", "--dpi", "150"})
+	got := reorderArgs([]string{"in.pdf", "--out", "o.png", "--dpi", "150"}, rasterizeValueFlags)
 	want := []string{"--out", "o.png", "--dpi", "150", "in.pdf"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("reorderArgs = %v, want %v", got, want)

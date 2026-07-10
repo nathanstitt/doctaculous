@@ -44,8 +44,8 @@ type OriginSheet struct {
 // points against a containing context. Raw, unrecognized declarations are not on
 // this struct — they are retained on the Rule for later sub-projects.
 //
-// Inherited properties (CSS) are Color, FontFamily, FontSizePt, Bold, Italic,
-// LineHeight, LineHeightMin, TextAlign, TextIndent, and WhiteSpace; inheritFrom must be kept in sync with this set.
+// Inherited properties (CSS) carry over from the parent in inheritFrom, which is
+// the single source of truth for which fields inherit.
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
@@ -405,9 +405,9 @@ func bestMatch(sels []Selector, n Node) (Specificity, bool) {
 // from the parent's computed style; everything else resets to initial.
 func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs := initialStyle()
-	// Inherited properties (CSS): keep this set in sync with the ComputedStyle
-	// doc comment. A property added to ComputedStyle but omitted here would
-	// silently reset to initial instead of inheriting.
+	// This function is the single source of truth for which fields inherit; a
+	// property added to ComputedStyle but omitted here silently resets to initial
+	// instead of inheriting.
 	cs.Color = parent.Color
 	cs.FontFamily = parent.FontFamily
 	cs.FontSizePt = parent.FontSizePt
@@ -938,11 +938,11 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.AlignContent = d.Value
 		}
 	case "place-items":
-		applyPlaceItems(cs, d.Value)
+		applyPlacePair(cs, d.Value, "align-items", "justify-items")
 	case "place-content":
-		applyPlaceContent(cs, d.Value)
+		applyPlacePair(cs, d.Value, "align-content", "justify-content")
 	case "place-self":
-		applyPlaceSelf(cs, d.Value)
+		applyPlacePair(cs, d.Value, "align-self", "justify-self")
 	case "grid-template":
 		applyGridTemplate(cs, d.Value)
 	case "grid":
@@ -1105,7 +1105,7 @@ func cleanFamilyList(val string) string {
 	parts := splitComma(val)
 	cleaned := parts[:0]
 	for _, part := range parts {
-		if part = trimQuotes(strings.TrimSpace(part)); part != "" {
+		if part = unquote(strings.TrimSpace(part)); part != "" {
 			cleaned = append(cleaned, part)
 		}
 	}
@@ -1144,13 +1144,6 @@ func WhiteSpaceFlags(ws string) (collapseSpaces, preserveNewlines, wrap bool) {
 
 // splitComma splits a comma-separated CSS value list (e.g. a font-family list).
 func splitComma(s string) []string { return strings.Split(s, ",") }
-
-func trimQuotes(s string) string {
-	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
 
 // parseNonNegNumber parses a unitless non-negative number (flex-grow/flex-shrink).
 // A negative or non-numeric value yields ok=false (the property keeps its prior value).

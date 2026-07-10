@@ -149,12 +149,10 @@ func splitTopLevel(s string, sep byte) []string {
 	return parts
 }
 
-// unquote strips a single matching pair of surrounding ASCII quotes.
+// unquote strips one matching pair of surrounding single or double quotes.
 func unquote(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
+	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
+		return s[1 : len(s)-1]
 	}
 	return s
 }

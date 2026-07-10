@@ -36,7 +36,7 @@ func topdfCmd(args []string) error {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous topdf <input.html|.docx|URL> --out file.pdf [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderTopdfArgs(args)); err != nil {
+	if err := fs.Parse(reorderArgs(args, topdfValueFlags)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil // -h/--help printed usage; not an error
 		}
@@ -107,32 +107,15 @@ func openReflowDocument(input, pageSize string, bundledFonts bool) (*doctaculous
 	}
 }
 
-// reorderTopdfArgs moves non-flag arguments after flags so Go's flag package (which
-// stops at the first non-flag token) sees every flag, letting the input appear
-// before flags ("topdf in.html --out o.pdf").
-func reorderTopdfArgs(args []string) []string {
-	valueFlags := map[string]bool{
-		"-in": true, "--in": true,
-		"-out": true, "--out": true,
-		"-page-width": true, "--page-width": true,
-		"-page-height": true, "--page-height": true,
-		"-margin": true, "--margin": true,
-		"-title": true, "--title": true,
-		"-workers": true, "--workers": true,
-		"-page-size": true, "--page-size": true,
-	}
-	var flags, positional []string
-	for i := 0; i < len(args); i++ { //nolint:intrange // index i is mutated inside the loop
-		a := args[i]
-		if len(a) > 0 && a[0] == '-' {
-			flags = append(flags, a)
-			if valueFlags[a] && i+1 < len(args) {
-				flags = append(flags, args[i+1])
-				i++
-			}
-			continue
-		}
-		positional = append(positional, a)
-	}
-	return append(flags, positional...)
+// topdfValueFlags lists the "topdf" flags that take their value as a separate
+// token, for reorderArgs.
+var topdfValueFlags = map[string]bool{
+	"-in": true, "--in": true,
+	"-out": true, "--out": true,
+	"-page-width": true, "--page-width": true,
+	"-page-height": true, "--page-height": true,
+	"-margin": true, "--margin": true,
+	"-title": true, "--title": true,
+	"-workers": true, "--workers": true,
+	"-page-size": true, "--page-size": true,
 }

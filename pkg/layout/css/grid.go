@@ -65,7 +65,7 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 	// content contributions (each item's min/max-content distributed to its columns).
 	colSpecs := makeTrackSpecs(colTracks, contentW, b.Style.FontSizePt)
 	colItems := contributions(ctx, e, items, areas) // column axis (width)
-	colSizes := resolveTrackSizes(colSpecs, colItems, contentW, colGap*float64(maxi(0, nCols-1)))
+	colSizes := resolveTrackSizes(colSpecs, colItems, contentW, colGap*float64(max(0, nCols-1)))
 
 	// Phase 5a: lay out each item at its column-span width; capture its natural height.
 	// Items are initially laid out at the full area width (which is correct for stretch
@@ -90,12 +90,12 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 		// space so the resolver's maximize step finds no surplus to distribute.
 		rowAvailForSize = sumRowContent(rowItems, rowGap, nRows)
 	}
-	rowSizes := resolveTrackSizes(rowSpecs, rowItems, rowAvailForSize, rowGap*float64(maxi(0, nRows-1)))
+	rowSizes := resolveTrackSizes(rowSpecs, rowItems, rowAvailForSize, rowGap*float64(max(0, nRows-1)))
 
 	// Phase 4: content-distribution alignment + track positioning.
 	// Compute leftover on each axis and apply justify-content / align-content.
-	colTotalGap := colGap * float64(maxi(0, nCols-1))
-	rowTotalGap := rowGap * float64(maxi(0, nRows-1))
+	colTotalGap := colGap * float64(max(0, nCols-1))
+	rowTotalGap := rowGap * float64(max(0, nRows-1))
 	// Leftover is clamped to 0 when the tracks overflow: per CSS Grid §12.1 a
 	// content-distribution property has no effect when the tracks plus free space
 	// exceed the available space (so center/end do NOT pull tracks negative the way
@@ -531,14 +531,6 @@ func (e *Engine) layoutGridItem(ctx context.Context, it *cssbox.Box, w float64) 
 		e.resolveAbsolute(ctx, pos, frag, w, frag.H)
 	}
 	return frag, natH
-}
-
-// maxi returns the larger of a and b (an int helper; the repo declines the max builtin).
-func maxi(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // lastSize returns the last element of sizes, or 0 when empty.
