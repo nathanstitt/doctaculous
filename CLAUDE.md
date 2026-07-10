@@ -311,10 +311,26 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   `docxout-basic`/`docxout-htmldoc-p1` goldens + the `htmldoc.docx.md` showcase round-trip golden.
   `2026-07-09-docx-writer-design.md`.
 
+**CSV/TSV input + output** (`pkg/doctaculous/csv_frontend.go`, `pkg/render/csvwrite`,
+`OpenCSV*`/`OpenTSV*`, `WriteCSV`/`WriteTSV`):
+
+- Input: stdlib `encoding/csv` (lazy quotes, ragged rows padded, BOM/CRLF) → an HTML table
+  (first row = header) through the reflow pipeline; CSV and TSV are distinct formats (csv ⇄ tsv
+  are real conversions), extension-only detection. Output: tables-only structure writer over the
+  boxwalk occupancy grid (spans duplicated — the GFM strategy; multiple tables blank-line
+  separated; prose dropped + logged, table-less documents produce empty output + a loud log) —
+  which makes **PDF → CSV table extraction** work via the existing lattice/stream recognizer
+  (pinned by test). `csv-specimen` golden. `2026-07-09-csv-tsv-io-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
+
+0. **XLSX input + output** (planned; enum/detection groundwork shipped with CSV/TSV): a hand-rolled
+   read-only `pkg/xlsx` reader (cached values, dates via numFmt, merged cells, visible sheets —
+   dep audit ruled out excelize/tealeg trees) and a `pkg/render/xlsxwrite` writer (one sheet per
+   table, native mergeCells, bold headers), each its own PR.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),

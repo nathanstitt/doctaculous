@@ -13,7 +13,8 @@ format conversions.
 The PDF pipeline (parse → interpret → rasterize) and the reflow engine (HTML and DOCX through a
 shared CSS layout engine) work end-to-end and render real-world documents faithfully. Any
 supported input converts to any supported output — inputs: PDF, DOCX, HTML, Markdown, plain
-text, http(s) URLs; outputs: PDF, DOCX, HTML, Markdown, plain text, PNG, JPEG:
+text, CSV/TSV, http(s) URLs; outputs: PDF, DOCX, HTML, Markdown, plain text, CSV/TSV (the
+document's tables — including tables recovered from PDFs), PNG, JPEG:
 
 ```sh
 doctaculous convert report.docx report.pdf
