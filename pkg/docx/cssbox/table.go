@@ -40,6 +40,12 @@ func lowerTable(tb *docx.Table, r *style.Resolver, num *docx.Numbering, rels map
 				ColSpan: span,
 				RowSpan: rowSpans[cellKey{ri, ci}],
 			}
+			// A w:tblHeader row's cells carry the bold flag on the CELL box — the
+			// signal the conversion writers' header detection reads (rendering is
+			// unaffected: run bold comes from run properties, which override).
+			if row.Props.IsHeader {
+				cellBox.Style.Bold = true
+			}
 			cellBox.Children = lowerBlocks(cell.Blocks, r, num, rels, newListCounter())
 			rowBox.Children = append(rowBox.Children, cellBox)
 		}
