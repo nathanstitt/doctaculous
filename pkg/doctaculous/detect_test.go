@@ -10,6 +10,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
+	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
 )
 
 // buildZip assembles an in-memory ZIP with the given part names (contents are
@@ -66,9 +67,14 @@ func TestDetectFormatMagic(t *testing.T) {
 		// Content beats the extension: a real PDF named .txt is a PDF.
 		{"pdf named txt", gen.TextPDF(), "report.txt", FormatPDF},
 		{"docx named zip", gendocx.Core[0].Bytes(), "archive.zip", FormatDOCX},
-		// Non-DOCX ZIPs are not documents.
+		// Unrecognized ZIPs are not documents.
 		{"plain zip", buildZip(t, "a.txt", "dir/b.txt"), "", FormatUnknown},
-		{"xlsx-shaped zip", buildZip(t, "[Content_Types].xml", "xl/workbook.xml"), "", FormatUnknown},
+		{"pptx-shaped zip", buildZip(t, "[Content_Types].xml", "ppt/presentation.xml"), "", FormatUnknown},
+		// SpreadsheetML packages classify as XLSX, at the conventional location
+		// or rels-redirected.
+		{"xlsx", genxlsx.Core[0].Bytes(), "", FormatXLSX},
+		{"xlsx-shaped zip", buildZip(t, "[Content_Types].xml", "xl/workbook.xml"), "", FormatXLSX},
+		{"opc xl zip", buildZip(t, "[Content_Types].xml", "xl/book.xml"), "", FormatXLSX},
 		// A rels-redirected OPC package: content types + word/ part, main part
 		// not at the conventional location.
 		{"opc word zip", buildZip(t, "[Content_Types].xml", "word/main.xml"), "", FormatDOCX},

@@ -52,10 +52,7 @@ func detectMagic(data []byte) Format {
 	case bytes.HasPrefix(data, []byte("\xFF\xD8\xFF")):
 		return FormatJPEG
 	case bytes.HasPrefix(data, []byte("PK\x03\x04")), bytes.HasPrefix(data, []byte("PK\x05\x06")):
-		if isDOCXArchive(data) {
-			return FormatDOCX
-		}
-		return FormatUnknown // some other ZIP (xlsx, epub, plain archive)
+		return classifyOPC(data) // DOCX, XLSX, or Unknown (epub, plain archive)
 	}
 	window := data
 	if len(window) > pdfHeaderWindow {
@@ -67,29 +64,39 @@ func detectMagic(data []byte) Format {
 	return FormatUnknown
 }
 
-// isDOCXArchive reports whether a ZIP's central directory identifies a
-// WordprocessingML package: the main document part at its conventional
-// location word/document.xml, or — tolerating a rels-redirected main part, as
-// the DOCX reader does — an OPC [Content_Types].xml alongside any word/ part.
-// Reading the central directory only touches the end of the archive, so this
-// is cheap.
-func isDOCXArchive(data []byte) bool {
+// classifyOPC identifies which Office package a ZIP's central directory holds:
+// the main part at its conventional location (word/document.xml → DOCX,
+// xl/workbook.xml → XLSX), or — tolerating a rels-redirected main part, as the
+// readers do — an OPC [Content_Types].xml alongside any word/- or xl/-prefixed
+// part. Other ZIPs (pptx, epub, plain archives) are Unknown. Reading the
+// central directory only touches the end of the archive, so this is cheap.
+func classifyOPC(data []byte) Format {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return false
+		return FormatUnknown
 	}
-	hasContentTypes, hasWordPart := false, false
+	hasContentTypes, hasWordPart, hasXLPart := false, false, false
 	for _, f := range zr.File {
 		switch {
 		case f.Name == "word/document.xml":
-			return true
+			return FormatDOCX
+		case f.Name == "xl/workbook.xml":
+			return FormatXLSX
 		case f.Name == "[Content_Types].xml":
 			hasContentTypes = true
 		case strings.HasPrefix(f.Name, "word/"):
 			hasWordPart = true
+		case strings.HasPrefix(f.Name, "xl/"):
+			hasXLPart = true
 		}
 	}
-	return hasContentTypes && hasWordPart
+	switch {
+	case hasContentTypes && hasWordPart:
+		return FormatDOCX
+	case hasContentTypes && hasXLPart:
+		return FormatXLSX
+	}
+	return FormatUnknown
 }
 
 // htmlSniffPatterns is the WHATWG MIME-sniffing §7.1 pattern table for
