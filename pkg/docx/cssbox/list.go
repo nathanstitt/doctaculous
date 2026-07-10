@@ -34,6 +34,49 @@ func (c *listCounter) next(numID, ilvl int) int {
 	return m[ilvl]
 }
 
+// lowerListRun lowers a run of consecutive numbered paragraphs into a single
+// list-container box, nesting deeper ilvl items in child containers attached
+// under the preceding item — the shape HTML box generation produces for
+// <ul>/<ol>, which the conversion writers' container/nesting detection expects.
+// Containers are layout-neutral wrappers (CSS initial values, display:block, no
+// spacing), so rendering is unchanged: items keep their own indent margins.
+func lowerListRun(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, rels map[string]docx.Relationship, ctr *listCounter) *lcssbox.Box {
+	newContainer := func() *lcssbox.Box {
+		cs := gcss.InitialStyle()
+		cs.Display = "block"
+		return &lcssbox.Box{Kind: lcssbox.BoxBlock, Display: lcssbox.DisplayBlock, Style: cs}
+	}
+	root := newContainer()
+	stack := []*lcssbox.Box{root} // stack[l] is the container receiving ilvl-l items
+	for _, blk := range blocks {
+		p := blk.Paragraph
+		lvl := p.Props.ILvl
+		if lvl < 0 {
+			lvl = 0
+		}
+		if lvl+1 < len(stack) {
+			stack = stack[:lvl+1]
+		}
+		for len(stack) <= lvl {
+			// A deeper level opens a sub-container under the last item of the
+			// current deepest container (or the container itself when the run
+			// starts mid-depth).
+			parent := stack[len(stack)-1]
+			sub := newContainer()
+			if n := len(parent.Children); n > 0 {
+				last := parent.Children[n-1]
+				last.Children = append(last.Children, sub)
+			} else {
+				parent.Children = append(parent.Children, sub)
+			}
+			stack = append(stack, sub)
+		}
+		items := lowerListParagraph(p, r, num, rels, ctr)
+		stack[lvl].Children = append(stack[lvl].Children, items...)
+	}
+	return root
+}
+
 // lowerListParagraph lowers a numbered paragraph into a DisplayListItem box with
 // a resolved marker. It reuses lowerParagraph for the item's inline content, then
 // overlays list-item display + the marker. A page break inside the paragraph

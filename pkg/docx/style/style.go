@@ -118,6 +118,10 @@ type EffectiveRun struct {
 	HasHighlight            bool
 	Caps                    bool
 	SmallCaps               bool
+	// StyleID is the run's character-style reference (w:rStyle), identity only —
+	// no formatting cascades from it (see EffectiveRun's doc). The conversion
+	// path reads it to recover run semantics (e.g. CodeChar marks inline code).
+	StyleID string
 }
 
 // EffectiveParagraph is the fully-resolved paragraph formatting.
@@ -185,6 +189,7 @@ func (r *Resolver) EffectiveRun(p docx.ParagraphProps, run docx.RunProps) Effect
 	if merged.HasSmallCaps {
 		eff.SmallCaps = merged.SmallCaps
 	}
+	eff.StyleID = merged.StyleID
 	return eff
 }
 
@@ -279,6 +284,9 @@ func mergeRun(base, over docx.RunProps) docx.RunProps {
 	}
 	if over.HasSmallCaps {
 		out.SmallCaps, out.HasSmallCaps = over.SmallCaps, true
+	}
+	if over.StyleID != "" {
+		out.StyleID = over.StyleID
 	}
 	return out
 }

@@ -829,6 +829,8 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 		} else if v, ok := wAttr(e, "hAnsi"); ok && v != "" {
 			props.Family = v
 		}
+	case "rStyle":
+		props.StyleID = wVal(e)
 	case "strike", "dstrike":
 		props.Strike = parseOnOff(wVal(e))
 		props.HasStrike = true

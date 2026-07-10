@@ -30,10 +30,15 @@ func TestLowerDecimalListNumbersIncrement(t *testing.T) {
 	d := numberedDoc()
 	root := lowerDoc(t, d)
 	body := root.Children[len(root.Children)-1]
-	if len(body.Children) != 2 {
-		t.Fatalf("body children = %d, want 2 list items", len(body.Children))
+	// Consecutive list items are grouped under one container box.
+	if len(body.Children) != 1 {
+		t.Fatalf("body children = %d, want 1 list container", len(body.Children))
 	}
-	i0, i1 := body.Children[0], body.Children[1]
+	list := body.Children[0]
+	if len(list.Children) != 2 {
+		t.Fatalf("list children = %d, want 2 list items", len(list.Children))
+	}
+	i0, i1 := list.Children[0], list.Children[1]
 	if i0.Display != lcssbox.DisplayListItem {
 		t.Fatalf("item0 Display = %v, want DisplayListItem", i0.Display)
 	}
@@ -55,7 +60,7 @@ func TestLowerBulletListMarker(t *testing.T) {
 	}
 	root := lowerDoc(t, d)
 	body := root.Children[len(root.Children)-1]
-	if got := body.Children[0].Marker.Text; got != "• " {
+	if got := body.Children[0].Children[0].Marker.Text; got != "• " {
 		t.Fatalf("bullet marker = %q, want '• '", got)
 	}
 }
@@ -72,7 +77,7 @@ func TestLowerListPrependsMarkerText(t *testing.T) {
 	}
 	root := lowerDoc(t, d)
 	body := root.Children[len(root.Children)-1]
-	item := body.Children[0]
+	item := body.Children[0].Children[0]
 	if item.Display != lcssbox.DisplayListItem {
 		t.Fatalf("item Display = %v, want DisplayListItem", item.Display)
 	}

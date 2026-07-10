@@ -130,16 +130,29 @@ func runningBox(hf *docx.HeaderFooter, r *style.Resolver, num *docx.Numbering) *
 // nil, so their links carry no Href); ctr threads list-counter state.
 func lowerBlocks(blocks []docx.Block, r *style.Resolver, num *docx.Numbering, rels map[string]docx.Relationship, ctr *listCounter) []*lcssbox.Box {
 	var out []*lcssbox.Box
-	for _, blk := range blocks {
+	for i := 0; i < len(blocks); {
+		blk := blocks[i]
 		switch {
-		case blk.Paragraph != nil:
-			if blk.Paragraph.Props.HasNum && num != nil {
-				out = append(out, lowerListParagraph(blk.Paragraph, r, num, rels, ctr)...)
-			} else {
-				out = append(out, lowerParagraph(blk.Paragraph, r, rels)...)
+		case blk.Paragraph != nil && blk.Paragraph.Props.HasNum && num != nil:
+			// A run of consecutive numbered paragraphs is one list: group it under
+			// a container box (nested by ilvl) so the conversion writers see the
+			// same shape HTML lists produce — without a container, list items are
+			// loose siblings of ordinary paragraphs, which flattens nesting and
+			// makes any mixed body misread as a single list.
+			j := i
+			for j < len(blocks) && blocks[j].Paragraph != nil && blocks[j].Paragraph.Props.HasNum {
+				j++
 			}
+			out = append(out, lowerListRun(blocks[i:j], r, num, rels, ctr))
+			i = j
+		case blk.Paragraph != nil:
+			out = append(out, lowerParagraph(blk.Paragraph, r, rels)...)
+			i++
 		case blk.Table != nil:
 			out = append(out, lowerTable(blk.Table, r, num, rels))
+			i++
+		default:
+			i++
 		}
 	}
 	return out
@@ -264,7 +277,13 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 	if er.Caps || er.SmallCaps {
 		cs.TextTransform = "uppercase" // small-caps approximated as uppercase (true small-caps needs synthesized glyphs)
 	}
-	return &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
+	box := &lcssbox.Box{Kind: lcssbox.BoxText, Text: text, Style: cs, Display: lcssbox.DisplayInline}
+	// A CodeChar character-style reference marks inline code for the conversion
+	// path (the visual identity — the monospace family — rides on direct rPr).
+	if key := strings.ToLower(strings.ReplaceAll(er.StyleID, " ", "")); key == "codechar" || key == "code" {
+		box.SemTag = "code"
+	}
+	return box
 }
 
 // footnoteMarker renders a footnote reference as a superscript number. The note
@@ -320,6 +339,11 @@ var docxHeadingStyles = map[string]string{
 	"subtitle":     "h2",
 	"quote":        "blockquote",
 	"intensequote": "blockquote",
+	// CodeBlock/HorizontalRule are the docxwrite writer's carriers for the pre and
+	// hr semantics (Word has no built-in equivalents); mapping them back closes
+	// the round trip, and a real Word doc using such style names reads sensibly.
+	"codeblock":      "pre",
+	"horizontalrule": "hr",
 }
 
 // paragraphSemantics derives a SemTag and heading level from a paragraph's style id.
