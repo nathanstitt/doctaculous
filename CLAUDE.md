@@ -383,6 +383,18 @@ document model consumed externally by tinycld/text):
   the gen corpus; `model-specimen` core fixture renders the construct→Write→reopen path into
   a golden. `2026-07-10-docx-model-writer-design.md`.
 
+**XLSX reader enrichment — calc-adoption PR 1/5** (`pkg/xlsx`):
+
+- Additive structured read surface: `Cell.Value` (typed Empty/String/Number/Bool/Date/Error;
+  dates via the shared serial logic), `Cell.Formula` (shared formulas EXPANDED per member via
+  a lexical A1 shifter — anchors fixed, literals/sheet-names opaque, "(" = function call),
+  `Cell.StyleID`/`Cell.Style` (full font/fill/alignment/border-with-diagonal/numFmt/protection
+  vocabulary; Color keeps rgb OR indexed OR theme+tint), sheet facts (visibility enum, tab
+  color, frozen panes, sparse row heights/row styles/col widths, defaults), workbook
+  `Date1904` + `DefinedNames`, 1-based coordinate helpers, complete builtin numFmt id table.
+  Display path byte-identical (Text untouched; formatter keeps its subset).
+  `2026-07-10-xlsx-reader-enrichment-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
