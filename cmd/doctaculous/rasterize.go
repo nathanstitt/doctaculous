@@ -17,15 +17,17 @@ import (
 func rasterizeCmd(args []string) error {
 	fs := flag.NewFlagSet("rasterize", flag.ContinueOnError)
 	var (
-		in       = fs.String("in", "", "input document (alternative to the positional argument)")
-		page     = fs.Int("page", 1, "1-based page number to render")
-		pages    = fs.String("pages", "", "page range, e.g. 1-3,5 or \"all\" (overrides --page)")
-		out      = fs.String("out", "", "output file or pattern (use %d for page number when rendering a range)")
-		dpi      = fs.Float64("dpi", 150, "render resolution in DPI")
-		format   = fs.String("format", "png", "output image format: png or jpg")
-		quality  = fs.Int("quality", 90, "JPEG quality 1-100 (jpg only)")
-		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
-		pageSize = fs.String("page-size", "letter", "HTML page size: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page (HTML only)")
+		in        = fs.String("in", "", "input document (alternative to the positional argument)")
+		page      = fs.Int("page", 1, "1-based page number to render")
+		pages     = fs.String("pages", "", "page range, e.g. 1-3,5 or \"all\" (overrides --page)")
+		out       = fs.String("out", "", "output file or pattern (use %d for page number when rendering a range)")
+		dpi       = fs.Float64("dpi", 150, "render resolution in DPI (with --max-width/--max-height: a resolution ceiling)")
+		maxWidth  = fs.Int("max-width", 0, "fit the render within this many pixels wide, aspect preserved (0 = off)")
+		maxHeight = fs.Int("max-height", 0, "fit the render within this many pixels tall, aspect preserved (0 = off)")
+		format    = fs.String("format", "png", "output image format: png or jpg")
+		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg only)")
+		workers   = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
+		pageSize  = fs.String("page-size", "letter", "HTML page size: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page (HTML only)")
 
 		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
@@ -52,6 +54,9 @@ func rasterizeCmd(args []string) error {
 	}
 	if *dpi <= 0 {
 		return fmt.Errorf("--dpi must be positive, got %v", *dpi)
+	}
+	if *maxWidth < 0 || *maxHeight < 0 {
+		return fmt.Errorf("--max-width/--max-height must be non-negative, got %d/%d", *maxWidth, *maxHeight)
 	}
 	if *format != "png" && *format != "jpg" && *format != "jpeg" {
 		return fmt.Errorf("unsupported --format %q (want png or jpg)", *format)
@@ -81,9 +86,35 @@ func rasterizeCmd(args []string) error {
 	imgOpts := doctaculous.ImageOptions{
 		Format:  imgFormat,
 		Quality: *quality,
-		Raster:  doctaculous.RasterOptions{DPI: *dpi, Workers: *workers, BundledFonts: *bundledFonts},
+		Raster: doctaculous.RasterOptions{
+			DPI:         fitDPI(fs, *dpi, *maxWidth, *maxHeight),
+			MaxWidthPx:  *maxWidth,
+			MaxHeightPx: *maxHeight,
+			Workers:     *workers, BundledFonts: *bundledFonts,
+		},
 	}
 	return renderPages(doc, indices, *out, imgOpts)
+}
+
+// fitDPI resolves the DPI the raster options carry when fit sizing is in play:
+// in the library, a positive DPI alongside MaxWidthPx/MaxHeightPx is a
+// resolution CEILING — so the flag's default of 150 must not silently become
+// one. An unset --dpi with a max flag means pure fit (DPI 0, the page fills
+// the box); an explicitly passed --dpi is an intentional ceiling and is kept.
+func fitDPI(fs *flag.FlagSet, dpi float64, maxWidth, maxHeight int) float64 {
+	if maxWidth <= 0 && maxHeight <= 0 {
+		return dpi
+	}
+	dpiSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "dpi" {
+			dpiSet = true
+		}
+	})
+	if dpiSet {
+		return dpi
+	}
+	return 0
 }
 
 // isHTTPURL reports whether input is an http:// or https:// URL (the CLI fetches
@@ -205,6 +236,8 @@ var rasterizeValueFlags = map[string]bool{
 	"-pages": true, "--pages": true,
 	"-out": true, "--out": true,
 	"-dpi": true, "--dpi": true,
+	"-max-width": true, "--max-width": true,
+	"-max-height": true, "--max-height": true,
 	"-format": true, "--format": true,
 	"-quality": true, "--quality": true,
 	"-workers": true, "--workers": true,
