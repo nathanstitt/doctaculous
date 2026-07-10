@@ -109,6 +109,8 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatRTF:      true,
 		FormatPPTX:     true,
 		FormatEPUB:     true,
+		FormatPNG:      true,
+		FormatJPEG:     true,
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,
@@ -245,8 +247,8 @@ func TestFormatRoles(t *testing.T) {
 	if !FormatPDF.ValidInput() || !FormatPDF.ValidOutput() {
 		t.Errorf("FormatPDF should be a valid input and output")
 	}
-	if FormatPNG.ValidInput() {
-		t.Errorf("FormatPNG should not be a valid input")
+	if !FormatPNG.ValidInput() || !FormatJPEG.ValidInput() {
+		t.Errorf("images are documents: PNG/JPEG should be valid inputs")
 	}
 	if FormatUnknown.ValidInput() || FormatUnknown.ValidOutput() {
 		t.Errorf("FormatUnknown should have no roles")

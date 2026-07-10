@@ -60,8 +60,11 @@ func TestConvertMatrix(t *testing.T) {
 		FormatCSV:      []byte("Name,Qty\nMatrix Title,5\n"),
 		FormatTSV:      []byte("Name\tQty\nMatrix Title\t5\n"),
 		FormatXLSX:     matrixXLSX(),
+		FormatPNG:      encodeTinyImage(t, FormatPNG),
+		FormatJPEG:     encodeTinyImage(t, FormatJPEG),
 	}
-	// A text fragment each input's content must carry into structure outputs.
+	// A text fragment each input's content must carry into structure outputs
+	// (an image input carries no text — "" matches vacuously).
 	wantText := map[Format]string{
 		FormatPDF:      "Matrix Title",
 		FormatDOCX:     "quick brown fox",
@@ -80,6 +83,8 @@ func TestConvertMatrix(t *testing.T) {
 		FormatMarkdown: true,
 		FormatText:     true,
 		FormatDOCX:     true, // the paragraph fixture
+		FormatPNG:      true, // an image is not a table
+		FormatJPEG:     true,
 	}
 	sentinels := []error{ErrUnknownFormat, ErrUnsupportedFormat, ErrSameFormat}
 	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatPNG, FormatJPEG}
@@ -115,6 +120,11 @@ func TestConvertMatrix(t *testing.T) {
 			}
 			if (to == FormatCSV || to == FormatTSV) && tableless[from] {
 				// Tables-only output from a table-less fixture: empty by design.
+				continue
+			}
+			if to == FormatText && (from == FormatPNG || from == FormatJPEG) {
+				// An image carries no text: plain-text output is empty by design
+				// (markdown output keeps the image as a data URI instead).
 				continue
 			}
 			if out.Len() == 0 {

@@ -65,10 +65,10 @@ func TestOpenErrors(t *testing.T) {
 	if _, err := Open(garbage); !errors.Is(err, ErrUnknownFormat) {
 		t.Errorf("Open(garbage): want ErrUnknownFormat, got %v", err)
 	}
-	// An image is a recognized format but not an input.
+	// An image opens as a single-page document at its pixel size.
 	png := writeTempFile(t, "img.png", encodeTinyImage(t, FormatPNG))
-	if _, err := Open(png); !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("Open(.png): want ErrUnsupportedFormat, got %v", err)
+	if doc, err := Open(png); err != nil || doc.Format() != FormatPNG {
+		t.Errorf("Open(.png): got (%v, %v), want a FormatPNG document", doc, err)
 	}
 	// Missing file surfaces the underlying error.
 	if _, err := Open(filepath.Join(t.TempDir(), "absent.pdf")); err == nil {
@@ -94,9 +94,9 @@ func TestOpenAs(t *testing.T) {
 	if _, err := OpenAs(FormatDOCX, path); err == nil {
 		t.Errorf("OpenAs(docx) on a PDF: want error, got nil")
 	}
-	// Image formats are not inputs.
-	if _, err := OpenAs(FormatPNG, path); !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("OpenAs(png): want ErrUnsupportedFormat, got %v", err)
+	// Forcing an image format on non-image bytes fails in the decoder.
+	if _, err := OpenAs(FormatPNG, path); err == nil {
+		t.Errorf("OpenAs(png) on a PDF: want a decode error, got nil")
 	}
 	// A URL is only openable as HTML.
 	if _, err := OpenAs(FormatPDF, "http://example.invalid/x"); err == nil {
