@@ -37,30 +37,24 @@ func (d *Document) WriteHTML(_ context.Context, out io.Writer, opts HTMLWriteOpt
 }
 
 // ConvertPDFToMarkdown reads a PDF from in, recovers its logical structure, and writes
-// GitHub-Flavored Markdown to out. Set opts.Plain for plain text. This is a convenience
-// wrapper over OpenBytes + WriteMarkdown.
+// GitHub-Flavored Markdown to out. Set opts.Plain for plain text. It is a convenience
+// wrapper over Convert.
 func ConvertPDFToMarkdown(ctx context.Context, in io.Reader, out io.Writer, opts MarkdownOptions) error {
-	data, err := io.ReadAll(in)
-	if err != nil {
-		return fmt.Errorf("doctaculous: read pdf: %w", err)
-	}
-	doc, err := OpenBytes(data)
-	if err != nil {
-		return err
-	}
-	return doc.WriteMarkdown(ctx, out, opts)
+	return Convert(ctx, in, out, ConvertOptions{
+		From:     FormatPDF,
+		To:       FormatMarkdown,
+		Markdown: opts,
+		Logf:     opts.Logf,
+	})
 }
 
 // ConvertPDFToHTML reads a PDF from in, recovers its logical structure, and writes HTML
-// to out. A convenience wrapper over OpenBytes + WriteHTML.
+// to out. It is a convenience wrapper over Convert.
 func ConvertPDFToHTML(ctx context.Context, in io.Reader, out io.Writer, opts HTMLWriteOptions) error {
-	data, err := io.ReadAll(in)
-	if err != nil {
-		return fmt.Errorf("doctaculous: read pdf: %w", err)
-	}
-	doc, err := OpenBytes(data)
-	if err != nil {
-		return err
-	}
-	return doc.WriteHTML(ctx, out, opts)
+	return Convert(ctx, in, out, ConvertOptions{
+		From:    FormatPDF,
+		To:      FormatHTML,
+		HTMLOut: opts,
+		Logf:    opts.Logf,
+	})
 }

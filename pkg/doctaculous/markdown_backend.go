@@ -27,21 +27,14 @@ func (o MarkdownOptions) toWriterOptions() markdown.Options {
 // Markdown to out. Tables are emitted as GFM pipe tables (merged cells are expanded by
 // duplicating their content across every covered slot, so the table stays rectangular);
 // headings, lists, links, and emphasis map to their Markdown equivalents. Set
-// opts.Plain to write plain text instead.
+// opts.Plain to write plain text instead. It is a convenience wrapper over Convert.
 func ConvertHTMLToMarkdown(ctx context.Context, in io.Reader, out io.Writer, opts MarkdownOptions) error {
-	data, err := io.ReadAll(in)
-	if err != nil {
-		return fmt.Errorf("doctaculous: read html: %w", err)
-	}
-	var htmlOpts []HTMLOption
-	if opts.Logf != nil {
-		htmlOpts = append(htmlOpts, WithLogf(opts.Logf))
-	}
-	doc, err := OpenHTMLBytes(data, htmlOpts...)
-	if err != nil {
-		return err
-	}
-	return doc.WriteMarkdown(ctx, out, opts)
+	return Convert(ctx, in, out, ConvertOptions{
+		From:     FormatHTML,
+		To:       FormatMarkdown,
+		Markdown: opts,
+		Logf:     opts.Logf,
+	})
 }
 
 // ConvertHTMLToText is ConvertHTMLToMarkdown in plain-text mode (opts.Plain forced
