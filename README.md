@@ -3,31 +3,33 @@
 A pure-Go, MIT-licensed document toolkit. No CGo, no native bindings — everything is Go.
 
 The long-term goal is an "everything" document tool: convert between formats, author and sign
-PDF/DOCX/EPUB/HTML, and rasterize pages to images. The current focus is **rasterizing PDF pages
-to images**.
+PDF/DOCX/HTML, and rasterize pages to images.
 
 Built for [tinycld](https://github.com/tinycld), where it powers document thumbnails and other
 format conversions.
 
 ## Status
 
-The core pipeline — parse → interpret → rasterize — works end-to-end and renders real-world PDFs
-faithfully (multi-column text, tables, images, rotated/cropped pages).
+The PDF pipeline (parse → interpret → rasterize) and the reflow engine (HTML and DOCX through a
+shared CSS layout engine) work end-to-end and render real-world documents faithfully. Any
+supported input converts to any supported output — inputs: PDF, DOCX, HTML files, http(s) URLs;
+outputs: PDF, HTML, Markdown, plain text, PNG, JPEG:
 
 ```sh
+doctaculous convert report.docx report.pdf
+doctaculous convert https://example.com page.png
+doctaculous convert input.pdf notes.md            # structure recovered by extraction
 doctaculous rasterize input.pdf --page 1 --out page1.png --dpi 150
 ```
 
-**Working:** xref tables / xref streams / object streams, Flate/LZW/ASCII/RunLength filters, vector
-fills (nonzero + even-odd), clipping, form XObjects, page rotation, ExtGState constant alpha
-(`/ca`/`/CA`), embedded fonts (TrueType, CFF, classic Type 1, Type0/CID, symbolic subsets), images
-(Gray/RGB/CMYK/Indexed/ICCBased at 1–16 bpc, JPEG, and `/SMask` soft masks), and a concurrent
-multi-page render path.
+`convert` detects the input format from content and extension (`--from` overrides) and takes the
+output format from the output extension (`--to` overrides). Converting a document to its own
+format is not supported. The focused subcommands (`rasterize`, `topdf`, `tomd`, `tohtml`) remain.
 
-**Not yet** (see the roadmap in [CLAUDE.md](CLAUDE.md#status--roadmap) for the prioritized list):
-ImageMask stencils, CCITT/JBIG2/JPX image filters, inline images, non-embedded base-14 fonts, full
-stroke joins/caps, shadings/gradients, blend modes, and encryption. Unsupported features degrade
-gracefully (skipped with a debug log, or a typed error) rather than failing the render.
+See the "Status & roadmap" section of [CLAUDE.md](CLAUDE.md#status--roadmap) for the full,
+current feature list (filters, fonts, encryption, shadings, CSS coverage, …) and what's next.
+Unsupported features degrade gracefully (skipped with a debug log, or a typed error) rather than
+failing the render.
 
 ## Why pure Go?
 
