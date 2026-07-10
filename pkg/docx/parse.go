@@ -63,16 +63,131 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 	}
 	doc.Headers, doc.Footers = headers, footers
 
-	// Footnotes part: prefer the relationship target, fall back to the convention.
+	// Footnotes/endnotes parts: prefer the relationship target, fall back to the
+	// convention. The two parts share their grammar (parseNotes).
 	const footnotesType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
 	if data, ok := pkg.part(resolveByType(pkg, mainName, footnotesType, "word/footnotes.xml")); ok {
-		fn, err := parseFootnotes(data)
+		fn, err := parseNotes(data, "footnote")
 		if err != nil {
 			return nil, err
 		}
 		doc.Footnotes = fn
 	}
+	const endnotesType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
+	if data, ok := pkg.part(resolveByType(pkg, mainName, endnotesType, "word/endnotes.xml")); ok {
+		en, err := parseNotes(data, "endnote")
+		if err != nil {
+			return nil, err
+		}
+		doc.Endnotes = en
+	}
+
+	// Comments part.
+	const commentsType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+	if data, ok := pkg.part(resolveByType(pkg, mainName, commentsType, "word/comments.xml")); ok {
+		cm, err := parseComments(data)
+		if err != nil {
+			return nil, err
+		}
+		doc.Comments = cm
+	}
+
+	// Preserve customXml parts verbatim so app-specific data survives a
+	// read-modify-write cycle (Document.ExtraParts).
+	doc.ExtraParts = pkg.partsWithPrefix("customXml/")
+
+	// Resolve every hyperlink's Target now that the relationships are loaded,
+	// so consumers (and the writer) see the URL without a rels lookup.
+	resolveHyperlinkTargets(doc)
 	return doc, nil
+}
+
+// resolveHyperlinkTargets fills Hyperlink.Target from the document rels for
+// every external hyperlink in the body, notes, comments, and headers/footers.
+func resolveHyperlinkTargets(doc *Document) {
+	if len(doc.Rels) == 0 {
+		return
+	}
+	resolve := func(h *Hyperlink) {
+		if h.Target == "" && h.RelID != "" {
+			if rel, ok := doc.Rels[h.RelID]; ok && rel.External {
+				h.Target = rel.Target
+			}
+		}
+	}
+	var walkChildren func(children []ParaChild)
+	var walkBlocks func(blocks []Block)
+	walkChildren = func(children []ParaChild) {
+		for i := range children {
+			switch {
+			case children[i].Hyperlink != nil:
+				resolve(children[i].Hyperlink)
+			case children[i].Revision != nil:
+				walkChildren(children[i].Revision.Content)
+			}
+		}
+	}
+	walkBlocks = func(blocks []Block) {
+		for i := range blocks {
+			switch {
+			case blocks[i].Paragraph != nil:
+				walkChildren(blocks[i].Paragraph.Content)
+			case blocks[i].Table != nil:
+				for _, row := range blocks[i].Table.Rows {
+					for _, cell := range row.Cells {
+						walkBlocks(cell.Blocks)
+					}
+				}
+			}
+		}
+	}
+	walkBlocks(doc.Body)
+	for _, notes := range []*Notes{doc.Footnotes, doc.Endnotes} {
+		if notes == nil {
+			continue
+		}
+		for _, blocks := range notes.ByID {
+			walkBlocks(blocks)
+		}
+	}
+	for _, c := range doc.Comments {
+		walkBlocks(c.Body)
+	}
+	for _, hf := range doc.Headers {
+		walkBlocks(hf.Blocks)
+	}
+	for _, hf := range doc.Footers {
+		walkBlocks(hf.Blocks)
+	}
+}
+
+// parseComments parses a word/comments.xml part into id-keyed comments.
+func parseComments(data []byte) (map[int]*Comment, error) {
+	out := map[int]*Comment{}
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("%w: comments: %v", ErrMalformedXML, err)
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Space != wNS || se.Name.Local != "comment" {
+			continue
+		}
+		c := &Comment{}
+		c.ID, _ = wAttrInt(se, "id")
+		c.Author, _ = wAttr(se, "author")
+		c.Initials, _ = wAttr(se, "initials")
+		c.Date, _ = wAttr(se, "date")
+		if err := fillBlocksUntil(dec, "comment", &c.Body); err != nil {
+			return nil, err
+		}
+		out[c.ID] = c
+	}
+	return out, nil
 }
 
 // resolveByType returns the part name for the first relationship of relType on
@@ -92,7 +207,7 @@ func resolveHeadersFooters(pkg *pkgReader, rels map[string]Relationship) (header
 	const hdrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
 	const ftrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
 	for id, rel := range rels {
-		switch rel.relType {
+		switch rel.Type {
 		case hdrType:
 			if data, ok := pkg.part(rel.Target); ok {
 				hf, err := parseHdrFtr(data, "hdr")
@@ -198,7 +313,7 @@ func (p *pkgReader) allRels(partName string) map[string]Relationship {
 		if !external {
 			target = joinPart(dir, r.Target)
 		}
-		out[r.ID] = Relationship{ID: r.ID, Target: target, External: external, relType: r.Type}
+		out[r.ID] = Relationship{ID: r.ID, Target: target, External: external, Type: r.Type}
 	}
 	return out
 }
@@ -356,34 +471,110 @@ func parseParagraph(dec *xml.Decoder) (*Paragraph, *SectionProps, error) {
 					return nil, nil, err
 				}
 				p.Props = props
+				p.Props.SectPr = s // keep the attachment point for the writer
 				sect = s
-			case "r":
-				runs, drawings, err := parseRun(dec)
-				if err != nil {
-					return nil, nil, err
-				}
-				for i := range runs {
-					// Copy into a fresh local: &runs[i] would alias parseRun's slice.
-					r := runs[i]
-					p.Content = append(p.Content, ParaChild{Run: &r})
-				}
-				for _, dr := range drawings {
-					p.Content = append(p.Content, ParaChild{Drawing: dr})
-				}
-			case "hyperlink":
-				h, err := parseHyperlink(dec, t)
-				if err != nil {
-					return nil, nil, err
-				}
-				p.Content = append(p.Content, ParaChild{Hyperlink: h})
 			default:
-				if err := dec.Skip(); err != nil {
-					return nil, nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
+				children, err := parseParaChild(dec, t)
+				if err != nil {
+					return nil, nil, err
 				}
+				p.Content = append(p.Content, children...)
 			}
 		case xml.EndElement:
 			if t.Name.Local == "p" {
 				return p, sect, nil
+			}
+		}
+	}
+}
+
+// parseParaChild dispatches one inline-level paragraph child (already-read
+// start element t): runs, hyperlinks, revision wrappers, and comment range
+// markers. Unknown elements are skipped. It is shared by the paragraph and
+// revision loops (w:ins/w:del wrap the same inline grammar).
+func parseParaChild(dec *xml.Decoder, t xml.StartElement) ([]ParaChild, error) {
+	switch t.Name.Local {
+	case "r":
+		runs, drawings, err := parseRun(dec)
+		if err != nil {
+			return nil, err
+		}
+		var out []ParaChild
+		for i := range runs {
+			// Copy into a fresh local: &runs[i] would alias parseRun's slice.
+			r := runs[i]
+			out = append(out, ParaChild{Run: &r})
+		}
+		for _, dr := range drawings {
+			out = append(out, ParaChild{Drawing: dr})
+		}
+		return out, nil
+	case "hyperlink":
+		h, before, after, err := parseHyperlink(dec, t)
+		if err != nil {
+			return nil, err
+		}
+		out := append(before, ParaChild{Hyperlink: h})
+		return append(out, after...), nil
+	case "ins", "del":
+		rev, err := parseRevision(dec, t)
+		if err != nil {
+			return nil, err
+		}
+		return []ParaChild{{Revision: rev}}, nil
+	case "commentRangeStart":
+		id, _ := wAttrInt(t, "id")
+		if err := dec.Skip(); err != nil {
+			return nil, fmt.Errorf("%w: commentRangeStart: %v", ErrMalformedXML, err)
+		}
+		return []ParaChild{{CommentStart: &CommentMark{ID: id}}}, nil
+	case "commentRangeEnd":
+		id, _ := wAttrInt(t, "id")
+		if err := dec.Skip(); err != nil {
+			return nil, fmt.Errorf("%w: commentRangeEnd: %v", ErrMalformedXML, err)
+		}
+		return []ParaChild{{CommentEnd: &CommentMark{ID: id}}}, nil
+	default:
+		if err := dec.Skip(); err != nil {
+			return nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
+		}
+		return nil, nil
+	}
+}
+
+// parseRevision consumes a w:ins / w:del wrapper (start is the already-read
+// start element carrying id/author/date), recursing into its inline content —
+// revisions are true containers: they wrap runs and hyperlinks and can nest.
+func parseRevision(dec *xml.Decoder, start xml.StartElement) (*Revision, error) {
+	rev := &Revision{Kind: RevisionInsert}
+	if start.Name.Local == "del" {
+		rev.Kind = RevisionDelete
+	}
+	rev.ID, _ = wAttrInt(start, "id")
+	rev.Author, _ = wAttr(start, "author")
+	rev.Date, _ = wAttr(start, "date")
+	end := start.Name.Local
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space != wNS {
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
+				}
+				continue
+			}
+			children, err := parseParaChild(dec, t)
+			if err != nil {
+				return nil, err
+			}
+			rev.Content = append(rev.Content, children...)
+		case xml.EndElement:
+			if t.Name.Local == end {
+				return rev, nil
 			}
 		}
 	}
@@ -417,6 +608,15 @@ func parsePPr(dec *xml.Decoder) (ParagraphProps, *SectionProps, error) {
 				case "tabs":
 					applyTabs(&props, dec)
 					continue
+				case "pPrChange":
+					// The outer pPr already holds the AFTER state; the nested pPr
+					// is the before state.
+					ch := &ParaPropsChange{Mark: parseRevisionMark(t)}
+					if err := parsePPrChangeBody(dec, ch); err != nil {
+						return props, nil, err
+					}
+					props.PPrChange = ch
+					continue
 				}
 			}
 			if err := dec.Skip(); err != nil {
@@ -446,6 +646,61 @@ func applyPPrChild(props *ParagraphProps, e xml.StartElement) {
 		applySpacing(props, e)
 	case "ind":
 		applyIndent(props, e)
+	case "framePr":
+		props.Frame = parseFramePr(e)
+	}
+}
+
+// parseFramePr reads a w:framePr's attributes into a FramePr (drop caps plus
+// captured frame geometry).
+func parseFramePr(e xml.StartElement) *FramePr {
+	f := &FramePr{}
+	f.DropCap, _ = wAttr(e, "dropCap")
+	if v, ok := wAttrInt(e, "lines"); ok {
+		f.Lines = v
+	}
+	f.Wrap, _ = wAttr(e, "wrap")
+	f.HAnchor, _ = wAttr(e, "hAnchor")
+	f.VAnchor, _ = wAttr(e, "vAnchor")
+	if v, ok := wAttrInt(e, "w"); ok {
+		f.W = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "h"); ok {
+		f.H = Twips(v)
+	}
+	if v, ok := wAttrInt(e, "hSpace"); ok {
+		f.HSpace = Twips(v)
+	}
+	return f
+}
+
+// parsePPrChangeBody consumes a w:pPrChange's children (the nested before-state
+// w:pPr) up to its end element. The nested pPr uses the full pPr grammar; a
+// sectPr inside it (unusual) is parsed and discarded.
+func parsePPrChangeBody(dec *xml.Decoder, ch *ParaPropsChange) error {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("%w: pPrChange: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "pPr" {
+				prev, _, err := parsePPr(dec)
+				if err != nil {
+					return err
+				}
+				ch.Previous = prev
+				continue
+			}
+			if err := dec.Skip(); err != nil {
+				return fmt.Errorf("%w: pPrChange: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "pPrChange" {
+				return nil
+			}
+		}
 	}
 }
 
@@ -593,7 +848,9 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 				if err != nil {
 					return nil, nil, err
 				}
-			case "t":
+			case "t", "delText":
+				// w:delText is the text of a run inside a w:del revision — same
+				// content grammar as w:t; deletion-ness lives on the wrapper.
 				text, err := parseText(dec, t)
 				if err != nil {
 					return nil, nil, err
@@ -629,6 +886,22 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
+			case "endnoteReference":
+				if id, ok := wAttrInt(t, "id"); ok {
+					flushText()
+					out = append(out, Run{Props: props, EndnoteRef: id})
+				}
+				if err := dec.Skip(); err != nil {
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
+			case "commentReference":
+				if id, ok := wAttrInt(t, "id"); ok {
+					flushText()
+					out = append(out, Run{Props: props, CommentRef: id})
+				}
+				if err := dec.Skip(); err != nil {
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
 			default:
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
@@ -644,12 +917,15 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 }
 
 // parseDrawing consumes a w:drawing, extracting the image extent (wp:extent
-// cx/cy in EMU) and the blip's relationship id (a:blip r:embed). It walks by
-// local name (the wp:/a:/pic: namespaces are distinct but the local names are
-// unambiguous). Returns nil if no blip is found (an unsupported drawing shape).
+// cx/cy in EMU), the blip's relationship id (a:blip r:embed), the anchor/wrap
+// facts of a floating drawing, and the alt text. It walks by local name (the
+// wp:/a:/pic: namespaces are distinct but the local names are unambiguous).
+// Returns nil if no blip is found (an unsupported drawing shape).
 func parseDrawing(dec *xml.Decoder) (*Drawing, error) {
 	dr := &Drawing{}
 	hasBlip := false
+	inPositionH := false
+	inAlign := false
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -658,6 +934,8 @@ func parseDrawing(dec *xml.Decoder) (*Drawing, error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			switch t.Name.Local {
+			case "anchor":
+				dr.Anchored = true
 			case "extent":
 				if v, ok := attrInt64(t, "cx"); ok {
 					dr.WidthEMU = v
@@ -670,9 +948,38 @@ func parseDrawing(dec *xml.Decoder) (*Drawing, error) {
 					dr.RelID = id
 					hasBlip = true
 				}
+			case "docPr":
+				if v, ok := wAttr(t, "descr"); ok {
+					dr.Description = v
+				}
+			case "wrapSquare":
+				dr.WrapKind = "square"
+			case "wrapTopAndBottom":
+				dr.WrapKind = "topAndBottom"
+			case "wrapTight":
+				dr.WrapKind = "tight"
+			case "wrapThrough":
+				dr.WrapKind = "through"
+			case "wrapNone":
+				dr.WrapKind = "none"
+			case "positionH":
+				inPositionH = true
+			case "align":
+				inAlign = inPositionH // only wp:positionH/wp:align is the horizontal alignment
+			}
+		case xml.CharData:
+			if inAlign {
+				if v := strings.TrimSpace(string(t)); v != "" {
+					dr.AlignH = v
+				}
 			}
 		case xml.EndElement:
-			if t.Name.Local == "drawing" {
+			switch t.Name.Local {
+			case "align":
+				inAlign = false
+			case "positionH":
+				inPositionH = false
+			case "drawing":
 				if !hasBlip {
 					return nil, nil
 				}
@@ -699,8 +1006,13 @@ func attrInt64(e xml.StartElement, local string) (int64, bool) {
 
 // parseHyperlink consumes a w:hyperlink: its runs plus the r:id / w:anchor
 // attributes. start is the already-read start element (carrying the attributes).
-func parseHyperlink(dec *xml.Decoder, start xml.StartElement) (*Hyperlink, error) {
-	h := &Hyperlink{}
+// Comment range markers found INSIDE the link are hoisted out (Hyperlink.Runs
+// stays a flat []Run): a start marker moves to just before the link and an end
+// marker to just after, so the range grows outward to cover the whole link —
+// positions inside a link are not representable in the model, and covering the
+// link whole is the conservative reading.
+func parseHyperlink(dec *xml.Decoder, start xml.StartElement) (h *Hyperlink, before, after []ParaChild, err error) {
+	h = &Hyperlink{}
 	if id, ok := rAttr(start, "id"); ok {
 		h.RelID = id
 	}
@@ -708,26 +1020,37 @@ func parseHyperlink(dec *xml.Decoder, start xml.StartElement) (*Hyperlink, error
 		h.Anchor = anchor
 	}
 	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return nil, fmt.Errorf("%w: hyperlink: %v", ErrMalformedXML, err)
+		tok, terr := dec.Token()
+		if terr != nil {
+			return nil, nil, nil, fmt.Errorf("%w: hyperlink: %v", ErrMalformedXML, terr)
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if t.Name.Space == wNS && t.Name.Local == "r" {
-				runs, _, err := parseRun(dec)
-				if err != nil {
-					return nil, err
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "r":
+					runs, _, err := parseRun(dec)
+					if err != nil {
+						return nil, nil, nil, err
+					}
+					h.Runs = append(h.Runs, runs...)
+					continue
+				case "commentRangeStart":
+					if id, ok := wAttrInt(t, "id"); ok {
+						before = append(before, ParaChild{CommentStart: &CommentMark{ID: id}})
+					}
+				case "commentRangeEnd":
+					if id, ok := wAttrInt(t, "id"); ok {
+						after = append(after, ParaChild{CommentEnd: &CommentMark{ID: id}})
+					}
 				}
-				h.Runs = append(h.Runs, runs...)
-				continue
 			}
 			if err := dec.Skip(); err != nil {
-				return nil, fmt.Errorf("%w: hyperlink: %v", ErrMalformedXML, err)
+				return nil, nil, nil, fmt.Errorf("%w: hyperlink: %v", ErrMalformedXML, err)
 			}
 		case xml.EndElement:
 			if t.Name.Local == "hyperlink" {
-				return h, nil
+				return h, before, after, nil
 			}
 		}
 	}
@@ -751,25 +1074,27 @@ func rAttr(e xml.StartElement, local string) (string, bool) {
 // is significant, but even without it a <w:t>'s character data is the run's
 // content (producers do not indent inside <w:t>), so trimming here would drop
 // spaces that separate adjacent runs. The attribute is therefore not consulted.
-func parseText(dec *xml.Decoder, _ xml.StartElement) (string, error) {
+func parseText(dec *xml.Decoder, start xml.StartElement) (string, error) {
+	end := start.Name.Local // "t" or "delText" — same content grammar
 	var sb strings.Builder
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return "", fmt.Errorf("%w: t: %v", ErrMalformedXML, err)
+			return "", fmt.Errorf("%w: %s: %v", ErrMalformedXML, end, err)
 		}
 		switch t := tok.(type) {
 		case xml.CharData:
 			sb.WriteString(string(t))
 		case xml.EndElement:
-			if t.Name.Local == "t" {
+			if t.Name.Local == end {
 				return sb.String(), nil
 			}
 		}
 	}
 }
 
-// parseRPr consumes a w:rPr into RunProps.
+// parseRPr consumes a w:rPr into RunProps. end is "rPr" for a run's own
+// properties; the nested before-state inside w:rPrChange shares the grammar.
 func parseRPr(dec *xml.Decoder) (RunProps, error) {
 	var props RunProps
 	for {
@@ -780,6 +1105,16 @@ func parseRPr(dec *xml.Decoder) (RunProps, error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			if t.Name.Space == wNS {
+				if t.Name.Local == "rPrChange" {
+					// The outer rPr already holds the AFTER state (what Word shows
+					// with markup off); the nested rPr is the before state.
+					ch := &RunPropsChange{Mark: parseRevisionMark(t)}
+					if err := parseRPrChangeBody(dec, ch); err != nil {
+						return props, err
+					}
+					props.RPrChange = ch
+					continue
+				}
 				applyRPrChild(&props, t)
 			}
 			if err := dec.Skip(); err != nil {
@@ -788,6 +1123,45 @@ func parseRPr(dec *xml.Decoder) (RunProps, error) {
 		case xml.EndElement:
 			if t.Name.Local == "rPr" {
 				return props, nil
+			}
+		}
+	}
+}
+
+// parseRevisionMark reads the shared id/author/date attributes off a
+// revision-carrying element (rPrChange/pPrChange/tcPrChange/cellIns/cellDel).
+func parseRevisionMark(e xml.StartElement) RevisionMark {
+	var m RevisionMark
+	m.ID, _ = wAttrInt(e, "id")
+	m.Author, _ = wAttr(e, "author")
+	m.Date, _ = wAttr(e, "date")
+	return m
+}
+
+// parseRPrChangeBody consumes a w:rPrChange's children (the nested before-state
+// w:rPr) up to its end element.
+func parseRPrChangeBody(dec *xml.Decoder, ch *RunPropsChange) error {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("%w: rPrChange: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "rPr" {
+				prev, err := parseRPr(dec)
+				if err != nil {
+					return err
+				}
+				ch.Previous = prev
+				continue
+			}
+			if err := dec.Skip(); err != nil {
+				return fmt.Errorf("%w: rPrChange: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "rPrChange" {
+				return nil
 			}
 		}
 	}
@@ -854,6 +1228,8 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 	case "smallCaps":
 		props.SmallCaps = parseOnOff(wVal(e))
 		props.HasSmallCaps = true
+	case "shd":
+		props.Shd = parseShd(e)
 	}
 }
 
@@ -1016,15 +1392,9 @@ func parseTc(dec *xml.Decoder) (TableCell, error) {
 			}
 			switch t.Name.Local {
 			case "tcPr":
-				props, span, vmerge, err := parseTcPr(dec)
-				if err != nil {
+				if err := parseTcPr(dec, &cell); err != nil {
 					return cell, err
 				}
-				cell.Props = props
-				if span > 0 {
-					cell.GridSpan = span
-				}
-				cell.VMerge = vmerge
 			default:
 				blk, _, err := parseBlockChild(dec, t)
 				if err != nil {
@@ -1113,47 +1483,92 @@ func parseTrPr(dec *xml.Decoder) (RowProps, error) {
 	}
 }
 
-// parseTcPr consumes a w:tcPr, returning cell props plus the gridSpan and vMerge
-// state.
-func parseTcPr(dec *xml.Decoder) (props CellProps, gridSpan int, vmerge VMergeKind, err error) {
+// parseTcPr consumes a w:tcPr, filling the cell's props, gridSpan, vMerge, and
+// revision marks in place.
+func parseTcPr(dec *xml.Decoder, cell *TableCell) error {
 	for {
 		tok, terr := dec.Token()
 		if terr != nil {
-			return props, gridSpan, vmerge, fmt.Errorf("%w: tcPr: %v", ErrMalformedXML, terr)
+			return fmt.Errorf("%w: tcPr: %v", ErrMalformedXML, terr)
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
 			if t.Name.Space == wNS {
 				switch t.Name.Local {
 				case "gridSpan":
-					if v, ok := wAttrInt(t, "val"); ok {
-						gridSpan = v
+					if v, ok := wAttrInt(t, "val"); ok && v > 0 {
+						cell.GridSpan = v
 					}
 				case "vMerge":
-					vmerge = parseVMerge(t)
+					cell.VMerge = parseVMerge(t)
 				case "tcW":
 					// Cells carry only a dxa width in the model; a pct cell width is dropped.
 					var pct int
-					applyTblW(&props.WidthDxa, &pct, t)
+					applyTblW(&cell.Props.WidthDxa, &pct, t)
 				case "vAlign":
-					props.VAlign = parseVAlign(wVal(t))
+					cell.Props.VAlign = parseVAlign(wVal(t))
 				case "tcBorders":
 					b, berr := parseBorders(dec, "tcBorders")
 					if berr != nil {
-						return props, gridSpan, vmerge, berr
+						return berr
 					}
-					props.Borders = b
+					cell.Props.Borders = b
 					continue
 				case "shd":
-					props.Shading = parseShd(t)
+					cell.Props.Shading = parseShd(t)
+				case "cellIns":
+					m := parseRevisionMark(t)
+					cell.Ins = &m
+				case "cellDel":
+					m := parseRevisionMark(t)
+					cell.Del = &m
+				case "tcPrChange":
+					// The outer tcPr already holds the AFTER state; the nested tcPr
+					// is the before state.
+					ch := &CellPropsChange{Mark: parseRevisionMark(t)}
+					if err := parseTcPrChangeBody(dec, ch); err != nil {
+						return err
+					}
+					cell.Props.TcPrChange = ch
+					continue
 				}
 			}
 			if serr := dec.Skip(); serr != nil {
-				return props, gridSpan, vmerge, fmt.Errorf("%w: tcPr: %v", ErrMalformedXML, serr)
+				return fmt.Errorf("%w: tcPr: %v", ErrMalformedXML, serr)
 			}
 		case xml.EndElement:
 			if t.Name.Local == "tcPr" {
-				return props, gridSpan, vmerge, nil
+				return nil
+			}
+		}
+	}
+}
+
+// parseTcPrChangeBody consumes a w:tcPrChange's children (the nested
+// before-state w:tcPr) up to its end element.
+func parseTcPrChangeBody(dec *xml.Decoder, ch *CellPropsChange) error {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("%w: tcPrChange: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "tcPr" {
+				var prev TableCell
+				prev.GridSpan = 1
+				if err := parseTcPr(dec, &prev); err != nil {
+					return err
+				}
+				ch.Previous = prev.Props
+				continue
+			}
+			if err := dec.Skip(); err != nil {
+				return fmt.Errorf("%w: tcPrChange: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "tcPrChange" {
+				return nil
 			}
 		}
 	}
@@ -1233,11 +1648,16 @@ func parseBorders(dec *xml.Decoder, name string) (BoxBorders, error) {
 }
 
 // parseBorder reads one border edge element (w:sz eighths-of-a-point, w:color,
-// w:val style). val="nil"/"none" marks the edge as no-border.
+// w:val style). val="nil"/"none" marks the edge as no-border; any other style
+// name is kept verbatim in Style (rendering draws it solid; conversion
+// round-trips the name).
 func parseBorder(e xml.StartElement) Border {
 	var bd Border
-	if v := wVal(e); v == "nil" || v == "none" {
+	switch v := wVal(e); v {
+	case "nil", "none":
 		bd.None = true
+	default:
+		bd.Style = v
 	}
 	if v, ok := wAttrInt(e, "sz"); ok {
 		bd.SizeEighthPt = v

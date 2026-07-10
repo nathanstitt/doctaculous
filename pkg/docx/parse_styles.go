@@ -114,6 +114,11 @@ func parseStyle(dec *xml.Decoder, start xml.StartElement) (*Style, error) {
 				if err := dec.Skip(); err != nil {
 					return nil, fmt.Errorf("%w: style: %v", ErrMalformedXML, err)
 				}
+			case "name":
+				st.Name = wVal(t)
+				if err := dec.Skip(); err != nil {
+					return nil, fmt.Errorf("%w: style: %v", ErrMalformedXML, err)
+				}
 			case "rPr":
 				rPr, err := parseRPr(dec)
 				if err != nil {

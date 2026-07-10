@@ -69,9 +69,15 @@ func (p *pkgReader) part(name string) ([]byte, bool) {
 
 // mediaParts returns every word/media/* part keyed by its part name.
 func (p *pkgReader) mediaParts() map[string][]byte {
+	return p.partsWithPrefix("word/media/")
+}
+
+// partsWithPrefix returns every part under a name prefix keyed by part name,
+// or nil when none exist.
+func (p *pkgReader) partsWithPrefix(prefix string) map[string][]byte {
 	var out map[string][]byte
 	for name := range p.files {
-		if strings.HasPrefix(name, "word/media/") {
+		if strings.HasPrefix(name, prefix) {
 			if data, ok := p.part(name); ok {
 				if out == nil {
 					out = map[string][]byte{}
