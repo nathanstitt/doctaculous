@@ -11,6 +11,7 @@ package xmlpart
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/beevik/etree"
 )
@@ -126,3 +127,46 @@ func InsertBefore(parent *etree.Element, el, ref *etree.Element) {
 
 // Remove deletes el from its parent.
 func Remove(parent, el *etree.Element) { parent.RemoveChild(el) }
+
+// Equal compares two elements semantically: prefixed name, attributes as an
+// order-insensitive set, text content, and child elements in sequence — the
+// dedupe test for style records (two xf/font/fill/border nodes that differ
+// only in attribute order are the same record).
+func Equal(a, b *etree.Element) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Space != b.Space || a.Tag != b.Tag {
+		return false
+	}
+	if len(a.Attr) != len(b.Attr) {
+		return false
+	}
+	key := func(at etree.Attr) string { return at.Space + ":" + at.Key + "=" + at.Value }
+	ak := make([]string, len(a.Attr))
+	bk := make([]string, len(b.Attr))
+	for i := range a.Attr {
+		ak[i] = key(a.Attr[i])
+		bk[i] = key(b.Attr[i])
+	}
+	sort.Strings(ak)
+	sort.Strings(bk)
+	for i := range ak {
+		if ak[i] != bk[i] {
+			return false
+		}
+	}
+	if a.Text() != b.Text() {
+		return false
+	}
+	ac, bc := a.ChildElements(), b.ChildElements()
+	if len(ac) != len(bc) {
+		return false
+	}
+	for i := range ac {
+		if !Equal(ac[i], bc[i]) {
+			return false
+		}
+	}
+	return true
+}
