@@ -55,8 +55,8 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatPDF:      {input: true, output: true},
 	FormatDOCX:     {input: true, output: false}, // output flips true when the DOCX writer lands
 	FormatHTML:     {input: true, output: true},
-	FormatMarkdown: {input: false, output: true}, // input flips true when the Markdown frontend lands
-	FormatText:     {input: false, output: true}, // input flips true when the plain-text frontend lands
+	FormatMarkdown: {input: true, output: true},
+	FormatText:     {input: true, output: true},
 	FormatPNG:      {input: false, output: true},
 	FormatJPEG:     {input: false, output: true},
 }

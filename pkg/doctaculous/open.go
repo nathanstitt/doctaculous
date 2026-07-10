@@ -88,20 +88,30 @@ func openDetected(f Format, data []byte, dir string, opts []OpenOption) (*Docume
 		}
 		return docxDocument(d)
 	case FormatHTML:
-		if dir != "" {
-			opts = append([]OpenOption{
-				WithResourceLoader(resource.DirLoader{Base: dir}),
-				WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
-			}, opts...)
-		}
-		return OpenHTMLBytes(data, opts...)
-	case FormatMarkdown, FormatText:
-		return nil, fmt.Errorf("doctaculous: %s input is not yet supported: %w", f, ErrUnsupportedFormat)
+		return openReflowFrontend(OpenHTMLBytes, data, dir, opts)
+	case FormatMarkdown:
+		return openReflowFrontend(OpenMarkdownBytes, data, dir, opts)
+	case FormatText:
+		return openReflowFrontend(OpenTextBytes, data, dir, opts)
 	case FormatPNG, FormatJPEG:
 		return nil, fmt.Errorf("doctaculous: %s is not a supported input format: %w", f, ErrUnsupportedFormat)
 	default:
 		return nil, fmt.Errorf("doctaculous: cannot detect the document format (open with an explicit format via OpenAs, or use a recognizable file extension): %w", ErrUnknownFormat)
 	}
+}
+
+// openReflowFrontend opens data through one of the HTML-family frontends
+// (HTML, Markdown, plain text — everything that flows through the HTML
+// pipeline), prepending the dir-rooted resource defaults when the source
+// directory is known, exactly as OpenHTMLFile does, so caller options win.
+func openReflowFrontend(open func([]byte, ...OpenOption) (*Document, error), data []byte, dir string, opts []OpenOption) (*Document, error) {
+	if dir != "" {
+		opts = append([]OpenOption{
+			WithResourceLoader(resource.DirLoader{Base: dir}),
+			WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
+		}, opts...)
+	}
+	return open(data, opts...)
 }
 
 // isHTTPURL reports whether path is an http:// or https:// URL. A simple

@@ -35,6 +35,9 @@ func TestOpenSniffs(t *testing.T) {
 		{"mislabeled.bin", gendocx.Core[0].Bytes(), FormatDOCX},
 		{"page.html", []byte("<html><body><p>hi</p></body></html>"), FormatHTML},
 		{"noext-html", []byte("<!DOCTYPE html><p>hi</p>"), FormatHTML},
+		// Extension-only formats (no content magic).
+		{"notes.md", []byte("# hi\n\nbody\n"), FormatMarkdown},
+		{"notes.txt", []byte("line one\nline two\n"), FormatText},
 	}
 	for _, c := range cases {
 		path := writeTempFile(t, c.name, c.data)
@@ -58,10 +61,10 @@ func TestOpenErrors(t *testing.T) {
 	if _, err := Open(garbage); !errors.Is(err, ErrUnknownFormat) {
 		t.Errorf("Open(garbage): want ErrUnknownFormat, got %v", err)
 	}
-	// Recognized by extension but not yet openable -> ErrUnsupportedFormat.
-	md := writeTempFile(t, "notes.md", []byte("# hi\n"))
-	if _, err := Open(md); !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("Open(.md): want ErrUnsupportedFormat, got %v", err)
+	// An image is a recognized format but not an input.
+	png := writeTempFile(t, "img.png", encodeTinyImage(t, FormatPNG))
+	if _, err := Open(png); !errors.Is(err, ErrUnsupportedFormat) {
+		t.Errorf("Open(.png): want ErrUnsupportedFormat, got %v", err)
 	}
 	// Missing file surfaces the underlying error.
 	if _, err := Open(filepath.Join(t.TempDir(), "absent.pdf")); err == nil {
