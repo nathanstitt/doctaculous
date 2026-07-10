@@ -93,6 +93,12 @@ func openDetected(f Format, data []byte, dir string, opts []OpenOption) (*Docume
 		return openReflowFrontend(OpenMarkdownBytes, data, dir, opts)
 	case FormatText:
 		return openReflowFrontend(OpenTextBytes, data, dir, opts)
+	case FormatCSV:
+		return openReflowFrontend(OpenCSVBytes, data, dir, opts)
+	case FormatTSV:
+		return openReflowFrontend(OpenTSVBytes, data, dir, opts)
+	case FormatXLSX:
+		return nil, fmt.Errorf("doctaculous: %s input is not yet supported: %w", f, ErrUnsupportedFormat)
 	case FormatPNG, FormatJPEG:
 		return nil, fmt.Errorf("doctaculous: %s is not a supported input format: %w", f, ErrUnsupportedFormat)
 	default:
