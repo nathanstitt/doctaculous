@@ -174,8 +174,9 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver, rels map[string]docx.R
 		}
 	}
 	var blocks []*lcssbox.Box
+	var floats []*lcssbox.Box
 	cur := newBlock()
-	for _, child := range p.Content {
+	for _, child := range effectiveContent(p.Content) {
 		if child.Hyperlink != nil {
 			href := hyperlinkURL(child.Hyperlink, rels)
 			for _, run := range child.Hyperlink.Runs {
@@ -188,6 +189,17 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver, rels map[string]docx.R
 			continue
 		}
 		if child.Drawing != nil {
+			if fk := drawingFloat(child.Drawing); fk != lcssbox.FloatNone {
+				// An anchored square-wrap drawing floats: emit it as a block-level
+				// sibling BEFORE the paragraph block so its band narrows the
+				// paragraph's lines (the engine places floats in block flow).
+				fb := drawingBox(child.Drawing, cur.Style)
+				fb.Display = lcssbox.DisplayBlock
+				fb.Style.Display = "block"
+				fb.Float = fk
+				floats = append(floats, fb)
+				continue
+			}
 			cur.Children = append(cur.Children, drawingBox(child.Drawing, cur.Style))
 			continue
 		}
@@ -198,6 +210,13 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver, rels map[string]docx.R
 		if run.FootnoteRef > 0 {
 			er := r.EffectiveRun(p.Props, run.Props)
 			cur.Children = append(cur.Children, footnoteMarker(run.FootnoteRef, er, cur.Style))
+			continue
+		}
+		if run.EndnoteRef > 0 {
+			// Endnote references render exactly like footnote markers (the note
+			// body lives at document end; the in-text marker is the same shape).
+			er := r.EffectiveRun(p.Props, run.Props)
+			cur.Children = append(cur.Children, footnoteMarker(run.EndnoteRef, er, cur.Style))
 			continue
 		}
 		switch run.Break {
@@ -217,7 +236,58 @@ func lowerParagraph(p *docx.Paragraph, r *style.Resolver, rels map[string]docx.R
 		cur.Children = append(cur.Children, runTextBox(run.Text, er, cur.Style))
 	}
 	blocks = append(blocks, cur)
-	return blocks
+	return append(floats, blocks...)
+}
+
+// drawingFloat maps an anchored drawing's wrap facts onto a CSS float: square
+// wrap aligned left/right floats (text wraps beside it); every other anchor
+// mode degrades to inline flow.
+func drawingFloat(dr *docx.Drawing) lcssbox.FloatKind {
+	if !dr.Anchored || dr.WrapKind != "square" {
+		return lcssbox.FloatNone
+	}
+	switch dr.AlignH {
+	case "left":
+		return lcssbox.FloatLeft
+	case "right":
+		return lcssbox.FloatRight
+	}
+	return lcssbox.FloatNone
+}
+
+// effectiveContent flattens a paragraph's tracked changes into the document's
+// FINAL state — Word's "No Markup" view, and the natural reading of "the
+// document as it will be": insertion content is included in place, deletion
+// content is excluded, comment range markers vanish (they are anchors, not
+// content), and comment reference runs (which carry no text) are dropped.
+func effectiveContent(children []docx.ParaChild) []docx.ParaChild {
+	// Fast path: no revision/comment constructs → the slice as-is.
+	plain := true
+	for i := range children {
+		if children[i].Revision != nil || children[i].CommentStart != nil ||
+			children[i].CommentEnd != nil || (children[i].Run != nil && children[i].Run.CommentRef > 0) {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return children
+	}
+	var out []docx.ParaChild
+	for _, ch := range children {
+		switch {
+		case ch.Revision != nil:
+			if ch.Revision.Kind == docx.RevisionInsert {
+				out = append(out, effectiveContent(ch.Revision.Content)...)
+			}
+			// A delete's content is excluded: it is no longer part of the document.
+		case ch.CommentStart != nil, ch.CommentEnd != nil:
+		case ch.Run != nil && ch.Run.CommentRef > 0:
+		default:
+			out = append(out, ch)
+		}
+	}
+	return out
 }
 
 // paragraphStyle maps a resolved DOCX paragraph onto a block ComputedStyle: alignment,
@@ -271,8 +341,11 @@ func runTextBox(text string, er style.EffectiveRun, para gcss.ComputedStyle) *lc
 		cs.VerticalAlign = "sub"
 		cs.FontSizePt = er.SizePt * 0.75
 	}
+	if er.HasShd {
+		cs.BackgroundColor = er.Shd
+	}
 	if er.HasHighlight {
-		cs.BackgroundColor = er.Highlight
+		cs.BackgroundColor = er.Highlight // a highlight paints over run shading
 	}
 	if er.Caps || er.SmallCaps {
 		cs.TextTransform = "uppercase" // small-caps approximated as uppercase (true small-caps needs synthesized glyphs)

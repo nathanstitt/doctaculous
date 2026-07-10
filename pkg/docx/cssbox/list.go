@@ -17,15 +17,21 @@ type listCounter struct {
 
 func newListCounter() *listCounter { return &listCounter{counts: map[int]map[int]int{}} }
 
-// next increments the (numID, ilvl) counter, resets deeper levels, and returns
-// the new value at ilvl.
-func (c *listCounter) next(numID, ilvl int) int {
+// next advances the (numID, ilvl) counter, resets deeper levels, and returns
+// the new value at ilvl. The first use of a level seeds it at start (the
+// effective w:start / w:startOverride value); a deeper level reset also
+// re-seeds on its next use, matching Word's sublist-restart semantics.
+func (c *listCounter) next(numID, ilvl, start int) int {
 	m := c.counts[numID]
 	if m == nil {
 		m = map[int]int{}
 		c.counts[numID] = m
 	}
-	m[ilvl]++
+	if _, seen := m[ilvl]; !seen {
+		m[ilvl] = start
+	} else {
+		m[ilvl]++
+	}
 	for deeper := range m {
 		if deeper > ilvl {
 			delete(m, deeper)
@@ -93,6 +99,14 @@ func lowerListParagraph(p *docx.Paragraph, r *style.Resolver, num *docx.Numberin
 		return blocks
 	}
 	first := blocks[0]
+	// A floated drawing lowers to a float block BEFORE the paragraph block; the
+	// marker belongs on the first real (non-float) block.
+	for _, b := range blocks {
+		if b.Float == lcssbox.FloatNone {
+			first = b
+			break
+		}
+	}
 	first.Display = lcssbox.DisplayListItem
 	first.Style.Display = "list-item" // match Box.Display (Style.Display is unread by layout, but reads clearly)
 	// markerText advances the list counter as a side effect — call it exactly once.
@@ -126,7 +140,7 @@ func markerText(pp docx.ParagraphProps, num *docx.Numbering, ctr *listCounter) s
 	case docx.NumFmtNone:
 		return ""
 	default:
-		val := ctr.next(pp.NumID, pp.ILvl)
+		val := ctr.next(pp.NumID, pp.ILvl, num.StartAt(pp.NumID, pp.ILvl))
 		return formatMarker(lvl, val)
 	}
 }
