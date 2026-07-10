@@ -1,6 +1,10 @@
 package boxwalk
 
-import "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+import (
+	"strings"
+
+	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+)
 
 // GridCell is one origin cell in an occupancy grid: the cell box, its origin
 // slot, and the span it covers.
@@ -21,6 +25,65 @@ type Grid struct {
 	Cells     []GridCell
 	Slots     [][]int
 	HeaderRow []bool // per row: a header row (from a header row group or all-header cells)
+}
+
+// CellPlainText renders a cell's content as one plain-text field, mirroring
+// the Markdown writer's renderCell: each block child renders to a collapsed
+// inline string (runs concatenated without separators, so styled runs inside a
+// word do not split it), then blocks join with a space. An image contributes
+// its alt text.
+func CellPlainText(cell *cssbox.Box) string {
+	var parts []string
+	if HasInlineContent(cell) {
+		parts = append(parts, inlinePlain(cell))
+	} else {
+		for _, c := range cell.Children {
+			parts = append(parts, inlinePlain(c))
+		}
+	}
+	return strings.Join(FilterEmpty(parts), " ")
+}
+
+// inlinePlain flattens a box's inline subtree to collapsed plain text.
+func inlinePlain(b *cssbox.Box) string {
+	var runs []StyledRun
+	CollectRuns(b, InlineState{}, func(rc *cssbox.ReplacedContent) string {
+		return rc.Attrs["alt"]
+	}, &runs)
+	var sb strings.Builder
+	for _, r := range runs {
+		if r.Literal != "" {
+			sb.WriteString(r.Literal)
+			continue
+		}
+		sb.WriteString(r.Text)
+	}
+	return CollapseSpaces(sb.String())
+}
+
+// CollectTables gathers a tree's DisplayTable boxes in document order, not
+// descending into a found table (a nested table's text is already part of its
+// host cell). It also counts the non-table content blocks a tables-only writer
+// (CSV, XLSX) drops, for the degradation log.
+func CollectTables(root *cssbox.Box) (tables []*cssbox.Box, droppedBlocks int) {
+	var walk func(b *cssbox.Box)
+	walk = func(b *cssbox.Box) {
+		if b.Display == cssbox.DisplayTable {
+			tables = append(tables, b)
+			return
+		}
+		if IsBlockContainer(b) && HasInlineContent(b) {
+			droppedBlocks++
+			return
+		}
+		for _, c := range b.Children {
+			walk(c)
+		}
+	}
+	if root != nil {
+		walk(root)
+	}
+	return tables, droppedBlocks
 }
 
 // BuildOccupancyGrid walks a DisplayTable subtree into a Grid. It mirrors the
