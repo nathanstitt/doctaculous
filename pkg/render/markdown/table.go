@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
 )
 
 // table renders a DisplayTable box as a GFM pipe table. GFM pipe tables cannot express
@@ -47,12 +48,12 @@ type tableModel struct {
 // it covers. Materializing slots into a dense grid afterwards fills every position,
 // which is exactly the "duplicate spanned content" behavior.
 func buildGrid(table *cssbox.Box) tableModel {
-	rowBoxes, headerFlags := collectRows(table)
+	rowBoxes, headerFlags := boxwalk.CollectRows(table)
 	slots := map[[2]int]cellData{}
 	maxCol := 0
 	for r, rowBox := range rowBoxes {
 		col := 0
-		for _, cellBox := range cellBoxesOf(rowBox) {
+		for _, cellBox := range boxwalk.CellBoxesOf(rowBox) {
 			// Skip columns already occupied by a rowspan carried down from above.
 			for {
 				if _, taken := slots[[2]int{r, col}]; !taken {
@@ -60,9 +61,9 @@ func buildGrid(table *cssbox.Box) tableModel {
 				}
 				col++
 			}
-			colSpan := clampSpan(cellBox.ColSpan)
-			rowSpan := clampSpan(cellBox.RowSpan)
-			header := headerFlags[r] || isHeaderCell(cellBox)
+			colSpan := boxwalk.ClampSpan(cellBox.ColSpan)
+			rowSpan := boxwalk.ClampSpan(cellBox.RowSpan)
+			header := headerFlags[r] || boxwalk.IsHeaderCell(cellBox)
 			cd := cellData{
 				text:  renderCell(cellBox, header),
 				align: cellBox.Style.TextAlign,
@@ -114,14 +115,14 @@ func renderCell(cell *cssbox.Box, header bool) string {
 	// Render each block child as a paragraph, then join with <br> (GFM's in-cell line
 	// break). A cell that is a single inline run renders as one string.
 	var parts []string
-	if hasInlineContent(cell) {
+	if boxwalk.HasInlineContent(cell) {
 		parts = append(parts, strings.TrimSpace(w.inlineOpt(cell, header)))
 	} else {
 		for _, c := range cell.Children {
 			parts = append(parts, strings.TrimSpace(w.inlineOpt(c, header)))
 		}
 	}
-	joined := strings.Join(filterEmpty(parts), " <br> ")
+	joined := strings.Join(boxwalk.FilterEmpty(parts), " <br> ")
 	return strings.ReplaceAll(joined, "|", `\|`)
 }
 
@@ -241,71 +242,6 @@ func (w *writer) captionText(table *cssbox.Box) string {
 	return ""
 }
 
-// collectRows returns the table's rows in document order (descending through row
-// groups) along with a parallel slice flagging which rows are header rows (a row inside
-// a DisplayTableHeaderGroup, or whose cells are all header cells).
-func collectRows(table *cssbox.Box) ([]*cssbox.Box, []bool) {
-	var rows []*cssbox.Box
-	var header []bool
-	var walk func(b *cssbox.Box, inHeader bool)
-	walk = func(b *cssbox.Box, inHeader bool) {
-		for _, c := range b.Children {
-			switch c.Display {
-			case cssbox.DisplayTableRow:
-				rows = append(rows, c)
-				header = append(header, inHeader || rowIsAllHeader(c))
-			case cssbox.DisplayTableHeaderGroup:
-				walk(c, true)
-			case cssbox.DisplayTableRowGroup, cssbox.DisplayTableFooterGroup:
-				walk(c, false)
-			}
-		}
-	}
-	walk(table, false)
-	return rows, header
-}
-
-// rowIsAllHeader reports whether every cell in a row is a header cell (a <th>).
-func rowIsAllHeader(row *cssbox.Box) bool {
-	cells := cellBoxesOf(row)
-	if len(cells) == 0 {
-		return false
-	}
-	for _, c := range cells {
-		if !isHeaderCell(c) {
-			return false
-		}
-	}
-	return true
-}
-
-// isHeaderCell reports whether a table cell is a header cell. HTML <th> gets
-// font-weight:bold from the UA sheet; that alone is ambiguous, so we treat a cell as a
-// header only when it is bold (the UA <th> signal). This is the pragmatic detector; a
-// dedicated SemTag for <th> is a possible refinement.
-func isHeaderCell(cell *cssbox.Box) bool {
-	return cell.Style.Bold
-}
-
-// cellBoxesOf returns the DisplayTableCell children of a row box.
-func cellBoxesOf(row *cssbox.Box) []*cssbox.Box {
-	var out []*cssbox.Box
-	for _, c := range row.Children {
-		if c.Display == cssbox.DisplayTableCell {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// clampSpan reads a span value (0 = absent) as at least 1.
-func clampSpan(n int) int {
-	if n < 1 {
-		return 1
-	}
-	return n
-}
-
 // cellTexts extracts the text of a row's cells, padded to cols with empty strings.
 func cellTexts(row []cellData, cols int) []string {
 	out := make([]string, cols)
@@ -319,16 +255,5 @@ func cellTexts(row []cellData, cols int) []string {
 
 // joinNonEmpty joins non-empty parts with a blank line between them.
 func joinNonEmpty(parts ...string) string {
-	return strings.Join(filterEmpty(parts), "\n\n")
-}
-
-// filterEmpty returns the non-empty strings of in, order-preserving.
-func filterEmpty(in []string) []string {
-	var out []string
-	for _, s := range in {
-		if strings.TrimSpace(s) != "" {
-			out = append(out, s)
-		}
-	}
-	return out
+	return strings.Join(boxwalk.FilterEmpty(parts), "\n\n")
 }
