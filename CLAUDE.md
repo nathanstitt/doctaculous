@@ -26,8 +26,10 @@ pipeline is the reflow target.)
 - **MIT licensed.** Every dependency must be MIT/BSD/Apache and pure Go. No GPL/AGPL.
 - Approved deps: `golang.org/x/image/*` (BSD), `github.com/srwiley/rasterx` (BSD),
   `github.com/benoitkugler/textlayout` (font parsing), `golang.org/x/net/html` (HTML parse),
-  `github.com/andybalholm/brotli` (MIT, pure-Go — WOFF2 Brotli decompression only). Add new deps
-  only if pure-Go + permissive; record the reason in the PR.
+  `github.com/andybalholm/brotli` (MIT, pure-Go — WOFF2 Brotli decompression only),
+  `github.com/beevik/etree` (BSD-2, pure-Go, zero deps — the raw-fidelity XML DOM the xlsx
+  editor rewrites dirty parts through; prefixes/attr order/CDATA preserved, verified in source
+  before adoption). Add new deps only if pure-Go + permissive; record the reason in the PR.
 - Vendored (copied into the tree, not a `go get` dep): `github.com/xiaoqidun/jbig2` (Apache-2.0, pure
   Go — JBIG2 image decode) in `pkg/pdf/filter/jbig2/`, vendored because it is new/solo-authored (see
   that dir's README + NOTICE); its only dep is `golang.org/x/image` (already used). Excluded from
@@ -394,6 +396,20 @@ document model consumed externally by tinycld/text):
   `Date1904` + `DefinedNames`, 1-based coordinate helpers, complete builtin numFmt id table.
   Display path byte-identical (Text untouched; formatter keeps its subset).
   `2026-07-10-xlsx-reader-enrichment-design.md`.
+
+**XLSX preservation-first editor core — calc-adoption PR 2/5** (`pkg/xlsx` `Edit`/`New`/`Save`):
+
+- Open-mutate-save with the strongest preservation contract: untouched parts copy
+  byte-verbatim at the zip layer (no-op Edit+Save ⇒ part-for-part byte-identical, reads never
+  dirty), dirty parts re-serialize through `internal/xmlpart` (beevik/etree pinned settings —
+  unknown elements/attrs/prefixes survive in order; DOCTYPE rejected; keystone
+  parse→serialize→reparse tree-equal property + fuzz). Sheet ops (add/delete/move/rename/
+  visibility with last-visible guards, tab color), typed cell writes (SetString inlineStr/
+  SetNumber/SetBool/SetDate with xf-clone date-format ensuring, ATOMIC
+  SetFormula(src, cached)), ClearCell keeps style, Cells iteration, merges/frozen panes/
+  dimension/row heights/col widths (range-splitting), stale calcChain dropped on first value
+  edit (part + CT + rel). Deterministic saves; single-goroutine editor, 1-based coordinates.
+  `2026-07-10-xlsx-editor-core-design.md`.
 
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
