@@ -114,10 +114,13 @@ func TestRTFDetectionAndConvert(t *testing.T) {
 		}
 	}
 
-	// RTF is not (yet) a conversion output.
+	// RTF is a conversion output too (pkg/render/rtfwrite).
 	var out bytes.Buffer
 	err = Convert(context.Background(), strings.NewReader("<p>hi</p>"), &out, ConvertOptions{From: FormatHTML, To: FormatRTF})
-	if err == nil {
-		t.Error("html→rtf should be unsupported until the writer lands")
+	if err != nil {
+		t.Errorf("html→rtf: %v", err)
+	}
+	if !strings.HasPrefix(out.String(), `{\rtf1`) {
+		t.Errorf("html→rtf output lacks an RTF signature:\n%.80s", out.String())
 	}
 }

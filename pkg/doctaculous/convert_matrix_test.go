@@ -60,6 +60,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatCSV:      []byte("Name,Qty\nMatrix Title,5\n"),
 		FormatTSV:      []byte("Name\tQty\nMatrix Title\t5\n"),
 		FormatXLSX:     matrixXLSX(),
+		FormatRTF:      []byte(`{\rtf1\ansi {\b Matrix Title}\par An introductory paragraph.\par}`),
 		FormatPNG:      encodeTinyImage(t, FormatPNG),
 		FormatJPEG:     encodeTinyImage(t, FormatJPEG),
 	}
@@ -74,6 +75,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatCSV:      "Matrix Title",
 		FormatTSV:      "Matrix Title",
 		FormatXLSX:     "Matrix Title",
+		FormatRTF:      "Matrix Title",
 	}
 	// CSV/TSV output carries tables only; inputs whose fixture has no table
 	// legitimately produce empty output there.
@@ -83,11 +85,12 @@ func TestConvertMatrix(t *testing.T) {
 		FormatMarkdown: true,
 		FormatText:     true,
 		FormatDOCX:     true, // the paragraph fixture
+		FormatRTF:      true, // the paragraph fixture
 		FormatPNG:      true, // an image is not a table
 		FormatJPEG:     true,
 	}
 	sentinels := []error{ErrUnknownFormat, ErrUnsupportedFormat, ErrSameFormat}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -164,6 +167,24 @@ func TestConvertMatrix(t *testing.T) {
 			case FormatMarkdown, FormatText, FormatHTML:
 				if !strings.Contains(out.String(), wantText[from]) {
 					t.Errorf("%s: output missing %q:\n%s", name, wantText[from], out.String())
+				}
+			case FormatRTF:
+				if !bytes.HasPrefix(out.Bytes(), []byte(`{\rtf1`)) {
+					t.Errorf("%s: output lacks an RTF signature", name)
+					break
+				}
+				// The produced document must reopen through our own reader and
+				// carry the source text (image inputs carry none — vacuous).
+				doc, err := OpenBytes(out.Bytes())
+				if err != nil {
+					t.Errorf("%s: reopening produced rtf: %v", name, err)
+					break
+				}
+				var text bytes.Buffer
+				if err := doc.WriteText(ctx, &text, MarkdownOptions{}); err != nil {
+					t.Errorf("%s: reading produced rtf: %v", name, err)
+				} else if !strings.Contains(text.String(), wantText[from]) {
+					t.Errorf("%s: reopened rtf missing %q:\n%s", name, wantText[from], text.String())
 				}
 			case FormatCSV, FormatTSV:
 				if !strings.Contains(out.String(), wantText[from]) {

@@ -121,6 +121,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatCSV:      true,
 		FormatTSV:      true,
 		FormatXLSX:     true,
+		FormatRTF:      true,
 		FormatPNG:      true,
 		FormatJPEG:     true,
 	}
