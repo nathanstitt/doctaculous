@@ -61,6 +61,100 @@ var builtinNumFmt = map[int]string{
 	47: "mmss.0",
 }
 
+// builtinNumFmtAll is the COMPLETE builtin id table (ECMA-376 §18.8.30, the
+// implied formats every producer shares; 0 = General is the "" zero value).
+// The display formatter deliberately keeps consulting only builtinNumFmt so
+// rendered Text is unchanged; this table serves the structured path —
+// Style.NumFmt resolution and date typing — and, later, code→id reuse in the
+// editor.
+var builtinNumFmtAll = map[int]string{
+	1:  "0",
+	2:  "0.00",
+	3:  "#,##0",
+	4:  "#,##0.00",
+	9:  "0%",
+	10: "0.00%",
+	11: "0.00E+00",
+	12: "# ?/?",
+	13: "# ??/??",
+	14: "mm-dd-yy",
+	15: "d-mmm-yy",
+	16: "d-mmm",
+	17: "mmm-yy",
+	18: "h:mm AM/PM",
+	19: "h:mm:ss AM/PM",
+	20: "h:mm",
+	21: "h:mm:ss",
+	22: "m/d/yy h:mm",
+	37: "#,##0 ;(#,##0)",
+	38: "#,##0 ;[Red](#,##0)",
+	39: "#,##0.00;(#,##0.00)",
+	40: "#,##0.00;[Red](#,##0.00)",
+	45: "mm:ss",
+	46: "[h]:mm:ss",
+	47: "mmss.0",
+	48: "##0.0E+0",
+	49: "@",
+}
+
+// resolveNumFmt resolves a numFmtId to its pattern for the structured path:
+// custom codes win, then the complete builtin table; "" is General.
+func resolveNumFmt(id int, custom map[int]string) string {
+	if code, ok := custom[id]; ok {
+		return code
+	}
+	if code, ok := builtinNumFmtAll[id]; ok {
+		return code
+	}
+	return ""
+}
+
+// typedValue derives a cell's typed cached value — the structured companion
+// to displayValue (which is unchanged and keeps producing Text).
+func typedValue(c rawCell, shared []string, styles styleTable, date1904 bool) Value {
+	switch c.typ {
+	case "s":
+		idx, err := strconv.Atoi(strings.TrimSpace(c.value))
+		if err != nil || idx < 0 || idx >= len(shared) {
+			return Value{Kind: KindString}
+		}
+		return Value{Kind: KindString, S: shared[idx]}
+	case "str", "inlineStr":
+		return Value{Kind: KindString, S: c.value}
+	case "b":
+		return Value{Kind: KindBool, B: strings.TrimSpace(c.value) == "1"}
+	case "e":
+		return Value{Kind: KindError, S: c.value}
+	default: // numeric
+		raw := strings.TrimSpace(c.value)
+		if raw == "" {
+			return Value{} // a style-only cell holds no value
+		}
+		f, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return Value{Kind: KindString, S: c.value} // malformed number: keep the text
+		}
+		code := resolveNumFmt(styles.numFmtID(c.styleIdx), styles.customFmt)
+		if isDateCode(code) {
+			return Value{Kind: KindDate, F: f, T: serialToTime(f, date1904)}
+		}
+		return Value{Kind: KindNumber, F: f}
+	}
+}
+
+// serialToTime converts an Excel serial to a UTC time under the workbook's
+// date system, rounding the fractional day to whole seconds.
+func serialToTime(serial float64, date1904 bool) time.Time {
+	epoch := excelEpoch1900
+	if date1904 {
+		epoch = excelEpoch1904
+	}
+	days := int(serial)
+	frac := serial - float64(days)
+	secs := int(frac*86400 + 0.5)
+	return epoch.AddDate(0, 0, days).Add(time.Duration(secs) * time.Second)
+}
+
 // formatNumber renders a numeric cached value through its format code:
 // date/time codes convert the Excel serial, percent codes scale and suffix,
 // and everything else — including custom codes the formatter does not model —
@@ -156,15 +250,7 @@ var excelEpoch1904 = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
 // formatSerialDate converts an Excel serial to a readable date/time string:
 // dates as 2006-01-02, date-times as 2006-01-02 15:04, pure times as 15:04:05.
 func formatSerialDate(serial float64, code string, date1904 bool) string {
-	epoch := excelEpoch1900
-	if date1904 {
-		epoch = excelEpoch1904
-	}
-	days := int(serial)
-	frac := serial - float64(days)
-	// Round the fractional day to whole seconds to absorb float error.
-	secs := int(frac*86400 + 0.5)
-	t := epoch.AddDate(0, 0, days).Add(time.Duration(secs) * time.Second)
+	t := serialToTime(serial, date1904)
 
 	hasDate := containsAny(strings.ToLower(stripLiterals(code)), "y", "d")
 	hasTime := containsAny(strings.ToLower(stripLiterals(code)), "h", "s")
