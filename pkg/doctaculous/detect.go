@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"archive/zip"
 	"bytes"
+	"io"
 	"strings"
 )
 
@@ -86,6 +87,15 @@ func classifyOPC(data []byte) Format {
 			return FormatXLSX
 		case f.Name == "ppt/presentation.xml":
 			return FormatPPTX
+		case f.Name == "mimetype":
+			// The EPUB OCF signature: a "mimetype" entry declaring the type.
+			if rc, err := f.Open(); err == nil {
+				mt, _ := io.ReadAll(io.LimitReader(rc, 64))
+				_ = rc.Close()
+				if strings.TrimSpace(string(mt)) == "application/epub+zip" {
+					return FormatEPUB
+				}
+			}
 		case f.Name == "[Content_Types].xml":
 			hasContentTypes = true
 		case strings.HasPrefix(f.Name, "word/"):
