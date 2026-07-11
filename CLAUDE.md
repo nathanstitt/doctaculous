@@ -3,8 +3,7 @@
 Pure-Go, MIT-licensed document toolkit. Long-term goal: convert any document to any other format,
 author/sign PDF/DOCX/HTML, and rasterize pages to images. The core pipeline (parse → interpret →
 raster) is working end-to-end and renders real-world PDFs, DOCX, and HTML faithfully; see "Status &
-roadmap" at the bottom for what's done and what's next. (**EPUB is out of scope** — the HTML
-pipeline is the reflow target.)
+roadmap" at the bottom for what's done and what's next.
 
 ## Working directives (how to build here)
 
@@ -447,6 +446,18 @@ document model consumed externally by tinycld/text):
   row flipped; input capability bit (output = D2). `pptx-specimen` golden.
   `2026-07-10-pptx-input-design.md`.
 
+**EPUB input** (`pkg/epub`, `OpenEPUB*`, `convert book.epub ...` — reverses the old
+out-of-scope note):
+
+- Container reader: container.xml → OPF (title, manifest, spine; `linear="no"` skipped;
+  EPUB 2/3 via the spine, NCX ignored); spine documents' body markup concatenates in reading
+  order (each chapter `break-before: page` when paginated) with collected package CSS +
+  inline styles; images/fonts/linked CSS resolve from the container through a loader adapter
+  (the OPF-directory layout every real-world book uses; the dir-loader default is skipped so
+  the container loader wins). DRM (META-INF/encryption.xml) → typed `epub.ErrEncrypted`.
+  Detection: the OCF `mimetype` zip entry in classifyOPC; `.epub`; MIME row flipped; input
+  capability bit (output = E2). `epub-specimen` golden. `2026-07-10-epub-input-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
@@ -504,6 +515,7 @@ each degrades gracefully and is documented in the relevant spec):
 - **Pagination** — mid-cell / mid-item (flex/grid) content splitting of a genuinely-indivisible
   over-tall row/item overflows; positioned/float distribution within a different-width named-page run.
 
-Out-of-scope, don't gold-plate without a concrete need: **EPUB** (`OpenEPUB` / ebook reading — the
-HTML pipeline is the reflow target), full ICC color management, JavaScript, interactive AcroForm
-widget rendering, tagged-PDF/accessibility, digital-signature verification.
+Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
+interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
+(EPUB — previously out of scope — landed as an input format when the any⇄any conversion goal
+made it a requirement; DRM-protected books stay refused by design.)

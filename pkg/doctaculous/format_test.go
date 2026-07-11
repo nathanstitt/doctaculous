@@ -31,6 +31,7 @@ func TestParseFormat(t *testing.T) {
 		{"rtf", FormatRTF},
 		{"pptx", FormatPPTX},
 		{"pptm", FormatPPTX},
+		{"epub", FormatEPUB},
 		{"png", FormatPNG},
 		{"jpeg", FormatJPEG},
 		{"jpg", FormatJPEG},
@@ -82,6 +83,7 @@ func TestFormatFromPath(t *testing.T) {
 		{"archive.zip", FormatUnknown},
 		{"doc.rtf", FormatRTF},
 		{"deck.pptx", FormatPPTX},
+		{"book.epub", FormatEPUB},
 	}
 	for _, c := range cases {
 		if got := FormatFromPath(c.path); got != c.want {
@@ -106,6 +108,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatXLSX:     true,
 		FormatRTF:      true,
 		FormatPPTX:     true,
+		FormatEPUB:     true,
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,
@@ -119,7 +122,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatPNG:      true,
 		FormatJPEG:     true,
 	}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPPTX, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPPTX, FormatEPUB, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -178,6 +181,7 @@ func TestFormatFromMIME(t *testing.T) {
 		{"application/rtf", FormatRTF},
 		{"text/rtf", FormatRTF},
 		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", FormatPPTX},
+		{"application/epub+zip", FormatEPUB},
 		{"image/png", FormatPNG},
 		{"image/jpeg", FormatJPEG},
 		{"image/jpg", FormatJPEG},
@@ -201,8 +205,6 @@ func TestFormatFromMIME(t *testing.T) {
 		"application/vnd.ms-word",
 		"application/vnd.ms-excel",
 		"application/vnd.ms-powerpoint",
-		// Flips to FormatEPUB when that frontend lands.
-		"application/epub+zip",
 		"image/heic",
 		"image/heif",
 		"image/heic-sequence",
