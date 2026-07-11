@@ -19,10 +19,11 @@ func fixupFlexGrid(b *cssbox.Box) {
 	}
 }
 
-// containerItems converts a flex/grid container's raw children into items. A
-// maximal run of inline-level boxes becomes one anonymous item; a block-level
-// box is kept as its own item; whitespace-only text outside an inline run is
-// discarded.
+// containerItems converts a flex/grid container's raw children into items. Every
+// element child becomes its own item — an inline-level element is blockified
+// (CSS Flexbox §4 / Grid §6: "the display value of a flex item is blockified");
+// only a maximal run of child TEXT (and anonymous inline splits) is wrapped in
+// one anonymous item. Whitespace-only text outside a text run is discarded.
 func containerItems(kids []*cssbox.Box, anonKind cssbox.BoxKind) []*cssbox.Box {
 	var out []*cssbox.Box
 	var run []*cssbox.Box
@@ -33,9 +34,9 @@ func containerItems(kids []*cssbox.Box, anonKind cssbox.BoxKind) []*cssbox.Box {
 		item := &cssbox.Box{
 			Kind:    anonKind,
 			Display: cssbox.DisplayBlock,
-			// The run holds only inline-level content (text / inline boxes — block and
-			// replaced children flush separately), so the anon item establishes an INLINE
-			// formatting context; with BlockFC its text would never lay out (zero size).
+			// The run holds only text-level content, so the anon item establishes an
+			// INLINE formatting context; with BlockFC its text would never lay out
+			// (zero size).
 			Formatting: cssbox.InlineFC,
 			Children:   run,
 		}
@@ -45,20 +46,27 @@ func containerItems(kids []*cssbox.Box, anonKind cssbox.BoxKind) []*cssbox.Box {
 	for _, c := range kids {
 		switch {
 		case isWSText(c) && len(run) == 0:
-			// Whitespace-only text BETWEEN block items (no inline run open) collapses
-			// away. Whitespace that arrives while an inline run IS open falls through to
-			// the default arm and stays in the run (correct per CSS Flexbox §4 / Grid §6 —
-			// unlike tablefix.go, which has no inline-run concept and drops whitespace
+			// Whitespace-only text BETWEEN items (no text run open) collapses away.
+			// Whitespace that arrives while a run IS open falls through to the default
+			// arm and stays in the run (correct per CSS Flexbox §4 / Grid §6 — unlike
+			// tablefix.go, which has no inline-run concept and drops whitespace
 			// outright).
 		case c.Kind.IsBlockLevel() || c.Kind == cssbox.BoxReplaced:
 			// A block-level box, OR an atomic replaced box (an <img>/form control): each
-			// becomes its OWN flex/grid item (CSS Flexbox §4 / Grid §6 — an atomic inline is
-			// an item, not coalesced into an inline run like text). A replaced box keeps its
-			// Kind so replaced sizing applies; an inline-block is already block-level by Kind.
+			// becomes its OWN flex/grid item (an atomic inline is an item, not coalesced
+			// into a text run). A replaced box keeps its Kind so replaced sizing applies;
+			// an inline-block is already block-level by Kind.
 			flush()
 			out = append(out, c)
+		case c.Kind == cssbox.BoxInline:
+			// An inline ELEMENT child (span/label/a/...) is its own item, blockified.
+			// Its content is inline-level (block-in-inline splitting already ran), so
+			// the blockified box holds an inline formatting context.
+			flush()
+			c.Kind, c.Display, c.Formatting = cssbox.BoxBlock, cssbox.DisplayBlock, cssbox.InlineFC
+			out = append(out, c)
 		default:
-			// Inline-level box or non-whitespace text: part of the current inline run.
+			// Text (or an anonymous inline split): part of the current text run.
 			run = append(run, c)
 		}
 	}
