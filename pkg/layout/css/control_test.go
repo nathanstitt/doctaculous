@@ -476,3 +476,45 @@ func TestControlPaintChrome(t *testing.T) {
 		t.Errorf("checked checkbox should paint more than an empty one (the checkmark)")
 	}
 }
+
+func TestRadioPaintsCircularChrome(t *testing.T) {
+	// A radio paints synthesized circular outlines (glyph items), NOT the
+	// checkbox's rectangular fill+bevel: no BackgroundKind rect and no bevel
+	// borders, and at least two glyph outlines (gray ring + field disc).
+	rd := renderControlItems(t, `<body><input type=radio></body>`)
+	if n := countKind(rd, layout.BorderKind); n != 0 {
+		t.Errorf("radio painted %d bevel border strips; circular chrome must not use rect bevels", n)
+	}
+	if n := countKind(rd, layout.GlyphKind); n < 2 {
+		t.Errorf("radio painted %d glyph outlines, want >= 2 (ring + disc)", n)
+	}
+	// A checked radio adds the dot.
+	checked := renderControlItems(t, `<body><input type=radio checked></body>`)
+	if countKind(checked, layout.GlyphKind) != countKind(rd, layout.GlyphKind)+1 {
+		t.Errorf("checked radio should paint exactly one more outline (the dot): %d vs %d",
+			countKind(checked, layout.GlyphKind), countKind(rd, layout.GlyphKind))
+	}
+}
+
+func TestCheckboxMarkIsSyntheticAndCentered(t *testing.T) {
+	// The checkmark is a synthesized outline positioned so its unit box maps onto
+	// the control's content box (baseline at the box bottom, size = box height) —
+	// never a font glyph subject to per-face metrics.
+	items := renderControlItems(t, `<body><input type=checkbox checked></body>`)
+	var glyphs []layout.GlyphItem
+	for _, it := range items {
+		if it.Kind == layout.GlyphKind {
+			glyphs = append(glyphs, it.Glyph)
+		}
+	}
+	if len(glyphs) != 1 {
+		t.Fatalf("checked checkbox painted %d glyph outlines, want exactly 1 (the mark)", len(glyphs))
+	}
+	mark := glyphs[0]
+	if mark.Outline == nil {
+		t.Fatal("mark has no outline")
+	}
+	if mark.SizePt != ctrlCheckSize {
+		t.Errorf("mark SizePt = %v, want the box side %v (unit box maps onto the content box)", mark.SizePt, float64(ctrlCheckSize))
+	}
+}

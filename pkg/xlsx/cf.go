@@ -91,9 +91,10 @@ func (s *SheetEdit) ConditionalFormats() []ConditionalFormatting {
 // SetConditionalFormats REPLACES the sheet's conditional formatting wholesale
 // (the authoritative-save shape). A rule with Raw set re-emits verbatim —
 // the lossless passthrough for rule kinds the caller does not model — with
-// only its priority renumbered; a typed rule synthesizes its element, minting
-// a dxf from Style when present. Priorities renumber 1..N across the sheet in
-// order. An empty set removes every block.
+// only its priority renumbered (and, when Style is also set, a freshly
+// minted dxfId stamped on — see cfRuleElement); a typed rule synthesizes its
+// element, minting a dxf from Style when present. Priorities renumber 1..N
+// across the sheet in order. An empty set removes every block.
 func (s *SheetEdit) SetConditionalFormats(cfs []ConditionalFormatting) error {
 	root, err := s.mut()
 	if err != nil {
@@ -131,6 +132,13 @@ func (s *SheetEdit) SetConditionalFormats(cfs []ConditionalFormatting) error {
 
 // cfRuleElement builds one cfRule element: verbatim from Raw when present
 // (priority renumbered), else synthesized from the typed fields.
+//
+// A Raw rule WITH Style set additionally mints a dxf and stamps its dxfId
+// onto the raw element — the legacy-upgrade shape: a caller re-synthesizing
+// rule XML from a pre-doctaculous representation has the rule body but no
+// valid dxf index to embed. A Raw rule WITHOUT Style keeps any embedded
+// dxfId verbatim (valid inductively: this editor only appends to <dxfs>,
+// never compacts it).
 func (f *File) cfRuleElement(rule CFRule, priority int) (*etree.Element, error) {
 	if len(rule.Raw) > 0 {
 		p, err := xmlpart.Parse(rule.Raw)
@@ -138,6 +146,13 @@ func (f *File) cfRuleElement(rule CFRule, priority int) (*etree.Element, error) 
 			return nil, err
 		}
 		el := p.Root().Copy()
+		if rule.Style != nil {
+			id, err := f.dxfIDFor(*rule.Style)
+			if err != nil {
+				return nil, err
+			}
+			el.CreateAttr("dxfId", strconv.Itoa(id))
+		}
 		el.CreateAttr("priority", strconv.Itoa(priority))
 		return el, nil
 	}

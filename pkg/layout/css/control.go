@@ -10,6 +10,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
 // classifyControl maps an element (its lowercased tag + attributes) to the form
@@ -324,7 +325,29 @@ func (cc *ControlContent) append(dst []layout.Item) []layout.Item {
 		}
 	}
 	switch cc.Kind {
-	case cssbox.CtrlCheckbox, cssbox.CtrlRadio:
+	case cssbox.CtrlRadio:
+		// Radio chrome is CIRCULAR: a gray ring (the border) around a field-color
+		// disc, plus a centered ink dot when checked — all synthesized outlines
+		// (font-independent), emitted in the control's em box via appendMarkPath.
+		bg := ctrlFieldBG
+		if cc.Disabled {
+			bg = ctrlDisabled
+		}
+		// Radii as fractions of the em box: the outer ring reaches the border box
+		// edge; the ring wall is ctrlBorder thick in point terms.
+		outer := (cc.CW + 2*ctrlBorder) / 2 / cc.CH
+		inner := cc.CW / 2 / cc.CH
+		cc.appendMarkPath(&dst, font.CirclePath(0.5, 0.5, outer, 0), ctrlGray)
+		cc.appendMarkPath(&dst, font.CirclePath(0.5, 0.5, inner, 0), bg)
+		if cc.Checked {
+			ink := ctrlInk
+			if cc.Disabled {
+				ink = ctrlGray
+			}
+			cc.appendMarkPath(&dst, font.CirclePath(0.5, 0.5, 0.25, 0), ink)
+		}
+		return dst
+	case cssbox.CtrlCheckbox:
 		bg := ctrlFieldBG
 		if cc.Disabled {
 			bg = ctrlDisabled
@@ -336,14 +359,10 @@ func (cc *ControlContent) append(dst []layout.Item) []layout.Item {
 			if cc.Disabled {
 				ink = ctrlGray
 			}
-			if cc.Kind == cssbox.CtrlRadio {
-				d := cc.CW * 0.4
-				fill(cc.CX+(cc.CW-d)/2, cc.CY+(cc.CH-d)/2, d, d, ink)
-			} else if !cc.appendGlyphCentered(&dst, '✓', ink) {
-				t := cc.CW * 0.12
-				fill(cc.CX+cc.CW*0.2, cc.CY+cc.CH*0.5, cc.CW*0.25, t, ink)
-				fill(cc.CX+cc.CW*0.4, cc.CY+cc.CH*0.3, t, cc.CH*0.4, ink)
-			}
+			// The checkmark is a synthesized polygon (short arm down to the elbow,
+			// long arm up to the right), not a font glyph — deterministic across
+			// faces and always centered.
+			cc.appendMarkPath(&dst, checkPath(), ink)
 		}
 		return dst
 	case cssbox.CtrlButton:
@@ -431,23 +450,28 @@ func (cc *ControlContent) appendText(dst *[]layout.Item, align ctrlAlign) {
 	}
 }
 
-// appendGlyphCentered emits a single glyph centered in the content box; returns
-// false (drawing nothing) when the face lacks the glyph, so the caller can fall back.
-func (cc *ControlContent) appendGlyphCentered(dst *[]layout.Item, r rune, ink color.RGBA) bool {
-	if cc.Face == nil {
-		return false
-	}
-	outline, adv, ok := cc.Face.Glyph(r)
-	if !ok || outline == nil {
-		return false
-	}
-	asc, desc, _ := cc.Face.Metrics()
-	gw := adv * cc.FontSizePt
-	baseline := cc.CY + (cc.CH+(asc-desc)*cc.FontSizePt)/2
-	x := cc.CX + (cc.CW-gw)/2
+// appendMarkPath emits a synthesized outline (unit-em coordinates, Y up, so the
+// [0,1]×[0,1] box maps onto the control's content box) as a glyph item. The glyph
+// baseline sits at the content box's bottom edge and the size is the box height,
+// which makes the unit box coincide with the content box exactly.
+func (cc *ControlContent) appendMarkPath(dst *[]layout.Item, outline *render.Path, ink color.RGBA) {
 	*dst = append(*dst, layout.Item{Kind: layout.GlyphKind,
-		Glyph: layout.GlyphItem{Outline: outline, XPt: x, YPt: baseline, SizePt: cc.FontSizePt, Color: ink}})
-	return true
+		Glyph: layout.GlyphItem{Outline: outline, XPt: cc.CX, YPt: cc.CY + cc.CH, SizePt: cc.CH, Color: ink}})
+}
+
+// checkPath is the checkbox tick: a two-arm polygon in the unit em box (Y up) —
+// the short arm descends from the left to the elbow, the long arm rises to the
+// upper right. Stroke thickness is baked into the polygon.
+func checkPath() *render.Path {
+	p := &render.Path{}
+	p.MoveTo(0.14, 0.48)
+	p.LineTo(0.36, 0.26)
+	p.LineTo(0.84, 0.74)
+	p.LineTo(0.74, 0.84)
+	p.LineTo(0.36, 0.46)
+	p.LineTo(0.24, 0.58)
+	p.Close()
+	return p
 }
 
 // appendTriangle emits a small downward triangle in the select's right-side box,

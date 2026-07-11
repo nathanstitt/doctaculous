@@ -39,6 +39,21 @@ func syntheticBullet(r rune) (outline *render.Path, advanceEm float64, ok bool) 
 	return nil, 0, false
 }
 
+// CirclePath synthesizes a circle outline centered at (cx, cy): a filled disc
+// when innerR <= 0, otherwise a ring whose hole has radius innerR (the inner
+// circle is wound opposite so the nonzero fill subtracts it). Coordinates follow
+// the glyph-outline convention (em-style units, Y up); callers scale/position via
+// the glyph transform. Exported for painters that need font-independent circular
+// marks (list bullets here; radio-button chrome in the layout engine).
+func CirclePath(cx, cy, outerR, innerR float64) *render.Path {
+	p := &render.Path{}
+	addCircle(p, cx, cy, outerR, false)
+	if innerR > 0 && innerR < outerR {
+		addCircle(p, cx, cy, innerR, true)
+	}
+	return p
+}
+
 // discPath is a filled circle centered at (radius, bulletCenterY).
 func discPath() *render.Path {
 	r := bulletDiameter / 2
