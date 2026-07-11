@@ -3,53 +3,15 @@ package xmlpart
 import (
 	"archive/zip"
 	"bytes"
-	"sort"
 	"strings"
 	"testing"
 
-	"github.com/beevik/etree"
 	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
 )
 
-// treeEqual compares two elements semantically: prefixed name, attributes as
-// an order-insensitive set, child elements in sequence, and the text content
-// interleaved between them (whitespace-preserved — the inputs under test are
-// byte-related, so text must survive verbatim).
-func treeEqual(a, b *etree.Element) bool {
-	if a.Space != b.Space || a.Tag != b.Tag {
-		return false
-	}
-	if len(a.Attr) != len(b.Attr) {
-		return false
-	}
-	key := func(at etree.Attr) string { return at.Space + ":" + at.Key + "=" + at.Value }
-	ak := make([]string, len(a.Attr))
-	bk := make([]string, len(b.Attr))
-	for i := range a.Attr {
-		ak[i] = key(a.Attr[i])
-		bk[i] = key(b.Attr[i])
-	}
-	sort.Strings(ak)
-	sort.Strings(bk)
-	for i := range ak {
-		if ak[i] != bk[i] {
-			return false
-		}
-	}
-	if a.Text() != b.Text() {
-		return false
-	}
-	ac, bc := a.ChildElements(), b.ChildElements()
-	if len(ac) != len(bc) {
-		return false
-	}
-	for i := range ac {
-		if !treeEqual(ac[i], bc[i]) {
-			return false
-		}
-	}
-	return true
-}
+// treeEqual is the exported semantic comparison (see Equal); aliased here so
+// the property test reads naturally.
+var treeEqual = Equal
 
 // TestRoundTripLossless is the keystone property: parse → serialize → reparse
 // yields a semantically identical tree for every XML part of every generated

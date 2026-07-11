@@ -57,6 +57,11 @@ type File struct {
 	// shared caches the shared-string table for typed reads.
 	shared     []string
 	sharedInit bool
+	// styleGen counts styles.xml mutations; styleCache/styleCacheGen memoize
+	// the resolved style table against it (see resolvedStyles).
+	styleGen      int
+	styleCacheGen int
+	styleCache    styleTable
 }
 
 // Edit opens xlsx bytes for in-place modification. The data is retained (the
@@ -67,12 +72,13 @@ func Edit(data []byte) (*File, error) {
 		return nil, fmt.Errorf("%w: %v", ErrNotXLSX, err)
 	}
 	f := &File{
-		zr:      zr,
-		parsed:  map[string]*xmlpart.Part{},
-		dirty:   map[string]bool{},
-		added:   map[string][]byte{},
-		deleted: map[string]bool{},
-		sheets:  map[string]*SheetEdit{},
+		zr:            zr,
+		parsed:        map[string]*xmlpart.Part{},
+		dirty:         map[string]bool{},
+		added:         map[string][]byte{},
+		deleted:       map[string]bool{},
+		sheets:        map[string]*SheetEdit{},
+		styleCacheGen: -1,
 	}
 	if f.rawPart("xl/workbook.xml") == nil {
 		return nil, fmt.Errorf("%w: missing xl/workbook.xml", ErrNotXLSX)

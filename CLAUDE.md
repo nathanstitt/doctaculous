@@ -411,6 +411,18 @@ document model consumed externally by tinycld/text):
   edit (part + CT + rel). Deterministic saves; single-goroutine editor, 1-based coordinates.
   `2026-07-10-xlsx-editor-core-design.md`.
 
+**XLSX style read-modify-write — calc-adoption PR 3/5** (`pkg/xlsx` `PatchCellStyle`):
+
+- The patch-not-replace overlay contract: all-pointer-leaf `StylePatch` (fonts/fills/
+  alignment/borders-with-Clear/numFmt; `*""` clears) applied by CLONING the cell's xf +
+  font/fill/border records and editing nodes — unmodeled facets (diagonal borders, indent,
+  rotation, protection, theme colors, unknown children like font `scheme`) ride along,
+  pinned by test. Records dedupe semantically (`xmlpart.Equal`); numFmt patterns reuse
+  builtin ids deterministically, reuse custom codes, else allocate ≥164. Whole-style
+  `SetCellStyle` + row-style variants + memoized `CellStyle` reads. Per-leaf canary audit
+  (editor read AND save/reopen), mirroring calc's style_attribute_registry.
+  `2026-07-10-xlsx-styles-rmw-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
