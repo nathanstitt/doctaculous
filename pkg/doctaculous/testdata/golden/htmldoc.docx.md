@@ -112,7 +112,7 @@ Separate borders: column 2 carries a tint, alternating rows a stripe; where they
 
 Absolute pinning, relative paint‑time offset, overflow clipping, and z‑index order.
 
-![](rId3)
+![](rId1)
 
 This stage is `position:relative`. The gold badge is `position:absolute`, pinned to its top‑right corner and painted above this text. The GIF inside it decodes through the indexed palette path.
 

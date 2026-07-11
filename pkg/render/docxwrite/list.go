@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
 )
@@ -19,17 +20,17 @@ const bulletNumID = 1
 // being the w:ilvl. Nested lists follow their parent item's paragraph at
 // depth+1, sharing the same numbering instance (per-level counters keep them
 // independent).
-func (w *writer) list(ctx context.Context, container *cssbox.Box, depth int) error {
+func (w *writer) list(ctx context.Context, container *cssbox.Box, depth int, out *[]docx.Block) error {
 	numID := bulletNumID
 	if containerIsOrdered(container) {
 		w.orderedLists++
 		numID = bulletNumID + w.orderedLists
 	}
-	return w.listItems(ctx, container, depth, numID)
+	return w.listItems(ctx, container, depth, numID, out)
 }
 
 // listItems emits the container's items with the given numbering instance.
-func (w *writer) listItems(ctx context.Context, container *cssbox.Box, depth, numID int) error {
+func (w *writer) listItems(ctx context.Context, container *cssbox.Box, depth, numID int, out *[]docx.Block) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -49,8 +50,9 @@ func (w *writer) listItems(ctx context.Context, container *cssbox.Box, depth, nu
 			prefix := boxwalk.StyledRun{Text: box + " "}
 			runs = append([]boxwalk.StyledRun{prefix}, runs...)
 		}
-		numPr := fmt.Sprintf(`<w:numPr><w:ilvl w:val="%d"/><w:numId w:val="%d"/></w:numPr>`, depth, numID)
-		w.emitParagraph(runs, "ListParagraph", numPr, "")
+		if p := w.buildParagraph(runs, "ListParagraph", &numPr{numID: numID, ilvl: depth}, docx.JustifyLeft, false); p != nil {
+			*out = append(*out, docx.Block{Paragraph: p})
+		}
 
 		// Nested lists render beneath their parent item, one level deeper. An
 		// ordered sublist keeps its own restart-at-1 semantics via per-level
@@ -69,13 +71,52 @@ func (w *writer) listItems(ctx context.Context, container *cssbox.Box, depth, nu
 						sub = bulletNumID
 					}
 				}
-				if err := w.listItems(ctx, c, depth+1, sub); err != nil {
+				if err := w.listItems(ctx, c, depth+1, sub, out); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// buildNumbering constructs the word/numbering.xml model: one bullet abstract
+// definition (glyph rotating by depth) shared by every bullet list, one
+// decimal abstract definition, and one w:num instance per ordered list
+// encountered — numbering restarts per instance both in the reader (per-numId
+// counters) and in Word (startOverride, which the reader ignores but Word
+// requires). Per-level indents give Word the familiar nested-list geometry.
+func buildNumbering(orderedLists int) *docx.Numbering {
+	num := docx.NewNumbering()
+	// Abstract 0: bullets. The glyph rotates •/◦/▪ by depth, matching the UA
+	// list rendering. Abstract 1: decimal; the %N placeholder is per-level, as
+	// the reader's single-placeholder substitution expects.
+	bulletGlyphs := []string{"•", "◦", "▪"}
+	bullet, decimal := map[int]docx.NumLevel{}, map[int]docx.NumLevel{}
+	for lvl := 0; lvl < 9; lvl++ {
+		ind := docx.Twips(720 * (lvl + 1))
+		bullet[lvl] = docx.NumLevel{
+			Format: docx.NumFmtBullet, Text: bulletGlyphs[lvl%len(bulletGlyphs)],
+			IndentLeft: ind, HasIndentLeft: true, Hanging: 360, HasHanging: true,
+		}
+		decimal[lvl] = docx.NumLevel{
+			Format: docx.NumFmtDecimal, Text: fmt.Sprintf("%%%d.", lvl+1),
+			Start: 1, HasStart: true,
+			IndentLeft: ind, HasIndentLeft: true, Hanging: 360, HasHanging: true,
+		}
+	}
+	num.Abstract[0] = bullet
+	num.Abstract[1] = decimal
+
+	// Instance 1 = bullets; instances 2..N+1 = one per ordered list.
+	num.Instances[bulletNumID] = docx.NumInstance{AbstractID: 0}
+	for i := 1; i <= orderedLists; i++ {
+		num.Instances[bulletNumID+i] = docx.NumInstance{
+			AbstractID: 1,
+			Overrides:  map[int]docx.LevelOverride{0: {Start: 1, HasStart: true}},
+		}
+	}
+	return num
 }
 
 // containerIsOrdered reports whether a list container holds ordered items,

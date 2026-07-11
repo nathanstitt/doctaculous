@@ -9,6 +9,8 @@
 // represented (they degrade to normal flow), and headers/footers and footnotes
 // are out of scope.
 //
+// The walk BUILDS a *docx.Document — the public model in pkg/docx — and
+// serializes it with docx.Write, so the repo has exactly one OPC emitter.
 // Every mapping is chosen so this repo's own DOCX reader (pkg/docx +
 // pkg/docx/cssbox) round-trips it: heading level rides on the HeadingN style
 // id, quotes on the Quote style, code blocks on the CodeBlock style, emphasis
@@ -19,7 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
+	"math"
 
 	// The image decoders imageRun's DecodeConfig relies on, registered here so
 	// the writer is self-sufficient.
@@ -27,6 +29,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
+	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
 	"github.com/nathanstitt/doctaculous/pkg/resource"
@@ -55,45 +58,41 @@ func Write(ctx context.Context, root *cssbox.Box, w io.Writer, opts Options) err
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
 	}
-	wr := &writer{opts: opts, ctx: ctx, relURL: map[string]string{}, media: map[string]mediaRef{}}
+	wr := &writer{
+		opts:  opts,
+		ctx:   ctx,
+		doc:   &docx.Document{Styles: docx.DefaultStyles()},
+		media: map[string]mediaRef{},
+	}
 	if root != nil {
-		if err := wr.block(ctx, root); err != nil {
+		if err := wr.block(ctx, root, &wr.doc.Body); err != nil {
 			return err
 		}
 	}
-	pkg, err := assemblePackage(wr, opts)
-	if err != nil {
-		return fmt.Errorf("docxwrite: %w", err)
-	}
-	if _, err := w.Write(pkg); err != nil {
+	wr.doc.Numbering = buildNumbering(wr.orderedLists)
+	wr.doc.Section = sectionProps(opts)
+	if err := docx.Write(w, wr.doc); err != nil {
 		return fmt.Errorf("docxwrite: %w", err)
 	}
 	return nil
 }
 
-// writer accumulates the document body XML and the package-level state the
-// parts are assembled from (hyperlink relationships, ordered-list numbering
-// instances).
+// writer accumulates the docx.Document being built and the walk state the
+// model's parts derive from (deduped media, ordered-list numbering instances).
 type writer struct {
 	opts Options
 	// ctx is the Write call's context, held for the walk-driven image fetches
 	// (the CollectRuns callback has no context parameter). The walk is
 	// single-goroutine and the writer does not outlive Write.
-	ctx  context.Context
-	body strings.Builder
+	ctx context.Context
+	doc *docx.Document
 
-	// rels are the document relationships in emission order (hyperlinks and
-	// images). Ids are assigned as allocated: rId1/rId2 are reserved for
-	// styles/numbering, rels start at rId3.
-	rels []docRel
-	// relURL dedupes hyperlink targets: URL -> allocated rel id.
-	relURL map[string]string
+	// pending queues the model children (drawings, alt-text runs) produced by
+	// the image callback, in walk order: CollectRuns returns literal marker
+	// runs, and paraChildren pops one queued child per marker.
+	pending []docx.ParaChild
 	// media dedupes embedded images: src ref -> its media part's identity.
 	media map[string]mediaRef
-	// mediaParts are the embedded image parts in allocation order.
-	mediaParts []mediaPart
-	// drawings counts emitted drawings (each needs a distinct docPr id).
-	drawings int
 
 	// orderedLists counts the ordered-list numbering instances allocated so
 	// far. Each ordered list gets its own w:num (counters are per-numId in the
@@ -102,80 +101,79 @@ type writer struct {
 	orderedLists int
 }
 
-// docRel is one word/_rels/document.xml.rels relationship.
-type docRel struct {
-	id, relType, target string
-	external            bool
-}
-
 // mediaRef is a deduped embedded image: its rel id and intrinsic pixel size.
 type mediaRef struct {
 	relID    string
 	pxW, pxH int
 }
 
-// mediaPart is one word/media/* part.
-type mediaPart struct {
-	name, ext string
-	data      []byte
-}
-
-// hyperlinkRel returns the rel id for an external hyperlink target, allocating
-// one on first use.
-func (w *writer) hyperlinkRel(url string) string {
-	if id, ok := w.relURL[url]; ok {
-		return id
+// sectionProps maps the options' page geometry to the body section (points ->
+// twips; Word's Letter page and 1in margin defaults when unset).
+func sectionProps(opts Options) docx.SectionProps {
+	pageW, pageH := opts.PageWidthPt, opts.PageHeightPt
+	if pageW <= 0 {
+		pageW = 612 // US Letter
 	}
-	id := fmt.Sprintf("rId%d", 3+len(w.rels))
-	w.rels = append(w.rels, docRel{
-		id:       id,
-		relType:  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-		target:   url,
-		external: true,
-	})
-	w.relURL[url] = id
-	return id
+	if pageH <= 0 {
+		pageH = 792
+	}
+	margin := opts.MarginPt
+	switch {
+	case margin < 0:
+		margin = 0
+	case margin == 0:
+		margin = 72 // Word's 1in default
+	}
+	m := twips(margin)
+	return docx.SectionProps{
+		PageW: twips(pageW), PageH: twips(pageH),
+		MarginTop: m, MarginBottom: m, MarginLeft: m, MarginRight: m,
+		Header: 720, Footer: 720,
+	}
 }
 
-// block dispatches one block-level box, mirroring the Markdown writer's walk. A
-// box that is not itself a recognized construct recurses into its children so
-// wrapper/anonymous boxes are transparent.
-func (w *writer) block(ctx context.Context, b *cssbox.Box) error {
+// twips converts points to twentieths of a point.
+func twips(pt float64) docx.Twips { return docx.Twips(math.Round(pt * 20)) }
+
+// block dispatches one block-level box into out, mirroring the Markdown
+// writer's walk. A box that is not itself a recognized construct recurses into
+// its children so wrapper/anonymous boxes are transparent.
+func (w *writer) block(ctx context.Context, b *cssbox.Box, out *[]docx.Block) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	switch {
 	case b.HeadingLvl >= 1 && b.HeadingLvl <= 6:
-		w.paragraph(b, fmt.Sprintf("Heading%d", b.HeadingLvl))
+		w.appendParagraph(out, b, fmt.Sprintf("Heading%d", b.HeadingLvl))
 	case b.SemTag == "blockquote":
-		return w.blockquote(ctx, b)
+		return w.blockquote(ctx, b, out)
 	case b.SemTag == "pre":
-		w.codeBlock(b)
+		w.codeBlock(b, out)
 	case b.SemTag == "hr":
-		w.horizontalRule()
+		w.horizontalRule(out)
 	case b.Display == cssbox.DisplayTable:
-		return w.table(ctx, b)
+		return w.table(ctx, b, out)
 	case boxwalk.IsListContainer(b):
-		return w.list(ctx, b, 0)
+		return w.list(ctx, b, 0, out)
 	case b.Display == cssbox.DisplayListItem:
 		// A stray list item outside a list container: render as a one-item list.
-		return w.list(ctx, &cssbox.Box{Children: []*cssbox.Box{b}}, 0)
+		return w.list(ctx, &cssbox.Box{Children: []*cssbox.Box{b}}, 0, out)
 	case boxwalk.IsBlockContainer(b):
 		if boxwalk.HasInlineContent(b) {
-			w.paragraph(b, "")
+			w.appendParagraph(out, b, "")
 		} else {
-			return w.children(ctx, b)
+			return w.children(ctx, b, out)
 		}
 	default:
-		return w.children(ctx, b)
+		return w.children(ctx, b, out)
 	}
 	return nil
 }
 
 // children recurses over a box's block-level children.
-func (w *writer) children(ctx context.Context, b *cssbox.Box) error {
+func (w *writer) children(ctx context.Context, b *cssbox.Box, out *[]docx.Block) error {
 	for _, c := range b.Children {
-		if err := w.block(ctx, c); err != nil {
+		if err := w.block(ctx, c, out); err != nil {
 			return err
 		}
 	}
@@ -186,19 +184,19 @@ func (w *writer) children(ctx context.Context, b *cssbox.Box) error {
 // the Quote style id back to the blockquote semantic). Non-paragraph content
 // (a nested list or table inside the quote) keeps its own construct and loses
 // the quote association — logged, a documented v1 limit.
-func (w *writer) blockquote(ctx context.Context, b *cssbox.Box) error {
+func (w *writer) blockquote(ctx context.Context, b *cssbox.Box, out *[]docx.Block) error {
 	if boxwalk.HasInlineContent(b) {
-		w.paragraph(b, "Quote")
+		w.appendParagraph(out, b, "Quote")
 		return nil
 	}
 	for _, c := range b.Children {
 		if boxwalk.IsBlockContainer(c) && boxwalk.HasInlineContent(c) &&
 			(c.SemTag == "" || c.SemTag == "p") && c.HeadingLvl == 0 {
-			w.paragraph(c, "Quote")
+			w.appendParagraph(out, c, "Quote")
 			continue
 		}
 		w.opts.Logf("docxwrite: non-paragraph content inside a blockquote keeps its own construct")
-		if err := w.block(ctx, c); err != nil {
+		if err := w.block(ctx, c, out); err != nil {
 			return err
 		}
 	}

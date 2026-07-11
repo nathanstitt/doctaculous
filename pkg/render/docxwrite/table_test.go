@@ -200,6 +200,42 @@ func TestImageExplicitSizeWins(t *testing.T) {
 	t.Fatalf("no drawing found")
 }
 
+func TestLinkedImageKeepsImage(t *testing.T) {
+	// A drawing cannot live inside the model's Hyperlink (runs only), so a
+	// linked image is emitted BESIDE its link group: the image survives — the
+	// reader dropped drawings inside w:hyperlink entirely — and the link text
+	// keeps its target on both sides of the split.
+	loader := resource.MapLoader{"pic.png": {Data: tinyPNG(t, 8, 8), ContentType: "image/png"}}
+	d := reopen(t, writeHTML(t,
+		`<html><body><p><a href="https://x.test/">before <img src="pic.png" alt="icon"> after</a></p></body></html>`,
+		Options{Loader: loader}))
+	ps := paragraphs(d)
+	var links []*docx.Hyperlink
+	var drawing *docx.Drawing
+	for _, c := range ps[0].Content {
+		if c.Hyperlink != nil {
+			links = append(links, c.Hyperlink)
+		}
+		if c.Drawing != nil {
+			drawing = c.Drawing
+		}
+	}
+	if drawing == nil {
+		t.Fatalf("linked image lost")
+	}
+	if len(links) != 2 {
+		t.Fatalf("link groups = %d, want 2 (split around the image)", len(links))
+	}
+	for i, l := range links {
+		if rel := d.Rels[l.RelID]; rel.Target != "https://x.test/" {
+			t.Errorf("link group %d target = %q", i, rel.Target)
+		}
+	}
+	if textOf(ps[0]) != "before  after" {
+		t.Errorf("link text = %q", textOf(ps[0]))
+	}
+}
+
 func TestImageDegradesWithoutLoader(t *testing.T) {
 	var logged bool
 	d := reopen(t, writeHTML(t, `<html><body><p>x <img src="pic.png" alt="fallback alt"> y</p></body></html>`,

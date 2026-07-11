@@ -1,18 +1,23 @@
 package docxwrite
 
 import (
+	"image/color"
 	"strings"
 
+	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
 )
 
-// paragraph emits one w:p from a box's inline content. pStyle, when non-empty,
-// is the paragraph style id (Heading1..6, Quote, ListParagraph, ...) — the
-// carrier of block semantics through the reader's round trip.
-func (w *writer) paragraph(b *cssbox.Box, pStyle string) {
-	runs := w.inlineRuns(b)
-	w.emitParagraph(runs, pStyle, "", justifyOf(b))
+// appendParagraph builds one w:p from a box's inline content and appends it to
+// out (nothing is appended for a paragraph that would be empty). pStyle, when
+// non-empty, is the paragraph style id (Heading1..6, Quote, Caption, ...) —
+// the carrier of block semantics through the reader's round trip.
+func (w *writer) appendParagraph(out *[]docx.Block, b *cssbox.Box, pStyle string) {
+	jc, hasJC := justifyOf(b)
+	if p := w.buildParagraph(w.inlineRuns(b), pStyle, nil, jc, hasJC); p != nil {
+		*out = append(*out, docx.Block{Paragraph: p})
+	}
 }
 
 // inlineRuns collects and normalizes a box's inline content into styled runs:
@@ -27,8 +32,8 @@ func (w *writer) inlineRuns(b *cssbox.Box) []boxwalk.StyledRun {
 	runs := raw[:0]
 	for _, r := range raw {
 		if r.Literal != "" {
-			// A literal is pre-built run XML from the image callback (a drawing,
-			// or an alt-text run); it passes through verbatim.
+			// A literal is the image callback's marker for a queued model child
+			// (a drawing, or an alt-text run); it passes through.
 			runs = append(runs, r)
 			continue
 		}
@@ -49,129 +54,160 @@ func (w *writer) inlineRuns(b *cssbox.Box) []boxwalk.StyledRun {
 	return runs
 }
 
-// emitParagraph writes one w:p: the paragraph properties (style, numbering,
-// justification), then each styled run — grouping consecutive runs that share
-// a link target under one w:hyperlink. An empty run list still emits an empty
-// paragraph when a pStyle is set (an hr or a blank quote line carries meaning);
-// otherwise it emits nothing.
-func (w *writer) emitParagraph(runs []boxwalk.StyledRun, pStyle, numPr, jc string) {
-	if len(runs) == 0 && pStyle == "" {
-		return
+// numPr is a paragraph's list membership: the numbering instance and level.
+type numPr struct {
+	numID, ilvl int
+}
+
+// buildParagraph assembles one docx.Paragraph: the paragraph properties
+// (style, numbering, justification) plus the styled runs converted to model
+// children. An empty run list still yields a paragraph when a pStyle is set
+// (an hr or a blank quote line carries meaning); otherwise it yields nil.
+func (w *writer) buildParagraph(runs []boxwalk.StyledRun, pStyle string, num *numPr, jc docx.Justify, hasJC bool) *docx.Paragraph {
+	content := w.paraChildren(runs)
+	if len(content) == 0 && pStyle == "" {
+		return nil
 	}
-	w.body.WriteString("<w:p>")
-	if pStyle != "" || numPr != "" || jc != "" {
-		w.body.WriteString("<w:pPr>")
-		if pStyle != "" {
-			w.body.WriteString(`<w:pStyle w:val="` + escAttr.Replace(pStyle) + `"/>`)
-		}
-		w.body.WriteString(numPr)
-		if jc != "" {
-			w.body.WriteString(`<w:jc w:val="` + jc + `"/>`)
-		}
-		w.body.WriteString("</w:pPr>")
+	props := docx.ParagraphProps{StyleID: pStyle, Justify: jc, HasJustify: hasJC}
+	if num != nil {
+		props.HasNum, props.NumID, props.ILvl = true, num.numID, num.ilvl
 	}
-	for i := 0; i < len(runs); {
-		if href := runs[i].Href; href != "" {
-			j := i
-			for j < len(runs) && runs[j].Href == href {
-				j++
+	return &docx.Paragraph{Props: props, Content: content}
+}
+
+// paraChildren converts styled runs to model children, grouping consecutive
+// runs that share a link target under one Hyperlink. A queued drawing inside a
+// link is emitted BESIDE the group (the model's Hyperlink holds runs only):
+// the image survives, the link target on the image itself is dropped — the
+// reader discarded such drawings entirely, so nothing round-trippable is lost.
+func (w *writer) paraChildren(runs []boxwalk.StyledRun) []docx.ParaChild {
+	var out []docx.ParaChild
+	var link *docx.Hyperlink // the open link group collecting runs
+	flushLink := func() {
+		if link != nil && len(link.Runs) > 0 {
+			out = append(out, docx.ParaChild{Hyperlink: link})
+		}
+		link = nil
+	}
+	for _, r := range runs {
+		if link != nil && r.Href != link.Target {
+			flushLink()
+		}
+		if r.Href != "" && link == nil {
+			link = &docx.Hyperlink{Target: r.Href}
+		}
+		if r.Literal != "" {
+			child := w.popPending()
+			switch {
+			case link != nil && child.Run != nil:
+				// Alt text inside a link joins the link's text.
+				link.Runs = append(link.Runs, *child.Run)
+			case link != nil:
+				w.opts.Logf("docxwrite: image inside a hyperlink keeps the image but not the link target")
+				flushLink()
+				out = append(out, child)
+				link = &docx.Hyperlink{Target: r.Href}
+			default:
+				out = append(out, child)
 			}
-			id := w.hyperlinkRel(href)
-			w.body.WriteString(`<w:hyperlink r:id="` + escAttr.Replace(id) + `">`)
-			for ; i < j; i++ {
-				w.run(runs[i])
-			}
-			w.body.WriteString("</w:hyperlink>")
 			continue
 		}
-		w.run(runs[i])
-		i++
+		run := docxRun(r)
+		if link != nil {
+			link.Runs = append(link.Runs, run)
+			continue
+		}
+		out = append(out, docx.ParaChild{Run: &run})
 	}
-	w.body.WriteString("</w:p>")
+	flushLink()
+	return out
 }
 
-// run writes one styled run: a literal (pre-built run XML — a drawing or an
-// alt-text run) verbatim, everything else through the property emitter.
-func (w *writer) run(r boxwalk.StyledRun) {
-	if r.Literal != "" {
-		w.body.WriteString(r.Literal)
-		return
-	}
-	w.textRun(r)
+// popPending pops the oldest queued model child (imageRun queues exactly one
+// per literal marker run, so markers and queue entries pair off in order).
+func (w *writer) popPending() docx.ParaChild {
+	child := w.pending[0]
+	w.pending = w.pending[1:]
+	return child
 }
 
-// textRun writes one w:r with its direct run properties. Character formatting
-// is always direct rPr (the reader models no character-style cascade); inline
-// code additionally carries the CodeChar style id, which the reader maps back
-// to the code semantic.
-func (w *writer) textRun(r boxwalk.StyledRun) {
-	w.body.WriteString("<w:r>")
-	var props strings.Builder
+// docxRun converts one styled text run to a model run with its direct run
+// properties. Character formatting is always direct rPr (the reader models no
+// character-style cascade); inline code additionally carries the CodeChar
+// style id, which the reader maps back to the code semantic.
+func docxRun(r boxwalk.StyledRun) docx.Run {
+	var p docx.RunProps
 	if r.Code {
-		props.WriteString(`<w:rStyle w:val="CodeChar"/>` + monoFonts)
+		p.StyleID = "CodeChar"
+		p.Family = monoFamily
 	}
 	if r.Bold {
-		props.WriteString("<w:b/>")
+		p.Bold, p.HasBold = true, true
 	}
 	if r.Italic {
-		props.WriteString("<w:i/>")
+		p.Italic, p.HasItalic = true, true
 	}
 	if r.Strike {
-		props.WriteString("<w:strike/>")
+		p.Strike, p.HasStrike = true, true
 	}
 	if r.Href != "" {
 		// Link chrome as direct properties (the Hyperlink character style is not
 		// modeled by the reader).
-		props.WriteString(`<w:color w:val="0563C1"/><w:u w:val="single"/>`)
+		p.Color, p.HasColor = color.RGBA{R: 0x05, G: 0x63, B: 0xC1, A: 0xFF}, true
+		p.Underline, p.HasUnderline = true, true
 	}
-	if props.Len() > 0 {
-		w.body.WriteString("<w:rPr>" + props.String() + "</w:rPr>")
-	}
-	w.body.WriteString(`<w:t xml:space="preserve">` + escText.Replace(r.Text) + "</w:t></w:r>")
+	return docx.Run{Props: p, Text: r.Text}
 }
 
-// codeBlock emits a <pre> box as ONE CodeBlock-styled paragraph whose lines are
-// separated by w:br. The reader lowers each w:br to a preserved newline, so the
-// paragraph's raw text round-trips as a single fenced block.
-func (w *writer) codeBlock(b *cssbox.Box) {
+// codeBlock emits a <pre> box as ONE CodeBlock-styled paragraph whose lines
+// are separated by line-break runs. The reader lowers each break to a
+// preserved newline, so the paragraph's raw text round-trips as a single
+// fenced block. Runs are built parse-shaped (text OR break per run — the form
+// the reader produces), so the model round-trips literally.
+func (w *writer) codeBlock(b *cssbox.Box, out *[]docx.Block) {
 	text := strings.TrimRight(boxwalk.RawText(b), "\n")
 	if text == "" {
 		return
 	}
-	w.body.WriteString(`<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr><w:r><w:rPr>` + monoFonts + `</w:rPr>`)
+	mono := docx.RunProps{Family: monoFamily}
+	p := &docx.Paragraph{Props: docx.ParagraphProps{StyleID: "CodeBlock"}}
 	for i, line := range strings.Split(text, "\n") {
 		if i > 0 {
-			w.body.WriteString("<w:br/>")
+			p.Content = append(p.Content, docx.ParaChild{Run: &docx.Run{Props: mono, Break: docx.BreakLine}})
 		}
-		w.body.WriteString(`<w:t xml:space="preserve">` + escText.Replace(line) + "</w:t>")
+		if line != "" {
+			p.Content = append(p.Content, docx.ParaChild{Run: &docx.Run{Props: mono, Text: line}})
+		}
 	}
-	w.body.WriteString("</w:r></w:p>")
+	*out = append(*out, docx.Block{Paragraph: p})
 }
 
 // horizontalRule emits an <hr> as an empty HorizontalRule-styled paragraph.
-// The style carries a bottom border for Word; the reader maps the style id back
-// to the hr semantic (paragraph borders themselves are not modeled).
-func (w *writer) horizontalRule() {
-	w.body.WriteString(`<w:p><w:pPr><w:pStyle w:val="HorizontalRule"/></w:pPr></w:p>`)
+// The style carries a bottom border for Word; the reader maps the style id
+// back to the hr semantic.
+func (w *writer) horizontalRule(out *[]docx.Block) {
+	*out = append(*out, docx.Block{Paragraph: &docx.Paragraph{
+		Props: docx.ParagraphProps{StyleID: "HorizontalRule"},
+	}})
 }
 
-// monoFonts is the monospace run-font selection shared by inline code and code
-// blocks. "Courier New" resolves to the bundled monospace substitute in this
-// engine and to a real monospace face in Word.
-const monoFonts = `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>`
+// monoFamily is the monospace run-font selection shared by inline code and
+// code blocks. "Courier New" resolves to the bundled monospace substitute in
+// this engine and to a real monospace face in Word.
+const monoFamily = "Courier New"
 
-// justifyOf maps the box's computed text-align to a w:jc value ("" = default
-// left, omitted).
-func justifyOf(b *cssbox.Box) string {
+// justifyOf maps the box's computed text-align to a w:jc value (hasJC false =
+// default left, omitted).
+func justifyOf(b *cssbox.Box) (jc docx.Justify, hasJC bool) {
 	switch b.Style.TextAlign {
 	case "center":
-		return "center"
+		return docx.JustifyCenter, true
 	case "right":
-		return "right"
+		return docx.JustifyRight, true
 	case "justify":
-		return "both"
+		return docx.JustifyBoth, true
 	}
-	return ""
+	return docx.JustifyLeft, false
 }
 
 // collapseWS maps every whitespace run (spaces, tabs, newlines) to a single
