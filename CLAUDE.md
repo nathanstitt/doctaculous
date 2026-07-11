@@ -467,6 +467,17 @@ out-of-scope note):
   design; png→png stays ErrSameFormat. Input capability bits flipped; conversion matrix
   extended. `2026-07-10-image-input-design.md`.
 
+**XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):
+
+- CF: one raw-fidelity read path for Workbook AND editor (`CFRule` typed fields + resolved
+  dxf + VERBATIM `Raw` — data bars/color scales pass through byte-faithfully);
+  `SetConditionalFormats` replaces wholesale (raw rules re-emit verbatim with renumbered
+  priorities; typed rules mint deduped dxfs). Notes: `Comment` (1-based A1-space) read on
+  both views; `SetComment`/`RemoveComment` regenerate the comments part + legacy VML
+  wholesale, wiring rels/content-types/legacyDrawing on first use. Editor-core fixes:
+  `sheetRelTarget` reads current bytes; `File.setPart` lets an original part be regenerated
+  through the dirty machinery. `2026-07-10-xlsx-cf-comments-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);

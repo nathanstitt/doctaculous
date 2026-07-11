@@ -91,6 +91,12 @@ type Sheet struct {
 	// DefaultRowHeight/DefaultColWidth are the sheet defaults (sheetFormatPr);
 	// zero when the sheet declares none.
 	DefaultRowHeight, DefaultColWidth float64
+	// CondFmts are the sheet's conditional-formatting blocks, with each rule
+	// carrying both its typed fields and the verbatim XML (CFRule.Raw) for
+	// lossless passthrough.
+	CondFmts []ConditionalFormatting
+	// Comments are the sheet's classic cell notes (1-based coordinates).
+	Comments []Comment
 }
 
 // Cell is one cell's display value plus the presentation facts conversion

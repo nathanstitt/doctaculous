@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
 )
 
 // Relationship type URIs (OPC).
@@ -85,6 +87,16 @@ func parseWorkbook(pkg *pkgReader) (*Workbook, error) {
 		case "veryHidden":
 			sheet.Visibility = SheetVeryHidden
 		}
+		// Conditional formatting resolves through the raw-fidelity tree so
+		// CFRule.Raw is byte-faithful (the same code path the editor uses).
+		if bytes.Contains(data, []byte("conditionalFormatting")) {
+			if p, err := xmlpart.Parse(data); err == nil {
+				sheet.CondFmts = parseCF(p.Root(), styles.dxfs)
+			}
+		}
+		if commentsRel, ok := pkg.firstRelOfType(rel.Target, relComments); ok {
+			sheet.Comments = parseCommentsPart(pkg.read(commentsRel.Target))
+		}
 		wb.Sheets = append(wb.Sheets, sheet)
 	}
 	return wb, nil
@@ -156,6 +168,74 @@ type styleTable struct {
 	// resolved is the full Style per xf index, shared (read-only) between
 	// every cell referencing the xf.
 	resolved []*Style
+	// dxfs are the differential formats conditional-format rules reference.
+	dxfs []*Style
+}
+
+// xmlFontDef is a font record (the fonts table and dxf fonts share it).
+type xmlFontDef struct {
+	B      *struct{} `xml:"b"`
+	I      *struct{} `xml:"i"`
+	Strike *struct{} `xml:"strike"`
+	U      *struct {
+		Val string `xml:"val,attr"`
+	} `xml:"u"`
+	Sz *struct {
+		Val float64 `xml:"val,attr"`
+	} `xml:"sz"`
+	Name *struct {
+		Val string `xml:"val,attr"`
+	} `xml:"name"`
+	Color *xmlColor `xml:"color"`
+}
+
+func fontFromXML(f xmlFontDef) Font {
+	ft := Font{Bold: f.B != nil, Italic: f.I != nil, Strike: f.Strike != nil, Color: toColor(f.Color)}
+	if f.U != nil {
+		ft.Underline = f.U.Val
+		if ft.Underline == "" {
+			ft.Underline = "single"
+		}
+	}
+	if f.Sz != nil {
+		ft.Size = f.Sz.Val
+	}
+	if f.Name != nil {
+		ft.Name = f.Name.Val
+	}
+	return ft
+}
+
+// xmlFillDef is a fill record.
+type xmlFillDef struct {
+	Pattern struct {
+		Type    string    `xml:"patternType,attr"`
+		FgColor *xmlColor `xml:"fgColor"`
+		BgColor *xmlColor `xml:"bgColor"`
+	} `xml:"patternFill"`
+}
+
+func fillFromXML(f xmlFillDef) Fill {
+	return Fill{Pattern: f.Pattern.Type, Fg: toColor(f.Pattern.FgColor), Bg: toColor(f.Pattern.BgColor)}
+}
+
+// xmlBorderDef is a border record.
+type xmlBorderDef struct {
+	DiagonalUp   string  `xml:"diagonalUp,attr"`
+	DiagonalDown string  `xml:"diagonalDown,attr"`
+	Left         xmlEdge `xml:"left"`
+	Right        xmlEdge `xml:"right"`
+	Top          xmlEdge `xml:"top"`
+	Bottom       xmlEdge `xml:"bottom"`
+	Diagonal     xmlEdge `xml:"diagonal"`
+}
+
+func borderFromXML(b xmlBorderDef) Border {
+	return Border{
+		Top: toEdge(b.Top), Right: toEdge(b.Right), Bottom: toEdge(b.Bottom),
+		Left: toEdge(b.Left), Diagonal: toEdge(b.Diagonal),
+		DiagonalUp: onOff(b.DiagonalUp), DiagonalDown: onOff(b.DiagonalDown),
+	}
 }
 
 // xmlColor is a styles.xml color element in any of its schemes.
@@ -205,42 +285,21 @@ func parseStyles(data []byte) styleTable {
 			} `xml:"numFmt"`
 		} `xml:"numFmts"`
 		Fonts struct {
-			Font []struct {
-				B      *struct{} `xml:"b"`
-				I      *struct{} `xml:"i"`
-				Strike *struct{} `xml:"strike"`
-				U      *struct {
-					Val string `xml:"val,attr"`
-				} `xml:"u"`
-				Sz *struct {
-					Val float64 `xml:"val,attr"`
-				} `xml:"sz"`
-				Name *struct {
-					Val string `xml:"val,attr"`
-				} `xml:"name"`
-				Color *xmlColor `xml:"color"`
-			} `xml:"font"`
+			Font []xmlFontDef `xml:"font"`
 		} `xml:"fonts"`
 		Fills struct {
-			Fill []struct {
-				Pattern struct {
-					Type    string    `xml:"patternType,attr"`
-					FgColor *xmlColor `xml:"fgColor"`
-					BgColor *xmlColor `xml:"bgColor"`
-				} `xml:"patternFill"`
-			} `xml:"fill"`
+			Fill []xmlFillDef `xml:"fill"`
 		} `xml:"fills"`
 		Borders struct {
-			Border []struct {
-				DiagonalUp   string  `xml:"diagonalUp,attr"`
-				DiagonalDown string  `xml:"diagonalDown,attr"`
-				Left         xmlEdge `xml:"left"`
-				Right        xmlEdge `xml:"right"`
-				Top          xmlEdge `xml:"top"`
-				Bottom       xmlEdge `xml:"bottom"`
-				Diagonal     xmlEdge `xml:"diagonal"`
-			} `xml:"border"`
+			Border []xmlBorderDef `xml:"border"`
 		} `xml:"borders"`
+		Dxfs struct {
+			Dxf []struct {
+				Font   *xmlFontDef   `xml:"font"`
+				Fill   *xmlFillDef   `xml:"fill"`
+				Border *xmlBorderDef `xml:"border"`
+			} `xml:"dxf"`
+		} `xml:"dxfs"`
 		CellXfs struct {
 			Xf []struct {
 				NumFmtID  int `xml:"numFmtId,attr"`
@@ -272,20 +331,7 @@ func parseStyles(data []byte) styleTable {
 	fullFonts := make([]Font, len(doc.Fonts.Font))
 	for i, f := range doc.Fonts.Font {
 		st.fonts = append(st.fonts, struct{ b, i bool }{f.B != nil, f.I != nil})
-		ft := Font{Bold: f.B != nil, Italic: f.I != nil, Strike: f.Strike != nil, Color: toColor(f.Color)}
-		if f.U != nil {
-			ft.Underline = f.U.Val
-			if ft.Underline == "" {
-				ft.Underline = "single"
-			}
-		}
-		if f.Sz != nil {
-			ft.Size = f.Sz.Val
-		}
-		if f.Name != nil {
-			ft.Name = f.Name.Val
-		}
-		fullFonts[i] = ft
+		fullFonts[i] = fontFromXML(f)
 	}
 
 	fullFills := make([]Fill, len(doc.Fills.Fill))
@@ -295,16 +341,26 @@ func parseStyles(data []byte) styleTable {
 			rgb = normalizeRGB(f.Pattern.FgColor.RGB)
 		}
 		st.fills = append(st.fills, rgb)
-		fullFills[i] = Fill{Pattern: f.Pattern.Type, Fg: toColor(f.Pattern.FgColor), Bg: toColor(f.Pattern.BgColor)}
+		fullFills[i] = fillFromXML(f)
 	}
 
 	fullBorders := make([]Border, len(doc.Borders.Border))
 	for i, b := range doc.Borders.Border {
-		fullBorders[i] = Border{
-			Top: toEdge(b.Top), Right: toEdge(b.Right), Bottom: toEdge(b.Bottom),
-			Left: toEdge(b.Left), Diagonal: toEdge(b.Diagonal),
-			DiagonalUp: onOff(b.DiagonalUp), DiagonalDown: onOff(b.DiagonalDown),
+		fullBorders[i] = borderFromXML(b)
+	}
+
+	for _, d := range doc.Dxfs.Dxf {
+		dxf := &Style{}
+		if d.Font != nil {
+			dxf.Font = fontFromXML(*d.Font)
 		}
+		if d.Fill != nil {
+			dxf.Fill = fillFromXML(*d.Fill)
+		}
+		if d.Border != nil {
+			dxf.Border = borderFromXML(*d.Border)
+		}
+		st.dxfs = append(st.dxfs, dxf)
 	}
 
 	for _, xf := range doc.CellXfs.Xf {
