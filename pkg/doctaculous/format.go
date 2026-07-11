@@ -76,7 +76,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatXLSX:     {input: true, output: true},
 	FormatRTF:      {input: true, output: true},
 	FormatPPTX:     {input: true, output: true},
-	FormatEPUB:     {input: true, output: false}, // output lands with pkg/render/epubwrite
+	FormatEPUB:     {input: true, output: true},
 	FormatPNG:      {input: true, output: true},
 	FormatJPEG:     {input: true, output: true},
 }

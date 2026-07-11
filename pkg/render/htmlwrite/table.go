@@ -99,7 +99,11 @@ func (w *writer) cellContent(cell *cssbox.Box, header bool) string {
 			parts = append(parts, strings.TrimSpace(w.inlineOpt(c, header)))
 		}
 	}
-	return strings.Join(boxwalk.FilterEmpty(parts), "<br>")
+	br := "<br>"
+	if w.opts.XHTML {
+		br = "<br/>"
+	}
+	return strings.Join(boxwalk.FilterEmpty(parts), br)
 }
 
 // captionMarkup renders a table's caption box (DisplayTableCaption) as inline HTML, or ""

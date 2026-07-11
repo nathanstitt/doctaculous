@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
+	genepub "github.com/nathanstitt/doctaculous/testdata/gen/epub"
 	genpptx "github.com/nathanstitt/doctaculous/testdata/gen/pptx"
 	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
 )
@@ -45,6 +46,13 @@ func matrixPPTX() []byte {
 	return genpptx.New().AddSlide(slide).Bytes()
 }
 
+// matrixEPUB builds a one-chapter book carrying the matrix marker text.
+func matrixEPUB() []byte {
+	return genepub.New().AddChapter("chap1.xhtml", `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>c1</title></head>
+<body><h1>Matrix Title</h1><p>An introductory paragraph.</p></body></html>`).Bytes()
+}
+
 // matrixPDF renders matrixHTML to PDF bytes with bundled fonts, so the text is
 // reliably extractable regardless of the host's installed fonts (the same
 // trick as the CLI tests' writeTestPDF).
@@ -75,6 +83,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatXLSX:     matrixXLSX(),
 		FormatRTF:      []byte(`{\rtf1\ansi {\b Matrix Title}\par An introductory paragraph.\par}`),
 		FormatPPTX:     matrixPPTX(),
+		FormatEPUB:     matrixEPUB(),
 		FormatPNG:      encodeTinyImage(t, FormatPNG),
 		FormatJPEG:     encodeTinyImage(t, FormatJPEG),
 	}
@@ -91,6 +100,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatXLSX:     "Matrix Title",
 		FormatRTF:      "Matrix Title",
 		FormatPPTX:     "Matrix Title",
+		FormatEPUB:     "Matrix Title",
 	}
 	// CSV/TSV output carries tables only; inputs whose fixture has no table
 	// legitimately produce empty output there.
@@ -102,11 +112,12 @@ func TestConvertMatrix(t *testing.T) {
 		FormatDOCX:     true, // the paragraph fixture
 		FormatRTF:      true, // the paragraph fixture
 		FormatPPTX:     true, // the title-and-text fixture
+		FormatEPUB:     true, // the heading-and-paragraph fixture
 		FormatPNG:      true, // an image is not a table
 		FormatJPEG:     true,
 	}
 	sentinels := []error{ErrUnknownFormat, ErrUnsupportedFormat, ErrSameFormat}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPPTX, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPPTX, FormatEPUB, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -183,6 +194,26 @@ func TestConvertMatrix(t *testing.T) {
 			case FormatMarkdown, FormatText, FormatHTML:
 				if !strings.Contains(out.String(), wantText[from]) {
 					t.Errorf("%s: output missing %q:\n%s", name, wantText[from], out.String())
+				}
+			case FormatEPUB:
+				if !bytes.HasPrefix(out.Bytes(), []byte("PK\x03\x04")) {
+					t.Errorf("%s: output is not a ZIP package", name)
+					break
+				}
+				doc, err := OpenBytes(out.Bytes())
+				if err != nil {
+					t.Errorf("%s: reopening produced epub: %v", name, err)
+					break
+				}
+				if doc.Format() != FormatEPUB {
+					t.Errorf("%s: produced package detected as %s", name, doc.Format())
+					break
+				}
+				var text bytes.Buffer
+				if err := doc.WriteText(ctx, &text, MarkdownOptions{}); err != nil {
+					t.Errorf("%s: reading produced epub: %v", name, err)
+				} else if !strings.Contains(text.String(), wantText[from]) {
+					t.Errorf("%s: reopened epub missing %q:\n%s", name, wantText[from], text.String())
 				}
 			case FormatPPTX:
 				if !bytes.HasPrefix(out.Bytes(), []byte("PK\x03\x04")) {

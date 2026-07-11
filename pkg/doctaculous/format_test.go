@@ -123,6 +123,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatXLSX:     true,
 		FormatRTF:      true,
 		FormatPPTX:     true,
+		FormatEPUB:     true,
 		FormatPNG:      true,
 		FormatJPEG:     true,
 	}

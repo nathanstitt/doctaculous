@@ -27,6 +27,14 @@ type Options struct {
 	// surrounding <!DOCTYPE>/<html>/<head>/<body> scaffold. The default (false) wraps the
 	// content in a minimal, well-formed HTML document.
 	Fragment bool
+	// XHTML, when true, emits XML-compliant markup: void elements self-close
+	// (<hr/>, <br/>, <img .../>). Used by the EPUB writer, whose content
+	// documents are XHTML.
+	XHTML bool
+	// ImageSrc, when non-nil, rewrites each <img> src before serialization
+	// (the EPUB writer maps fetched references to manifest item hrefs).
+	// Returning "" drops the image.
+	ImageSrc func(src string) string
 	// Logf receives degradation messages (e.g. a table with no rows). May be nil (messages
 	// discarded).
 	Logf func(string, ...any)
@@ -91,7 +99,11 @@ func (w *writer) block(b *cssbox.Box, depth int) {
 	case b.SemTag == "pre":
 		w.codeBlock(b, depth)
 	case b.SemTag == "hr":
-		w.line(depth, "<hr>")
+		if w.opts.XHTML {
+			w.line(depth, "<hr/>")
+		} else {
+			w.line(depth, "<hr>")
+		}
 	case b.Display == cssbox.DisplayTable:
 		w.table(b, depth)
 	case boxwalk.IsListContainer(b):
