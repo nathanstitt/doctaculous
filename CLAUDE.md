@@ -261,11 +261,33 @@ bullet's design doc is in `docs/superpowers/specs/`:
   satisfies `reflowTree` via lazy extraction. ToUnicode CMaps (Type0/CID text), font weight/slant, and
   scanned-PDF OCR are follow-ups. `2026-07-08-pdf-to-html-markdown-design.md`.
 
+**Unified conversion core** (`pkg/doctaculous/format.go`+`detect.go`+`open.go`+`convert.go`+
+`image_backend.go`, CLI `convert`):
+
+- One `Format` type + capability table (`CanConvert`, typed `ErrUnknownFormat`/
+  `ErrUnsupportedFormat`/`ErrSameFormat`); content-first `DetectFormat` (magic → extension hint →
+  WHATWG HTML sniff; no UTF-8⇒text fallback). `Open`/`OpenBytes` sniff any supported format (the
+  PDF path is byte-identical); `OpenAs`/`OpenBytesAs` skip detection; every opener stamps
+  `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write` dispatch any valid
+  input→output pair (the legacy `ConvertXToY` wrappers are shims, pinned byte-identical);
+  same-format conversion is a deliberate `ErrSameFormat` on the generic path only. PNG/JPEG are
+  output formats (`WriteImage`/`EncodeImage`; Convert-to-image writes one page, multi-page = CLI
+  `%d` fan-out). CLI: `convert <in> <out>` with `--from`/`--to`; all subcommands share one
+  detection-based opener (rasterize no longer assumes unknown extensions are PDF; topdf `--print`
+  actually applies print media now). A new format lands by flipping its capability bit + one switch
+  case in `openDetected`/`Write` — see the sibling contract in
+  `2026-07-09-unified-conversion-core-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
 
+0. **Any-to-any conversion siblings** (the conversion core is Done; design + sibling contract in
+   `2026-07-09-unified-conversion-core-design.md`): **Markdown input** (goldmark → HTML pipeline),
+   **plain-text input** (`<pre>` wrap → HTML pipeline), and **DOCX output** (`pkg/render/docxwrite`,
+   a cssbox structure writer like the Markdown one). Each is one capability-bit flip + one switch
+   case, in its own PR.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),

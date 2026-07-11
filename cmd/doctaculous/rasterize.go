@@ -1,15 +1,9 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"image"
-	"image/jpeg"
-	"image/png"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,6 +23,7 @@ func rasterizeCmd(args []string) error {
 		out      = fs.String("out", "", "output file or pattern (use %d for page number when rendering a range)")
 		dpi      = fs.Float64("dpi", 150, "render resolution in DPI")
 		format   = fs.String("format", "png", "output image format: png or jpg")
+		quality  = fs.Int("quality", 90, "JPEG quality 1-100 (jpg only)")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
 		pageSize = fs.String("page-size", "letter", "HTML page size: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page (HTML only)")
 
@@ -68,7 +63,7 @@ func rasterizeCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or \"tall\")", *pageSize)
 	}
 
-	doc, err := openDocument(input, *pageSize, *bundledFonts)
+	doc, err := openInput(input, doctaculous.FormatUnknown, *pageSize, *bundledFonts, false)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -79,61 +74,16 @@ func rasterizeCmd(args []string) error {
 		return err
 	}
 
-	opts := doctaculous.RasterOptions{DPI: *dpi, Workers: *workers, BundledFonts: *bundledFonts}
-	results := doc.RasterizePages(context.Background(), indices, opts)
-
-	multi := len(indices) > 1
-	if multi && !strings.Contains(*out, "%d") {
-		return fmt.Errorf("rendering %d pages requires a %%d placeholder in --out (e.g. page-%%d.%s)", len(indices), *format)
+	imgFormat := doctaculous.FormatPNG
+	if *format == "jpg" || *format == "jpeg" {
+		imgFormat = doctaculous.FormatJPEG
 	}
-
-	var firstErr error
-	written := 0
-	for _, r := range results {
-		if r.Err != nil {
-			fmt.Fprintf(os.Stderr, "doctaculous: page %d: %v\n", r.Index+1, r.Err) //nolint:errcheck // stderr
-			if firstErr == nil {
-				firstErr = r.Err
-			}
-			continue
-		}
-		path := outputPath(*out, r.Index)
-		if err := writeImage(path, r.Image, *format); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			fmt.Fprintf(os.Stderr, "doctaculous: writing %s: %v\n", path, err) //nolint:errcheck // stderr
-			continue
-		}
-		written++
+	imgOpts := doctaculous.ImageOptions{
+		Format:  imgFormat,
+		Quality: *quality,
+		Raster:  doctaculous.RasterOptions{DPI: *dpi, Workers: *workers, BundledFonts: *bundledFonts},
 	}
-	if firstErr != nil {
-		// Successful pages are still written, but the command must report failure
-		// so scripts and CI detect the partial batch.
-		return fmt.Errorf("%d of %d pages failed; first error: %w", len(indices)-written, len(indices), firstErr)
-	}
-	return nil
-}
-
-// openDocument opens the input by format. An http(s):// URL is fetched and rendered
-// as HTML (the URL check comes first, before the extension switch, so a URL ending
-// in e.g. .pdf is still treated as a web page). Otherwise it dispatches on file
-// extension: .docx goes through the reflow pipeline, .html/.htm through the HTML
-// pipeline, and everything else is treated as PDF. The HTML page size (pageSize —
-// "letter" paginates onto US-Letter pages, "tall" renders one tall page) applies to
-// the URL and HTML paths and is ignored for PDF/DOCX.
-func openDocument(input, pageSize string, bundledFonts bool) (*doctaculous.Document, error) {
-	if isHTTPURL(input) {
-		return doctaculous.OpenURL(input, htmlOpts(pageSize, bundledFonts)...)
-	}
-	switch strings.ToLower(filepath.Ext(input)) {
-	case ".docx":
-		return doctaculous.OpenDOCX(input)
-	case ".html", ".htm":
-		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize, bundledFonts)...)
-	default:
-		return doctaculous.Open(input)
-	}
+	return renderPages(doc, indices, *out, imgOpts)
 }
 
 // isHTTPURL reports whether input is an http:// or https:// URL (the CLI fetches
@@ -146,14 +96,18 @@ func isHTTPURL(input string) bool {
 
 // htmlOpts builds the HTML layout options shared by the URL and local-HTML paths:
 // pageSize "letter" (the CLI default) paginates onto US-Letter pages; "tall" (or an
-// empty value) renders a single tall page.
-func htmlOpts(pageSize string, bundledFonts bool) []doctaculous.HTMLOption {
+// empty value) renders a single tall page. printMedia switches the cascade to the
+// @media print context (used for PDF output).
+func htmlOpts(pageSize string, bundledFonts, printMedia bool) []doctaculous.HTMLOption {
 	var opts []doctaculous.HTMLOption
 	if pageSize == "letter" {
 		opts = append(opts, doctaculous.WithPageSize(doctaculous.LetterWidthPt, doctaculous.LetterHeightPt))
 	}
 	if bundledFonts {
 		opts = append(opts, doctaculous.WithBundledFonts())
+	}
+	if printMedia {
+		opts = append(opts, doctaculous.WithPrintMedia())
 	}
 	return opts
 }
@@ -243,29 +197,6 @@ func outputPath(pattern string, index int) string {
 	return pattern
 }
 
-// writeImage encodes img to path in the given format (png or jpg).
-func writeImage(path string, img image.Image, format string) (err error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		// Surface a close error only if encoding itself succeeded (a flush of
-		// buffered bytes can fail on a full disk).
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-
-	switch format {
-	case "jpg", "jpeg":
-		err = jpeg.Encode(f, img, &jpeg.Options{Quality: 90})
-	default:
-		err = png.Encode(f, img)
-	}
-	return err
-}
-
 // rasterizeValueFlags lists the "rasterize" flags that take their value as a
 // separate token, for reorderArgs.
 var rasterizeValueFlags = map[string]bool{
@@ -275,6 +206,7 @@ var rasterizeValueFlags = map[string]bool{
 	"-out": true, "--out": true,
 	"-dpi": true, "--dpi": true,
 	"-format": true, "--format": true,
+	"-quality": true, "--quality": true,
 	"-workers": true, "--workers": true,
 	"-page-size": true, "--page-size": true,
 }

@@ -6,9 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/nathanstitt/doctaculous/pkg/doctaculous"
 )
@@ -57,7 +55,7 @@ func topdfCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or empty)", *pageSize)
 	}
 
-	doc, err := openReflowDocument(input, *pageSize, *bundledFonts)
+	doc, err := openInput(input, doctaculous.FormatUnknown, *pageSize, *bundledFonts, *print)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -83,28 +81,12 @@ func topdfCmd(args []string) error {
 		return fmt.Errorf("create %s: %w", *out, err)
 	}
 	defer func() { _ = f.Close() }()
-	if err := doc.WritePDF(context.Background(), f, opts); err != nil {
+	// Writing through the generic dispatch (rather than WritePDF directly) gives a
+	// PDF input the precise same-format error instead of a bare type failure.
+	if err := doc.Write(context.Background(), f, doctaculous.FormatPDF, doctaculous.ConvertOptions{PDF: opts}); err != nil {
 		return err
 	}
 	return nil
-}
-
-// openReflowDocument opens the input as a reflow document (the only kind WritePDF
-// accepts): an http(s) URL and .html/.htm files go through the HTML pipeline, .docx
-// through the DOCX pipeline. A .pdf (or any other extension) is rejected — the PDF
-// writer emits from the reflow engine, not from a parsed PDF.
-func openReflowDocument(input, pageSize string, bundledFonts bool) (*doctaculous.Document, error) {
-	if isHTTPURL(input) {
-		return doctaculous.OpenURL(input, htmlOpts(pageSize, bundledFonts)...)
-	}
-	switch strings.ToLower(filepath.Ext(input)) {
-	case ".docx":
-		return doctaculous.OpenDOCX(input)
-	case ".html", ".htm":
-		return doctaculous.OpenHTMLFile(input, htmlOpts(pageSize, bundledFonts)...)
-	default:
-		return nil, fmt.Errorf("topdf input must be .html, .docx, or an http(s) URL (got %q)", input)
-	}
 }
 
 // topdfValueFlags lists the "topdf" flags that take their value as a separate

@@ -1,7 +1,10 @@
 // Command doctaculous is the command-line interface to the doctaculous document
-// toolkit. Subcommands: "rasterize" renders document pages to images, "topdf" converts
-// a reflow document (HTML/URL/DOCX) to a PDF with searchable text, and "tomd" converts
-// one to Markdown or plain text.
+// toolkit. The primary verb is "convert", which converts any supported input
+// (PDF, DOCX, HTML file, or http(s) URL) to any supported output (pdf, md, txt,
+// html, png, jpg), detecting formats from content and extensions. The focused
+// subcommands remain: "rasterize" renders document pages to images, "topdf"
+// converts a reflow document to a PDF with searchable text, "tomd" converts one
+// to Markdown or plain text, and "tohtml" to HTML.
 package main
 
 import (
@@ -28,6 +31,8 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "convert":
+		return convertCmd(args[1:])
 	case "rasterize":
 		return rasterizeCmd(args[1:])
 	case "topdf":
@@ -90,7 +95,7 @@ func inferCommand(args []string) (string, error) {
 	case ".pdf":
 		return "rasterize", nil
 	}
-	return "", fmt.Errorf("cannot infer command; name a subcommand (topdf|rasterize) or use recognizable --in/--out extensions")
+	return "", fmt.Errorf("cannot infer command; use \"doctaculous convert <in> <out>\", name a subcommand, or use recognizable --in/--out extensions")
 }
 
 // resolveInput returns the single input document from the --in flag or a positional
@@ -134,6 +139,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `doctaculous - pure-Go document toolkit
 
 usage:
+  doctaculous convert   <input> <output> [flags]   (any format to any other)
   doctaculous topdf     --in <file.html|.docx|URL> --out file.pdf [flags]
   doctaculous tomd      --in <file.pdf|.html|.docx|URL> [--out file.md] [--plain]
   doctaculous tohtml    --in <file.pdf|.html|.docx|URL> [--out file.html] [--fragment]
@@ -142,10 +148,15 @@ usage:
   doctaculous version
   doctaculous help
 
+"convert" detects the input format from content and extension (--from overrides)
+and takes the output format from the output extension (--to overrides). Inputs:
+pdf, docx, html, http(s) URLs. Outputs: pdf, md, txt, html, png, jpg. Converting
+a document to its own format is not supported.
+
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;
 .png/.jpg => rasterize).
 
-run "doctaculous topdf -h" or "doctaculous rasterize -h" for subcommand flags.
+run "doctaculous convert -h" (or topdf/rasterize/... -h) for subcommand flags.
 `)
 }

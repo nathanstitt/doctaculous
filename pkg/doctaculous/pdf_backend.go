@@ -27,26 +27,6 @@ type pdfRenderer struct {
 	extractRoot *cssbox.Box
 }
 
-// Open reads and parses a PDF document from a file path. For DOCX and other
-// reflowable formats use OpenDOCX.
-func Open(path string) (*Document, error) {
-	d, err := pdf.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	return &Document{r: &pdfRenderer{doc: d}}, nil
-}
-
-// OpenBytes parses a PDF document from an in-memory byte slice. The slice is
-// retained and must not be modified by the caller.
-func OpenBytes(data []byte) (*Document, error) {
-	d, err := pdf.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return &Document{r: &pdfRenderer{doc: d}}, nil
-}
-
 func (r *pdfRenderer) pageCount() int { return r.doc.PageCount() }
 
 // cssboxRoot lazily extracts the PDF's logical structure (paragraphs, headings, lists,

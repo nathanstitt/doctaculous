@@ -13,11 +13,18 @@ import (
 
 // Document is an opened document ready for rendering. It is read-only after Open
 // and safe for concurrent use across goroutines. It wraps a format-specific
-// renderer (PDF today; DOCX and other reflowable formats via OpenDOCX) behind a
-// common API, so callers rasterize any supported format the same way.
+// renderer behind a common API, so callers rasterize and convert any supported
+// format the same way.
 type Document struct {
 	r renderer
+	// format is the source format the document was opened from, stamped by every
+	// opener. The generic Write path consults it to reject same-format conversion.
+	format Format
 }
+
+// Format reports the format the document was opened from (e.g. FormatPDF for
+// Open on a PDF file, FormatHTML for OpenURL).
+func (d *Document) Format() Format { return d.format }
 
 // renderer is the format-agnostic backend a Document delegates to. Each supported
 // format provides one; the public Document and its worker pool are format-neutral.
