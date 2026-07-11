@@ -36,6 +36,8 @@ const (
 	FormatXLSX Format = "xlsx"
 	// FormatRTF is a Rich Text Format document.
 	FormatRTF Format = "rtf"
+	// FormatPPTX is a PresentationML (.pptx) presentation.
+	FormatPPTX Format = "pptx"
 	// FormatPNG is a PNG image (a rasterized page).
 	FormatPNG Format = "png"
 	// FormatJPEG is a JPEG image (a rasterized page).
@@ -71,6 +73,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatTSV:      {input: true, output: true},
 	FormatXLSX:     {input: true, output: true},
 	FormatRTF:      {input: true, output: false}, // output lands with pkg/render/rtfwrite
+	FormatPPTX:     {input: true, output: false}, // output lands with pkg/render/pptxwrite
 	FormatPNG:      {input: false, output: true},
 	FormatJPEG:     {input: false, output: true},
 }
@@ -132,6 +135,8 @@ func ParseFormat(s string) (Format, error) {
 		return FormatXLSX, nil
 	case "rtf":
 		return FormatRTF, nil
+	case "pptx", "pptm":
+		return FormatPPTX, nil
 	case "png":
 		return FormatPNG, nil
 	case "jpeg", "jpg":
@@ -161,9 +166,10 @@ var mimeFormats = map[string]Format{
 	"text/tab-separated-values": FormatTSV,
 	"application/rtf":           FormatRTF,
 	"text/rtf":                  FormatRTF,
-	"image/png":                 FormatPNG,
-	"image/jpeg":                FormatJPEG,
-	"image/jpg":                 FormatJPEG,
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": FormatPPTX,
+	"image/png":  FormatPNG,
+	"image/jpeg": FormatJPEG,
+	"image/jpg":  FormatJPEG,
 
 	// Deliberate refusals. Legacy binary Office formats have no pure-Go reader
 	// and are not the OOXML formats their names resemble.
@@ -171,10 +177,8 @@ var mimeFormats = map[string]Format{
 	"application/vnd.ms-word":       FormatUnknown,
 	"application/vnd.ms-excel":      FormatUnknown,
 	"application/vnd.ms-powerpoint": FormatUnknown,
-	// Flips to its Format when the corresponding frontend lands (the same
-	// sibling contract as the capability bits): presentationml -> FormatPPTX,
-	// epub -> FormatEPUB.
-	"application/vnd.openxmlformats-officedocument.presentationml.presentation": FormatUnknown,
+	// Flips to FormatEPUB when that frontend lands (the same sibling contract
+	// as the capability bits).
 	"application/epub+zip": FormatUnknown,
 	// No viable pure-Go HEIC/HEIF decoder exists.
 	"image/heic":          FormatUnknown,
@@ -237,6 +241,8 @@ func (f Format) MIME() string {
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	case FormatRTF:
 		return "application/rtf"
+	case FormatPPTX:
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	case FormatPNG:
 		return "image/png"
 	case FormatJPEG:
@@ -270,6 +276,8 @@ func FormatFromPath(path string) Format {
 		return FormatXLSX
 	case ".rtf":
 		return FormatRTF
+	case ".pptx", ".pptm":
+		return FormatPPTX
 	case ".png":
 		return FormatPNG
 	case ".jpg", ".jpeg":

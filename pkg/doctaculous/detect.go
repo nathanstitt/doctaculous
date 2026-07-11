@@ -77,19 +77,23 @@ func classifyOPC(data []byte) Format {
 	if err != nil {
 		return FormatUnknown
 	}
-	hasContentTypes, hasWordPart, hasXLPart := false, false, false
+	hasContentTypes, hasWordPart, hasXLPart, hasPPTPart := false, false, false, false
 	for _, f := range zr.File {
 		switch {
 		case f.Name == "word/document.xml":
 			return FormatDOCX
 		case f.Name == "xl/workbook.xml":
 			return FormatXLSX
+		case f.Name == "ppt/presentation.xml":
+			return FormatPPTX
 		case f.Name == "[Content_Types].xml":
 			hasContentTypes = true
 		case strings.HasPrefix(f.Name, "word/"):
 			hasWordPart = true
 		case strings.HasPrefix(f.Name, "xl/"):
 			hasXLPart = true
+		case strings.HasPrefix(f.Name, "ppt/"):
+			hasPPTPart = true
 		}
 	}
 	switch {
@@ -97,6 +101,8 @@ func classifyOPC(data []byte) Format {
 		return FormatDOCX
 	case hasContentTypes && hasXLPart:
 		return FormatXLSX
+	case hasContentTypes && hasPPTPart:
+		return FormatPPTX
 	}
 	return FormatUnknown
 }

@@ -29,6 +29,8 @@ func TestParseFormat(t *testing.T) {
 		{"xlsx", FormatXLSX},
 		{"xlsm", FormatXLSX},
 		{"rtf", FormatRTF},
+		{"pptx", FormatPPTX},
+		{"pptm", FormatPPTX},
 		{"png", FormatPNG},
 		{"jpeg", FormatJPEG},
 		{"jpg", FormatJPEG},
@@ -79,6 +81,7 @@ func TestFormatFromPath(t *testing.T) {
 		{"", FormatUnknown},
 		{"archive.zip", FormatUnknown},
 		{"doc.rtf", FormatRTF},
+		{"deck.pptx", FormatPPTX},
 	}
 	for _, c := range cases {
 		if got := FormatFromPath(c.path); got != c.want {
@@ -102,6 +105,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatTSV:      true,
 		FormatXLSX:     true,
 		FormatRTF:      true,
+		FormatPPTX:     true,
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,
@@ -115,7 +119,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatPNG:      true,
 		FormatJPEG:     true,
 	}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPPTX, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -173,6 +177,7 @@ func TestFormatFromMIME(t *testing.T) {
 		{"text/tab-separated-values", FormatTSV},
 		{"application/rtf", FormatRTF},
 		{"text/rtf", FormatRTF},
+		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", FormatPPTX},
 		{"image/png", FormatPNG},
 		{"image/jpeg", FormatJPEG},
 		{"image/jpg", FormatJPEG},
@@ -196,8 +201,7 @@ func TestFormatFromMIME(t *testing.T) {
 		"application/vnd.ms-word",
 		"application/vnd.ms-excel",
 		"application/vnd.ms-powerpoint",
-		// Flips to its Format when the corresponding frontend lands.
-		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		// Flips to FormatEPUB when that frontend lands.
 		"application/epub+zip",
 		"image/heic",
 		"image/heif",

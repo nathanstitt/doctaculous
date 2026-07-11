@@ -435,6 +435,18 @@ document model consumed externally by tinycld/text):
   (`resource.LoadDataURL` short-circuits the image cache — the browser rule). `rtf-specimen`
   golden. `2026-07-10-rtf-input-design.md`.
 
+**PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx ...`):
+
+- Hand-rolled PresentationML reader: visible slides' shape trees (text frames with
+  level/bullet/alignment + run b/i/sz/color, pictures, spanned tables), frames resolved
+  through slide→layout→master placeholder inheritance; hidden slides skipped; animations/
+  SmartArt/themes out of scope (content still extracts). Frontend renders one fixed-size
+  page per slide (absolutely positioned frames; pictures as data: URIs; titles → h2;
+  bullets → nested ul/ol with kind-switch handling), shapes ordered title-first/top-down
+  for the structure writers. `classifyOPC` gains ppt/; `.pptx`/`.pptm`; presentationml MIME
+  row flipped; input capability bit (output = D2). `pptx-specimen` golden.
+  `2026-07-10-pptx-input-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
