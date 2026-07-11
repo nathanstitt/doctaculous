@@ -3,14 +3,14 @@
 [![CI](https://github.com/nathanstitt/doctaculous/actions/workflows/ci.yml/badge.svg)](https://github.com/nathanstitt/doctaculous/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/nathanstitt/doctaculous.svg)](https://pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous)
 [![Go 1.26](https://img.shields.io/badge/Go-1.26-00758d?labelColor=211c17)](go.mod)
-[![CGo free](https://img.shields.io/badge/CGo-none-c8401a?labelColor=211c17)](#why-pure-go)
+[![CGo free](https://img.shields.io/badge/CGo-none-c8401a?labelColor=211c17)](#why)
 [![MIT](https://img.shields.io/badge/license-MIT-c8401a?labelColor=211c17)](LICENSE)
 
 A pure-Go document toolkit: parse, lay out, rasterize, extract, convert, and edit
 documents — with its own PDF interpreter and its own CSS layout engine, no CGo,
 no native bindings, no copyleft.
 
-## Thirteen formats. Every direction.
+## Read/Write thirteen formats and convert between them
 
 Every supported format is both an input **and** an output — all 156 ordered pairs
 convert (a format to itself is a deliberate `ErrSameFormat`):
@@ -65,7 +65,8 @@ err = doctaculous.Convert(ctx, in, out, doctaculous.ConvertOptions{
 
 For hosts routing uploads: `OpenReader(ctx, r)` / `OpenReaderAs` accept plain
 `io.Reader`s, and `FormatFromMIME` maps content types onto the capability table
-(`Format.ValidInput()` is the gate).
+(`Format.ValidInput()` is the gate). Full API reference:
+[pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous](https://pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous).
 
 ## How it works
 
@@ -121,7 +122,7 @@ edit files rather than convert them:
   corpora: tracked changes, comments, footnotes/endnotes, numbering, sections,
   drawings, and unmodeled parts all survive the round trip.
 
-## Why pure Go?
+## Why?
 
 The high-fidelity incumbents (PDFium, MuPDF, Poppler) require CGo and/or carry
 copyleft licenses. doctaculous implements the whole stack — PDF interpretation,
@@ -131,7 +132,9 @@ are pure-Go and permissively licensed (see `go.mod`); the one vendored decoder
 is Apache-2.0.
 
 Built for [tinycld](https://github.com/tinycld), where it powers document
-thumbnails, text extraction, and format conversion in production.
+thumbnails, text extraction, and editing of xlsx/docx with the
+[calc](https://github.com/tinycld/calc) and [text](https://github.com/tinycld/text)
+packages respectively.
 
 ## Limitations
 
@@ -146,6 +149,8 @@ one bad page can't kill a batch. The notable gaps today:
 - Flexbox is single-line (`flex-wrap` pending); grid lacks named-line placement
   and subgrid; JPEG2000 images and PDF tiling patterns are skipped;
   password-protected PDFs open only with an empty user password.
+
+The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 
 ## Layout of the codebase
 
