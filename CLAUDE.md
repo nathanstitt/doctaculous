@@ -356,6 +356,16 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   extraction). Capability gate for hosts = `FormatFromMIME(mt).ValidInput()`.
   `2026-07-10-mime-reader-open-design.md`.
 
+**Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
+
+- `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
+  `RasterOptions.MaxWidthPx/MaxHeightPx` fit-within-box sizing resolved per page to a concrete
+  DPI above the backends (painting untouched — fit ≡ explicit-DPI, pixel-identical, test-pinned;
+  ceil-safe exact fits). DPI becomes a resolution CEILING alongside the box (zero = fill the
+  box, upscaling vector-sharp; positive = downscale-only thumbnails). CLI flags on `rasterize` +
+  `convert` image output (unset `--dpi` = pure fit via flag.Visit).
+  `2026-07-10-fit-raster-sizing-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already

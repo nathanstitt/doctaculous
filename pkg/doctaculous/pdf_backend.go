@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"math"
 	"sync"
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
@@ -44,6 +45,26 @@ func (r *pdfRenderer) cssboxRoot() *cssbox.Box {
 		r.extractRoot = root
 	})
 	return r.extractRoot
+}
+
+// pageSize reports the page's MediaBox size in points, post-/Rotate — the same
+// geometry choices raster.RenderPage makes, so a fit computed from this size
+// matches the rendered pixel dimensions exactly.
+func (r *pdfRenderer) pageSize(index int) (float64, float64, error) {
+	pg, err := r.doc.Page(index)
+	if err != nil {
+		return 0, 0, fmt.Errorf("page %d: %w", index, err)
+	}
+	w, h := pg.MediaBox.Width(), pg.MediaBox.Height()
+	// Mirror raster.RenderPage's validation so fit math never divides by junk
+	// from a crafted MediaBox (NaN fails the > 0 comparison).
+	if !(w > 0 && h > 0) || math.IsInf(w, 1) || math.IsInf(h, 1) {
+		return 0, 0, fmt.Errorf("page %d: invalid MediaBox %gx%g", index, w, h)
+	}
+	if pg.Rotate == 90 || pg.Rotate == 270 {
+		w, h = h, w
+	}
+	return w, h, nil
 }
 
 func (r *pdfRenderer) renderPage(ctx context.Context, index int, opts RasterOptions) (image.Image, error) {

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/testdata/gen"
 )
 
 func TestResolvePagesSingle(t *testing.T) {
@@ -186,4 +189,53 @@ func TestRasterizeCmdURL(t *testing.T) {
 	if info.Size() == 0 {
 		t.Errorf("rendered %s is empty", got)
 	}
+}
+
+// TestRasterizeCmdFitSizing exercises --max-width/--max-height end to end: an
+// unset --dpi means pure fit (the letter page fills the 480x360 box at 279x360),
+// while an explicit --dpi acts as a resolution ceiling.
+func TestRasterizeCmdFitSizing(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "letter.pdf")
+	if err := os.WriteFile(in, gen.TextPDF(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fit := filepath.Join(dir, "fit.png")
+	if err := rasterizeCmd([]string{in, "--out", fit, "--max-width", "480", "--max-height", "360", "--bundled-fonts"}); err != nil {
+		t.Fatalf("rasterizeCmd fit: %v", err)
+	}
+	if w, h := decodePNGSize(t, fit); w != 279 || h != 360 {
+		t.Errorf("fit render = %dx%d, want 279x360", w, h)
+	}
+
+	// An explicit --dpi is a ceiling: 72 DPI on a 612x792pt page is 612x792 px,
+	// well inside a huge box — no upscale to fill it.
+	capped := filepath.Join(dir, "capped.png")
+	if err := rasterizeCmd([]string{in, "--out", capped, "--max-width", "10000", "--max-height", "10000", "--dpi", "72", "--bundled-fonts"}); err != nil {
+		t.Fatalf("rasterizeCmd capped: %v", err)
+	}
+	if w, h := decodePNGSize(t, capped); w != 612 || h != 792 {
+		t.Errorf("dpi-ceiling render = %dx%d, want 612x792", w, h)
+	}
+
+	// Negative values are rejected.
+	if err := rasterizeCmd([]string{in, "--out", fit, "--max-width", "-1"}); err == nil {
+		t.Error("expected an error for --max-width -1")
+	}
+}
+
+// decodePNGSize decodes the PNG at path and returns its pixel dimensions.
+func decodePNGSize(t *testing.T, path string) (w, h int) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close() //nolint:errcheck // read-only file
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return img.Bounds().Dx(), img.Bounds().Dy()
 }

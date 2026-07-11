@@ -134,3 +134,4 @@ func (pdfStub) pageCount() int { return 0 }
 func (pdfStub) renderPage(context.Context, int, RasterOptions) (image.Image, error) {
 	return nil, nil
 }
+func (pdfStub) pageSize(int) (float64, float64, error) { return 0, 0, nil }
