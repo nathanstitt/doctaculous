@@ -146,6 +146,10 @@ var modelCore = []modelFixture{
 			Line: 360, LineRule: LineRuleExact, HasLine: true,
 			IndentLeft: 720, HasIndentLeft: true, IndentRight: 360, HasIndentRight: true,
 			FirstLine: -180, HasFirstLine: true, PageBreakBefore: true,
+			Borders: &BoxBorders{
+				Bottom: Border{Style: "single", SizeEighthPt: 6, Color: rgba(0xD8, 0xDE, 0xE4), HasColor: true},
+				Top:    Border{None: true},
+			},
 			TabStops: []TabStop{{PosTwips: 2880, Align: "center"}, {PosTwips: 5760, Align: "right"}},
 		}, textRun("styled paragraph", RunProps{}))}}
 	}},
@@ -269,8 +273,9 @@ var modelCore = []modelFixture{
 		tracked.Props.TcPrChange = &CellPropsChange{Mark: RevisionMark{ID: 12, Author: "Iv"},
 			Previous: CellProps{VAlign: VAlignBottom, WidthDxa: 1000}}
 		return &Document{Body: []Block{{Table: &Table{
-			Grid:  []Twips{2000, 3000, 3000},
-			Props: TableProps{WidthDxa: 8000, Justify: JustifyCenter, Borders: BoxBorders{Top: border("single", 4)}},
+			Grid: []Twips{2000, 3000, 3000},
+			Props: TableProps{WidthDxa: 8000, Justify: JustifyCenter,
+				Borders: BoxBorders{Top: border("single", 4)}, LayoutFixed: true},
 			Rows: []TableRow{
 				{Props: RowProps{IsHeader: true, HeightDxa: 400}, Cells: []TableCell{cell("a"), spanned}},
 				{Cells: []TableCell{merged, cell("b"), tracked}},
@@ -281,8 +286,9 @@ var modelCore = []modelFixture{
 	{"lists-numbering", func() *Document {
 		num := NewNumbering()
 		num.Abstract[0] = map[int]NumLevel{
-			0: {Format: NumFmtDecimal, Text: "%1.", Start: 3, HasStart: true},
-			1: {Format: NumFmtLowerLetter, Text: "%2)"},
+			0: {Format: NumFmtDecimal, Text: "%1.", Start: 3, HasStart: true,
+				IndentLeft: 720, HasIndentLeft: true, Hanging: 360, HasHanging: true},
+			1: {Format: NumFmtLowerLetter, Text: "%2)", IndentLeft: 1440, HasIndentLeft: true},
 		}
 		num.Abstract[1] = map[int]NumLevel{0: {Format: NumFmtBullet, Text: "•"}}
 		num.Instances[1] = NumInstance{AbstractID: 0}

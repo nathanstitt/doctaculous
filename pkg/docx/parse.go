@@ -605,6 +605,15 @@ func parsePPr(dec *xml.Decoder) (ParagraphProps, *SectionProps, error) {
 				case "numPr":
 					applyNumPr(&props, dec)
 					continue
+				case "pBdr":
+					b, err := parseBorders(dec, "pBdr")
+					if err != nil {
+						return props, nil, err
+					}
+					if b != (BoxBorders{}) {
+						props.Borders = &b
+					}
+					continue
 				case "tabs":
 					applyTabs(&props, dec)
 					continue
@@ -1438,6 +1447,10 @@ func parseTblPr(dec *xml.Decoder) (TableProps, error) {
 					continue
 				case "shd":
 					props.Shading = parseShd(t)
+				case "tblLayout":
+					if v, _ := wAttr(t, "type"); v == "fixed" {
+						props.LayoutFixed = true
+					}
 				}
 			}
 			if err := dec.Skip(); err != nil {

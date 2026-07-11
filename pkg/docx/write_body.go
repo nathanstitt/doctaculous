@@ -298,6 +298,9 @@ func (dw *docWriter) writePPrDepth(sb *strings.Builder, p ParagraphProps, withCh
 	if p.HasNum {
 		fmt.Fprintf(&b, `<w:numPr><w:ilvl w:val="%d"/><w:numId w:val="%d"/></w:numPr>`, p.ILvl, p.NumID)
 	}
+	if p.Borders != nil {
+		writeBorders(&b, "pBdr", *p.Borders)
+	}
 	if len(p.TabStops) > 0 {
 		b.WriteString("<w:tabs>")
 		for _, ts := range p.TabStops {
@@ -564,6 +567,9 @@ func (dw *docWriter) writeTblPr(sb *strings.Builder, p TableProps) {
 	}
 	writeBorders(&b, "tblBorders", p.Borders)
 	writeShd(&b, p.Shading)
+	if p.LayoutFixed {
+		b.WriteString(`<w:tblLayout w:type="fixed"/>`)
+	}
 	if b.Len() == 0 {
 		return
 	}

@@ -331,5 +331,8 @@ func mergePara(base, over docx.ParagraphProps) docx.ParagraphProps {
 	if over.PageBreakBefore {
 		out.PageBreakBefore = true
 	}
+	if over.Borders != nil {
+		out.Borders = over.Borders
+	}
 	return out
 }

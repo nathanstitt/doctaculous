@@ -17,18 +17,19 @@
 //     substitutes and the writer emits);
 //   - a Style with an empty Type is a paragraph style.
 //
-// The modeled vocabulary: paragraphs (style/justify/spacing/indent/tabs/
-// frames/drop caps/page breaks/numbering), runs (bold/italic/underline/
+// The modeled vocabulary: paragraphs (style/justify/spacing/indent/borders/
+// tabs/frames/drop caps/page breaks/numbering), runs (bold/italic/underline/
 // strike/size/color/family/highlight/shading/caps/vertAlign/character style),
 // hyperlinks, inline and anchored drawings (extent, wrap, alignment, alt
 // text), tables (grid, spans, vertical merges, borders with style names,
-// shading, header rows, widths), tracked changes (w:ins/w:del containers and
-// rPr/pPr/tcPr property-change before-states, cell ins/del marks), comments
-// (part + range markers + reference runs), footnotes and endnotes, headers
-// and footers, multi-section geometry, numbering definitions (formats,
-// level text, start/override values), the style table, embedded media, and
-// verbatim customXml parts (Document.ExtraParts — the escape hatch for
-// app-owned data). Unknown constructs are dropped at parse time; the writer
-// fails with ErrInvalidDocument rather than silently dropping content it
-// cannot represent.
+// shading, header rows, widths, fixed layout), tracked changes (w:ins/w:del
+// containers and rPr/pPr/tcPr property-change before-states, cell ins/del
+// marks), comments (part + range markers + reference runs), footnotes and
+// endnotes, headers and footers, multi-section geometry, numbering
+// definitions (formats, level text, level indents, start/override values),
+// the style table, embedded media, and verbatim customXml parts
+// (Document.ExtraParts — the escape hatch for app-owned data). Unknown
+// constructs are dropped at parse time; the writer fails with
+// ErrInvalidDocument rather than silently dropping content it cannot
+// represent.
 package docx

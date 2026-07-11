@@ -475,6 +475,20 @@ document model consumed externally by tinycld/text):
   nav links, chapters ⇒ pages), md→epub→md loop, `epubout-basic` golden; EPUB joins the
   convert matrix as input AND output. `2026-07-10-epub-output-design.md`.
 
+**DOCX writer unification** (`pkg/render/docxwrite` → `docx.Write`) — the public-model
+PR 3/3:
+
+- docxwrite's cssbox walk now BUILDS a `*docx.Document` (DefaultStyles/AddImage/model
+  paragraphs-runs-hyperlinks-tables-drawings, parse-shaped runs) and serializes via
+  `docx.Write` — ONE OPC emitter for the repo; its private XML/zip machinery (opc.go,
+  styles.go, numbering.go, xml.go) is deleted, the public `docxwrite.Write` API unchanged.
+  Facts the old XML carried land as additive model fields (parsed + written + fixture-
+  covered): `ParagraphProps.Borders` (w:pBdr — HorizontalRule keeps its visible rule),
+  `NumLevel.IndentLeft/Hanging` (per-level list indents), `TableProps.LayoutFixed`.
+  Semantically 1:1 (parity matrix + reopen units unchanged; PNG goldens byte-identical);
+  a linked image now survives the round trip BESIDE its link group (the reader dropped
+  drawings inside w:hyperlink), pinned by test. `2026-07-10-docxwrite-unification-design.md`.
+
 **PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx ...`):
 
 - Hand-rolled PresentationML reader: visible slides' shape trees (text frames with

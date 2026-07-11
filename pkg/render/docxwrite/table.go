@@ -2,10 +2,10 @@ package docxwrite
 
 import (
 	"context"
-	"fmt"
 	"image/color"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
 )
@@ -14,109 +14,97 @@ import (
 // and vMerge restart/continue chains for row spans (the reader reconstructs the
 // spans from exactly these). A caption becomes a Caption-styled paragraph above
 // the table.
-func (w *writer) table(ctx context.Context, b *cssbox.Box) error {
+func (w *writer) table(ctx context.Context, b *cssbox.Box, out *[]docx.Block) error {
 	if cap := captionOf(b); cap != nil {
-		w.paragraph(cap, "Caption")
+		w.appendParagraph(out, cap, "Caption")
 	}
 	grid := boxwalk.BuildOccupancyGrid(b)
 	if grid.Cols == 0 || len(grid.Slots) == 0 {
 		return nil
 	}
 
-	w.body.WriteString("<w:tbl><w:tblPr><w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>")
-	// Column widths: the writer runs pre-layout, so content-driven widths are
+	// Fixed layout: the writer runs pre-layout, so content-driven widths are
 	// not available; the page content width splits evenly across the columns (a
-	// documented v1 approximation).
-	colTw := w.contentWidthTwips() / grid.Cols
+	// documented v1 approximation) and the grid widths are authoritative.
+	tbl := &docx.Table{Props: docx.TableProps{LayoutFixed: true}}
+	colTw := w.contentWidthTwips() / docx.Twips(grid.Cols)
 	for c := 0; c < grid.Cols; c++ {
-		fmt.Fprintf(&w.body, `<w:gridCol w:w="%d"/>`, colTw)
+		tbl.Grid = append(tbl.Grid, colTw)
 	}
-	w.body.WriteString("</w:tblGrid>")
 
 	for r := range grid.Slots {
-		w.body.WriteString("<w:tr>")
-		if grid.HeaderRow[r] {
-			w.body.WriteString("<w:trPr><w:tblHeader/></w:trPr>")
-		}
+		row := docx.TableRow{Props: docx.RowProps{IsHeader: grid.HeaderRow[r]}}
 		for c := 0; c < grid.Cols; {
 			idx := grid.Slots[r][c]
 			if idx < 0 {
-				// A gap from a short row: an empty cell keeps the grid rectangular.
-				w.body.WriteString("<w:tc><w:tcPr></w:tcPr><w:p/></w:tc>")
+				// A gap from a short row: an empty cell keeps the grid
+				// rectangular (docx.Write supplies its empty paragraph).
+				row.Cells = append(row.Cells, docx.TableCell{GridSpan: 1})
 				c++
 				continue
 			}
 			cell := grid.Cells[idx]
-			if err := w.tableCell(ctx, cell, cell.Row == r); err != nil {
+			tc, err := w.tableCell(ctx, cell, cell.Row == r)
+			if err != nil {
 				return err
 			}
+			row.Cells = append(row.Cells, tc)
 			c += cell.ColSpan
 		}
-		w.body.WriteString("</w:tr>")
+		tbl.Rows = append(tbl.Rows, row)
 	}
-	w.body.WriteString("</w:tbl>")
+	*out = append(*out, docx.Block{Table: tbl})
 	return nil
 }
 
-// tableCell emits one w:tc. origin distinguishes the cell's first row (real
+// tableCell builds one w:tc. origin distinguishes the cell's first row (real
 // content, vMerge restart when it spans rows) from a covered row below it (an
-// explicit vMerge continue with an empty paragraph — a bare vMerge would mean
-// restart).
-func (w *writer) tableCell(ctx context.Context, cell boxwalk.GridCell, origin bool) error {
-	w.body.WriteString("<w:tc><w:tcPr>")
-	if cell.ColSpan > 1 {
-		fmt.Fprintf(&w.body, `<w:gridSpan w:val="%d"/>`, cell.ColSpan)
-	}
+// explicit vMerge continue with no content — a bare vMerge would mean restart).
+func (w *writer) tableCell(ctx context.Context, cell boxwalk.GridCell, origin bool) (docx.TableCell, error) {
+	tc := docx.TableCell{GridSpan: cell.ColSpan}
 	if cell.RowSpan > 1 {
 		if origin {
-			w.body.WriteString(`<w:vMerge w:val="restart"/>`)
+			tc.VMerge = docx.VMergeRestart
 		} else {
-			w.body.WriteString(`<w:vMerge w:val="continue"/>`)
+			tc.VMerge = docx.VMergeContinue
 		}
 	}
-	w.body.WriteString(cellBorders(cell.Box.Style))
+	tc.Props.Borders = cellBorders(cell.Box.Style)
 	if bg := cell.Box.Style.BackgroundColor; bg.A != 0 {
-		fmt.Fprintf(&w.body, `<w:shd w:val="clear" w:fill="%s"/>`, hexColor(bg))
+		tc.Props.Shading = docx.Shading{Fill: bg, HasFill: true}
 	}
-	w.body.WriteString("</w:tcPr>")
-
 	if !origin {
-		w.body.WriteString("<w:p/></w:tc>")
-		return nil
+		return tc, nil
 	}
-	before := w.body.Len()
 	if boxwalk.HasInlineContent(cell.Box) {
-		w.paragraph(cell.Box, "")
-	} else if err := w.children(ctx, cell.Box); err != nil {
-		return err
+		w.appendParagraph(&tc.Blocks, cell.Box, "")
+	} else if err := w.children(ctx, cell.Box, &tc.Blocks); err != nil {
+		return tc, err
 	}
-	if w.body.Len() == before {
-		// A w:tc must contain at least one block; an empty paragraph stands in.
-		w.body.WriteString("<w:p/>")
-	}
-	w.body.WriteString("</w:tc>")
-	return nil
+	return tc, nil
 }
 
 // cellBorders maps the cell box's computed borders to w:tcBorders (per-cell —
 // the reader does not read table-level insideH/insideV). Border sizes are in
 // eighths of a point.
-func cellBorders(cs gcss.ComputedStyle) string {
-	edge := func(name string, widthPt float64, col color.RGBA, style string) string {
+func cellBorders(cs gcss.ComputedStyle) docx.BoxBorders {
+	edge := func(widthPt float64, col color.RGBA, style string) docx.Border {
 		if widthPt <= 0 || style == "none" || style == "hidden" || style == "" {
-			return ""
+			return docx.Border{}
 		}
-		return fmt.Sprintf(`<w:%s w:val="single" w:sz="%d" w:color="%s"/>`,
-			name, int(widthPt*8+0.5), hexColor(col))
+		return docx.Border{
+			Style:        "single",
+			SizeEighthPt: int(widthPt*8 + 0.5),
+			Color:        col,
+			HasColor:     col.A != 0,
+		}
 	}
-	s := edge("top", lengthPt(cs.BorderTopWidth, cs.FontSizePt), cs.BorderTopColor, cs.BorderTopStyle) +
-		edge("left", lengthPt(cs.BorderLeftWidth, cs.FontSizePt), cs.BorderLeftColor, cs.BorderLeftStyle) +
-		edge("bottom", lengthPt(cs.BorderBottomWidth, cs.FontSizePt), cs.BorderBottomColor, cs.BorderBottomStyle) +
-		edge("right", lengthPt(cs.BorderRightWidth, cs.FontSizePt), cs.BorderRightColor, cs.BorderRightStyle)
-	if s == "" {
-		return ""
+	return docx.BoxBorders{
+		Top:    edge(lengthPt(cs.BorderTopWidth, cs.FontSizePt), cs.BorderTopColor, cs.BorderTopStyle),
+		Left:   edge(lengthPt(cs.BorderLeftWidth, cs.FontSizePt), cs.BorderLeftColor, cs.BorderLeftStyle),
+		Bottom: edge(lengthPt(cs.BorderBottomWidth, cs.FontSizePt), cs.BorderBottomColor, cs.BorderBottomStyle),
+		Right:  edge(lengthPt(cs.BorderRightWidth, cs.FontSizePt), cs.BorderRightColor, cs.BorderRightStyle),
 	}
-	return "<w:tcBorders>" + s + "</w:tcBorders>"
 }
 
 // lengthPt resolves a border-width Length to points (px:pt 1:1 in this engine).
@@ -131,16 +119,8 @@ func lengthPt(l gcss.Length, fontSizePt float64) float64 {
 	}
 }
 
-// hexColor renders an RGBA as the RRGGBB form OOXML colors use.
-func hexColor(c color.RGBA) string {
-	if c.A == 0 {
-		return "auto"
-	}
-	return fmt.Sprintf("%02X%02X%02X", c.R, c.G, c.B)
-}
-
 // contentWidthTwips is the section content width (page minus margins) in twips.
-func (w *writer) contentWidthTwips() int {
+func (w *writer) contentWidthTwips() docx.Twips {
 	pageW := w.opts.PageWidthPt
 	if pageW <= 0 {
 		pageW = 612
