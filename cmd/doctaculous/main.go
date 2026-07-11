@@ -65,6 +65,10 @@ func run(args []string) error {
 			return tomdCmd(args)
 		case "tohtml":
 			return tohtmlCmd(args)
+		case "todocx":
+			return todocxCmd(args)
+		case "convert":
+			return convertCmd(args)
 		}
 		return rasterizeCmd(args)
 	}
@@ -87,6 +91,8 @@ func inferCommand(args []string) (string, error) {
 		return "tohtml", nil
 	case ".docx":
 		return "todocx", nil
+	case ".csv", ".tsv", ".xlsx":
+		return "convert", nil
 	case ".png", ".jpg", ".jpeg":
 		return "rasterize", nil
 	}
@@ -94,7 +100,7 @@ func inferCommand(args []string) (string, error) {
 		return "topdf", nil
 	}
 	switch strings.ToLower(filepath.Ext(in)) {
-	case ".html", ".htm", ".docx", ".md", ".markdown", ".txt", ".text":
+	case ".html", ".htm", ".docx", ".md", ".markdown", ".txt", ".text", ".csv", ".tsv":
 		return "topdf", nil
 	case ".pdf":
 		return "rasterize", nil
@@ -155,8 +161,9 @@ usage:
 
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, html, md, txt, http(s) URLs. Outputs: pdf, docx, md, txt, html, png,
-jpg. Converting a document to its own format is not supported.
+pdf, docx, html, md, txt, csv, tsv, http(s) URLs. Outputs: pdf, docx, md, txt,
+html, csv, tsv, png, jpg. CSV/TSV output carries the document's tables (prose is
+dropped). Converting a document to its own format is not supported.
 
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;

@@ -46,6 +46,8 @@ func TestConvertMatrix(t *testing.T) {
 		FormatHTML:     []byte(matrixHTML),
 		FormatMarkdown: []byte("# Matrix Title\n\nAn introductory paragraph of body text.\n"),
 		FormatText:     []byte("Matrix Title\n\nplain body lines\n"),
+		FormatCSV:      []byte("Name,Qty\nMatrix Title,5\n"),
+		FormatTSV:      []byte("Name\tQty\nMatrix Title\t5\n"),
 	}
 	// A text fragment each input's content must carry into structure outputs.
 	wantText := map[Format]string{
@@ -54,9 +56,20 @@ func TestConvertMatrix(t *testing.T) {
 		FormatHTML:     "Matrix Title",
 		FormatMarkdown: "Matrix Title",
 		FormatText:     "Matrix Title",
+		FormatCSV:      "Matrix Title",
+		FormatTSV:      "Matrix Title",
+	}
+	// CSV/TSV output carries tables only; inputs whose fixture has no table
+	// legitimately produce empty output there.
+	tableless := map[Format]bool{
+		FormatPDF:      true, // matrixPDF has a heading + paragraph, no ruled table
+		FormatHTML:     true,
+		FormatMarkdown: true,
+		FormatText:     true,
+		FormatDOCX:     true, // the paragraph fixture
 	}
 	sentinels := []error{ErrUnknownFormat, ErrUnsupportedFormat, ErrSameFormat}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -85,6 +98,10 @@ func TestConvertMatrix(t *testing.T) {
 			var out bytes.Buffer
 			if err := Convert(ctx, bytes.NewReader(inputs[from]), &out, opts); err != nil {
 				t.Errorf("%s: Convert: %v", name, err)
+				continue
+			}
+			if (to == FormatCSV || to == FormatTSV) && tableless[from] {
+				// Tables-only output from a table-less fixture: empty by design.
 				continue
 			}
 			if out.Len() == 0 {
@@ -122,6 +139,10 @@ func TestConvertMatrix(t *testing.T) {
 					t.Errorf("%s: output lacks a JPEG signature", name)
 				}
 			case FormatMarkdown, FormatText, FormatHTML:
+				if !strings.Contains(out.String(), wantText[from]) {
+					t.Errorf("%s: output missing %q:\n%s", name, wantText[from], out.String())
+				}
+			case FormatCSV, FormatTSV:
 				if !strings.Contains(out.String(), wantText[from]) {
 					t.Errorf("%s: output missing %q:\n%s", name, wantText[from], out.String())
 				}
