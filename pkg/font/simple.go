@@ -19,9 +19,10 @@ type simpleFont struct {
 	toName    [256]string  // glyph name per code, for name→GID lookup
 	width     [256]float64 // em units; only valid where hasWidth is set
 	hasWidth  [256]bool
-	missing   float64 // /MissingWidth in em units
-	symbolic  bool    // FontDescriptor /Flags bit 3: a symbolic (non-standard) font
-	noEncDict bool    // the font dict has no explicit /Encoding
+	toUni     map[int]rune // code → rune from /ToUnicode, for text extraction
+	missing   float64      // /MissingWidth in em units
+	symbolic  bool         // FontDescriptor /Flags bit 3: a symbolic (non-standard) font
+	noEncDict bool         // the font dict has no explicit /Encoding
 }
 
 // newSimpleFont builds a simpleFont from a resolved font dictionary and its
@@ -37,6 +38,9 @@ func newSimpleFont(doc *pdf.Document, fontDict pdf.Dict, prog *program) (*simple
 	f.buildEncoding(doc, fontDict)
 	f.buildWidths(doc, fontDict)
 	f.resolveGIDs()
+	// Parsed after resolveGIDs on purpose: /ToUnicode refines only the extracted
+	// rune, never code→GID resolution, so painting is unaffected.
+	f.toUni = parseToUnicode(doc, fontDict)
 	return f, nil
 }
 
@@ -174,10 +178,18 @@ func (f *simpleFont) DecodeString(s []byte) []content.Glyph {
 	glyphs := make([]content.Glyph, 0, len(s))
 	for _, c := range s {
 		gid := f.toGID[c]
+		// /ToUnicode is the authoritative extraction mapping when present (PDF
+		// 32000-1 §9.10.2); the encoding-derived rune is the fallback. This
+		// matters for symbolic subset fonts whose /Differences names (or raw
+		// codes) carry no usable Unicode.
+		r := f.toRune[c]
+		if u, ok := f.toUni[int(c)]; ok {
+			r = u
+		}
 		glyphs = append(glyphs, content.Glyph{
 			Code:    int(c),
 			Width:   f.widthOf(c),
-			Rune:    f.toRune[c],
+			Rune:    r,
 			IsSpace: c == 0x20,
 			Outline: f.prog.outline(gid),
 		})

@@ -17,6 +17,7 @@ type type0Font struct {
 	prog     *program
 	dw       float64         // default width, em units
 	w        map[int]float64 // CID → width, em units
+	toUni    map[int]rune    // CID → rune from /ToUnicode, for text extraction
 	cidToGID func(cid int) fonts.GID
 }
 
@@ -43,6 +44,7 @@ func newType0Font(doc *pdf.Document, fontDict pdf.Dict) (*type0Font, error) {
 		f.dw = dw / 1000
 	}
 	f.w = parseCIDWidths(doc, doc.GetArray(cidFont["W"]))
+	f.toUni = parseToUnicode(doc, fontDict)
 	f.cidToGID = buildCIDToGID(doc, cidFont, prog.numGlyphs())
 	return f, nil
 }
@@ -170,7 +172,7 @@ func (f *type0Font) DecodeString(s []byte) []content.Glyph {
 		glyphs = append(glyphs, content.Glyph{
 			Code:    cid,
 			Width:   f.widthOf(cid),
-			Rune:    0, // no ToUnicode in scope
+			Rune:    f.toUni[cid], // 0 when the font carries no /ToUnicode
 			IsSpace: false,
 			Outline: f.prog.outline(gid),
 		})
