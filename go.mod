@@ -15,6 +15,7 @@ require (
 require (
 	github.com/adrg/strutil v0.2.2 // indirect
 	github.com/adrg/xdg v0.3.0 // indirect
+	github.com/beevik/etree v1.6.0 // indirect
 	github.com/benoitkugler/pstokenizer v1.0.1 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
