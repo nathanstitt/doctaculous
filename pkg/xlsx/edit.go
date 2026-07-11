@@ -208,6 +208,7 @@ func (f *File) setPart(name string, data []byte) error {
 	}
 	f.parsed[name] = p
 	f.dirty[name] = true
+	delete(f.deleted, name) // a rewritten part is alive again
 	if _, ok := f.added[name]; !ok && !f.originalPart(name) {
 		f.added[name] = data
 	}
