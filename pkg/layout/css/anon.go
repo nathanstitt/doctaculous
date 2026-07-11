@@ -249,17 +249,21 @@ func wrapInlineRuns(children []*cssbox.Box) []*cssbox.Box {
 // blocks). Non-whitespace text has its internal whitespace runs collapsed to a
 // single space.
 func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box {
-	// The CSS white-space of the containing element decides whether whitespace
+	// The CSS white-space governing a text run decides whether its whitespace
 	// collapses: collapsing modes (normal/nowrap) squash runs (incl. newlines) to one
 	// space; pre-line collapses spaces/tabs but keeps newlines; preserving modes
 	// (pre/pre-wrap) keep everything (the shaper turns kept newlines into breaks and
-	// kept tabs into tab stops). A text box is anonymous and inherits, so the parent's
-	// value applies. The empty/normal default reproduces the prior collapse-everything.
-	collapseSpaces, preserveNewlines, _ := gcss.WhiteSpaceFlags(parent.Style.WhiteSpace)
+	// kept tabs into tab stops). A text box carries its governing element's computed
+	// style (makeTextBox copies the parent's), so the box's own value is authoritative
+	// — for ordinary text it equals the containing element's, and for a synthesized
+	// hard-break leaf (<br> → "\n" with white-space:pre-line) it preserves the newline
+	// regardless of the container's mode. The empty/normal default reproduces the
+	// prior collapse-everything.
 	for _, c := range children {
 		if c.Kind != cssbox.BoxText {
 			continue
 		}
+		collapseSpaces, preserveNewlines, _ := gcss.WhiteSpaceFlags(c.Style.WhiteSpace)
 		switch {
 		case collapseSpaces && !preserveNewlines:
 			c.Text = collapseWS(c.Text) // normal / nowrap
@@ -281,8 +285,12 @@ func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box 
 	parentIsBlockContainer := parent.Kind.IsBlockLevel()
 	var out []*cssbox.Box
 	for i, c := range children {
-		if collapseSpaces && c.Kind == cssbox.BoxText && isAllWS(c.Text) {
-			if parentIsBlockContainer && adjacentToBlock(children, i) {
+		if c.Kind == cssbox.BoxText && isAllWS(c.Text) {
+			collapseSpaces, preserveNewlines, _ := gcss.WhiteSpaceFlags(c.Style.WhiteSpace)
+			// A preserved newline (a <br> leaf, or pre-line text containing '\n')
+			// is a hard break, never disposable inter-block whitespace.
+			disposable := collapseSpaces && !(preserveNewlines && strings.Contains(c.Text, "\n"))
+			if disposable && parentIsBlockContainer && adjacentToBlock(children, i) {
 				continue // drop inter-block whitespace
 			}
 		}
