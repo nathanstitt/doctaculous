@@ -108,6 +108,14 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: fidelityDocx,
 	},
+	{
+		Name: "model-specimen",
+		Desc: "a document CONSTRUCTED through the public pkg/docx model and serialized with " +
+			"docx.Bytes — the writer-first consumer path — sampling styles, emphasis, shading, " +
+			"a hyperlink, a footnote, a tracked change, a start-at-4 list, and a bordered table",
+		Pages: 1,
+		Build: modelSpecimenDocx,
+	},
 }
 
 const docOpen = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
