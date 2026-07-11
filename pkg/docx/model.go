@@ -324,10 +324,13 @@ type Run struct {
 	FootnoteRef int
 	// EndnoteRef mirrors FootnoteRef for w:endnoteReference (Document.Endnotes).
 	EndnoteRef int
-	// CommentRef is the id of a comment this run references (w:commentReference);
-	// 0 = none. A reference run has no text and renders as nothing — the comment
-	// itself lives in Document.Comments.
-	CommentRef int
+	// CommentRef is the id of a comment this run references (w:commentReference).
+	// Comment ids number from 0 (both Word and LibreOffice start there), so
+	// presence rides on HasCommentRef, not on a zero sentinel. A reference run
+	// has no text and renders as nothing — the comment itself lives in
+	// Document.Comments.
+	CommentRef    int
+	HasCommentRef bool
 }
 
 // BreakKind classifies a w:br inside a run.

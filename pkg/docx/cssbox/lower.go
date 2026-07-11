@@ -265,7 +265,7 @@ func effectiveContent(children []docx.ParaChild) []docx.ParaChild {
 	plain := true
 	for i := range children {
 		if children[i].Revision != nil || children[i].CommentStart != nil ||
-			children[i].CommentEnd != nil || (children[i].Run != nil && children[i].Run.CommentRef > 0) {
+			children[i].CommentEnd != nil || (children[i].Run != nil && runRefsComment(children[i].Run)) {
 			plain = false
 			break
 		}
@@ -282,13 +282,18 @@ func effectiveContent(children []docx.ParaChild) []docx.ParaChild {
 			}
 			// A delete's content is excluded: it is no longer part of the document.
 		case ch.CommentStart != nil, ch.CommentEnd != nil:
-		case ch.Run != nil && ch.Run.CommentRef > 0:
+		case ch.Run != nil && runRefsComment(ch.Run):
 		default:
 			out = append(out, ch)
 		}
 	}
 	return out
 }
+
+// runRefsComment reports whether a run is a comment-reference marker. Comment
+// ids number from 0, so HasCommentRef is the authoritative signal (a bare
+// non-zero id is honored for hand-constructed documents).
+func runRefsComment(r *docx.Run) bool { return r.HasCommentRef || r.CommentRef > 0 }
 
 // paragraphStyle maps a resolved DOCX paragraph onto a block ComputedStyle: alignment,
 // space-before/after → vertical margins, left/right indent → horizontal margins,

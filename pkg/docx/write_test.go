@@ -223,7 +223,7 @@ var modelCore = []modelFixture{
 				ParaChild{CommentStart: &CommentMark{ID: 9}},
 				textRun("flagged", RunProps{}),
 				ParaChild{CommentEnd: &CommentMark{ID: 9}},
-				ParaChild{Run: &Run{CommentRef: 9}},
+				ParaChild{Run: &Run{CommentRef: 9, HasCommentRef: true}},
 			)},
 		}
 	}},

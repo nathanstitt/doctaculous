@@ -906,7 +906,7 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 			case "commentReference":
 				if id, ok := wAttrInt(t, "id"); ok {
 					flushText()
-					out = append(out, Run{Props: props, CommentRef: id})
+					out = append(out, Run{Props: props, CommentRef: id, HasCommentRef: true})
 				}
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
