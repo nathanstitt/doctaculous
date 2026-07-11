@@ -16,3 +16,15 @@ type Node interface {
 	// Attr returns an attribute value and whether it was present.
 	Attr(key string) (string, bool)
 }
+
+// SiblingIndexer is an optional extension of Node that enables the structural
+// pseudo-classes (:first-child, :nth-child(), :nth-of-type(), …). All values are
+// 1-based positions among the parent's ELEMENT children (text nodes do not
+// count): pos from the first sibling, last from the last sibling, and
+// typePos/typeLast the same restricted to siblings sharing the element's tag. A
+// root element reports 1 for all four. A Node that does not implement the
+// interface never matches a structural pseudo-class (the selector is inert, not
+// an error).
+type SiblingIndexer interface {
+	SiblingIndex() (pos, last, typePos, typeLast int)
+}

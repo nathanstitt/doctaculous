@@ -1,6 +1,9 @@
 package css
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Specificity is a CSS specificity triple (a,b,c): id count, class count, type
 // count. Compared field-by-field, a dominates b dominates c.
@@ -25,7 +28,27 @@ type simpleSelector struct {
 	tag     string // "" means any (universal or qualifier-only)
 	id      string
 	classes []string
-	pseudos []string // pseudo-class names, lowercased (e.g. "link", "hover"); no leading ":"
+	pseudos []string  // pseudo-class names, lowercased (e.g. "link", "hover"); no leading ":"
+	nths    []nthTest // structural :nth-*() pseudo-classes (An+B), parsed
+}
+
+// nthTest is one parsed :nth-child()/:nth-last-child()/:nth-of-type()/
+// :nth-last-of-type() qualifier: position p (1-based) matches when p = a·k + b
+// for some integer k ≥ 0. fromEnd counts from the last sibling; ofType restricts
+// the sibling walk to elements with the subject's tag.
+type nthTest struct {
+	a, b    int
+	fromEnd bool
+	ofType  bool
+}
+
+// matchesPos reports whether 1-based position p satisfies the An+B test.
+func (t nthTest) matchesPos(p int) bool {
+	if t.a == 0 {
+		return p == t.b
+	}
+	d := p - t.b
+	return d%t.a == 0 && d/t.a >= 0
 }
 
 // Selector is a sequence of simpleSelectors joined by descendant combinators,
@@ -44,6 +67,7 @@ func (s Selector) Specificity() Specificity {
 		}
 		sp.Classes += len(p.classes)
 		sp.Classes += len(p.pseudos) // a pseudo-class counts at the class level (CSS)
+		sp.Classes += len(p.nths)    // ... including the functional structural ones
 		if p.tag != "" {
 			sp.Types++
 		}
@@ -101,7 +125,39 @@ func (ss simpleSelector) matches(n Node) bool {
 			return false
 		}
 	}
+	for _, t := range ss.nths {
+		pos, ok := structuralPos(n, t.ofType, t.fromEnd)
+		if !ok || !t.matchesPos(pos) {
+			return false
+		}
+	}
 	return true
+}
+
+// structuralPos returns n's 1-based position among its parent's element children
+// (restricted to n's tag when ofType, counted from the last sibling when fromEnd),
+// or ok=false when the Node does not expose sibling positions (a DOM that does not
+// implement SiblingIndexer never matches structural pseudo-classes). A root
+// element counts as the first and only child.
+func structuralPos(n Node, ofType, fromEnd bool) (int, bool) {
+	si, ok := n.(SiblingIndexer)
+	if !ok {
+		return 0, false
+	}
+	pos, last, typePos, typeLast := si.SiblingIndex()
+	if pos < 1 { // defensive: implementation failed to locate the element
+		return 0, false
+	}
+	switch {
+	case ofType && fromEnd:
+		return typeLast, true
+	case ofType:
+		return typePos, true
+	case fromEnd:
+		return last, true
+	default:
+		return pos, true
+	}
 }
 
 // matchPseudoClass reports whether pseudo-class p (lowercased, no ":") matches n in
@@ -118,6 +174,32 @@ func matchPseudoClass(p string, n Node) bool {
 	switch p {
 	case "link":
 		return isHyperlink(n)
+	case "first-child":
+		pos, ok := structuralPos(n, false, false)
+		return ok && pos == 1
+	case "last-child":
+		pos, ok := structuralPos(n, false, true)
+		return ok && pos == 1
+	case "only-child":
+		pos, ok := structuralPos(n, false, false)
+		if !ok || pos != 1 {
+			return false
+		}
+		last, _ := structuralPos(n, false, true)
+		return last == 1
+	case "first-of-type":
+		pos, ok := structuralPos(n, true, false)
+		return ok && pos == 1
+	case "last-of-type":
+		pos, ok := structuralPos(n, true, true)
+		return ok && pos == 1
+	case "only-of-type":
+		pos, ok := structuralPos(n, true, false)
+		if !ok || pos != 1 {
+			return false
+		}
+		last, _ := structuralPos(n, true, true)
+		return last == 1
 	default:
 		// "visited" and all dynamic/state pseudo-classes: never match statically.
 		return false
@@ -203,7 +285,7 @@ func parseSimple(f string) (simpleSelector, bool) {
 	for i < len(f) {
 		marker := f[i]
 		if marker == '(' {
-			return simpleSelector{}, false // functional pseudo / unexpected '(': drop
+			return simpleSelector{}, false // '(' without a preceding :name: drop
 		}
 		i++
 		if marker == ':' && i < len(f) && f[i] == ':' {
@@ -227,10 +309,107 @@ func parseSimple(f string) (simpleSelector, bool) {
 			if isLegacyPseudoElement(lower) {
 				return simpleSelector{}, false // :before/:after/… as pseudo-element: drop
 			}
+			if i < len(f) && f[i] == '(' {
+				// A functional pseudo-class. The structural :nth-*(An+B) family is
+				// supported; any other functional (:not, :is, :where, …) drops the
+				// selector so its rule never falsely matches.
+				close := strings.IndexByte(f[i:], ')')
+				if close < 0 {
+					return simpleSelector{}, false // unterminated argument
+				}
+				arg := f[i+1 : i+close]
+				i += close + 1
+				t, ok := parseNthPseudo(lower, arg)
+				if !ok {
+					return simpleSelector{}, false
+				}
+				ss.nths = append(ss.nths, t)
+				continue
+			}
 			ss.pseudos = append(ss.pseudos, lower)
 		}
 	}
 	return ss, true
+}
+
+// parseNthPseudo builds the nthTest for one of the four structural functional
+// pseudo-classes from its raw argument. Any other name, or a malformed An+B
+// argument, returns ok=false (the caller drops the selector).
+func parseNthPseudo(name, arg string) (nthTest, bool) {
+	var t nthTest
+	switch name {
+	case "nth-child":
+	case "nth-last-child":
+		t.fromEnd = true
+	case "nth-of-type":
+		t.ofType = true
+	case "nth-last-of-type":
+		t.fromEnd, t.ofType = true, true
+	default:
+		return nthTest{}, false
+	}
+	a, b, ok := parseANpB(arg)
+	if !ok {
+		return nthTest{}, false
+	}
+	t.a, t.b = a, b
+	return t, true
+}
+
+// parseANpB parses the CSS An+B microsyntax: "even", "odd", "5", "n", "-n+3",
+// "2n", "2n+1", "3n-2" — with optional whitespace around the sign. Returns
+// ok=false on anything else.
+func parseANpB(src string) (a, b int, ok bool) {
+	s := strings.ToLower(strings.TrimSpace(src))
+	switch s {
+	case "even":
+		return 2, 0, true
+	case "odd":
+		return 2, 1, true
+	case "":
+		return 0, 0, false
+	}
+	nIdx := strings.IndexByte(s, 'n')
+	if nIdx < 0 {
+		// Plain integer: B only.
+		b, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, 0, false
+		}
+		return 0, b, true
+	}
+	// Coefficient before 'n': "", "-", "+", or an integer.
+	coef := strings.TrimSpace(s[:nIdx])
+	switch coef {
+	case "", "+":
+		a = 1
+	case "-":
+		a = -1
+	default:
+		v, err := strconv.Atoi(coef)
+		if err != nil {
+			return 0, 0, false
+		}
+		a = v
+	}
+	// Offset after 'n': empty, or sign + integer (whitespace allowed around the sign).
+	rest := strings.TrimSpace(s[nIdx+1:])
+	if rest == "" {
+		return a, 0, true
+	}
+	sign := 1
+	switch rest[0] {
+	case '+':
+	case '-':
+		sign = -1
+	default:
+		return 0, 0, false
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(rest[1:]))
+	if err != nil || v < 0 { // the sign is separate; "2n+-3" is invalid
+		return 0, 0, false
+	}
+	return a, sign * v, true
 }
 
 // isLegacyPseudoElement reports whether name (lowercased) is one of the four pseudo-
