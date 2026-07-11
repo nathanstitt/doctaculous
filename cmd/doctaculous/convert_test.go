@@ -162,6 +162,38 @@ func TestRunDispatchesConvert(t *testing.T) {
 	}
 }
 
+func TestConvertCmdMarkdownInput(t *testing.T) {
+	in := writeConvertInput(t, "notes.md", []byte("# MD Title\n\nSome **bold** body.\n"))
+	dir := t.TempDir()
+
+	out := filepath.Join(dir, "out.pdf")
+	if err := convertCmd([]string{in, out, "--bundled-fonts"}); err != nil {
+		t.Fatalf("md->pdf: %v", err)
+	}
+	if data, _ := os.ReadFile(out); !strings.HasPrefix(string(data), "%PDF-") {
+		t.Errorf("md->pdf output lacks a PDF header")
+	}
+
+	outHTML := filepath.Join(dir, "out.html")
+	if err := convertCmd([]string{in, outHTML}); err != nil {
+		t.Fatalf("md->html: %v", err)
+	}
+	if data, _ := os.ReadFile(outHTML); !strings.Contains(string(data), "MD Title") {
+		t.Errorf("md->html output missing content:\n%s", data)
+	}
+}
+
+func TestConvertCmdTextInput(t *testing.T) {
+	in := writeConvertInput(t, "notes.txt", []byte("plain line one\nplain line two\n"))
+	out := filepath.Join(t.TempDir(), "out.png")
+	if err := convertCmd([]string{in, out, "--dpi", "36", "--bundled-fonts"}); err != nil {
+		t.Fatalf("txt->png: %v", err)
+	}
+	if fi, err := os.Stat(out); err != nil || fi.Size() == 0 {
+		t.Errorf("txt->png output missing or empty (err=%v)", err)
+	}
+}
+
 func TestConvertCmdHelpExitsClean(t *testing.T) {
 	if err := convertCmd([]string{"-h"}); err != nil {
 		t.Errorf("-h should exit clean, got %v", err)

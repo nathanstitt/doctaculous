@@ -82,10 +82,11 @@ func TestFormatFromPath(t *testing.T) {
 // is part of that PR.
 func TestCanConvertMatrix(t *testing.T) {
 	inputs := map[Format]bool{
-		FormatPDF:  true,
-		FormatDOCX: true,
-		FormatHTML: true,
-		// FormatMarkdown and FormatText flip true when their frontends land.
+		FormatPDF:      true,
+		FormatDOCX:     true,
+		FormatHTML:     true,
+		FormatMarkdown: true,
+		FormatText:     true,
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,

@@ -41,15 +41,19 @@ func matrixPDF(t *testing.T) []byte {
 func TestConvertMatrix(t *testing.T) {
 	ctx := context.Background()
 	inputs := map[Format][]byte{
-		FormatPDF:  matrixPDF(t),
-		FormatDOCX: gendocx.Core[0].Bytes(),
-		FormatHTML: []byte(matrixHTML),
+		FormatPDF:      matrixPDF(t),
+		FormatDOCX:     gendocx.Core[0].Bytes(),
+		FormatHTML:     []byte(matrixHTML),
+		FormatMarkdown: []byte("# Matrix Title\n\nAn introductory paragraph of body text.\n"),
+		FormatText:     []byte("Matrix Title\n\nplain body lines\n"),
 	}
 	// A text fragment each input's content must carry into structure outputs.
 	wantText := map[Format]string{
-		FormatPDF:  "Matrix Title",
-		FormatDOCX: "quick brown fox",
-		FormatHTML: "Matrix Title",
+		FormatPDF:      "Matrix Title",
+		FormatDOCX:     "quick brown fox",
+		FormatHTML:     "Matrix Title",
+		FormatMarkdown: "Matrix Title",
+		FormatText:     "Matrix Title",
 	}
 	sentinels := []error{ErrUnknownFormat, ErrUnsupportedFormat, ErrSameFormat}
 	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatPNG, FormatJPEG}
