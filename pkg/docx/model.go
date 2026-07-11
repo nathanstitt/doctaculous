@@ -245,6 +245,9 @@ type TableProps struct {
 	WidthPct int   // w:tblW type="pct" (in fiftieths of a percent per OOXML); 0 = unset
 	WidthDxa Twips // w:tblW type="dxa"; 0 = unset
 	Justify  Justify
+	// LayoutFixed is w:tblLayout type="fixed": the grid column widths are
+	// authoritative (consumers skip the auto-fit algorithm). false = auto.
+	LayoutFixed bool
 }
 
 // RowProps holds row-level properties (w:trPr). Populated in the tables phase.
@@ -282,8 +285,7 @@ const (
 	VAlignBottom
 )
 
-// BoxBorders holds the four edge borders of a table or cell. Populated in the
-// tables phase.
+// BoxBorders holds the four edge borders of a table, cell, or paragraph.
 type BoxBorders struct {
 	Top, Bottom, Left, Right Border
 }
@@ -402,6 +404,11 @@ type ParagraphProps struct {
 	HasIndentLeft, HasIndentRight, HasFirstLine bool
 	// PageBreakBefore forces the paragraph to start a new page (w:pageBreakBefore).
 	PageBreakBefore bool
+	// Borders are the paragraph borders (w:pBdr top/left/bottom/right), or nil
+	// when unset. The between/bar edges are not modeled. Rendering ignores
+	// paragraph borders today; the field round-trips for conversion (the
+	// HorizontalRule style carries its visible bottom rule here).
+	Borders *BoxBorders
 	// NumID/ILvl are the list membership from w:numPr (numId + ilvl); HasNum marks
 	// them set. A paragraph with HasNum lowers to a list item.
 	NumID  int

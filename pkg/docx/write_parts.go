@@ -66,6 +66,16 @@ func (dw *docWriter) numberingXML() string {
 			if lvl.Text != "" {
 				sb.WriteString(`<w:lvlText w:val="` + escXMLAttr.Replace(lvl.Text) + `"/>`)
 			}
+			if lvl.HasIndentLeft || lvl.HasHanging {
+				sb.WriteString("<w:pPr><w:ind")
+				if lvl.HasIndentLeft {
+					fmt.Fprintf(&sb, ` w:left="%d"`, int(lvl.IndentLeft))
+				}
+				if lvl.HasHanging {
+					fmt.Fprintf(&sb, ` w:hanging="%d"`, int(lvl.Hanging))
+				}
+				sb.WriteString("/></w:pPr>")
+			}
 			sb.WriteString("</w:lvl>")
 		}
 		sb.WriteString("</w:abstractNum>")
@@ -197,7 +207,9 @@ func DefaultStyles() *Styles {
 	add(&Style{ID: "CodeBlock", Name: "Code Block", Type: "paragraph", BasedOn: "Normal",
 		Para: ParagraphProps{SpacingAfter: 0, HasSpacingAfter: true},
 		Run:  RunProps{Family: "Courier New", SizeHalfPts: 20, HasSize: true}})
-	add(&Style{ID: "HorizontalRule", Name: "Horizontal Rule", Type: "paragraph", BasedOn: "Normal"})
+	add(&Style{ID: "HorizontalRule", Name: "Horizontal Rule", Type: "paragraph", BasedOn: "Normal",
+		Para: ParagraphProps{Borders: &BoxBorders{Bottom: Border{
+			Style: "single", SizeEighthPt: 6, Color: rgb(0xD8, 0xDE, 0xE4), HasColor: true}}}})
 	add(&Style{ID: "CodeChar", Name: "Code Char", Type: "character",
 		Run: RunProps{Family: "Courier New"}})
 	add(&Style{ID: "Hyperlink", Name: "Hyperlink", Type: "character",

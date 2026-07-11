@@ -50,6 +50,14 @@ type NumLevel struct {
 	// explicitly declared (Word's effective default is 1).
 	Start    int
 	HasStart bool
+	// IndentLeft/Hanging are the level's paragraph indent (w:lvl > w:pPr >
+	// w:ind left/hanging) in twips; Has* mark them declared. Word uses these
+	// for per-level list indentation; rendering here nests by ilvl instead,
+	// so the values round-trip for conversion.
+	IndentLeft    Twips
+	HasIndentLeft bool
+	Hanging       Twips
+	HasHanging    bool
 }
 
 // NumFmt is a w:numFmt list-marker format.
@@ -192,6 +200,9 @@ func parseLvl(dec *xml.Decoder) (NumLevel, error) {
 						lvl.Start = v
 						lvl.HasStart = true
 					}
+				case "pPr":
+					applyLvlPPr(&lvl, dec)
+					continue
 				}
 			}
 			if err := dec.Skip(); err != nil {
@@ -200,6 +211,33 @@ func parseLvl(dec *xml.Decoder) (NumLevel, error) {
 		case xml.EndElement:
 			if t.Name.Local == "lvl" {
 				return lvl, nil
+			}
+		}
+	}
+}
+
+// applyLvlPPr consumes a w:lvl's w:pPr, capturing the level indent (w:ind
+// left/hanging); other level paragraph properties are dropped, as before.
+func applyLvlPPr(lvl *NumLevel, dec *xml.Decoder) {
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "ind" {
+				if v, ok := wAttrInt(t, "left"); ok {
+					lvl.IndentLeft, lvl.HasIndentLeft = Twips(v), true
+				}
+				if v, ok := wAttrInt(t, "hanging"); ok {
+					lvl.Hanging, lvl.HasHanging = Twips(v), true
+				}
+			}
+			_ = dec.Skip()
+		case xml.EndElement:
+			if t.Name.Local == "pPr" {
+				return
 			}
 		}
 	}
