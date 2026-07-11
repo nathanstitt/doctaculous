@@ -133,7 +133,7 @@ is Apache-2.0.
 Built for [tinycld](https://github.com/tinycld), where it powers document
 thumbnails, text extraction, and format conversion in production.
 
-## Honest limits
+## Limitations
 
 Unsupported constructs degrade gracefully — a skip and a debug log, or a typed
 error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …) — never a panic;
@@ -146,9 +146,6 @@ one bad page can't kill a batch. The notable gaps today:
 - Flexbox is single-line (`flex-wrap` pending); grid lacks named-line placement
   and subgrid; JPEG2000 images and PDF tiling patterns are skipped;
   password-protected PDFs open only with an empty user password.
-
-The full feature inventory and roadmap live in
-[CLAUDE.md → Status & roadmap](CLAUDE.md#status--roadmap).
 
 ## Layout of the codebase
 
