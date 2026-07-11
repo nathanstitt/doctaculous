@@ -29,6 +29,8 @@ type ConvertOptions struct {
 	// PDF applies when To == FormatPDF. PDF.Print additionally switches an HTML
 	// input's cascade to the print media context.
 	PDF PDFOptions
+	// DOCX applies when To == FormatDOCX.
+	DOCX DOCXOptions
 	// Markdown applies when To == FormatMarkdown or FormatText.
 	Markdown MarkdownOptions
 	// HTMLOut applies when To == FormatHTML.
@@ -173,6 +175,12 @@ func (d *Document) Write(ctx context.Context, out io.Writer, to Format, opts Con
 			pdfOpts.BundledFonts = true
 		}
 		return d.WritePDF(ctx, out, pdfOpts)
+	case FormatDOCX:
+		docxOpts := opts.DOCX
+		if docxOpts.Logf == nil {
+			docxOpts.Logf = opts.Logf
+		}
+		return d.WriteDOCX(ctx, out, docxOpts)
 	case FormatMarkdown, FormatText:
 		mdOpts := opts.Markdown
 		if mdOpts.Logf == nil {

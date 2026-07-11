@@ -53,7 +53,7 @@ var (
 // lands, its bit flips here and the whole conversion surface picks it up.
 var formatCaps = map[Format]struct{ input, output bool }{
 	FormatPDF:      {input: true, output: true},
-	FormatDOCX:     {input: true, output: false}, // output flips true when the DOCX writer lands
+	FormatDOCX:     {input: true, output: true},
 	FormatHTML:     {input: true, output: true},
 	FormatMarkdown: {input: true, output: true},
 	FormatText:     {input: true, output: true},

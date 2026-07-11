@@ -339,6 +339,11 @@ type RunProps struct {
 	// UnderlineColor is the w:u color; HasUnderlineColor marks it set.
 	UnderlineColor    color.RGBA
 	HasUnderlineColor bool
+	// StyleID is the referenced character style (w:rStyle val), or "" if none.
+	// Only the identity is modeled (there is no character-style formatting
+	// cascade); the conversion path uses it to recover run semantics (e.g. the
+	// CodeChar style marks inline code).
+	StyleID string
 }
 
 // SectionProps is the page geometry from a w:sectPr: paper size and margins, all

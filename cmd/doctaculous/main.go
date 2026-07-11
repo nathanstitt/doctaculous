@@ -41,6 +41,8 @@ func run(args []string) error {
 		return tomdCmd(args[1:])
 	case "tohtml":
 		return tohtmlCmd(args[1:])
+	case "todocx":
+		return todocxCmd(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("doctaculous", version)
 		return nil
@@ -83,6 +85,8 @@ func inferCommand(args []string) (string, error) {
 		return "tomd", nil
 	case ".html", ".htm":
 		return "tohtml", nil
+	case ".docx":
+		return "todocx", nil
 	case ".png", ".jpg", ".jpeg":
 		return "rasterize", nil
 	}
@@ -141,6 +145,7 @@ func usage() {
 usage:
   doctaculous convert   <input> <output> [flags]   (any format to any other)
   doctaculous topdf     --in <file.html|.docx|URL> --out file.pdf [flags]
+  doctaculous todocx    --in <file.pdf|.html|.md|URL> --out file.docx [flags]
   doctaculous tomd      --in <file.pdf|.html|.docx|URL> [--out file.md] [--plain]
   doctaculous tohtml    --in <file.pdf|.html|.docx|URL> [--out file.html] [--fragment]
   doctaculous rasterize  --in <file.pdf|.docx|.html|URL> --out file.png [flags]
@@ -150,8 +155,8 @@ usage:
 
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, html, md, txt, http(s) URLs. Outputs: pdf, md, txt, html, png, jpg.
-Converting a document to its own format is not supported.
+pdf, docx, html, md, txt, http(s) URLs. Outputs: pdf, docx, md, txt, html, png,
+jpg. Converting a document to its own format is not supported.
 
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;

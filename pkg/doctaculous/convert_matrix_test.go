@@ -96,6 +96,23 @@ func TestConvertMatrix(t *testing.T) {
 				if !bytes.HasPrefix(out.Bytes(), []byte("%PDF-")) {
 					t.Errorf("%s: output lacks a PDF header", name)
 				}
+			case FormatDOCX:
+				if !bytes.HasPrefix(out.Bytes(), []byte("PK\x03\x04")) {
+					t.Errorf("%s: output is not a ZIP package", name)
+				}
+				// The produced package must reopen through our own reader and carry
+				// the source text.
+				doc, err := OpenDOCXBytes(out.Bytes())
+				if err != nil {
+					t.Errorf("%s: reopening produced docx: %v", name, err)
+					break
+				}
+				var md bytes.Buffer
+				if err := doc.WriteText(ctx, &md, MarkdownOptions{}); err != nil {
+					t.Errorf("%s: reading produced docx: %v", name, err)
+				} else if !strings.Contains(md.String(), wantText[from]) {
+					t.Errorf("%s: reopened docx missing %q:\n%s", name, wantText[from], md.String())
+				}
 			case FormatPNG:
 				if !bytes.HasPrefix(out.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
 					t.Errorf("%s: output lacks a PNG signature", name)
