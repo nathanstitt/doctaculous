@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" height="250" role="img" aria-label="doctaculous — any document to any other document, pure Go">
+  <style>
+    :root {
+      --ink: #211c17;
+      --faint: #8a8177;
+      --accent: #c8401a;
+      --paper: #fdfbf7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #ece7df;
+        --faint: #8f8478;
+        --accent: #ff7847;
+        --paper: #16130f;
+      }
+    }
+    .ink    { fill: var(--ink); }
+    .faint  { fill: var(--faint); }
+    .accent { fill: var(--accent); }
+    .stroke-ink    { stroke: var(--ink);    fill: none; }
+    .stroke-accent { stroke: var(--accent); fill: none; }
+    .fill-paper    { fill: var(--paper); }
+    .wordmark {
+      font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+      font-size: 72px;
+      font-style: italic;
+      letter-spacing: 1px;
+    }
+    .tagline {
+      font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px;
+      letter-spacing: 4.5px;
+    }
+  </style>
+
+  <!-- emblem: two dog-eared pages, back page tilted -->
+  <g transform="translate(450 47)">
+    <!-- back page, tilted -->
+    <g transform="rotate(-9) translate(-30 0)">
+      <path class="stroke-ink fill-paper" stroke-width="2.5"
+            d="M -19 -26 H 9 L 19 -16 V 26 H -19 Z"/>
+      <path class="stroke-ink" stroke-width="2.5" d="M 9 -26 V -16 H 19"/>
+    </g>
+    <!-- front page, straight -->
+    <g transform="translate(12 2)">
+      <path class="stroke-ink fill-paper" stroke-width="2.5"
+            d="M -19 -26 H 9 L 19 -16 V 26 H -19 Z"/>
+      <path class="accent" d="M 9 -26 L 19 -16 H 9 Z"/>
+      <path class="stroke-ink" stroke-width="2.5" d="M 9 -26 V -16 H 19"/>
+      <!-- text lines -->
+      <rect class="ink"    x="-12" y="-10" width="24" height="2.5" rx="1.25"/>
+      <rect class="ink"    x="-12" y="-3"  width="24" height="2.5" rx="1.25"/>
+      <rect class="ink"    x="-12" y="4"   width="17" height="2.5" rx="1.25"/>
+      <rect class="accent" x="-12" y="13"  width="11" height="2.5" rx="1.25"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text class="ink wordmark" x="450" y="164" text-anchor="middle">doctaculous</text>
+
+  <!-- rule with printer's diamond -->
+  <g>
+    <line class="stroke-ink" stroke-width="1" x1="230" y1="192" x2="438" y2="192"/>
+    <rect class="accent" x="444" y="186" width="12" height="12" transform="rotate(45 450 192)"/>
+    <line class="stroke-ink" stroke-width="1" x1="462" y1="192" x2="670" y2="192"/>
+  </g>
+
+  <!-- tagline -->
+  <text class="faint tagline" x="453" y="222" text-anchor="middle">ANY DOCUMENT &#8594; ANY OTHER &#183; PURE GO &#183; MIT</text>
+</svg>
