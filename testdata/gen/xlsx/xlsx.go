@@ -18,6 +18,7 @@ type Builder struct {
 	sharedStrings string
 	styles        string
 	date1904      bool
+	definedNames  string
 }
 
 type sheet struct {
@@ -50,6 +51,10 @@ func (b *Builder) SetStyles(xml string) *Builder { b.styles = xml; return b }
 // SetDate1904 switches the workbook to the 1904 date system.
 func (b *Builder) SetDate1904() *Builder { b.date1904 = true; return b }
 
+// SetDefinedNames sets the workbook's <definedNames> children (raw
+// <definedName ...>...</definedName> XML; empty = no element).
+func (b *Builder) SetDefinedNames(xml string) *Builder { b.definedNames = xml; return b }
+
 // Bytes serializes the package deterministically.
 func (b *Builder) Bytes() []byte {
 	var wbSheets, wbRels strings.Builder
@@ -75,9 +80,13 @@ func (b *Builder) Bytes() []byte {
 	if b.date1904 {
 		pr = `<workbookPr date1904="1"/>`
 	}
+	names := ""
+	if b.definedNames != "" {
+		names = `<definedNames>` + b.definedNames + `</definedNames>`
+	}
 	workbook := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
-		pr + `<sheets>` + wbSheets.String() + `</sheets></workbook>`
+		pr + `<sheets>` + wbSheets.String() + `</sheets>` + names + `</workbook>`
 
 	type part struct{ name, data string }
 	parts := []part{
