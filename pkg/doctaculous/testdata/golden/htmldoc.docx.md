@@ -1,6 +1,6 @@
 Doctaculous
 
-Pure‑Go document toolkitHTML rendering specimen
+Pure‑Go document toolkit HTML rendering specimen
 
 # The Rendering Feature Tour
 
@@ -32,13 +32,13 @@ This line is right‑aligned.
 
 Padding, margins, backgrounds, and every border style the engine renders — including the four 3D bevels.
 
-border:outset
+border: outset
 
-border:inset
+border: inset
 
-border:ridge
+border: ridge
 
-border:groove
+border: groove
 
 Four `border-style` bevels. Outset reads raised, inset sunken; ridge and groove are their two‑facet cousins.
 
@@ -156,7 +156,15 @@ Notes
 
 Plan
 
-**Preferences** Subscribe to updates Remember this device Contact by email Contact by phone
+**Preferences**
+
+Subscribe to updates
+
+Remember this device
+
+Contact by email
+
+Contact by phone
 
 **10 / WHITE-SPACE**
 
