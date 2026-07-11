@@ -1,6 +1,6 @@
 # DOCX writer (pkg/render/docxwrite)
 
-**Status:** implemented (core; tables + embedded images are the follow-up PR)
+**Status:** implemented (core + tables + embedded images)
 **Date:** 2026-07-09
 **Author:** Nathan Stitt
 
@@ -32,8 +32,8 @@ matrix: HTML → WriteDOCX → reopen → WriteMarkdown must equal HTML → Writ
 | lists (`IsListContainer`/`Marker`) | `w:numPr` (`ilvl` = depth, ListParagraph style); bullets share numId 1 (one bullet abstract, glyph rotating •/◦/▪); each ordered list gets its own `w:num` over one decimal abstract so numbering restarts (reader counters are per-numId; Word needs the startOverride it emits) | marker prefix stripped from the item's leading run (numbering re-synthesizes it) |
 | task-list items | `☐`/`☒` text prefix | one-way (no checkbox control in DOCX); documented |
 | page geometry | body-final `w:sectPr` (pt × 20 twips; Letter default, 1in margin default) | |
-| tables | follow-up PR (v1 logs + emits cell content as plain paragraphs) | |
-| images | follow-up PR (v1 keeps alt text + logs) | |
+| tables (`boxwalk.BuildOccupancyGrid` — origin-preserving, unlike the GFM duplicate-content grid) | `w:tbl`/`w:tblGrid` (columns split the content width evenly — a documented pre-layout approximation), colspan → `gridSpan`, rowspan → `vMerge restart` + explicit `continue` cells repeating the origin's gridSpan (a bare vMerge means restart), per-cell `w:tcBorders`/`w:shd` from the computed style (the reader ignores table-level insideH/V), header rows → `w:trPr/tblHeader`, caption → Caption-styled paragraph (bold, matching the UA) | reader lowering addition: a `tblHeader` row's cells get `Style.Bold` on the CELL box — the conversion writers' header detector — so header rows round-trip |
+| images | fetched through `Options.Loader` → deduped `word/media/*` parts + image rels + a complete `wp:inline`/`pic:pic` drawing (docPr/nvPicPr/spPr for Word; the reader needs only extent + blip). Extent: width/height attrs (px × 9525 EMU) else the intrinsic decoded size. The image callback returns the run XML as a literal; no loader / fetch / decode failure → alt text + log | plumbed via a new `reflowResources` seam: `reflowRenderer` retains its source's resource loader (HTML dir/HTTP loader, DOCX `MediaLoader`); the PDF renderer omits it (extraction has no image bytes) |
 
 **XML emission** is direct string assembly with explicit escapers (matching
 pdfwrite/htmlwrite): `encoding/xml` cannot emit the prefixed `<w:p>` form real OOXML

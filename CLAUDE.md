@@ -303,17 +303,18 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   (HTML→docx→md ≡ HTML→md) + reopen-verified units + `docxout-basic` golden. Landed with a
   cross-cutting lowering fix: consecutive DOCX list paragraphs now group into nested list-container
   boxes (mixed bodies no longer drop non-list content from Markdown/HTML conversion; nested lists
-  keep their depth). Tables + embedded images are the follow-up PR (content degrades to paragraphs /
-  alt text + log). `2026-07-09-docx-writer-design.md`.
+  keep their depth). Tables ship natively (`boxwalk.BuildOccupancyGrid` → `w:tbl`/`gridSpan`/
+  explicit `vMerge` chains, per-cell borders/shading, `tblHeader` rows — with a lowering addition
+  marking header-row cells bold so headers round-trip; captions → a bold Caption style) and images
+  embed as deduped media parts + `wp:inline` drawings fetched through a new `reflowResources`
+  loader seam (no loader → alt text + log). Round-trip parity matrix incl. tables,
+  `docxout-basic`/`docxout-htmldoc-p1` goldens + the `htmldoc.docx.md` showcase round-trip golden.
+  `2026-07-09-docx-writer-design.md`.
 
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
-
-0. **DOCX writer: tables + embedded images** (`2026-07-09-docx-writer-design.md` — the core writer
-   is Done): `w:tbl`/`gridSpan`/`vMerge` via a boxwalk occupancy grid, media parts + `wp:inline`
-   drawings, htmldoc-showcase round-trip golden.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),

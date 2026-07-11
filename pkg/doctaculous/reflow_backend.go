@@ -20,6 +20,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // reflowRenderer renders a reflowable document that has already been laid out into
@@ -34,6 +35,9 @@ type reflowRenderer struct {
 	// document opened before this field was populated) and yields empty conversion
 	// output.
 	root *cssbox.Box
+	// loader resolves the document's image refs for conversion backends that embed
+	// media (the DOCX writer). nil is tolerated (images degrade to alt text).
+	loader resource.ResourceLoader
 }
 
 // OpenDOCX reads and parses a .docx file, lays out all pages, and returns a
@@ -83,7 +87,7 @@ func docxDocument(d *docx.Document) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Document{r: &reflowRenderer{pages: pages, root: root}, format: FormatDOCX}, nil
+	return &Document{r: &reflowRenderer{pages: pages, root: root, loader: docxcssbox.MediaLoader(d)}, format: FormatDOCX}, nil
 }
 
 // docxPageSheet synthesizes an @page stylesheet carrying the DOCX section's page
@@ -121,6 +125,17 @@ type reflowTree interface{ cssboxRoot() *cssbox.Box }
 
 // cssboxRoot exposes the finalized box tree for the conversion backends (WriteMarkdown).
 func (r *reflowRenderer) cssboxRoot() *cssbox.Box { return r.root }
+
+// reflowResources is implemented by renderers that retain their source's resource
+// loader, so a conversion backend that embeds media (the DOCX writer) can fetch the
+// document's images. The PDF renderer does not implement it (extraction carries no
+// image bytes), so its images degrade gracefully.
+type reflowResources interface {
+	resourceLoader() resource.ResourceLoader
+}
+
+// resourceLoader exposes the source's resource loader for media-embedding backends.
+func (r *reflowRenderer) resourceLoader() resource.ResourceLoader { return r.loader }
 
 func (r *reflowRenderer) pageCount() int { return len(r.pages.Pages) }
 

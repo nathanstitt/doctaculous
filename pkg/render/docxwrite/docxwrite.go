@@ -21,8 +21,15 @@ import (
 	"io"
 	"strings"
 
+	// The image decoders imageRun's DecodeConfig relies on, registered here so
+	// the writer is self-sufficient.
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
 // Options configures DOCX output.
@@ -33,6 +40,9 @@ type Options struct {
 	// MarginPt is the uniform page margin in points; default 72 (1in, Word's
 	// default) when zero. A negative value means no margin (0).
 	MarginPt float64
+	// Loader resolves image refs (an <img> src) to bytes for embedding as media
+	// parts. nil means images degrade to their alt text (logged).
+	Loader resource.ResourceLoader
 	// Logf receives degradation diagnostics (e.g. a construct the writer cannot
 	// represent). nil -> no-op.
 	Logf func(string, ...any)
@@ -45,7 +55,7 @@ func Write(ctx context.Context, root *cssbox.Box, w io.Writer, opts Options) err
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
 	}
-	wr := &writer{opts: opts, relURL: map[string]string{}}
+	wr := &writer{opts: opts, ctx: ctx, relURL: map[string]string{}, media: map[string]mediaRef{}}
 	if root != nil {
 		if err := wr.block(ctx, root); err != nil {
 			return err
@@ -66,14 +76,24 @@ func Write(ctx context.Context, root *cssbox.Box, w io.Writer, opts Options) err
 // instances).
 type writer struct {
 	opts Options
+	// ctx is the Write call's context, held for the walk-driven image fetches
+	// (the CollectRuns callback has no context parameter). The walk is
+	// single-goroutine and the writer does not outlive Write.
+	ctx  context.Context
 	body strings.Builder
 
-	// rels are the document relationships in emission order (hyperlinks now;
-	// images when the media path lands). Ids are assigned at assembly:
-	// rId1/rId2 are reserved for styles/numbering, rels start at rId3.
+	// rels are the document relationships in emission order (hyperlinks and
+	// images). Ids are assigned as allocated: rId1/rId2 are reserved for
+	// styles/numbering, rels start at rId3.
 	rels []docRel
 	// relURL dedupes hyperlink targets: URL -> allocated rel id.
 	relURL map[string]string
+	// media dedupes embedded images: src ref -> its media part's identity.
+	media map[string]mediaRef
+	// mediaParts are the embedded image parts in allocation order.
+	mediaParts []mediaPart
+	// drawings counts emitted drawings (each needs a distinct docPr id).
+	drawings int
 
 	// orderedLists counts the ordered-list numbering instances allocated so
 	// far. Each ordered list gets its own w:num (counters are per-numId in the
@@ -86,6 +106,18 @@ type writer struct {
 type docRel struct {
 	id, relType, target string
 	external            bool
+}
+
+// mediaRef is a deduped embedded image: its rel id and intrinsic pixel size.
+type mediaRef struct {
+	relID    string
+	pxW, pxH int
+}
+
+// mediaPart is one word/media/* part.
+type mediaPart struct {
+	name, ext string
+	data      []byte
 }
 
 // hyperlinkRel returns the rel id for an external hyperlink target, allocating
@@ -122,10 +154,7 @@ func (w *writer) block(ctx context.Context, b *cssbox.Box) error {
 	case b.SemTag == "hr":
 		w.horizontalRule()
 	case b.Display == cssbox.DisplayTable:
-		// Tables land with the media/table follow-up; keep the content by
-		// emitting each cell's blocks as plain paragraphs.
-		w.opts.Logf("docxwrite: table structure not yet supported; emitting cell content as paragraphs")
-		return w.tableFallback(ctx, b)
+		return w.table(ctx, b)
 	case boxwalk.IsListContainer(b):
 		return w.list(ctx, b, 0)
 	case b.Display == cssbox.DisplayListItem:
@@ -171,24 +200,6 @@ func (w *writer) blockquote(ctx context.Context, b *cssbox.Box) error {
 		w.opts.Logf("docxwrite: non-paragraph content inside a blockquote keeps its own construct")
 		if err := w.block(ctx, c); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// tableFallback emits a table's cell content as plain paragraphs (structure
-// dropped, content kept).
-func (w *writer) tableFallback(ctx context.Context, table *cssbox.Box) error {
-	rows, _ := boxwalk.CollectRows(table)
-	for _, row := range rows {
-		for _, cell := range boxwalk.CellBoxesOf(row) {
-			if boxwalk.HasInlineContent(cell) {
-				w.paragraph(cell, "")
-				continue
-			}
-			if err := w.children(ctx, cell); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

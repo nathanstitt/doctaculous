@@ -14,13 +14,22 @@ import (
 // two writes of the same tree are byte-identical (mirroring pdfwrite's
 // reproducibility guarantee).
 func assemblePackage(w *writer, opts Options) ([]byte, error) {
-	parts := []struct{ name, data string }{
-		{"[Content_Types].xml", contentTypesXML},
-		{"_rels/.rels", rootRelsXML},
-		{"word/document.xml", documentXML(w, opts)},
-		{"word/_rels/document.xml.rels", documentRelsXML(w.rels)},
-		{"word/styles.xml", stylesXML()},
-		{"word/numbering.xml", numberingXML(w.orderedLists)},
+	parts := []struct {
+		name string
+		data []byte
+	}{
+		{"[Content_Types].xml", []byte(contentTypesXML(w.mediaParts))},
+		{"_rels/.rels", []byte(rootRelsXML)},
+		{"word/document.xml", []byte(documentXML(w, opts))},
+		{"word/_rels/document.xml.rels", []byte(documentRelsXML(w.rels))},
+		{"word/styles.xml", []byte(stylesXML())},
+		{"word/numbering.xml", []byte(numberingXML(w.orderedLists))},
+	}
+	for _, m := range w.mediaParts {
+		parts = append(parts, struct {
+			name string
+			data []byte
+		}{m.name, m.data})
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -30,7 +39,7 @@ func assemblePackage(w *writer, opts Options) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("create part %s: %w", p.name, err)
 		}
-		if _, err := f.Write([]byte(p.data)); err != nil {
+		if _, err := f.Write(p.data); err != nil {
 			return nil, fmt.Errorf("write part %s: %w", p.name, err)
 		}
 	}
@@ -72,16 +81,30 @@ func twips(pt float64) int { return int(math.Round(pt * 20)) }
 
 // contentTypesXML declares the package's part content types. The repo's reader
 // only checks the part exists, but real consumers (Word, LibreOffice) validate
-// it, so the declarations are complete.
-const contentTypesXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+// it, so the declarations are complete — including a Default per embedded image
+// extension.
+func contentTypesXML(media []mediaPart) string {
+	var sb strings.Builder
+	sb.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
-<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+`)
+	seen := map[string]bool{}
+	for _, m := range media {
+		if seen[m.ext] {
+			continue
+		}
+		seen[m.ext] = true
+		sb.WriteString(`<Default Extension="` + m.ext + `" ContentType="image/` + m.ext + `"/>` + "\n")
+	}
+	sb.WriteString(`<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
 <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
 </Types>
-`
+`)
+	return sb.String()
+}
 
 // rootRelsXML points the package at the main document part.
 const rootRelsXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
