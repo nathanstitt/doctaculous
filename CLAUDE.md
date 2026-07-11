@@ -334,14 +334,20 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   via the writers' existing detector. ZIP detection generalized to an OPC classifier
   (`word/`→DOCX, `xl/`→XLSX). `xlsx-specimen` golden. `2026-07-09-xlsx-input-design.md`.
 
+**XLSX output** (`pkg/render/xlsxwrite`, `WriteXLSX`, `convert ... out.xlsx`):
+
+- Tables-only writer (shared `boxwalk.CollectTables`/`CellPlainText` with csvwrite): one worksheet
+  per table (caption-derived names, sanitized/unique/31-char), native `mergeCells` spans, bold
+  header xf (the reader's header detector — headers round-trip), inlineStr + numeric cells (clean
+  numbers stay numbers, so csv→xlsx→csv is byte-identical; `007` stays text), deterministic OPC;
+  table-less documents write one empty sheet + a loud log. Round-trip parity via the `pkg/xlsx`
+  reader; pdf→xlsx extraction pinned. v1 punts: alignment/fill write-back, typed date cells.
+  `2026-07-09-xlsx-output-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
 degrade gracefully; a TODO becoming supported just turns that skip into real output.
-
-0. **XLSX output** (`pkg/render/xlsxwrite`, planned — input is Done): one sheet per table, native
-   mergeCells, bold header xf, inlineStr + numeric cells, deterministic OPC; round-trip parity via
-   the `pkg/xlsx` reader.
 1. **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
    viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see Done).
 2. **Shadings / gradients (remaining)** — tiling patterns (PatternType 1; skipped + logged),
