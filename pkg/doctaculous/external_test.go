@@ -1,6 +1,7 @@
 package doctaculous
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"image"
@@ -180,5 +181,56 @@ func TestExternalConstantAlphaApplied(t *testing.T) {
 	r8 := best.r >> 8
 	if r8 < 64 {
 		t.Errorf("green pixel R=%d too saturated; /ca 0.5 alpha not applied (want a tint)", r8)
+	}
+}
+
+// TestExternalOfficeCorpus runs the committed real-world DOCX and XLSX
+// fixtures (testdata/external/{docx,xlsx} — Word-, Excel-, Mac-Office-, and
+// LibreOffice-authored; see their READMEs for provenance and licensing)
+// through the full pipeline: content-detected Open, layout + first-page
+// raster, and plain-text conversion. Files whose only content lives in
+// headers, comments, deleted revisions, or group shapes legitimately convert
+// to empty text (those renders are pinned invisible by design), so only the
+// conversion CALL must succeed for them.
+func TestExternalOfficeCorpus(t *testing.T) {
+	// Content invisible to the structure writers by design.
+	emptyTextOK := map[string]bool{
+		"comment.docx":                             true, // body is one comment-reference run
+		"headerFooter.docx":                        true, // content only in headers/footers
+		"groupshape-trackedchanges.docx":           true, // text inside a group shape (not extracted)
+		"redline-range-comment.docx":               true, // content deleted by revision + comment
+		"55406_Conditional_formatting_sample.xlsx": true, // style-only cells (a pure CF-fill demo, no values)
+	}
+	for _, dir := range []string{"docx", "xlsx"} {
+		root := filepath.Join("..", "..", "testdata", "external", dir)
+		files, err := filepath.Glob(filepath.Join(root, "*."+dir))
+		if err != nil || len(files) == 0 {
+			t.Skipf("external %s corpus not present", dir)
+		}
+		for _, path := range files {
+			t.Run(filepath.Base(path), func(t *testing.T) {
+				doc, err := Open(path, WithBundledFonts())
+				if err != nil {
+					t.Fatalf("Open: %v", err)
+				}
+				if doc.PageCount() < 1 {
+					t.Fatalf("PageCount = %d, want >= 1", doc.PageCount())
+				}
+				img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 36, BundledFonts: true})
+				if err != nil {
+					t.Fatalf("RasterizePage(0): %v", err)
+				}
+				if b := img.Bounds(); b.Dx() <= 0 || b.Dy() <= 0 {
+					t.Errorf("rasterized image has empty bounds %v", b)
+				}
+				var txt bytes.Buffer
+				if err := doc.WriteText(context.Background(), &txt, MarkdownOptions{}); err != nil {
+					t.Fatalf("WriteText: %v", err)
+				}
+				if txt.Len() == 0 && !emptyTextOK[filepath.Base(path)] {
+					t.Errorf("text conversion is empty")
+				}
+			})
+		}
 	}
 }

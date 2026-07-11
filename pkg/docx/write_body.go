@@ -140,7 +140,7 @@ func (dw *docWriter) writeHyperlink(sb *strings.Builder, h *Hyperlink, inDelete 
 // omitted — the parser drops such runs, so emitting one would break the
 // round-trip fixed point.
 func (dw *docWriter) writeRun(sb *strings.Builder, r *Run, inDelete bool) error {
-	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && r.CommentRef == 0 {
+	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && !r.hasCommentRef() {
 		return nil
 	}
 	sb.WriteString("<w:r>")
@@ -162,12 +162,17 @@ func (dw *docWriter) writeRun(sb *strings.Builder, r *Run, inDelete bool) error 
 	if r.EndnoteRef != 0 {
 		fmt.Fprintf(sb, `<w:endnoteReference w:id="%d"/>`, r.EndnoteRef)
 	}
-	if r.CommentRef != 0 {
+	if r.hasCommentRef() {
 		fmt.Fprintf(sb, `<w:commentReference w:id="%d"/>`, r.CommentRef)
 	}
 	sb.WriteString("</w:r>")
 	return nil
 }
+
+// hasCommentRef reports whether the run references a comment. HasCommentRef is
+// the authoritative signal (comment ids number from 0); a bare non-zero
+// CommentRef is honored so a hand-constructed document need not set the flag.
+func (r *Run) hasCommentRef() bool { return r.HasCommentRef || r.CommentRef != 0 }
 
 // writeRunText renders run text, mapping tab characters back to <w:tab/> (the
 // parser folds w:tab into "\t") and preserving significant whitespace.
@@ -297,6 +302,10 @@ func (dw *docWriter) writePPrDepth(sb *strings.Builder, p ParagraphProps, withCh
 	}
 	if p.HasNum {
 		fmt.Fprintf(&b, `<w:numPr><w:ilvl w:val="%d"/><w:numId w:val="%d"/></w:numPr>`, p.ILvl, p.NumID)
+	} else if p.ILvl != 0 {
+		// A bare level with no instance — Word's own style part does this (its
+		// Subtitle style carries ilvl only); preserved without inventing a numId.
+		fmt.Fprintf(&b, `<w:numPr><w:ilvl w:val="%d"/></w:numPr>`, p.ILvl)
 	}
 	if p.Borders != nil {
 		writeBorders(&b, "pBdr", *p.Borders)

@@ -543,6 +543,20 @@ out-of-scope note):
   Editor-core fix: `setPart` resurrects a deleted part (remove-then-add in one session — calc's
   save shape). `2026-07-10-xlsx-pivots-names-design.md`.
 
+**External office corpus — real-world DOCX/XLSX preservation fixtures**
+(`testdata/external/{docx,xlsx}`):
+
+- 24 committed Word-/Mac-Office-/Excel-/LibreOffice-authored files (Apache-2.0 from POI,
+  MPL-2.0 from LibreOffice core, MIT from Open-XML-SDK incl. an ISO-strict workbook —
+  per-file provenance + license texts in each dir's README, isolated like the CC-BY-SA PDF
+  corpus). Swept by: the xlsx preservation contract (pinned feature counts, no-op Edit+Save
+  BYTE-IDENTICAL, edit+reopen), the docx save-cycle contract (Parse∘Write fixed point — the
+  external half the CLAUDE.md contract always promised), and a full-pipeline
+  open/raster/convert smoke. Landing them caught two real fidelity bugs, fixed at the
+  source: `Run.CommentRef`'s zero sentinel dropped id-0 comment references (both Word and
+  LibreOffice number comments from 0 — now `HasCommentRef`), and a bare `<w:ilvl>` without
+  `numId` (Word's own Subtitle style) was dropped on write.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
