@@ -1,12 +1,16 @@
 package doctaculous
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
@@ -100,6 +104,80 @@ func TestOpenAs(t *testing.T) {
 	}
 	if _, err := OpenBytesAs(FormatUnknown, gen.TextPDF()); !errors.Is(err, ErrUnknownFormat) {
 		t.Errorf("OpenBytesAs(unknown): want ErrUnknownFormat")
+	}
+}
+
+// TestOpenReader verifies the stream entry point detects the format from
+// content (no filename hint exists), fully buffering the reader.
+func TestOpenReader(t *testing.T) {
+	doc, err := OpenReader(context.Background(), bytes.NewReader(gen.TextPDF()))
+	if err != nil {
+		t.Fatalf("OpenReader(pdf stream): %v", err)
+	}
+	if doc.Format() != FormatPDF {
+		t.Errorf("Format() = %q, want pdf", doc.Format())
+	}
+	if doc.PageCount() < 1 {
+		t.Errorf("PageCount() = %d, want >= 1", doc.PageCount())
+	}
+	// Extension-only formats have no content magic on a stream.
+	if _, err := OpenReader(context.Background(), strings.NewReader("# just markdown\n")); !errors.Is(err, ErrUnknownFormat) {
+		t.Errorf("OpenReader(markdown stream): want ErrUnknownFormat, got %v", err)
+	}
+}
+
+// TestOpenReaderAs covers the MIME-driven composition the drive integration
+// uses: FormatFromMIME names the format, the stream supplies the bytes.
+func TestOpenReaderAs(t *testing.T) {
+	doc, err := OpenReaderAs(context.Background(), FormatMarkdown, strings.NewReader("# Title\n\nbody\n"))
+	if err != nil {
+		t.Fatalf("OpenReaderAs(markdown): %v", err)
+	}
+	if doc.Format() != FormatMarkdown {
+		t.Errorf("Format() = %q, want markdown", doc.Format())
+	}
+
+	f := FormatFromMIME("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	doc, err = OpenReaderAs(context.Background(), f, bytes.NewReader(gendocx.Core[0].Bytes()))
+	if err != nil {
+		t.Fatalf("OpenReaderAs(FormatFromMIME(docx)): %v", err)
+	}
+	if doc.Format() != FormatDOCX {
+		t.Errorf("Format() = %q, want docx", doc.Format())
+	}
+
+	if _, err := OpenReaderAs(context.Background(), FormatUnknown, strings.NewReader("x")); !errors.Is(err, ErrUnknownFormat) {
+		t.Errorf("OpenReaderAs(unknown): want ErrUnknownFormat, got %v", err)
+	}
+}
+
+// TestOpenReaderReadError verifies a failing reader surfaces its error from
+// both stream entry points.
+func TestOpenReaderReadError(t *testing.T) {
+	sentinel := errors.New("stream broke")
+	if _, err := OpenReader(context.Background(), iotest.ErrReader(sentinel)); !errors.Is(err, sentinel) {
+		t.Errorf("OpenReader(ErrReader): want the read error, got %v", err)
+	}
+	if _, err := OpenReaderAs(context.Background(), FormatPDF, iotest.ErrReader(sentinel)); !errors.Is(err, sentinel) {
+		t.Errorf("OpenReaderAs(ErrReader): want the read error, got %v", err)
+	}
+}
+
+// TestOpenReaderCancelled pins the open-boundary contract: a cancelled context
+// yields an error, never a silently truncated document (the layout engine
+// degrades internally; the boundary converts that to a failure).
+func TestOpenReaderCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := OpenReaderAs(ctx, FormatHTML, strings.NewReader("<html><body><p>hi</p></body></html>")); !errors.Is(err, context.Canceled) {
+		t.Errorf("OpenReaderAs(cancelled, html): want context.Canceled, got %v", err)
+	}
+	if _, err := OpenReaderAs(ctx, FormatDOCX, bytes.NewReader(gendocx.Core[0].Bytes())); !errors.Is(err, context.Canceled) {
+		t.Errorf("OpenReaderAs(cancelled, docx): want context.Canceled, got %v", err)
+	}
+	// A live context is unaffected.
+	if _, err := OpenReaderAs(context.Background(), FormatHTML, strings.NewReader("<p>ok</p>")); err != nil {
+		t.Errorf("OpenReaderAs(live ctx): %v", err)
 	}
 }
 

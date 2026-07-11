@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"path/filepath"
 	"strings"
 )
@@ -132,6 +133,110 @@ func ParseFormat(s string) (Format, error) {
 		return FormatJPEG, nil
 	default:
 		return FormatUnknown, fmt.Errorf("doctaculous: format %q: %w", s, ErrUnknownFormat)
+	}
+}
+
+// mimeFormats maps a normalized MIME media type to its Format. A type mapped
+// to FormatUnknown is a DELIBERATE refusal — a type the toolkit recognizes but
+// cannot (or must not) read — and overrides the text/* fallback in
+// FormatFromMIME. Notably the legacy binary Office types must never map to
+// their OOXML cousins: a .doc is not a .docx.
+var mimeFormats = map[string]Format{
+	"application/pdf":   FormatPDF,
+	"application/x-pdf": FormatPDF,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": FormatDOCX,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       FormatXLSX,
+	"text/html":                 FormatHTML,
+	"application/xhtml+xml":     FormatHTML,
+	"text/markdown":             FormatMarkdown,
+	"text/x-markdown":           FormatMarkdown,
+	"text/plain":                FormatText,
+	"text/csv":                  FormatCSV,
+	"application/csv":           FormatCSV,
+	"text/tab-separated-values": FormatTSV,
+	"image/png":                 FormatPNG,
+	"image/jpeg":                FormatJPEG,
+	"image/jpg":                 FormatJPEG,
+
+	// Deliberate refusals. Legacy binary Office formats have no pure-Go reader
+	// and are not the OOXML formats their names resemble.
+	"application/msword":            FormatUnknown,
+	"application/vnd.ms-word":       FormatUnknown,
+	"application/vnd.ms-excel":      FormatUnknown,
+	"application/vnd.ms-powerpoint": FormatUnknown,
+	// Flips to its Format when the corresponding frontend lands (the same
+	// sibling contract as the capability bits): presentationml -> FormatPPTX,
+	// epub -> FormatEPUB, rtf -> FormatRTF (text/rtf is also the reason plain
+	// "text/*" cannot fall back unconditionally).
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": FormatUnknown,
+	"application/epub+zip": FormatUnknown,
+	"application/rtf":      FormatUnknown,
+	"text/rtf":             FormatUnknown,
+	// No viable pure-Go HEIC/HEIF decoder exists.
+	"image/heic":          FormatUnknown,
+	"image/heif":          FormatUnknown,
+	"image/heic-sequence": FormatUnknown,
+	"image/heif-sequence": FormatUnknown,
+	// Generic containers say nothing about their content; use DetectFormat.
+	"application/zip":          FormatUnknown,
+	"application/octet-stream": FormatUnknown,
+}
+
+// FormatFromMIME maps a MIME media type to a Format. The type is normalized
+// first — parameters such as "; charset=utf-8" are stripped and the type is
+// case-folded (mime.ParseMediaType, with a manual strip for malformed values).
+// Unrecognized types, and types the toolkit deliberately does not read (legacy
+// binary Office, HEIC/HEIF, generic zip/octet-stream), return FormatUnknown;
+// an unlisted text/* subtype falls back to FormatText (unknown text renders as
+// plain text, the browser rule), with listed exceptions (text/rtf) staying
+// Unknown. Callers with untrusted or generic types compose with content
+// detection: f := FormatFromMIME(mt); if f == FormatUnknown { f =
+// DetectFormat(data, name) }.
+func FormatFromMIME(mimeType string) Format {
+	mt, _, err := mime.ParseMediaType(mimeType)
+	if err != nil {
+		// Malformed parameter section (or empty input) — still make a
+		// best-effort match on the media type itself.
+		mt = strings.ToLower(strings.TrimSpace(mimeType))
+		if i := strings.IndexByte(mt, ';'); i >= 0 {
+			mt = strings.TrimSpace(mt[:i])
+		}
+	}
+	if f, ok := mimeFormats[mt]; ok {
+		return f
+	}
+	if strings.HasPrefix(mt, "text/") {
+		return FormatText
+	}
+	return FormatUnknown
+}
+
+// MIME returns f's canonical MIME type, or "" for FormatUnknown.
+// FormatFromMIME(f.MIME()) == f holds for every format the toolkit knows.
+func (f Format) MIME() string {
+	switch f {
+	case FormatPDF:
+		return "application/pdf"
+	case FormatDOCX:
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case FormatHTML:
+		return "text/html"
+	case FormatMarkdown:
+		return "text/markdown"
+	case FormatText:
+		return "text/plain"
+	case FormatCSV:
+		return "text/csv"
+	case FormatTSV:
+		return "text/tab-separated-values"
+	case FormatXLSX:
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case FormatPNG:
+		return "image/png"
+	case FormatJPEG:
+		return "image/jpeg"
+	default:
+		return ""
 	}
 }
 

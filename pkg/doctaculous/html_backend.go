@@ -37,6 +37,10 @@ type htmlConfig struct {
 	// interactive/HTML render); WithPrintMedia switches it to css.MediaPrint so
 	// @media print rules apply (used for PDF output).
 	media css.Media
+	// ctx bounds open-time box generation, resource loading, and layout. It
+	// defaults to context.Background() and is set (unexported) by the
+	// ctx-taking entry points via withOpenContext.
+	ctx context.Context
 }
 
 // defaultViewportPt is the default layout viewport width in points (px:pt 1:1).
@@ -48,7 +52,18 @@ const defaultViewportPt = 1280
 // applied: the default viewport width, no loader (links are skipped), and a
 // no-op logger.
 func defaultHTMLConfig() htmlConfig {
-	return htmlConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil, media: css.MediaScreen}
+	return htmlConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil, media: css.MediaScreen, ctx: context.Background()}
+}
+
+// withOpenContext threads a caller's context into open-time layout and
+// resource loading. Unexported: the ctx-taking entry points (OpenReader,
+// OpenReaderAs, Convert) prepend it; a nil ctx is ignored.
+func withOpenContext(ctx context.Context) HTMLOption {
+	return func(c *htmlConfig) {
+		if ctx != nil {
+			c.ctx = ctx
+		}
+	}
 }
 
 // WithViewportWidth sets the layout viewport width in CSS pixels (treated 1:1 as
@@ -220,7 +235,10 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: parse html: %w", err)
 	}
-	ctx := context.Background()
+	ctx := cfg.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	root, fontFaces, pageRules, running, err := layoutcss.BuildWithFontsPagesRunningMedia(ctx, doc, cfg.loader, cfg.media, cfg.logf)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: build html boxes: %w", err)
@@ -245,6 +263,13 @@ func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: layout html: %w", err)
+	}
+	// The layout engine degrades on cancellation (it stops adding content and
+	// returns what it has, keeping partial output renderable for its other
+	// callers). At the open boundary that would silently hand the caller a
+	// truncated document, so convert a cancelled ctx into a hard error here.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("doctaculous: open html: %w", err)
 	}
 	return &Document{r: &reflowRenderer{pages: pages, root: root, loader: cfg.loader}, format: FormatHTML}, nil
 }

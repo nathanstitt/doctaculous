@@ -88,7 +88,7 @@ func Convert(ctx context.Context, in io.Reader, out io.Writer, opts ConvertOptio
 	if err := CanConvert(from, opts.To); err != nil {
 		return err
 	}
-	doc, err := openDetected(from, data, "", opts.inputOptions())
+	doc, err := openDetected(ctx, from, data, "", opts.inputOptions())
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func ConvertFile(ctx context.Context, inPath, outPath string, opts ConvertOption
 	if isHTTPURL(inPath) {
 		doc, err = OpenURL(inPath, opts.inputOptions()...)
 	} else {
-		doc, err = openDetected(from, data, dir, opts.inputOptions())
+		doc, err = openDetected(ctx, from, data, dir, opts.inputOptions())
 	}
 	if err != nil {
 		return err

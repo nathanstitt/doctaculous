@@ -344,6 +344,18 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   reader; pdf→xlsx extraction pinned. v1 punts: alignment/fill write-back, typed date cells.
   `2026-07-09-xlsx-output-design.md`.
 
+**Stream + MIME input surface** (`pkg/doctaculous` format.go/open.go, first tinycld-adoption PR):
+
+- `FormatFromMIME`/`Format.MIME()` (params stripped/case-folded; explicit-Unknown pins for
+  legacy binary Office — never the OOXML cousins — HEIC, zip, octet-stream; unlisted `text/*` →
+  FormatText with `text/rtf` excepted; rows flip to PPTX/EPUB/RTF when those frontends land);
+  `OpenReader`/`OpenReaderAs(ctx, ...)` stream entry points (fully buffered) threading a real
+  open-time context through layout — a cancelled open ERRORS rather than returning a silently
+  truncated document (boundary check; the engine itself degrades); `Convert`/`ConvertFile` now
+  pass their ctx to open; `MarkdownOptions.MaxBytes` rune-safe text-output cap (search-index
+  extraction). Capability gate for hosts = `FormatFromMIME(mt).ValidInput()`.
+  `2026-07-10-mime-reader-open-design.md`.
+
 ### TODO (roughly priority order)
 
 Each item lands with a new fixture/test + showcase entry in the same PR. Unsupported cases already
