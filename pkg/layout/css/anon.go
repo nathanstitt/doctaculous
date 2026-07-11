@@ -289,7 +289,7 @@ func handleWhitespace(children []*cssbox.Box, parent *cssbox.Box) []*cssbox.Box 
 			collapseSpaces, preserveNewlines, _ := gcss.WhiteSpaceFlags(c.Style.WhiteSpace)
 			// A preserved newline (a <br> leaf, or pre-line text containing '\n')
 			// is a hard break, never disposable inter-block whitespace.
-			disposable := collapseSpaces && !(preserveNewlines && strings.Contains(c.Text, "\n"))
+			disposable := collapseSpaces && (!preserveNewlines || !strings.Contains(c.Text, "\n"))
 			if disposable && parentIsBlockContainer && adjacentToBlock(children, i) {
 				continue // drop inter-block whitespace
 			}
