@@ -140,7 +140,9 @@ func openDetected(ctx context.Context, f Format, data []byte, dir string, opts [
 		// loader the frontend installs) — a caller's explicit loader still wins.
 		return openReflowFrontend(ctx, OpenEPUBBytes, data, "", opts)
 	case FormatPNG, FormatJPEG:
-		return nil, fmt.Errorf("doctaculous: %s is not a supported input format: %w", f, ErrUnsupportedFormat)
+		// An image opens as a single page exactly its pixel size; the frontend
+		// stamps the format from the actual encoding.
+		return openReflowFrontend(ctx, OpenImageBytes, data, "", opts)
 	default:
 		return nil, fmt.Errorf("doctaculous: cannot detect the document format (open with an explicit format via OpenAs or OpenReaderAs, or use a recognizable file extension): %w", ErrUnknownFormat)
 	}

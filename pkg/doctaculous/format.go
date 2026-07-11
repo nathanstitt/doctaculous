@@ -77,8 +77,8 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatRTF:      {input: true, output: false}, // output lands with pkg/render/rtfwrite
 	FormatPPTX:     {input: true, output: false}, // output lands with pkg/render/pptxwrite
 	FormatEPUB:     {input: true, output: false}, // output lands with pkg/render/epubwrite
-	FormatPNG:      {input: false, output: true},
-	FormatJPEG:     {input: false, output: true},
+	FormatPNG:      {input: true, output: true},
+	FormatJPEG:     {input: true, output: true},
 }
 
 // ValidInput reports whether f is a supported conversion input (a format the

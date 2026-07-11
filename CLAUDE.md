@@ -458,6 +458,15 @@ out-of-scope note):
   Detection: the OCF `mimetype` zip entry in classifyOPC; `.epub`; MIME row flipped; input
   capability bit (output = E2). `epub-specimen` golden. `2026-07-10-epub-input-design.md`.
 
+**PNG/JPEG input — images as documents** (`OpenImage*`):
+
+- The any⇄any principle applied to the image formats: an image opens as a single page exactly
+  its pixel size (format stamped from the actual encoding via DecodeConfig; data:-URI embed
+  through the reflow pipeline). image→PDF fills the page edge to edge (pinned), image→JPEG
+  transcodes, markdown carries a data: URI, plain-text/tables-only outputs are empty by
+  design; png→png stays ErrSameFormat. Input capability bits flipped; conversion matrix
+  extended. `2026-07-10-image-input-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
