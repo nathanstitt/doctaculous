@@ -20,18 +20,35 @@ func TestParseFootnoteReference(t *testing.T) {
 }
 
 func TestParseFootnotesPart(t *testing.T) {
-	fn, err := parseFootnotes([]byte(`<?xml version="1.0"?>
+	fn, err := parseNotes([]byte(`<?xml version="1.0"?>
 <w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:footnote w:id="2"><w:p><w:r><w:t>A note.</w:t></w:r></w:p></w:footnote>
-</w:footnotes>`))
+</w:footnotes>`), "footnote")
 	if err != nil {
-		t.Fatalf("parseFootnotes: %v", err)
+		t.Fatalf("parseNotes: %v", err)
 	}
-	note, ok := fn.Note(2)
-	if !ok || len(note.Blocks) != 1 {
-		t.Fatalf("Note(2) = %+v, ok=%v, want 1 block", note, ok)
+	blocks, ok := fn.Note(2)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("Note(2) = %+v, ok=%v, want 1 block", blocks, ok)
 	}
-	if got := note.Blocks[0].Paragraph.Content[0].Run.Text; got != "A note." {
+	if got := blocks[0].Paragraph.Content[0].Run.Text; got != "A note." {
 		t.Fatalf("note text = %q, want 'A note.'", got)
+	}
+}
+
+func TestParseEndnotesPart(t *testing.T) {
+	en, err := parseNotes([]byte(`<?xml version="1.0"?>
+<w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:endnote w:id="3"><w:p><w:r><w:t>An endnote.</w:t></w:r></w:p></w:endnote>
+</w:endnotes>`), "endnote")
+	if err != nil {
+		t.Fatalf("parseNotes: %v", err)
+	}
+	blocks, ok := en.Note(3)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("Note(3) = %+v, ok=%v, want 1 block", blocks, ok)
+	}
+	if got := blocks[0].Paragraph.Content[0].Run.Text; got != "An endnote." {
+		t.Fatalf("endnote text = %q, want 'An endnote.'", got)
 	}
 }

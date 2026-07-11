@@ -101,6 +101,13 @@ var Core = []CoreFixture{
 		Pages: 1,
 		Build: runPropsDocx,
 	},
+	{
+		Name: "fidelity",
+		Desc: "tracked changes rendered final-state, invisible comment anchors, run shading, " +
+			"an endnote marker, a list starting at 5, and a right-floated anchored image",
+		Pages: 1,
+		Build: fidelityDocx,
+	},
 }
 
 const docOpen = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -371,6 +378,80 @@ func footnoteDocx() []byte {
 // runRPr builds a run with a raw w:rPr XML fragment and text.
 func runRPr(rPr, text string) string {
 	return `<w:r><w:rPr>` + rPr + `</w:rPr><w:t xml:space="preserve">` + text + `</w:t></w:r>`
+}
+
+const ctEndnotes = "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"
+const ctComments = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+const relEndnotes = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
+const relComments = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+
+// fidelityDocx exercises the reader-fidelity vocabulary end to end: a tracked
+// insertion renders, a tracked deletion does not (final-state), comment range
+// markers and the reference run are invisible, a run carries w:shd shading, an
+// endnote reference shows a superscript marker, an ordered list starts at 5 via
+// w:startOverride, and an anchored square-wrap image floats right with the
+// following text wrapping beside it.
+func fidelityDocx() []byte {
+	revisions := `<w:p>` +
+		`<w:r><w:t xml:space="preserve">Tracked changes: kept </w:t></w:r>` +
+		`<w:ins w:id="1" w:author="Ada" w:date="2026-07-01T00:00:00Z"><w:r><w:t xml:space="preserve">inserted </w:t></w:r></w:ins>` +
+		`<w:del w:id="2" w:author="Ada" w:date="2026-07-01T00:00:00Z"><w:r><w:delText xml:space="preserve">DELETED </w:delText></w:r></w:del>` +
+		`<w:r><w:t>final.</w:t></w:r>` +
+		`</w:p>`
+	comments := `<w:p>` +
+		`<w:commentRangeStart w:id="3"/>` +
+		`<w:r><w:t xml:space="preserve">Commented text reads clean</w:t></w:r>` +
+		`<w:commentRangeEnd w:id="3"/>` +
+		`<w:r><w:commentReference w:id="3"/></w:r>` +
+		`<w:r><w:t xml:space="preserve"> — no anchor artifacts.</w:t></w:r>` +
+		`</w:p>`
+	shdAndEndnote := `<w:p>` +
+		runRPr(`<w:shd w:val="clear" w:fill="FFF2A8"/>`, "shaded run") +
+		`<w:r><w:t xml:space="preserve"> and an endnote</w:t></w:r>` +
+		`<w:r><w:endnoteReference w:id="1"/></w:r>` +
+		`</w:p>`
+	listItem := func(text string) string {
+		return `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr>` +
+			`<w:r><w:t xml:space="preserve">` + text + `</w:t></w:r></w:p>`
+	}
+	floated := `<w:p><w:r><w:drawing>` +
+		`<wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">` +
+		`<wp:extent cx="1371600" cy="914400"/>` +
+		`<wp:positionH relativeFrom="margin"><wp:align>right</wp:align></wp:positionH>` +
+		`<wp:wrapSquare wrapText="bothSides"/>` +
+		`<wp:docPr id="1" name="floater" descr="a floated image"/>` +
+		`<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData>` +
+		`<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+		`<pic:blipFill><a:blip r:embed="rId7"/></pic:blipFill>` +
+		`</pic:pic></a:graphicData></a:graphic></wp:anchor>` +
+		`</w:drawing></w:r>` +
+		`<w:r><w:t xml:space="preserve">` + strings.Repeat("Text wraps beside the floated image. ", 6) + `</w:t></w:r>` +
+		`</w:p>`
+
+	doc := docOpenR + revisions + comments + shdAndEndnote +
+		listItem("List starts at five") + listItem("and continues at six") +
+		floated + docClose
+
+	numbering := `<?xml version="1.0"?><w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>` +
+		`<w:num w:numId="7"><w:abstractNumId w:val="0"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride></w:num>` +
+		`</w:numbering>`
+	endnotes := `<?xml version="1.0"?><w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:endnote w:id="1">` + para("", "", "The endnote body.") + `</w:endnote>` +
+		`</w:endnotes>`
+	commentsPart := `<?xml version="1.0"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:comment w:id="3" w:author="Reviewer">` + para("", "", "An invisible comment.") + `</w:comment>` +
+		`</w:comments>`
+
+	return New().SetDocument(doc).
+		SetNumbering(numbering).
+		AddMedia("media/image1.png", tinyPNG(108, 72)).
+		AddRel("rId7", relImage, "media/image1.png", "").
+		AddPart("endnotes.xml", ctEndnotes, endnotes).
+		AddPart("comments.xml", ctComments, commentsPart).
+		AddRel("rId13", relEndnotes, "endnotes.xml", "").
+		AddRel("rId14", relComments, "comments.xml", "").
+		Bytes()
 }
 
 func runPropsDocx() []byte {

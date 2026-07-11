@@ -37,7 +37,9 @@ const emuPerPt = 12700
 // rel id (resolved by MediaLoader); the extent (EMU) becomes width/height point
 // attributes so the CSS replaced-sizing uses them (CSS width/height would
 // override, but a DOCX drawing has no CSS). The box inherits the paragraph style
-// so it flows inline.
+// so it flows inline. An ANCHORED drawing with square wrap and a left/right
+// alignment lowers to a CSS float (text wraps beside it — the engine's float
+// machinery); other anchor modes degrade to inline flow.
 func drawingBox(dr *docx.Drawing, para gcss.ComputedStyle) *lcssbox.Box {
 	cs := para
 	cs.Display = "inline-block"

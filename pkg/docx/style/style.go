@@ -116,8 +116,12 @@ type EffectiveRun struct {
 	VertAlign               docx.VertAlign
 	Highlight               color.RGBA
 	HasHighlight            bool
-	Caps                    bool
-	SmallCaps               bool
+	// Shd is the run's background shading (w:shd); a highlight, when also set,
+	// paints over it.
+	Shd       color.RGBA
+	HasShd    bool
+	Caps      bool
+	SmallCaps bool
 	// StyleID is the run's character-style reference (w:rStyle), identity only —
 	// no formatting cascades from it (see EffectiveRun's doc). The conversion
 	// path reads it to recover run semantics (e.g. CodeChar marks inline code).
@@ -182,6 +186,10 @@ func (r *Resolver) EffectiveRun(p docx.ParagraphProps, run docx.RunProps) Effect
 	if merged.HasHighlight {
 		eff.Highlight = merged.Highlight
 		eff.HasHighlight = true
+	}
+	if merged.Shd.HasFill {
+		eff.Shd = merged.Shd.Fill
+		eff.HasShd = true
 	}
 	if merged.HasCaps {
 		eff.Caps = merged.Caps
@@ -278,6 +286,9 @@ func mergeRun(base, over docx.RunProps) docx.RunProps {
 	}
 	if over.HasHighlight {
 		out.Highlight, out.HasHighlight = over.Highlight, true
+	}
+	if over.Shd.HasFill {
+		out.Shd = over.Shd
 	}
 	if over.HasCaps {
 		out.Caps, out.HasCaps = over.Caps, true

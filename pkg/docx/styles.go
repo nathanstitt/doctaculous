@@ -21,6 +21,9 @@ type Styles struct {
 type Style struct {
 	// ID is the w:styleId, the key other elements reference.
 	ID string
+	// Name is the style's display name (w:name), shown in Word's style UI; ""
+	// when the part omits it.
+	Name string
 	// Type is "paragraph", "character", "table", or "numbering".
 	Type string
 	// BasedOn is the parent styleId (w:basedOn), or "" if this is a root style.

@@ -8,25 +8,35 @@ import (
 	"io"
 )
 
-// Footnotes is the parsed word/footnotes.xml: note id -> block content.
-type Footnotes struct {
-	byID map[int]*HeaderFooter // reuse HeaderFooter's Blocks container
+// Notes is a parsed notes part — word/footnotes.xml or word/endnotes.xml, which
+// share their grammar — mapping a note id to its block content.
+type Notes struct {
+	// ByID maps a note id to its blocks. Separator/continuation notes (the
+	// special ids Word reserves, typically <= 0) are included; consumers ignore
+	// ids they hold no reference for.
+	ByID map[int][]Block
 }
 
-// Note returns a footnote's content by id.
-func (f *Footnotes) Note(id int) (*HeaderFooter, bool) {
-	if f == nil {
+// NewNotes returns an empty Notes container, for callers constructing a
+// document for the writer.
+func NewNotes() *Notes { return &Notes{ByID: map[int][]Block{}} }
+
+// Add sets a note's content by id.
+func (n *Notes) Add(id int, blocks []Block) { n.ByID[id] = blocks }
+
+// Note returns a note's content by id.
+func (n *Notes) Note(id int) ([]Block, bool) {
+	if n == nil {
 		return nil, false
 	}
-	n, ok := f.byID[id]
-	return n, ok
+	blocks, ok := n.ByID[id]
+	return blocks, ok
 }
 
-// parseFootnotes parses a word/footnotes.xml part. Separator/continuation notes
-// (negative or special ids) are parsed like any other; the lowering ignores ids
-// it has no reference for.
-func parseFootnotes(data []byte) (*Footnotes, error) {
-	f := &Footnotes{byID: map[int]*HeaderFooter{}}
+// parseNotes parses a footnotes/endnotes part; element is the per-note element
+// local name ("footnote" or "endnote").
+func parseNotes(data []byte, element string) (*Notes, error) {
+	n := NewNotes()
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		tok, err := dec.Token()
@@ -34,18 +44,18 @@ func parseFootnotes(data []byte) (*Footnotes, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("%w: footnotes: %v", ErrMalformedXML, err)
+			return nil, fmt.Errorf("%w: %ss: %v", ErrMalformedXML, element, err)
 		}
 		se, ok := tok.(xml.StartElement)
-		if !ok || se.Name.Space != wNS || se.Name.Local != "footnote" {
+		if !ok || se.Name.Space != wNS || se.Name.Local != element {
 			continue
 		}
 		id, _ := wAttrInt(se, "id")
-		note := &HeaderFooter{}
-		if err := fillBlocksUntil(dec, "footnote", &note.Blocks); err != nil {
+		var blocks []Block
+		if err := fillBlocksUntil(dec, element, &blocks); err != nil {
 			return nil, err
 		}
-		f.byID[id] = note
+		n.ByID[id] = blocks
 	}
-	return f, nil
+	return n, nil
 }

@@ -37,7 +37,19 @@ type Document struct {
 	Headers map[string]*HeaderFooter
 	Footers map[string]*HeaderFooter
 	// Footnotes holds the parsed word/footnotes.xml (note id -> content), or nil.
-	Footnotes *Footnotes
+	Footnotes *Notes
+	// Endnotes holds the parsed word/endnotes.xml (note id -> content), or nil.
+	Endnotes *Notes
+	// Comments holds the parsed word/comments.xml keyed by comment id, or nil.
+	// A comment's in-text range is marked by ParaChild.CommentStart/CommentEnd
+	// and its reference run by Run.CommentRef.
+	Comments map[int]*Comment
+	// ExtraParts holds package parts outside the modeled vocabulary that must
+	// survive a read-modify-write cycle, keyed by part name (currently every
+	// customXml/* part). The writer emits them verbatim; callers may add or
+	// replace entries to carry app-specific data (the map itself is the one
+	// deliberately caller-mutable field on an otherwise read-only Document).
+	ExtraParts map[string][]byte
 	// Section is the document's (single, for now) section geometry, taken from the
 	// body-level w:sectPr. It is never nil after Open; a default Letter page is
 	// substituted when the document declares none.
@@ -48,13 +60,26 @@ type Document struct {
 	Sections []SectionProps
 }
 
+// Comment is one word/comments.xml entry: its identity/attribution plus the
+// comment's block content. The in-text anchor is separate (CommentStart/
+// CommentEnd markers + a Run.CommentRef reference run).
+type Comment struct {
+	ID       int
+	Author   string
+	Initials string
+	// Date is the w:date value verbatim (ISO 8601 in practice).
+	Date string
+	Body []Block
+}
+
 // Relationship is one document relationship (Id -> Target), with the external
-// flag set when TargetMode="External" (hyperlinks to URLs).
+// flag set when TargetMode="External" (hyperlinks to URLs). Type is the
+// relationship type URI, kept so a writer can re-emit the rels part faithfully.
 type Relationship struct {
 	ID       string
 	Target   string
 	External bool
-	relType  string
+	Type     string
 }
 
 // Block is a top-level flow item: exactly one field is non-nil. A paragraph
@@ -74,12 +99,63 @@ type Paragraph struct {
 }
 
 // ParaChild is one inline-level member of a paragraph's content: exactly one
-// field is non-nil. A bare Run, a Hyperlink group wrapping runs, or a Drawing
-// (an embedded image).
+// field is non-nil. A bare Run, a Hyperlink group wrapping runs, a Drawing
+// (an embedded image), a Revision wrapper (w:ins / w:del), or a comment range
+// marker (w:commentRangeStart / w:commentRangeEnd).
 type ParaChild struct {
 	Run       *Run
 	Hyperlink *Hyperlink
 	Drawing   *Drawing
+	Revision  *Revision
+	// CommentStart / CommentEnd mark a comment's anchored range. They are
+	// position markers, not containers, because a range may cross run and
+	// hyperlink boundaries. Markers found INSIDE a w:hyperlink are hoisted at
+	// parse time: a start to just before the link, an end to just after (the
+	// range grows outward to cover the whole link); the reverse direction is
+	// expressible without a model change by splitting the link in two.
+	CommentStart *CommentMark
+	CommentEnd   *CommentMark
+}
+
+// Revision is a tracked change: a w:ins (insertion) or w:del (deletion)
+// wrapping inline content. It is a true container in OOXML — it can wrap
+// hyperlinks and nest (an insertion inside a moved range) — so it is modeled
+// as a ParaChild wrapper rather than a per-run annotation, preserving the
+// grouping and the revision's identity exactly once. The FINAL document state
+// is: Insert content included, Delete content excluded (rendering follows
+// that — Word's "No Markup" view).
+type Revision struct {
+	Kind RevisionKind
+	// ID is the w:id revision identifier.
+	ID     int
+	Author string
+	// Date is the w:date value verbatim (ISO 8601 in practice).
+	Date    string
+	Content []ParaChild
+}
+
+// RevisionKind classifies a Revision.
+type RevisionKind int
+
+const (
+	// RevisionInsert is a w:ins tracked insertion.
+	RevisionInsert RevisionKind = iota
+	// RevisionDelete is a w:del tracked deletion (its runs carry w:delText).
+	RevisionDelete
+)
+
+// CommentMark is a comment range boundary (w:commentRangeStart/End): the id
+// keys into Document.Comments.
+type CommentMark struct {
+	ID int
+}
+
+// RevisionMark is a revision annotation without content of its own — a table
+// cell's w:cellIns / w:cellDel, and the identity half of a properties change.
+type RevisionMark struct {
+	ID     int
+	Author string
+	Date   string
 }
 
 // Hyperlink is a w:hyperlink: a group of runs linking to an external URL
@@ -99,11 +175,22 @@ type Hyperlink struct {
 
 // Drawing is a w:drawing carrying an embedded image: RelID references the image
 // part via the document relationships; WidthEMU/HeightEMU are the extent (914400
-// EMU = 1in). Later phases populate it; Phase 1 only declares it.
+// EMU = 1in).
 type Drawing struct {
 	RelID     string
 	WidthEMU  int64
 	HeightEMU int64
+	// Anchored is true for a floating wp:anchor drawing (false = wp:inline).
+	Anchored bool
+	// WrapKind is the anchored drawing's text-wrap mode: "square",
+	// "topAndBottom", "tight", "through", or "none" ("" for inline drawings).
+	WrapKind string
+	// AlignH is the anchored drawing's horizontal alignment from
+	// wp:positionH/wp:align ("left", "right", "center"), or "" when positioned
+	// by offset.
+	AlignH string
+	// Description is the wp:docPr descr attribute (alt text), or "".
+	Description string
 }
 
 // Table is a w:tbl: a column grid plus rows. Props carries table-level borders,
@@ -130,6 +217,11 @@ type TableCell struct {
 	GridSpan int
 	VMerge   VMergeKind
 	Props    CellProps
+	// Ins / Del are the cell's tracked-change marks (w:cellIns / w:cellDel in
+	// tcPr): the cell was inserted/deleted as part of a table-row revision.
+	// Rendering shows the final state (marks are identity only).
+	Ins *RevisionMark
+	Del *RevisionMark
 }
 
 // VMergeKind classifies a cell's w:vMerge state.
@@ -161,12 +253,21 @@ type RowProps struct {
 	HeightDxa Twips // w:trHeight
 }
 
-// CellProps holds cell-level properties (w:tcPr). Populated in the tables phase.
+// CellProps holds cell-level properties (w:tcPr).
 type CellProps struct {
 	Borders  BoxBorders
 	Shading  Shading
 	WidthDxa Twips // w:tcW type="dxa"; 0 = unset
 	VAlign   CellVAlign
+	// TcPrChange is the tracked change of the cell's properties (w:tcPrChange):
+	// Previous holds the BEFORE state; the fields above are the after state.
+	TcPrChange *CellPropsChange
+}
+
+// CellPropsChange is a tracked cell-properties change (w:tcPrChange).
+type CellPropsChange struct {
+	Mark     RevisionMark
+	Previous CellProps
 }
 
 // CellVAlign is a cell's vertical alignment (w:vAlign).
@@ -188,9 +289,13 @@ type BoxBorders struct {
 }
 
 // Border is one edge border (w:tblBorders/w:tcBorders child). SizeEighthPt is
-// w:sz in eighths of a point. None is true when style="nil"/"none".
+// w:sz in eighths of a point. None is true when style="nil"/"none". Style is
+// the ST_Border style name as written ("single", "dashed", "dotted", "double",
+// ...), or "" when the edge is unset/none — rendering treats every non-none
+// style as a solid rule, but the name round-trips for conversion.
 type Border struct {
 	None         bool
+	Style        string
 	SizeEighthPt int
 	Color        color.RGBA
 	HasColor     bool
@@ -215,6 +320,12 @@ type Run struct {
 	// FootnoteRef is the id of a footnote this run references (w:footnoteReference
 	// w:id); 0 = none. Such a run has no text; it renders as a superscript marker.
 	FootnoteRef int
+	// EndnoteRef mirrors FootnoteRef for w:endnoteReference (Document.Endnotes).
+	EndnoteRef int
+	// CommentRef is the id of a comment this run references (w:commentReference);
+	// 0 = none. A reference run has no text and renders as nothing — the comment
+	// itself lives in Document.Comments.
+	CommentRef int
 }
 
 // BreakKind classifies a w:br inside a run.
@@ -300,6 +411,38 @@ type ParagraphProps struct {
 	// alignment, captured for the conversion path. Rendering uses fixed 8-column
 	// stops today (custom positions are a deferred inline-core change).
 	TabStops []TabStop
+	// Frame is the paragraph's text frame (w:framePr) — most notably a drop cap.
+	// Rendering degrades a framed paragraph to normal flow; conversion reads
+	// Frame.DropCap.
+	Frame *FramePr
+	// PPrChange is the tracked change of the paragraph's properties
+	// (w:pPrChange): Previous holds the BEFORE state; this struct's own fields
+	// are the after state.
+	PPrChange *ParaPropsChange
+	// SectPr is the section break this paragraph carries (its pPr's w:sectPr),
+	// or nil. The geometry is also appended to Document.Sections; the paragraph
+	// attachment point is kept so a writer can re-emit multi-section documents
+	// in place.
+	SectPr *SectionProps
+}
+
+// ParaPropsChange is a tracked paragraph-properties change (w:pPrChange).
+type ParaPropsChange struct {
+	Mark     RevisionMark
+	Previous ParagraphProps
+}
+
+// FramePr is a paragraph text frame (w:framePr). DropCap is the headline use:
+// "drop" (inside the text) or "margin"; Lines is the drop height in lines. The
+// remaining fields capture the frame's geometry for fidelity.
+type FramePr struct {
+	DropCap string
+	Lines   int
+	Wrap    string
+	HAnchor string
+	VAnchor string
+	W, H    Twips
+	HSpace  Twips
 }
 
 // TabStop is one w:tab definition inside w:tabs: a position (twips) and its
@@ -344,6 +487,19 @@ type RunProps struct {
 	// cascade); the conversion path uses it to recover run semantics (e.g. the
 	// CodeChar style marks inline code).
 	StyleID string
+	// Shd is the run's background shading (w:shd in rPr) — the character-level
+	// background a textStyle backgroundColor maps to.
+	Shd Shading
+	// RPrChange is the tracked change of the run's properties (w:rPrChange):
+	// Previous holds the BEFORE state; this struct's own fields are the after
+	// state (what Word shows with markup off).
+	RPrChange *RunPropsChange
+}
+
+// RunPropsChange is a tracked run-properties change (w:rPrChange).
+type RunPropsChange struct {
+	Mark     RevisionMark
+	Previous RunProps
 }
 
 // SectionProps is the page geometry from a w:sectPr: paper size and margins, all

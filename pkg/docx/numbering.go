@@ -9,13 +9,35 @@ import (
 )
 
 // Numbering is the parsed word/numbering.xml: w:num instances (numId ->
-// abstractNumId) plus w:abstractNum definitions (per-level format/text). It is
-// read-only after Open.
+// abstract reference + per-level overrides) plus w:abstractNum definitions
+// (per-level format/text/start). It is read-only after Open; the exported maps
+// exist so a caller can construct one for the writer.
 type Numbering struct {
-	// numToAbstract maps a w:numId to its w:abstractNumId.
-	numToAbstract map[int]int
-	// abstract maps an abstractNumId to its levels by ilvl.
-	abstract map[int]map[int]NumLevel
+	// Abstract maps an abstractNumId to its levels by ilvl.
+	Abstract map[int]map[int]NumLevel
+	// Instances maps a w:numId to its instance definition.
+	Instances map[int]NumInstance
+}
+
+// NewNumbering returns an empty Numbering, for callers constructing a document
+// for the writer.
+func NewNumbering() *Numbering {
+	return &Numbering{Abstract: map[int]map[int]NumLevel{}, Instances: map[int]NumInstance{}}
+}
+
+// NumInstance is one w:num: the abstract definition it references plus any
+// per-level overrides (w:lvlOverride).
+type NumInstance struct {
+	AbstractID int
+	// Overrides maps an ilvl to its override; nil/absent = none.
+	Overrides map[int]LevelOverride
+}
+
+// LevelOverride is a w:lvlOverride: currently the w:startOverride restart
+// value (per-instance ordered lists restart their counters through this).
+type LevelOverride struct {
+	Start    int
+	HasStart bool
 }
 
 // NumLevel is one list level's marker definition.
@@ -24,6 +46,10 @@ type NumLevel struct {
 	// Text is the w:lvlText pattern (e.g. "%1.", "•"). %N is replaced by level N's
 	// current counter value when the marker is formatted.
 	Text string
+	// Start is the level's starting counter value (w:start); HasStart marks it
+	// explicitly declared (Word's effective default is 1).
+	Start    int
+	HasStart bool
 }
 
 // NumFmt is a w:numFmt list-marker format.
@@ -45,11 +71,11 @@ func (n *Numbering) Level(numID, ilvl int) (NumLevel, bool) {
 	if n == nil {
 		return NumLevel{}, false
 	}
-	absID, ok := n.numToAbstract[numID]
+	inst, ok := n.Instances[numID]
 	if !ok {
 		return NumLevel{}, false
 	}
-	levels, ok := n.abstract[absID]
+	levels, ok := n.Abstract[inst.AbstractID]
 	if !ok {
 		return NumLevel{}, false
 	}
@@ -57,12 +83,31 @@ func (n *Numbering) Level(numID, ilvl int) (NumLevel, bool) {
 	return lvl, ok
 }
 
+// StartAt resolves the effective starting counter value for (numID, ilvl): a
+// w:startOverride on the instance wins, then the abstract level's w:start,
+// else 1 (Word's default).
+func (n *Numbering) StartAt(numID, ilvl int) int {
+	if n == nil {
+		return 1
+	}
+	inst, ok := n.Instances[numID]
+	if !ok {
+		return 1
+	}
+	if ov, ok := inst.Overrides[ilvl]; ok && ov.HasStart {
+		return ov.Start
+	}
+	if levels, ok := n.Abstract[inst.AbstractID]; ok {
+		if lvl, ok := levels[ilvl]; ok && lvl.HasStart {
+			return lvl.Start
+		}
+	}
+	return 1
+}
+
 // parseNumbering parses a word/numbering.xml part.
 func parseNumbering(data []byte) (*Numbering, error) {
-	n := &Numbering{
-		numToAbstract: map[int]int{},
-		abstract:      map[int]map[int]NumLevel{},
-	}
+	n := NewNumbering()
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		tok, err := dec.Token()
@@ -83,14 +128,14 @@ func parseNumbering(data []byte) (*Numbering, error) {
 			if err != nil {
 				return nil, err
 			}
-			n.abstract[id] = levels
+			n.Abstract[id] = levels
 		case "num":
 			id, _ := wAttrInt(se, "numId")
-			abs, err := parseNumInstance(dec)
+			inst, err := parseNumInstance(dec)
 			if err != nil {
 				return nil, err
 			}
-			n.numToAbstract[id] = abs
+			n.Instances[id] = inst
 		}
 	}
 	return n, nil
@@ -126,7 +171,7 @@ func parseAbstractNum(dec *xml.Decoder) (map[int]NumLevel, error) {
 	}
 }
 
-// parseLvl reads one w:lvl (numFmt + lvlText).
+// parseLvl reads one w:lvl (numFmt + lvlText + start).
 func parseLvl(dec *xml.Decoder) (NumLevel, error) {
 	var lvl NumLevel
 	for {
@@ -142,6 +187,11 @@ func parseLvl(dec *xml.Decoder) (NumLevel, error) {
 					lvl.Format = parseNumFmt(wVal(t))
 				case "lvlText":
 					lvl.Text = wVal(t)
+				case "start":
+					if v, ok := wAttrInt(t, "val"); ok {
+						lvl.Start = v
+						lvl.HasStart = true
+					}
 				}
 			}
 			if err := dec.Skip(); err != nil {
@@ -155,27 +205,69 @@ func parseLvl(dec *xml.Decoder) (NumLevel, error) {
 	}
 }
 
-// parseNumInstance reads a w:num, returning its abstractNumId.
-func parseNumInstance(dec *xml.Decoder) (int, error) {
-	abs := -1
+// parseNumInstance reads a w:num: its abstractNumId plus any w:lvlOverride
+// children (per-level startOverride values).
+func parseNumInstance(dec *xml.Decoder) (NumInstance, error) {
+	inst := NumInstance{AbstractID: -1}
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return abs, fmt.Errorf("%w: num: %v", ErrMalformedXML, err)
+			return inst, fmt.Errorf("%w: num: %v", ErrMalformedXML, err)
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if t.Name.Space == wNS && t.Name.Local == "abstractNumId" {
-				if v, ok := wAttrInt(t, "val"); ok {
-					abs = v
+			if t.Name.Space == wNS {
+				switch t.Name.Local {
+				case "abstractNumId":
+					if v, ok := wAttrInt(t, "val"); ok {
+						inst.AbstractID = v
+					}
+				case "lvlOverride":
+					ilvl, _ := wAttrInt(t, "ilvl")
+					ov, err := parseLvlOverride(dec)
+					if err != nil {
+						return inst, err
+					}
+					if inst.Overrides == nil {
+						inst.Overrides = map[int]LevelOverride{}
+					}
+					inst.Overrides[ilvl] = ov
+					continue
 				}
 			}
 			if err := dec.Skip(); err != nil {
-				return abs, fmt.Errorf("%w: num: %v", ErrMalformedXML, err)
+				return inst, fmt.Errorf("%w: num: %v", ErrMalformedXML, err)
 			}
 		case xml.EndElement:
 			if t.Name.Local == "num" {
-				return abs, nil
+				return inst, nil
+			}
+		}
+	}
+}
+
+// parseLvlOverride reads a w:lvlOverride's w:startOverride.
+func parseLvlOverride(dec *xml.Decoder) (LevelOverride, error) {
+	var ov LevelOverride
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return ov, fmt.Errorf("%w: lvlOverride: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "startOverride" {
+				if v, ok := wAttrInt(t, "val"); ok {
+					ov.Start = v
+					ov.HasStart = true
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return ov, fmt.Errorf("%w: lvlOverride: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "lvlOverride" {
+				return ov, nil
 			}
 		}
 	}
