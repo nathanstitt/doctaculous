@@ -28,6 +28,7 @@ func TestParseFormat(t *testing.T) {
 		{"tab", FormatTSV},
 		{"xlsx", FormatXLSX},
 		{"xlsm", FormatXLSX},
+		{"rtf", FormatRTF},
 		{"png", FormatPNG},
 		{"jpeg", FormatJPEG},
 		{"jpg", FormatJPEG},
@@ -43,7 +44,7 @@ func TestParseFormat(t *testing.T) {
 			t.Errorf("ParseFormat(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
-	for _, bad := range []string{"", "rtf", "word", "image"} {
+	for _, bad := range []string{"", "word", "image"} {
 		got, err := ParseFormat(bad)
 		if !errors.Is(err, ErrUnknownFormat) {
 			t.Errorf("ParseFormat(%q): want ErrUnknownFormat, got (%q, %v)", bad, got, err)
@@ -77,7 +78,7 @@ func TestFormatFromPath(t *testing.T) {
 		{"noext", FormatUnknown},
 		{"", FormatUnknown},
 		{"archive.zip", FormatUnknown},
-		{"doc.rtf", FormatUnknown},
+		{"doc.rtf", FormatRTF},
 	}
 	for _, c := range cases {
 		if got := FormatFromPath(c.path); got != c.want {
@@ -100,6 +101,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatCSV:      true,
 		FormatTSV:      true,
 		FormatXLSX:     true,
+		FormatRTF:      true,
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,
@@ -113,7 +115,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatPNG:      true,
 		FormatJPEG:     true,
 	}
-	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatPNG, FormatJPEG}
+	all := []Format{FormatPDF, FormatDOCX, FormatHTML, FormatMarkdown, FormatText, FormatCSV, FormatTSV, FormatXLSX, FormatRTF, FormatPNG, FormatJPEG}
 
 	for _, from := range all {
 		for _, to := range all {
@@ -139,8 +141,8 @@ func TestCanConvertMatrix(t *testing.T) {
 	for _, pair := range [][2]Format{
 		{FormatUnknown, FormatPDF},
 		{FormatPDF, FormatUnknown},
-		{Format("rtf"), FormatPDF},
-		{FormatPDF, Format("rtf")},
+		{Format("wpd"), FormatPDF},
+		{FormatPDF, Format("wpd")},
 	} {
 		if err := CanConvert(pair[0], pair[1]); !errors.Is(err, ErrUnknownFormat) {
 			t.Errorf("CanConvert(%q, %q): want ErrUnknownFormat, got %v", pair[0], pair[1], err)
@@ -169,6 +171,8 @@ func TestFormatFromMIME(t *testing.T) {
 		{"text/csv", FormatCSV},
 		{"application/csv", FormatCSV},
 		{"text/tab-separated-values", FormatTSV},
+		{"application/rtf", FormatRTF},
+		{"text/rtf", FormatRTF},
 		{"image/png", FormatPNG},
 		{"image/jpeg", FormatJPEG},
 		{"image/jpg", FormatJPEG},
@@ -195,8 +199,6 @@ func TestFormatFromMIME(t *testing.T) {
 		// Flips to its Format when the corresponding frontend lands.
 		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
 		"application/epub+zip",
-		"application/rtf",
-		"text/rtf", // the text/* fallback exception
 		"image/heic",
 		"image/heif",
 		"image/heic-sequence",

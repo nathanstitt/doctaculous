@@ -130,6 +130,8 @@ func openDetected(ctx context.Context, f Format, data []byte, dir string, opts [
 		return openReflowFrontend(ctx, OpenTSVBytes, data, dir, opts)
 	case FormatXLSX:
 		return openReflowFrontend(ctx, OpenXLSXBytes, data, dir, opts)
+	case FormatRTF:
+		return openReflowFrontend(ctx, OpenRTFBytes, data, dir, opts)
 	case FormatPNG, FormatJPEG:
 		return nil, fmt.Errorf("doctaculous: %s is not a supported input format: %w", f, ErrUnsupportedFormat)
 	default:

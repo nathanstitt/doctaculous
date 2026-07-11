@@ -94,11 +94,22 @@ func (c *imageCache) get(ctx context.Context, ref string) decodedImage {
 // transient reports whether the miss was caused by a context cancellation/deadline
 // (so the caller can avoid caching it); permanent failures report false.
 func (c *imageCache) decode(ctx context.Context, ref string) (d decodedImage, transient bool) {
-	if c.loader == nil {
+	var (
+		data        []byte
+		contentType string
+		err         error
+	)
+	switch {
+	case strings.HasPrefix(ref, "data:"):
+		// A data: URI carries its own bytes — decode regardless of loader
+		// (the browser rule; an inline image must not depend on fetching).
+		data, contentType, err = resource.LoadDataURL(ref)
+	case c.loader == nil:
 		c.logf("css layout: no resource loader; cannot decode image %q", ref)
 		return decodedImage{}, false
+	default:
+		data, contentType, err = c.loader.Load(ctx, ref)
 	}
-	data, contentType, err := c.loader.Load(ctx, ref)
 	if err != nil {
 		c.logf("css layout: load image %q failed: %v", ref, err)
 		return decodedImage{}, errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)

@@ -53,6 +53,8 @@ func detectMagic(data []byte) Format {
 		return FormatJPEG
 	case bytes.HasPrefix(data, []byte("PK\x03\x04")), bytes.HasPrefix(data, []byte("PK\x05\x06")):
 		return classifyOPC(data) // DOCX, XLSX, or Unknown (epub, plain archive)
+	case bytes.HasPrefix(data, []byte(`{\rtf`)):
+		return FormatRTF
 	}
 	window := data
 	if len(window) > pdfHeaderWindow {

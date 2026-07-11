@@ -34,6 +34,8 @@ const (
 	FormatTSV Format = "tsv"
 	// FormatXLSX is a SpreadsheetML (.xlsx) workbook.
 	FormatXLSX Format = "xlsx"
+	// FormatRTF is a Rich Text Format document.
+	FormatRTF Format = "rtf"
 	// FormatPNG is a PNG image (a rasterized page).
 	FormatPNG Format = "png"
 	// FormatJPEG is a JPEG image (a rasterized page).
@@ -68,6 +70,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatCSV:      {input: true, output: true},
 	FormatTSV:      {input: true, output: true},
 	FormatXLSX:     {input: true, output: true},
+	FormatRTF:      {input: true, output: false}, // output lands with pkg/render/rtfwrite
 	FormatPNG:      {input: false, output: true},
 	FormatJPEG:     {input: false, output: true},
 }
@@ -127,6 +130,8 @@ func ParseFormat(s string) (Format, error) {
 		return FormatTSV, nil
 	case "xlsx", "xlsm":
 		return FormatXLSX, nil
+	case "rtf":
+		return FormatRTF, nil
 	case "png":
 		return FormatPNG, nil
 	case "jpeg", "jpg":
@@ -154,6 +159,8 @@ var mimeFormats = map[string]Format{
 	"text/csv":                  FormatCSV,
 	"application/csv":           FormatCSV,
 	"text/tab-separated-values": FormatTSV,
+	"application/rtf":           FormatRTF,
+	"text/rtf":                  FormatRTF,
 	"image/png":                 FormatPNG,
 	"image/jpeg":                FormatJPEG,
 	"image/jpg":                 FormatJPEG,
@@ -166,12 +173,9 @@ var mimeFormats = map[string]Format{
 	"application/vnd.ms-powerpoint": FormatUnknown,
 	// Flips to its Format when the corresponding frontend lands (the same
 	// sibling contract as the capability bits): presentationml -> FormatPPTX,
-	// epub -> FormatEPUB, rtf -> FormatRTF (text/rtf is also the reason plain
-	// "text/*" cannot fall back unconditionally).
+	// epub -> FormatEPUB.
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": FormatUnknown,
 	"application/epub+zip": FormatUnknown,
-	"application/rtf":      FormatUnknown,
-	"text/rtf":             FormatUnknown,
 	// No viable pure-Go HEIC/HEIF decoder exists.
 	"image/heic":          FormatUnknown,
 	"image/heif":          FormatUnknown,
@@ -188,9 +192,9 @@ var mimeFormats = map[string]Format{
 // Unrecognized types, and types the toolkit deliberately does not read (legacy
 // binary Office, HEIC/HEIF, generic zip/octet-stream), return FormatUnknown;
 // an unlisted text/* subtype falls back to FormatText (unknown text renders as
-// plain text, the browser rule), with listed exceptions (text/rtf) staying
-// Unknown. Callers with untrusted or generic types compose with content
-// detection: f := FormatFromMIME(mt); if f == FormatUnknown { f =
+// plain text, the browser rule) — listed text/* rows like text/rtf take their
+// own format first. Callers with untrusted or generic types compose with
+// content detection: f := FormatFromMIME(mt); if f == FormatUnknown { f =
 // DetectFormat(data, name) }.
 func FormatFromMIME(mimeType string) Format {
 	mt, _, err := mime.ParseMediaType(mimeType)
@@ -231,6 +235,8 @@ func (f Format) MIME() string {
 		return "text/tab-separated-values"
 	case FormatXLSX:
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case FormatRTF:
+		return "application/rtf"
 	case FormatPNG:
 		return "image/png"
 	case FormatJPEG:
@@ -262,6 +268,8 @@ func FormatFromPath(path string) Format {
 		return FormatTSV
 	case ".xlsx", ".xlsm":
 		return FormatXLSX
+	case ".rtf":
+		return FormatRTF
 	case ".png":
 		return FormatPNG
 	case ".jpg", ".jpeg":

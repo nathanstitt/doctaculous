@@ -423,6 +423,18 @@ document model consumed externally by tinycld/text):
   (editor read AND save/reopen), mirroring calc's style_attribute_registry.
   `2026-07-10-xlsx-styles-rmw-design.md`.
 
+**RTF input** (`pkg/rtf`, `OpenRTF*`, `convert in.rtf ...`):
+
+- Dependency-free tokenizer + converter → HTML through the reflow pipeline: paragraph/char
+  formatting with 0-toggles, font/color tables, alignment/indents, cp1252 + `\uN`/`\ucN`
+  escapes, hyperlink fields, `\trowd` tables, `\pngblip`/`\jpegblip` pictures (data: URIs;
+  others logged + skipped), `\paperw`-family page geometry → `@page`; the RTF resilience rule
+  (unknown words skipped, unknown `{\*}` destinations ignored) is the degrade story. Wiring:
+  `{\rtf` magic, `.rtf`, MIME rows flipped, input capability bit (output = F2). Landed with a
+  cross-cutting engine fix: **data: image URIs decode without a resource loader**
+  (`resource.LoadDataURL` short-circuits the image cache — the browser rule). `rtf-specimen`
+  golden. `2026-07-10-rtf-input-design.md`.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);

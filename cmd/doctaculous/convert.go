@@ -24,7 +24,7 @@ func convertCmd(args []string) error {
 	var (
 		in   = fs.String("in", "", "input document or http(s) URL (alternative to the first positional argument)")
 		out  = fs.String("out", "", "output file (alternative to the second positional argument; \"-\" writes to stdout and requires --to)")
-		from = fs.String("from", "", "input format override: pdf, docx, xlsx, html, md, txt, csv, or tsv (default: detected from content and extension)")
+		from = fs.String("from", "", "input format override: pdf, docx, xlsx, rtf, html, md, txt, csv, or tsv (default: detected from content and extension)")
 		to   = fs.String("to", "", "output format override: pdf, docx, xlsx, md, txt, html, csv, tsv, png, or jpg (default: from the output extension)")
 
 		pageSize = fs.String("page-size", "letter", "HTML pagination: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page")
