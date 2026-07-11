@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
+	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
 )
 
 // matrixHTML is the HTML source fixture for the conversion-matrix tests. The
@@ -20,6 +21,16 @@ const matrixHTML = `<!DOCTYPE html><html><head><style>body{margin:0}</style></he
 <h1>Matrix Title</h1>
 <p>An introductory paragraph of body text.</p>
 </body></html>`
+
+// matrixXLSX builds a one-sheet workbook carrying the matrix marker text.
+func matrixXLSX() []byte {
+	sheet := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1" t="inlineStr"><is><t>Name</t></is></c><c r="B1" t="inlineStr"><is><t>Qty</t></is></c></row>
+<row r="2"><c r="A2" t="inlineStr"><is><t>Matrix Title</t></is></c><c r="B2"><v>5</v></c></row>
+</sheetData></worksheet>`
+	return genxlsx.New().AddSheet("Data", sheet).Bytes()
+}
 
 // matrixPDF renders matrixHTML to PDF bytes with bundled fonts, so the text is
 // reliably extractable regardless of the host's installed fonts (the same
@@ -48,6 +59,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatText:     []byte("Matrix Title\n\nplain body lines\n"),
 		FormatCSV:      []byte("Name,Qty\nMatrix Title,5\n"),
 		FormatTSV:      []byte("Name\tQty\nMatrix Title\t5\n"),
+		FormatXLSX:     matrixXLSX(),
 	}
 	// A text fragment each input's content must carry into structure outputs.
 	wantText := map[Format]string{
@@ -58,6 +70,7 @@ func TestConvertMatrix(t *testing.T) {
 		FormatText:     "Matrix Title",
 		FormatCSV:      "Matrix Title",
 		FormatTSV:      "Matrix Title",
+		FormatXLSX:     "Matrix Title",
 	}
 	// CSV/TSV output carries tables only; inputs whose fixture has no table
 	// legitimately produce empty output there.

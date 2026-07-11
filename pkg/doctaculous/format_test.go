@@ -99,7 +99,7 @@ func TestCanConvertMatrix(t *testing.T) {
 		FormatText:     true,
 		FormatCSV:      true,
 		FormatTSV:      true,
-		// FormatXLSX flips true when its reader lands.
+		FormatXLSX:     true,
 	}
 	outputs := map[Format]bool{
 		FormatPDF:      true,

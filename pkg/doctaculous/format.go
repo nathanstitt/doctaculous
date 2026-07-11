@@ -66,7 +66,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatText:     {input: true, output: true},
 	FormatCSV:      {input: true, output: true},
 	FormatTSV:      {input: true, output: true},
-	FormatXLSX:     {input: false, output: false}, // input flips with the reader PR, output with the writer PR
+	FormatXLSX:     {input: true, output: false}, // output flips when its writer lands
 	FormatPNG:      {input: false, output: true},
 	FormatJPEG:     {input: false, output: true},
 }
