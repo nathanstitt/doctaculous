@@ -154,7 +154,10 @@ func writeTextShape(b *strings.Builder, sh pptx.Shape) {
 	}
 }
 
-// writeBulletRun nests consecutive bulleted paragraphs by level.
+// writeBulletRun nests consecutive bulleted paragraphs by level. A deeper
+// list opens INSIDE the still-open <li> (a nested list must be a child of its
+// parent item, or the structure writers cannot see it), so an item's tag
+// closes only when the walk returns to — or above — its level.
 func writeBulletRun(b *strings.Builder, paras []pptx.Paragraph) {
 	tag := func(p pptx.Paragraph) string {
 		if p.Bullet == "auto" {
@@ -163,30 +166,42 @@ func writeBulletRun(b *strings.Builder, paras []pptx.Paragraph) {
 		return "ul"
 	}
 	var stack []string
-	closeTo := func(level int) {
-		for len(stack) > level {
-			b.WriteString("</" + stack[len(stack)-1] + ">")
-			stack = stack[:len(stack)-1]
+	openLI := false
+	closeOne := func() {
+		if openLI {
+			b.WriteString("</li>")
 		}
+		b.WriteString("</" + stack[len(stack)-1] + ">")
+		stack = stack[:len(stack)-1]
+		openLI = len(stack) > 0
 	}
 	for _, p := range paras {
 		want := p.Level + 1
-		closeTo(want)
+		for len(stack) > want {
+			closeOne()
+		}
 		// A bullet-kind switch at the current level (• → numbered) closes the
 		// open list and starts one of the right kind.
 		if len(stack) == want && stack[want-1] != tag(p) {
-			closeTo(want - 1)
+			closeOne()
+		}
+		if len(stack) == want && openLI {
+			b.WriteString("</li>")
+			openLI = false
 		}
 		for len(stack) < want {
 			t := tag(p)
 			b.WriteString("<" + t + ">")
 			stack = append(stack, t)
+			openLI = false
 		}
 		b.WriteString("<li>")
 		writeRuns(b, p.Runs)
-		b.WriteString("</li>")
+		openLI = true
 	}
-	closeTo(0)
+	for len(stack) > 0 {
+		closeOne()
+	}
 }
 
 // writeTableShape renders an a:tbl grid with its spans.

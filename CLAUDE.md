@@ -449,6 +449,19 @@ document model consumed externally by tinycld/text):
   `rtfout-basic` golden; RTF is in the convert matrix as input AND output.
   `2026-07-10-rtf-output-design.md`.
 
+**PPTX output** (`pkg/render/pptxwrite`, `WritePPTX`/`ConvertHTMLToPPTX`, `convert ... out.pptx`):
+
+- Everything → .pptx — a cssbox STRUCTURE writer: every `<h1>`/`<h2>` starts a new slide with
+  that heading as the title placeholder; following blocks become the body (text box paragraphs,
+  `buChar`/`buAutoNum`+`lvl` lists, native `a:tbl` with `gridSpan`/`rowSpan` + `hMerge`/`vMerge`
+  continuations, `p:pic` media parts with loaderless data:-URI embedding). Logged degrades:
+  h3–h6 → bold paragraphs, quote/code flatten, links drop targets, hr skipped. Deterministic
+  OPC (the gen-fixture package shape). Reopen-verified per-construct round trips through
+  pkg/pptx + slide-count pin + `pptxout-basic` golden; PPTX joins the convert matrix as input
+  AND output. Landed with a D1 frontend fix the round trip exposed: nested-list `<ul>` now
+  opens INSIDE its parent `<li>` (structure writers previously dropped nested items).
+  `2026-07-10-pptx-output-design.md`.
+
 **PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx ...`):
 
 - Hand-rolled PresentationML reader: visible slides' shape trees (text frames with
