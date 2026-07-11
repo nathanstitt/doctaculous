@@ -33,8 +33,8 @@ func markdownOfDOCX(t *testing.T, d *docx.Document) string {
 func markdownOfHTML(t *testing.T, src string) string {
 	t.Helper()
 	var out bytes.Buffer
-	if err := ConvertHTMLToMarkdown(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertHTMLToMarkdown: %v", err)
+	if err := convertHTMLToMarkdown(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertHTMLToMarkdown: %v", err)
 	}
 	return out.String()
 }

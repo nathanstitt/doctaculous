@@ -131,7 +131,7 @@ bullet's design doc is in `docs/superpowers/specs/`:
 - **DOCX fidelity** (lists/numbering, tables, images, headers/footers + multi-section — most reuse
   the CSS engine's existing vocabulary via lowering). `2026-07-02-docx-fidelity-design.md`.
 
-**HTML/DOCX → PDF writer** (`pkg/render/pdfwrite`, `ConvertHTMLToPDF`/`WritePDF`):
+**HTML/DOCX → PDF writer** (`pkg/render/pdfwrite`, `WritePDF`):
 
 - A second `render.Device` that emits a real PDF with **selectable/searchable text** (Type0/
   Identity-H CIDFontType2 with glyf-subsetted `/FontFile2` for TrueType, simple `/Type1` with
@@ -139,7 +139,7 @@ bullet's design doc is in `docs/superpowers/specs/`:
   deterministic output, `@media print` capture (`pkg/css/media.go`). Byte-identical for the raster
   corpus (the new `DrawGlyph` seam rasterizes via the outline). `2026-06-26-html-to-pdf-writer-design.md`.
 
-**HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `ConvertHTMLToMarkdown`/`WriteMarkdown`
+**HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `WriteMarkdown`
 + `WriteText`, CLI `tomd`):
 
 - A conversion backend that walks the shared `cssbox` tree (not the paint seam — it needs structure,
@@ -150,8 +150,8 @@ bullet's design doc is in `docs/superpowers/specs/`:
   nested + task lists, thematic breaks, and **high-fidelity pipe tables** (colspan/rowspan expanded by
   content duplication, alignment, caption). `2026-07-07-html-docx-markdown-design.md`.
 
-**PDF → Markdown & HTML** (`pkg/pdf/extract`, `pkg/render/htmlwrite`, `ConvertPDFToMarkdown`/
-`ConvertPDFToHTML` + `WriteHTML`, CLI `tomd <pdf>` / `tohtml`):
+**PDF → Markdown & HTML** (`pkg/pdf/extract`, `pkg/render/htmlwrite`, `WriteHTML`,
+CLI `tomd <pdf>` / `tohtml`):
 
 - Structure recovery from a PDF's positioned glyphs + vector paths. The content interpreter gains
   optional, paint-neutral capture sinks (`content.Options.TextSink`/`GraphicsSink`, nil =
@@ -170,7 +170,7 @@ bullet's design doc is in `docs/superpowers/specs/`:
   WHATWG HTML sniff; no UTF-8⇒text fallback). `Open`/`OpenBytes` sniff any supported format (the
   PDF path is byte-identical); `OpenAs`/`OpenBytesAs` skip detection; every opener stamps
   `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write` dispatch any valid
-  input→output pair (the legacy `ConvertXToY` wrappers are shims, pinned byte-identical);
+  input→output pair (the legacy `ConvertXToY` wrappers were shims pinned byte-identical, since removed);
   same-format conversion is a deliberate `ErrSameFormat` on the generic path only. PNG/JPEG are
   output formats (`WriteImage`/`EncodeImage`; Convert-to-image writes one page, multi-page = CLI
   `%d` fan-out). CLI: `convert <in> <out>` with `--from`/`--to`; all subcommands share one
@@ -192,7 +192,7 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   (`pkg/layout/inline` shape/break; all prior goldens byte-identical).
   `2026-07-09-markdown-text-input-design.md`.
 
-**DOCX writer** (`pkg/render/docxwrite`, `WriteDOCX`/`ConvertHTMLToDOCX`, CLI `todocx` +
+**DOCX writer** (`pkg/render/docxwrite`, `WriteDOCX`, CLI `todocx` +
 `convert ... out.docx`):
 
 - Everything → .docx (HTML/Markdown/text, and PDF via extraction) — a cssbox STRUCTURE writer
@@ -334,7 +334,7 @@ document model consumed externally by tinycld/text):
   (`resource.LoadDataURL` short-circuits the image cache — the browser rule). `rtf-specimen`
   golden. `2026-07-10-rtf-input-design.md`.
 
-**RTF output** (`pkg/render/rtfwrite`, `WriteRTF`/`ConvertHTMLToRTF`, `convert ... out.rtf`):
+**RTF output** (`pkg/render/rtfwrite`, `WriteRTF`, `convert ... out.rtf`):
 
 - Everything → .rtf — a cssbox STRUCTURE writer (boxwalk-based, the Markdown/DOCX shape) whose
   mappings our own reader round-trips: block semantics on stylesheet names (`\sN` "heading N"
@@ -349,7 +349,7 @@ document model consumed externally by tinycld/text):
   `rtfout-basic` golden; RTF is in the convert matrix as input AND output.
   `2026-07-10-rtf-output-design.md`.
 
-**PPTX output** (`pkg/render/pptxwrite`, `WritePPTX`/`ConvertHTMLToPPTX`, `convert ... out.pptx`):
+**PPTX output** (`pkg/render/pptxwrite`, `WritePPTX`, `convert ... out.pptx`):
 
 - Everything → .pptx — a cssbox STRUCTURE writer: every `<h1>`/`<h2>` starts a new slide with
   that heading as the title placeholder; following blocks become the body (text box paragraphs,
@@ -362,7 +362,7 @@ document model consumed externally by tinycld/text):
   opens INSIDE its parent `<li>` (structure writers previously dropped nested items).
   `2026-07-10-pptx-output-design.md`.
 
-**EPUB output** (`pkg/render/epubwrite`, `WriteEPUB`/`ConvertHTMLToEPUB`, `convert ... out.epub`)
+**EPUB output** (`pkg/render/epubwrite`, `WriteEPUB`, `convert ... out.epub`)
 — **completes the any⇄any table: all 13 formats are both inputs AND outputs**:
 
 - Deterministic EPUB 3 built ON htmlwrite (content documents ARE XHTML — a new byte-identical

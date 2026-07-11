@@ -52,14 +52,3 @@ func (d *Document) WriteDOCX(ctx context.Context, out io.Writer, opts DOCXOption
 	}
 	return nil
 }
-
-// ConvertHTMLToDOCX reads HTML from in, lays it out, and writes a .docx to out.
-// It is a convenience wrapper over Convert.
-func ConvertHTMLToDOCX(ctx context.Context, in io.Reader, out io.Writer, opts DOCXOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From: FormatHTML,
-		To:   FormatDOCX,
-		DOCX: opts,
-		Logf: opts.Logf,
-	})
-}

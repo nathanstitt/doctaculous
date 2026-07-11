@@ -59,7 +59,6 @@ type ConvertOptions struct {
 
 // inputOptions assembles the open-time options for reflow inputs: the derived
 // cross-cutting defaults first, then the caller's HTML options so they win.
-// This mirrors what ConvertHTMLToPDF has always done.
 func (o ConvertOptions) inputOptions() []OpenOption {
 	var opts []OpenOption
 	if o.Logf != nil {

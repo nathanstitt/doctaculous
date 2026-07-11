@@ -119,7 +119,7 @@ func TestPDFToXLSX(t *testing.T) {
 	<table><tr><th>Item</th><th>Qty</th></tr><tr><td>Widgets</td><td>5</td></tr></table>
 	</body></html>`
 	var pdf bytes.Buffer
-	err := ConvertHTMLToPDF(context.Background(), strings.NewReader(tableHTML), &pdf, PDFOptions{BundledFonts: true})
+	err := convertHTMLToPDF(context.Background(), strings.NewReader(tableHTML), &pdf, PDFOptions{BundledFonts: true})
 	if err != nil {
 		t.Fatalf("build pdf: %v", err)
 	}

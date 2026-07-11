@@ -119,7 +119,7 @@ func TestMarkdownGolden(t *testing.T) {
 func checkGolden(t *testing.T, dir, name, src string, opts MarkdownOptions) {
 	t.Helper()
 	var out bytes.Buffer
-	if err := ConvertHTMLToMarkdown(context.Background(), bytes.NewReader([]byte(src)), &out, opts); err != nil {
+	if err := convertHTMLToMarkdown(context.Background(), bytes.NewReader([]byte(src)), &out, opts); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
 	path := filepath.Join(dir, name)

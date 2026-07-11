@@ -56,21 +56,6 @@ func (o PDFOptions) toWriterOptions() pdfwrite.Options {
 	}
 }
 
-// ConvertHTMLToPDF reads HTML from in, lays it out, and writes a PDF to out. Text is
-// embedded as real, searchable/selectable glyphs (Type0/Identity-H for TrueType
-// faces, a simple Type1 font for the bundled sans/serif substitutes). When
-// opts.Print is set the cascade honors @media print rules. It is a convenience
-// wrapper over Convert.
-func ConvertHTMLToPDF(ctx context.Context, in io.Reader, out io.Writer, opts PDFOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From:         FormatHTML,
-		To:           FormatPDF,
-		PDF:          opts,
-		Logf:         opts.Logf,
-		BundledFonts: opts.BundledFonts,
-	})
-}
-
 // WritePDF writes an opened reflow document (HTML or DOCX) to out as a PDF. It
 // returns an error if the document is not a reflow document (e.g. an opened PDF).
 func (d *Document) WritePDF(ctx context.Context, out io.Writer, opts PDFOptions) error {

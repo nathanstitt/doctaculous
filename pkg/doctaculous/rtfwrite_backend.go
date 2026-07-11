@@ -52,14 +52,3 @@ func (d *Document) WriteRTF(ctx context.Context, out io.Writer, opts RTFOptions)
 	}
 	return nil
 }
-
-// ConvertHTMLToRTF reads HTML from in, lays it out, and writes RTF to out.
-// It is a convenience wrapper over Convert.
-func ConvertHTMLToRTF(ctx context.Context, in io.Reader, out io.Writer, opts RTFOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From: FormatHTML,
-		To:   FormatRTF,
-		RTF:  opts,
-		Logf: opts.Logf,
-	})
-}

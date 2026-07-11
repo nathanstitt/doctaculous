@@ -35,26 +35,3 @@ func (d *Document) WriteHTML(_ context.Context, out io.Writer, opts HTMLWriteOpt
 	}
 	return nil
 }
-
-// ConvertPDFToMarkdown reads a PDF from in, recovers its logical structure, and writes
-// GitHub-Flavored Markdown to out. Set opts.Plain for plain text. It is a convenience
-// wrapper over Convert.
-func ConvertPDFToMarkdown(ctx context.Context, in io.Reader, out io.Writer, opts MarkdownOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From:     FormatPDF,
-		To:       FormatMarkdown,
-		Markdown: opts,
-		Logf:     opts.Logf,
-	})
-}
-
-// ConvertPDFToHTML reads a PDF from in, recovers its logical structure, and writes HTML
-// to out. It is a convenience wrapper over Convert.
-func ConvertPDFToHTML(ctx context.Context, in io.Reader, out io.Writer, opts HTMLWriteOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From:    FormatPDF,
-		To:      FormatHTML,
-		HTMLOut: opts,
-		Logf:    opts.Logf,
-	})
-}

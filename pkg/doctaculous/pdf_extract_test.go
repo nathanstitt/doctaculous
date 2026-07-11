@@ -13,9 +13,9 @@ import (
 func roundTripPDF(t *testing.T, html string) []byte {
 	t.Helper()
 	var pdfBuf bytes.Buffer
-	err := ConvertHTMLToPDF(context.Background(), strings.NewReader(html), &pdfBuf, PDFOptions{BundledFonts: true})
+	err := convertHTMLToPDF(context.Background(), strings.NewReader(html), &pdfBuf, PDFOptions{BundledFonts: true})
 	if err != nil {
-		t.Fatalf("ConvertHTMLToPDF: %v", err)
+		t.Fatalf("convertHTMLToPDF: %v", err)
 	}
 	if pdfBuf.Len() == 0 {
 		t.Fatal("produced empty PDF")
@@ -32,8 +32,8 @@ func TestPDFToMarkdownRoundTrip(t *testing.T) {
 	pdf := roundTripPDF(t, html)
 
 	var out bytes.Buffer
-	if err := ConvertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertPDFToMarkdown: %v", err)
+	if err := convertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertPDFToMarkdown: %v", err)
 	}
 	got := out.String()
 	// The extracted text should contain the heading and body words. Exact structure
@@ -54,8 +54,8 @@ func TestPDFToHTMLRoundTrip(t *testing.T) {
 	pdf := roundTripPDF(t, html)
 
 	var out bytes.Buffer
-	if err := ConvertPDFToHTML(context.Background(), bytes.NewReader(pdf), &out, HTMLWriteOptions{}); err != nil {
-		t.Fatalf("ConvertPDFToHTML: %v", err)
+	if err := convertPDFToHTML(context.Background(), bytes.NewReader(pdf), &out, HTMLWriteOptions{}); err != nil {
+		t.Fatalf("convertPDFToHTML: %v", err)
 	}
 	got := out.String()
 	if !strings.Contains(got, "<!DOCTYPE html>") || !strings.Contains(got, "<body>") {
@@ -83,8 +83,8 @@ func TestPDFTableRoundTrip(t *testing.T) {
 	pdf := roundTripPDF(t, html)
 
 	var out bytes.Buffer
-	if err := ConvertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertPDFToMarkdown: %v", err)
+	if err := convertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertPDFToMarkdown: %v", err)
 	}
 	got := out.String()
 	// A GFM pipe table with the header separator and all cells present.

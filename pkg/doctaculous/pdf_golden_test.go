@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// pdfxGoldens are HTML fixtures rendered to a PDF (via ConvertHTMLToPDF) and then
+// pdfxGoldens are HTML fixtures rendered to a PDF (via the convertHTMLToPDF helper) and then
 // extracted back to Markdown and HTML, compared to committed pdfx-*.md / pdfx-*.html
 // goldens. Each exercises one slice of the PDF structure-recovery extractor: heading/
 // paragraph classification, list detection, the lattice (ruled) table detector, and a
@@ -77,8 +77,8 @@ func TestPDFExtractMarkdownGolden(t *testing.T) {
 		t.Run(f.name, func(t *testing.T) {
 			pdf := roundTripPDF(t, f.html)
 			var out bytes.Buffer
-			if err := ConvertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
-				t.Fatalf("ConvertPDFToMarkdown: %v", err)
+			if err := convertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &out, MarkdownOptions{}); err != nil {
+				t.Fatalf("convertPDFToMarkdown: %v", err)
 			}
 			checkPDFXGolden(t, filepath.Join(dir, "pdfx-"+f.name+".md"), out.Bytes())
 		})
@@ -98,8 +98,8 @@ func TestPDFExtractHTMLGolden(t *testing.T) {
 		t.Run(f.name, func(t *testing.T) {
 			pdf := roundTripPDF(t, f.html)
 			var out bytes.Buffer
-			if err := ConvertPDFToHTML(context.Background(), bytes.NewReader(pdf), &out, HTMLWriteOptions{}); err != nil {
-				t.Fatalf("ConvertPDFToHTML: %v", err)
+			if err := convertPDFToHTML(context.Background(), bytes.NewReader(pdf), &out, HTMLWriteOptions{}); err != nil {
+				t.Fatalf("convertPDFToHTML: %v", err)
 			}
 			checkPDFXGolden(t, filepath.Join(dir, "pdfx-"+f.name+".html"), out.Bytes())
 		})
@@ -128,7 +128,7 @@ func checkPDFXGolden(t *testing.T, path string, got []byte) {
 // TestPDFExtractEmptyPage extracts a one-page PDF that carries no recoverable text (only a
 // bordered empty box): extraction must not error and must produce (near-)empty output.
 //
-// Note: a truly whitespace-only body cannot be used here because ConvertHTMLToPDF emits a
+// Note: a truly whitespace-only body cannot be used here because html→pdf conversion emits a
 // zero-page PDF for it, which the parser then rejects with "document has no pages" (see the
 // caveat in the accompanying report). A vector-only page is a valid, parseable, text-free
 // document that exercises the same empty-extraction path.
@@ -137,16 +137,16 @@ func TestPDFExtractEmptyPage(t *testing.T) {
 		div{width:100px;height:60px;border:2px solid black}</style></head><body><div></div></body></html>`)
 
 	var md bytes.Buffer
-	if err := ConvertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &md, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertPDFToMarkdown on empty page: %v", err)
+	if err := convertPDFToMarkdown(context.Background(), bytes.NewReader(pdf), &md, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertPDFToMarkdown on empty page: %v", err)
 	}
 	if strings.TrimSpace(md.String()) != "" {
 		t.Errorf("empty page produced non-empty markdown: %q", md.String())
 	}
 
 	var html bytes.Buffer
-	if err := ConvertPDFToHTML(context.Background(), bytes.NewReader(pdf), &html, HTMLWriteOptions{}); err != nil {
-		t.Fatalf("ConvertPDFToHTML on empty page: %v", err)
+	if err := convertPDFToHTML(context.Background(), bytes.NewReader(pdf), &html, HTMLWriteOptions{}); err != nil {
+		t.Fatalf("convertPDFToHTML on empty page: %v", err)
 	}
 	// An empty document still emits scaffold, but must carry no body text.
 	if got := html.String(); strings.Contains(got, "<p>") || strings.Contains(got, "<table>") {
@@ -158,7 +158,7 @@ func TestPDFExtractEmptyPage(t *testing.T) {
 // parser), not panic.
 func TestConvertPDFToMarkdownInvalidPDF(t *testing.T) {
 	var out bytes.Buffer
-	err := ConvertPDFToMarkdown(context.Background(), strings.NewReader("this is not a PDF"), &out, MarkdownOptions{})
+	err := convertPDFToMarkdown(context.Background(), strings.NewReader("this is not a PDF"), &out, MarkdownOptions{})
 	if err == nil {
 		t.Fatal("expected an error for non-PDF input, got nil")
 	}

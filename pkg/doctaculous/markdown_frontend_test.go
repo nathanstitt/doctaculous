@@ -124,8 +124,8 @@ func TestMarkdownParityWithHTML(t *testing.T) {
 	if err := doc.WriteMarkdown(ctx, &fromMD, MarkdownOptions{}); err != nil {
 		t.Fatalf("WriteMarkdown: %v", err)
 	}
-	if err := ConvertHTMLToMarkdown(ctx, strings.NewReader(html), &fromHTML, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertHTMLToMarkdown: %v", err)
+	if err := convertHTMLToMarkdown(ctx, strings.NewReader(html), &fromHTML, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertHTMLToMarkdown: %v", err)
 	}
 	if fromMD.String() != fromHTML.String() {
 		t.Errorf("markdown/html parity broken:\n--- from md ---\n%s\n--- from html ---\n%s", fromMD.String(), fromHTML.String())

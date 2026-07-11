@@ -112,7 +112,7 @@ func TestPDFToCSVTableExtraction(t *testing.T) {
 	</table>
 	</body></html>`
 	var pdf bytes.Buffer
-	err := ConvertHTMLToPDF(context.Background(), strings.NewReader(tableHTML), &pdf, PDFOptions{BundledFonts: true})
+	err := convertHTMLToPDF(context.Background(), strings.NewReader(tableHTML), &pdf, PDFOptions{BundledFonts: true})
 	if err != nil {
 		t.Fatalf("build pdf: %v", err)
 	}

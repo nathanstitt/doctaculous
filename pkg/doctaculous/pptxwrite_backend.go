@@ -47,14 +47,3 @@ func (d *Document) WritePPTX(ctx context.Context, out io.Writer, opts PPTXOption
 	}
 	return nil
 }
-
-// ConvertHTMLToPPTX reads HTML from in, lays it out, and writes a .pptx to
-// out. It is a convenience wrapper over Convert.
-func ConvertHTMLToPPTX(ctx context.Context, in io.Reader, out io.Writer, opts PPTXOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From: FormatHTML,
-		To:   FormatPPTX,
-		PPTX: opts,
-		Logf: opts.Logf,
-	})
-}

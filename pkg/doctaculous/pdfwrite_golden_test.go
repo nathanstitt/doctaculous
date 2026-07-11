@@ -16,9 +16,9 @@ func TestConvertHTMLToPDFRoundTrips(t *testing.T) {
 <body><p>Hello PDF world</p></body></html>`
 
 	var buf bytes.Buffer
-	err := ConvertHTMLToPDF(context.Background(), bytes.NewReader([]byte(html)), &buf, PDFOptions{})
+	err := convertHTMLToPDF(context.Background(), bytes.NewReader([]byte(html)), &buf, PDFOptions{})
 	if err != nil {
-		t.Fatalf("ConvertHTMLToPDF: %v", err)
+		t.Fatalf("convertHTMLToPDF: %v", err)
 	}
 	doc, err := OpenBytes(buf.Bytes())
 	if err != nil {
@@ -36,8 +36,8 @@ func TestConvertHTMLToPDFEmbedsSearchableText(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>body{margin:0}</style></head>
 <body><p>Searchable</p></body></html>`
 	var buf bytes.Buffer
-	if err := ConvertHTMLToPDF(context.Background(), bytes.NewReader([]byte(html)), &buf, PDFOptions{}); err != nil {
-		t.Fatalf("ConvertHTMLToPDF: %v", err)
+	if err := convertHTMLToPDF(context.Background(), bytes.NewReader([]byte(html)), &buf, PDFOptions{}); err != nil {
+		t.Fatalf("convertHTMLToPDF: %v", err)
 	}
 	out := buf.Bytes()
 	if !bytes.Contains(out, []byte("/ToUnicode")) {
@@ -69,7 +69,7 @@ func TestWritePDFWorksForDOCX(t *testing.T) {
 func TestWritePDFRejectsNonReflowDocument(t *testing.T) {
 	// A minimal HTML->PDF, reopened as a PDF document, is not a reflow document.
 	var pdfBuf bytes.Buffer
-	if err := ConvertHTMLToPDF(context.Background(), bytes.NewReader([]byte("<p>x</p>")), &pdfBuf, PDFOptions{}); err != nil {
+	if err := convertHTMLToPDF(context.Background(), bytes.NewReader([]byte("<p>x</p>")), &pdfBuf, PDFOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	pdfDoc, err := OpenBytes(pdfBuf.Bytes())
@@ -92,8 +92,8 @@ func TestConvertHTMLToPDFPrintMedia(t *testing.T) {
 	</style></head><body><p>x</p></body></html>`
 	render := func(print bool) []byte {
 		var buf bytes.Buffer
-		if err := ConvertHTMLToPDF(context.Background(), bytes.NewReader([]byte(html)), &buf, PDFOptions{Print: print}); err != nil {
-			t.Fatalf("ConvertHTMLToPDF(print=%v): %v", print, err)
+		if err := convertHTMLToPDF(context.Background(), bytes.NewReader([]byte(html)), &buf, PDFOptions{Print: print}); err != nil {
+			t.Fatalf("convertHTMLToPDF(print=%v): %v", print, err)
 		}
 		return buf.Bytes()
 	}
@@ -116,7 +116,7 @@ func TestHTMLToPDFFidelity(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var pdfBuf bytes.Buffer
-			if err := ConvertHTMLToPDF(context.Background(), bytes.NewReader([]byte(tc.html)), &pdfBuf,
+			if err := convertHTMLToPDF(context.Background(), bytes.NewReader([]byte(tc.html)), &pdfBuf,
 				PDFOptions{PageWidthPt: 612, PageHeightPt: 792, MarginPt: 36}); err != nil {
 				t.Fatal(err)
 			}

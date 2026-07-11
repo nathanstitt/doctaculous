@@ -19,8 +19,8 @@ func TestConvertHTMLToMarkdown(t *testing.T) {
 		</table>
 	</body></html>`
 	var out bytes.Buffer
-	if err := ConvertHTMLToMarkdown(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertHTMLToMarkdown: %v", err)
+	if err := convertHTMLToMarkdown(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertHTMLToMarkdown: %v", err)
 	}
 	got := out.String()
 	for _, want := range []string{
@@ -40,8 +40,8 @@ func TestConvertHTMLToMarkdown(t *testing.T) {
 func TestConvertHTMLToText(t *testing.T) {
 	src := `<html><body><h1>Title</h1><p>Body <strong>word</strong>.</p></body></html>`
 	var out bytes.Buffer
-	if err := ConvertHTMLToText(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertHTMLToText: %v", err)
+	if err := convertHTMLToText(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("convertHTMLToText: %v", err)
 	}
 	got := out.String()
 	if strings.Contains(got, "#") || strings.Contains(got, "**") {

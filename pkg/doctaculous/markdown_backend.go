@@ -29,28 +29,6 @@ func (o MarkdownOptions) toWriterOptions() markdown.Options {
 	return markdown.Options{Plain: o.Plain, Logf: o.Logf}
 }
 
-// ConvertHTMLToMarkdown reads HTML from in, lays it out, and writes GitHub-Flavored
-// Markdown to out. Tables are emitted as GFM pipe tables (merged cells are expanded by
-// duplicating their content across every covered slot, so the table stays rectangular);
-// headings, lists, links, and emphasis map to their Markdown equivalents. Set
-// opts.Plain to write plain text instead. It is a convenience wrapper over Convert.
-func ConvertHTMLToMarkdown(ctx context.Context, in io.Reader, out io.Writer, opts MarkdownOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From:     FormatHTML,
-		To:       FormatMarkdown,
-		Markdown: opts,
-		Logf:     opts.Logf,
-	})
-}
-
-// ConvertHTMLToText is ConvertHTMLToMarkdown in plain-text mode (opts.Plain forced
-// true): it writes the document's text with structure preserved as whitespace, no
-// Markdown syntax.
-func ConvertHTMLToText(ctx context.Context, in io.Reader, out io.Writer, opts MarkdownOptions) error {
-	opts.Plain = true
-	return ConvertHTMLToMarkdown(ctx, in, out, opts)
-}
-
 // WriteMarkdown writes an opened reflow document (HTML or DOCX) to out as GitHub-
 // Flavored Markdown. It works on any document that can produce a cssbox tree: an opened
 // HTML or DOCX reflow document, or an opened PDF (whose logical structure is recovered by

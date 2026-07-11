@@ -46,14 +46,3 @@ func (d *Document) WriteEPUB(ctx context.Context, out io.Writer, opts EPUBOption
 	}
 	return nil
 }
-
-// ConvertHTMLToEPUB reads HTML from in, lays it out, and writes an .epub to
-// out. It is a convenience wrapper over Convert.
-func ConvertHTMLToEPUB(ctx context.Context, in io.Reader, out io.Writer, opts EPUBOptions) error {
-	return Convert(ctx, in, out, ConvertOptions{
-		From: FormatHTML,
-		To:   FormatEPUB,
-		EPUB: opts,
-		Logf: opts.Logf,
-	})
-}

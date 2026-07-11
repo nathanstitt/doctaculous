@@ -59,7 +59,7 @@ func matrixEPUB() []byte {
 func matrixPDF(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	err := ConvertHTMLToPDF(context.Background(), strings.NewReader(matrixHTML), &buf,
+	err := convertHTMLToPDF(context.Background(), strings.NewReader(matrixHTML), &buf,
 		PDFOptions{BundledFonts: true})
 	if err != nil {
 		t.Fatalf("build pdf fixture: %v", err)
@@ -375,40 +375,6 @@ func TestConvertFile(t *testing.T) {
 	err = ConvertFile(ctx, inPath, filepath.Join(dir, "out.html"), ConvertOptions{})
 	if !errors.Is(err, ErrSameFormat) {
 		t.Errorf("html->html: want ErrSameFormat, got %v", err)
-	}
-}
-
-// TestConvertShimEquivalence pins that the legacy one-shot wrappers produce
-// byte-identical output to the generic Convert call they now delegate to.
-func TestConvertShimEquivalence(t *testing.T) {
-	ctx := context.Background()
-
-	var viaShim, viaGeneric bytes.Buffer
-	if err := ConvertHTMLToMarkdown(ctx, strings.NewReader(matrixHTML), &viaShim, MarkdownOptions{}); err != nil {
-		t.Fatalf("ConvertHTMLToMarkdown: %v", err)
-	}
-	err := Convert(ctx, strings.NewReader(matrixHTML), &viaGeneric,
-		ConvertOptions{From: FormatHTML, To: FormatMarkdown})
-	if err != nil {
-		t.Fatalf("Convert: %v", err)
-	}
-	if !bytes.Equal(viaShim.Bytes(), viaGeneric.Bytes()) {
-		t.Errorf("ConvertHTMLToMarkdown diverges from the generic Convert")
-	}
-
-	pdfSrc := matrixPDF(t)
-	viaShim.Reset()
-	viaGeneric.Reset()
-	if err := ConvertPDFToHTML(ctx, bytes.NewReader(pdfSrc), &viaShim, HTMLWriteOptions{}); err != nil {
-		t.Fatalf("ConvertPDFToHTML: %v", err)
-	}
-	err = Convert(ctx, bytes.NewReader(pdfSrc), &viaGeneric,
-		ConvertOptions{From: FormatPDF, To: FormatHTML})
-	if err != nil {
-		t.Fatalf("Convert: %v", err)
-	}
-	if !bytes.Equal(viaShim.Bytes(), viaGeneric.Bytes()) {
-		t.Errorf("ConvertPDFToHTML diverges from the generic Convert")
 	}
 }
 
