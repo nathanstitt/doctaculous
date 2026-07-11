@@ -32,6 +32,8 @@ const (
 	destColorTbl
 	destFldInst
 	destPict
+	destStyleSheet
+	destPnText
 )
 
 // charState is the character formatting the group stack scopes.
@@ -48,6 +50,21 @@ type paraState struct {
 	leftTw, firstTw        int
 	spaceBeforeTw, afterTw int
 	inTable                bool
+	// styleNum is the \s paragraph style; the stylesheet name it resolves to
+	// carries block semantics (heading N, Quote, CodeBlock, HorizontalRule).
+	styleNum int
+	// outline is \outlinelevelN + 1 (0 = unset) — the heading fallback signal.
+	outline int
+	// listID/listLevel are the \ls list instance and \ilvl depth of a list
+	// paragraph.
+	listID, listLevel int
+}
+
+// listItem is one accumulated list paragraph awaiting assembly.
+type listItem struct {
+	level, id int
+	ordered   bool
+	html      string
 }
 
 // groupState is one {...} scope.
@@ -90,16 +107,27 @@ type converter struct {
 		r, g, b int
 		set     bool
 	}
+	// styles maps a \s style number to its stylesheet name.
+	styles    map[int]string
+	styleName strings.Builder
+	styleCur  int
+	// styleSkip marks a non-paragraph stylesheet entry (\cs/\ds/\ts).
+	styleSkip bool
 
 	logf func(string, ...any)
 
 	// Document accumulation.
 	blocks []string
 	runs   []*run
+	// List accumulation.
+	pnMarker  strings.Builder // the current paragraph's \pntext marker
+	listItems []listItem
 	// Table accumulation.
 	cellBlocks []string   // paragraphs of the current cell
 	rowCells   []string   // completed cells of the current row
 	tableRows  [][]string // completed rows
+	headerRows []bool     // parallel: \trhdr rows
+	rowHeader  bool       // the current row carries \trhdr
 	cellxTw    []int      // current row's cell right-edges
 
 	pict *pictCtx
@@ -123,9 +151,10 @@ func ToHTML(data []byte, logf func(string, ...any)) (string, error) {
 		logf = func(string, ...any) {}
 	}
 	c := &converter{
-		tz:    tokenizer{src: data},
-		fonts: map[int]string{},
-		logf:  logf,
+		tz:     tokenizer{src: data},
+		fonts:  map[int]string{},
+		styles: map[int]string{},
+		logf:   logf,
 	}
 	c.stack = []groupState{{ucSkip: 1, char: charState{colorIdx: -1, highlightIdx: -1, fontIdx: -1}}}
 	c.convert()
@@ -141,6 +170,7 @@ func (c *converter) convert() {
 		switch tok.kind {
 		case tokEOF:
 			c.flushParagraph()
+			c.flushList()
 			c.flushTable()
 			return
 		case tokGroupOpen:
@@ -173,6 +203,8 @@ func (c *converter) closeDestination(closing groupState) {
 	switch closing.dest {
 	case destFontTbl:
 		c.flushFontName()
+	case destStyleSheet:
+		c.flushStyleName()
 	case destColorTbl:
 		// entries flush on ';' as they appear
 	case destPict:
@@ -247,12 +279,20 @@ func (c *converter) control(tok token) {
 				t.char.href = url
 			}
 		}
-	case "stylesheet", "info", "header", "footer", "headerl", "headerr", "headerf",
+	case "info", "header", "footer", "headerl", "headerr", "headerf",
 		"footerl", "footerr", "footerf", "ftnsep", "ftnsepc", "aftnsep", "aftnsepc",
 		"listtable", "listoverridetable", "revtbl", "generator", "themedata",
 		"colorschememapping", "latentstyles", "datastore", "rsidtbl", "xmlnstbl",
-		"filetbl", "objdata", "listtext", "pntext":
+		"filetbl", "objdata":
 		t.dest = destSkip
+	case "stylesheet":
+		t.dest = destStyleSheet
+		c.styleSkip = false
+	case "pntext", "listtext":
+		// The list marker: captured (not skipped) — it tells a list paragraph's
+		// kind (bullet vs numbered).
+		t.dest = destPnText
+		c.pnMarker.Reset()
 
 	// Destination-specific controls.
 	case "f":
@@ -261,6 +301,19 @@ func (c *converter) control(tok token) {
 			c.fontCur = tok.param
 		} else {
 			t.char.fontIdx = tok.param
+		}
+	case "s":
+		if t.dest == destStyleSheet {
+			c.flushStyleName()
+			c.styleCur, c.styleSkip = tok.param, false
+		} else {
+			t.para.styleNum = tok.param
+		}
+	case "cs", "ds", "ts", "tsrowd":
+		if t.dest == destStyleSheet {
+			// A character/section/table style: not a paragraph-style entry.
+			c.flushStyleName()
+			c.styleSkip = true
 		}
 	case "red":
 		c.colorCur.r, c.colorCur.set = clamp255(tok.param), true
@@ -310,6 +363,12 @@ func (c *converter) control(tok token) {
 		t.para.spaceBeforeTw = tok.param
 	case "sa":
 		t.para.afterTw = tok.param
+	case "outlinelevel":
+		t.para.outline = tok.param + 1
+	case "ls":
+		t.para.listID = tok.param
+	case "ilvl":
+		t.para.listLevel = tok.param
 
 	// Character formatting.
 	case "plain":
@@ -336,6 +395,9 @@ func (c *converter) control(tok token) {
 		t.para.inTable = true
 	case "trowd":
 		c.cellxTw = nil
+		c.rowHeader = false
+	case "trhdr":
+		c.rowHeader = true
 	case "cellx":
 		c.cellxTw = append(c.cellxTw, tok.param)
 	case "cell":
@@ -412,6 +474,16 @@ func (c *converter) text(s string) {
 		return
 	case destFontTbl:
 		c.fontName.WriteString(s)
+	case destStyleSheet:
+		parts := strings.Split(s, ";")
+		for i, p := range parts {
+			c.styleName.WriteString(p)
+			if i < len(parts)-1 {
+				c.flushStyleName()
+			}
+		}
+	case destPnText:
+		c.pnMarker.WriteString(s)
 	case destColorTbl:
 		for range strings.Count(s, ";") {
 			c.flushColorEntry()
@@ -442,6 +514,15 @@ func dropSpace(r rune) rune {
 		return -1
 	}
 	return r
+}
+
+// flushStyleName finalizes a stylesheet entry.
+func (c *converter) flushStyleName() {
+	name := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(c.styleName.String()), ";"))
+	c.styleName.Reset()
+	if name != "" && !c.styleSkip {
+		c.styles[c.styleCur] = name
+	}
 }
 
 // flushFontName finalizes a font-table entry.
@@ -475,13 +556,21 @@ func clamp255(v int) int {
 	return v
 }
 
-// appendText adds escaped text to the current run.
+// appendText adds escaped text to the current run (or the pending list marker
+// when inside a \pntext group — \bullet and \tab route here too).
 func (c *converter) appendText(s string) {
+	if c.top().dest == destPnText {
+		c.pnMarker.WriteString(s)
+		return
+	}
 	c.appendRaw(html.EscapeString(s))
 }
 
 // appendRaw adds raw HTML to the current run, splitting runs on state change.
 func (c *converter) appendRaw(s string) {
+	if c.top().dest == destPnText {
+		return // markup has no meaning inside a marker
+	}
 	st := c.top().char
 	if len(c.runs) == 0 || c.runs[len(c.runs)-1].state != st {
 		c.runs = append(c.runs, &run{state: st})
@@ -489,25 +578,136 @@ func (c *converter) appendRaw(s string) {
 	c.runs[len(c.runs)-1].text.WriteString(s)
 }
 
-// flushParagraph closes the current paragraph into a block (or table cell).
+// flushParagraph closes the current paragraph into a block (or table cell, or
+// pending list item). The paragraph's stylesheet name is the block-semantics
+// carrier: "heading N" (with \outlinelevel as the styleless fallback), Quote,
+// CodeBlock, and HorizontalRule map to their HTML constructs — the same trick
+// the DOCX writer's paragraph styles play, so our own RTF output round-trips.
 func (c *converter) flushParagraph() {
 	para := c.top().para
 	inner := c.renderRuns()
 	c.runs = nil
-	if inner == "" && !para.inTable {
-		if para.inTable {
-			return
-		}
-		// An empty paragraph still occupies a line.
-		inner = ""
+	marker := strings.TrimSpace(c.pnMarker.String())
+	c.pnMarker.Reset()
+
+	if !para.inTable && (para.listID > 0 || marker != "") {
+		c.flushTable()
+		c.listItems = append(c.listItems, listItem{
+			level:   para.listLevel,
+			id:      para.listID,
+			ordered: markerIsOrdered(marker),
+			html:    inner,
+		})
+		return
 	}
-	block := "<p" + paraStyleAttr(para) + ">" + inner + "</p>"
+
+	style := strings.ToLower(strings.Join(strings.Fields(c.styles[para.styleNum]), " "))
+	var block string
+	switch style {
+	case "horizontalrule", "horizontal rule":
+		block = "<hr>"
+	case "codeblock", "html preformatted":
+		block = "<pre>" + strings.ReplaceAll(inner, "<br>", "\n") + "</pre>"
+	case "quote", "blockquote", "block quote", "intense quote":
+		block = "<blockquote><p" + paraStyleAttr(para) + ">" + inner + "</p></blockquote>"
+	default:
+		if n := headingOf(style, para.outline); n > 0 {
+			tag := fmt.Sprintf("h%d", n)
+			block = "<" + tag + paraStyleAttr(para) + ">" + inner + "</" + tag + ">"
+		} else {
+			// An empty paragraph still occupies a line.
+			block = "<p" + paraStyleAttr(para) + ">" + inner + "</p>"
+		}
+	}
 	if para.inTable {
 		c.cellBlocks = append(c.cellBlocks, block)
 		return
 	}
 	c.flushTable()
+	c.flushList()
 	c.blocks = append(c.blocks, block)
+}
+
+// headingOf resolves a paragraph's heading level: a "heading N" style name
+// wins, then the \outlinelevel signal; 0 = not a heading.
+func headingOf(styleName string, outline int) int {
+	if n, ok := strings.CutPrefix(styleName, "heading "); ok {
+		if lvl, err := strconv.Atoi(n); err == nil && lvl >= 1 {
+			return min(lvl, 6)
+		}
+	}
+	if outline >= 1 {
+		return min(outline, 6)
+	}
+	return 0
+}
+
+// markerIsOrdered reports whether a \pntext marker denotes a numbered item
+// ("1.", "iv)", "a.") rather than a bullet glyph.
+func markerIsOrdered(m string) bool {
+	if m == "" {
+		return false
+	}
+	if m[0] >= '0' && m[0] <= '9' {
+		return true
+	}
+	return len(m) >= 2 && (strings.HasSuffix(m, ".") || strings.HasSuffix(m, ")")) && isAlpha(m[0])
+}
+
+// flushList assembles the accumulated list paragraphs into nested <ul>/<ol>
+// blocks. Deeper items open a sublist inside the open <li>; a top-level item
+// from a different \ls instance starts a separate list (two adjacent lists
+// stay two lists).
+func (c *converter) flushList() {
+	if len(c.listItems) == 0 {
+		return
+	}
+	var sb strings.Builder
+	var stack []string
+	openLI := false
+	closeOne := func() {
+		if openLI {
+			sb.WriteString("</li>")
+		}
+		sb.WriteString("</" + stack[len(stack)-1] + ">")
+		stack = stack[:len(stack)-1]
+		openLI = len(stack) > 0
+	}
+	lastTopID := -1
+	for _, it := range c.listItems {
+		depth := it.level + 1
+		if it.level == 0 {
+			if len(stack) > 0 && it.id != lastTopID {
+				for len(stack) > 0 {
+					closeOne()
+				}
+			}
+			lastTopID = it.id
+		}
+		for len(stack) > depth {
+			closeOne()
+		}
+		if len(stack) == depth && openLI {
+			sb.WriteString("</li>")
+			openLI = false
+		}
+		for len(stack) < depth {
+			tag := "ul"
+			if it.ordered {
+				tag = "ol"
+			}
+			sb.WriteString("<" + tag + ">")
+			stack = append(stack, tag)
+			openLI = false
+		}
+		sb.WriteString("<li>" + it.html)
+		openLI = true
+	}
+	for len(stack) > 0 {
+		closeOne()
+	}
+	c.listItems = nil
+	c.blocks = append(c.blocks, sb.String())
 }
 
 // renderRuns emits the pending runs as styled spans.
@@ -526,15 +726,22 @@ func (c *converter) renderRuns() string {
 	return sb.String()
 }
 
-// runWrappers builds the open/close tags for a run's state.
+// runWrappers builds the open/close tags for a run's state. A monospace font
+// selection reads as inline code (<code>), the semantic our own writer emits
+// it for — other fonts stay a font-family span.
 func (c *converter) runWrappers(st charState) (string, string) {
 	var styles []string
+	code := false
 	if st.sizePt > 0 {
 		styles = append(styles, "font-size:"+trimPt(st.sizePt)+"pt")
 	}
 	if st.fontIdx >= 0 {
 		if name, ok := c.fonts[st.fontIdx]; ok {
-			styles = append(styles, "font-family:"+quoteFontFamily(name))
+			if isMonoFamily(name) {
+				code = true
+			} else {
+				styles = append(styles, "font-family:"+quoteFontFamily(name))
+			}
 		}
 	}
 	if rgb := c.colorAt(st.colorIdx); rgb != "" {
@@ -549,6 +756,9 @@ func (c *converter) runWrappers(st charState) (string, string) {
 	}
 	if len(styles) > 0 {
 		open.WriteString(`<span style="` + strings.Join(styles, ";") + `">`)
+	}
+	if code {
+		open.WriteString("<code>")
 	}
 	if st.bold {
 		open.WriteString("<b>")
@@ -574,6 +784,9 @@ func (c *converter) runWrappers(st charState) (string, string) {
 	if st.bold {
 		closer.WriteString("</b>")
 	}
+	if code {
+		closer.WriteString("</code>")
+	}
 	if len(styles) > 0 {
 		closer.WriteString("</span>")
 	}
@@ -594,6 +807,17 @@ func (c *converter) colorAt(idx int) string {
 // quoteFontFamily quotes a family name for CSS.
 func quoteFontFamily(name string) string {
 	return `'` + strings.ReplaceAll(name, `'`, "") + `'`
+}
+
+// isMonoFamily recognizes the common monospace family names.
+func isMonoFamily(name string) bool {
+	l := strings.ToLower(name)
+	for _, m := range []string{"courier", "consolas", "menlo", "monaco", "mono"} {
+		if strings.Contains(l, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // paraStyleAttr renders paragraph formatting as a style attribute.
@@ -638,26 +862,34 @@ func (c *converter) endRow() {
 		return
 	}
 	c.tableRows = append(c.tableRows, c.rowCells)
+	c.headerRows = append(c.headerRows, c.rowHeader)
 	c.rowCells = nil
+	c.rowHeader = false
 }
 
-// flushTable emits any accumulated table rows.
+// flushTable emits any accumulated table rows (\trhdr rows as header cells).
 func (c *converter) flushTable() {
 	if len(c.tableRows) == 0 {
 		return
 	}
+	c.flushList()
 	var sb strings.Builder
 	sb.WriteString(`<table style="border-collapse:collapse">`)
-	for _, row := range c.tableRows {
+	for i, row := range c.tableRows {
+		tag := "td"
+		if i < len(c.headerRows) && c.headerRows[i] {
+			tag = "th"
+		}
 		sb.WriteString("<tr>")
 		for _, cell := range row {
-			sb.WriteString(`<td style="border:1px solid #808080;padding:2pt 4pt">` + cell + "</td>")
+			sb.WriteString(`<` + tag + ` style="border:1px solid #808080;padding:2pt 4pt">` + cell + "</" + tag + ">")
 		}
 		sb.WriteString("</tr>")
 	}
 	sb.WriteString("</table>")
 	c.blocks = append(c.blocks, sb.String())
 	c.tableRows = nil
+	c.headerRows = nil
 }
 
 // flushPict emits an accumulated picture as a data-URI image.

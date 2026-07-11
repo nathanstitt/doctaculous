@@ -429,10 +429,25 @@ document model consumed externally by tinycld/text):
   escapes, hyperlink fields, `\trowd` tables, `\pngblip`/`\jpegblip` pictures (data: URIs;
   others logged + skipped), `\paperw`-family page geometry → `@page`; the RTF resilience rule
   (unknown words skipped, unknown `{\*}` destinations ignored) is the degrade story. Wiring:
-  `{\rtf` magic, `.rtf`, MIME rows flipped, input capability bit (output = F2). Landed with a
+  `{\rtf` magic, `.rtf`, MIME rows flipped, input capability bit. Landed with a
   cross-cutting engine fix: **data: image URIs decode without a resource loader**
   (`resource.LoadDataURL` short-circuits the image cache — the browser rule). `rtf-specimen`
   golden. `2026-07-10-rtf-input-design.md`.
+
+**RTF output** (`pkg/render/rtfwrite`, `WriteRTF`/`ConvertHTMLToRTF`, `convert ... out.rtf`):
+
+- Everything → .rtf — a cssbox STRUCTURE writer (boxwalk-based, the Markdown/DOCX shape) whose
+  mappings our own reader round-trips: block semantics on stylesheet names (`\sN` "heading N"
+  + `\outlinelevel`, Quote/CodeBlock/HorizontalRule — the reader now parses the stylesheet and
+  maps the names back, which also upgrades real Word files), lists on `\ls`/`\ilvl` + a literal
+  `\pntext` marker (reader now captures markers → nested `<ul>`/`<ol>`), inline code on the
+  monospace font (reader: mono font → `<code>`), HYPERLINK fields, `\trowd` tables with
+  `\trhdr` header rows (reader → `<th>`) and spans DUPLICATED into covered slots (the GFM
+  strategy — round-tripped grids match direct conversion), captions as a bold line, `\pict`
+  png/jpeg (data: URIs embed loaderless and round-trip byte-identically), `\uN?` escapes incl.
+  surrogate pairs. Deterministic. 17-case html→rtf→md ≡ html→md parity matrix + md/pdf loops +
+  `rtfout-basic` golden; RTF is in the convert matrix as input AND output.
+  `2026-07-10-rtf-output-design.md`.
 
 **PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx ...`):
 
