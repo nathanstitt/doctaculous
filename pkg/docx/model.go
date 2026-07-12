@@ -191,6 +191,9 @@ type Drawing struct {
 	AlignH string
 	// Description is the wp:docPr descr attribute (alt text), or "".
 	Description string
+	// Title is the wp:docPr title attribute, or "". Distinct from Description:
+	// Word exposes both a title and a longer description in the alt-text dialog.
+	Title string
 }
 
 // Table is a w:tbl: a column grid plus rows. Props carries table-level borders,
@@ -483,6 +486,10 @@ type RunProps struct {
 	// Highlight is the w:highlight color; HasHighlight marks it set.
 	Highlight    color.RGBA
 	HasHighlight bool
+	// HighlightName is the raw w:highlight val (e.g. "yellow", "darkGreen"), kept
+	// for the conversion path so a consumer can apply its own name→color palette
+	// instead of the resolved RGBA. "" when the highlight is unset.
+	HighlightName string
 	// Caps/SmallCaps are w:caps/w:smallCaps; Has* mark them set.
 	Caps, HasCaps           bool
 	SmallCaps, HasSmallCaps bool

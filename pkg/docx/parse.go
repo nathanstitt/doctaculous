@@ -367,12 +367,9 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 				doc.Section = sect
 				doc.Sections = append(doc.Sections, sect)
 			default:
-				blk, sect, err := parseBlockChild(dec, t)
+				sect, err := appendBlockChild(dec, t, &doc.Body)
 				if err != nil {
 					return err
-				}
-				if blk != nil {
-					doc.Body = append(doc.Body, *blk)
 				}
 				if sect != nil {
 					doc.Section = *sect
@@ -391,6 +388,11 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 // the body and by table cells. It returns the parsed block (nil for an element it
 // skips) and any sectPr found in a paragraph's pPr (a section boundary; nil in a
 // cell context). start is the already-read start element.
+//
+// A w:sdt (structured document tag / content control) is NOT handled here — it can
+// unwrap to multiple blocks, which this single-block signature can't express. Block
+// contexts route through appendBlockChild, which unwraps sdt; the few callers that
+// use parseBlockChild directly do so where sdt cannot appear.
 func parseBlockChild(dec *xml.Decoder, start xml.StartElement) (*Block, *SectionProps, error) {
 	switch start.Name.Local {
 	case "p":
@@ -413,6 +415,90 @@ func parseBlockChild(dec *xml.Decoder, start xml.StartElement) (*Block, *Section
 	}
 }
 
+// appendBlockChild parses one block-level start element and appends the resulting
+// block(s) to blocks, returning any section break the element carried. It differs
+// from parseBlockChild in one respect: a w:sdt (content control) is transparently
+// unwrapped — its w:sdtContent children are parsed as if they sat inline in the
+// parent, appending every inner block. This keeps content-control text/tables/lists
+// from being silently dropped. The last inner sectPr (if any) is returned.
+func appendBlockChild(dec *xml.Decoder, start xml.StartElement, blocks *[]Block) (*SectionProps, error) {
+	if start.Name.Local == "sdt" {
+		return parseSdtBlocks(dec, blocks)
+	}
+	blk, sect, err := parseBlockChild(dec, start)
+	if err != nil {
+		return nil, err
+	}
+	if blk != nil {
+		*blocks = append(*blocks, *blk)
+	}
+	return sect, nil
+}
+
+// parseSdtBlocks consumes a block-level w:sdt, unwrapping its w:sdtContent and
+// appending each inner block to blocks (transparently, as if the sdt wrapper were
+// absent). w:sdtPr / w:sdtEndPr and any other children are skipped. Returns the last
+// section break found among the inner blocks, if any.
+func parseSdtBlocks(dec *xml.Decoder, blocks *[]Block) (*SectionProps, error) {
+	var lastSect *SectionProps
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return lastSect, fmt.Errorf("%w: sdt: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "sdtContent" {
+				for {
+					ctok, cerr := dec.Token()
+					if cerr != nil {
+						return lastSect, fmt.Errorf("%w: sdtContent: %v", ErrMalformedXML, cerr)
+					}
+					switch ct := ctok.(type) {
+					case xml.StartElement:
+						if ct.Name.Space != wNS {
+							if err := dec.Skip(); err != nil {
+								return lastSect, fmt.Errorf("%w: sdtContent: %v", ErrMalformedXML, err)
+							}
+							continue
+						}
+						// Nested sdt unwraps recursively via appendBlockChild.
+						sect, aerr := appendBlockChild(dec, ct, blocks)
+						if aerr != nil {
+							return lastSect, aerr
+						}
+						if sect != nil {
+							lastSect = sect
+						}
+					case xml.EndElement:
+						if ct.Name.Local == "sdtContent" {
+							goto drainSdt
+						}
+					}
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return lastSect, fmt.Errorf("%w: sdt: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "sdt" {
+				return lastSect, nil
+			}
+		}
+	}
+drainSdt:
+	// sdtContent closed; consume up to the sdt end.
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return lastSect, fmt.Errorf("%w: sdt: %v", ErrMalformedXML, err)
+		}
+		if end, ok := tok.(xml.EndElement); ok && end.Name.Local == "sdt" {
+			return lastSect, nil
+		}
+	}
+}
+
 // fillBlocksUntil consumes block content until the named end element, appending
 // to blocks. It is the shared block-consumption loop for the header/footer and
 // footnote part parsers (both wrap a run of w:body-grammar blocks in a single
@@ -431,12 +517,8 @@ func fillBlocksUntil(dec *xml.Decoder, end string, blocks *[]Block) error {
 				}
 				continue
 			}
-			blk, _, err := parseBlockChild(dec, t)
-			if err != nil {
+			if _, err := appendBlockChild(dec, t, blocks); err != nil {
 				return err
-			}
-			if blk != nil {
-				*blocks = append(*blocks, *blk)
 			}
 		case xml.EndElement:
 			if t.Name.Local == end {
@@ -534,11 +616,76 @@ func parseParaChild(dec *xml.Decoder, t xml.StartElement) ([]ParaChild, error) {
 			return nil, fmt.Errorf("%w: commentRangeEnd: %v", ErrMalformedXML, err)
 		}
 		return []ParaChild{{CommentEnd: &CommentMark{ID: id}}}, nil
+	case "sdt":
+		// Inline content control: transparently unwrap w:sdtContent's inline
+		// children (runs, hyperlinks, nested revisions) as if the wrapper were
+		// absent, so the run text is preserved rather than dropped.
+		return parseInlineSdt(dec)
 	default:
 		if err := dec.Skip(); err != nil {
 			return nil, fmt.Errorf("%w: p: %v", ErrMalformedXML, err)
 		}
 		return nil, nil
+	}
+}
+
+// parseInlineSdt consumes an inline-level w:sdt inside a paragraph, returning the
+// flattened inline children of its w:sdtContent (recursing through parseParaChild,
+// so nested sdt/runs/hyperlinks all unwrap). Non-content children (w:sdtPr) are
+// skipped.
+func parseInlineSdt(dec *xml.Decoder) ([]ParaChild, error) {
+	var out []ParaChild
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return out, fmt.Errorf("%w: sdt: %v", ErrMalformedXML, err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Space == wNS && t.Name.Local == "sdtContent" {
+				for {
+					ctok, cerr := dec.Token()
+					if cerr != nil {
+						return out, fmt.Errorf("%w: sdtContent: %v", ErrMalformedXML, cerr)
+					}
+					switch ct := ctok.(type) {
+					case xml.StartElement:
+						if ct.Name.Space != wNS {
+							if err := dec.Skip(); err != nil {
+								return out, fmt.Errorf("%w: sdtContent: %v", ErrMalformedXML, err)
+							}
+							continue
+						}
+						children, perr := parseParaChild(dec, ct)
+						if perr != nil {
+							return out, perr
+						}
+						out = append(out, children...)
+					case xml.EndElement:
+						if ct.Name.Local == "sdtContent" {
+							goto drainInlineSdt
+						}
+					}
+				}
+			}
+			if err := dec.Skip(); err != nil {
+				return out, fmt.Errorf("%w: sdt: %v", ErrMalformedXML, err)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "sdt" {
+				return out, nil
+			}
+		}
+	}
+drainInlineSdt:
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return out, fmt.Errorf("%w: sdt: %v", ErrMalformedXML, err)
+		}
+		if end, ok := tok.(xml.EndElement); ok && end.Name.Local == "sdt" {
+			return out, nil
+		}
 	}
 }
 
@@ -961,6 +1108,9 @@ func parseDrawing(dec *xml.Decoder) (*Drawing, error) {
 				if v, ok := wAttr(t, "descr"); ok {
 					dr.Description = v
 				}
+				if v, ok := wAttr(t, "title"); ok {
+					dr.Title = v
+				}
 			case "wrapSquare":
 				dr.WrapKind = "square"
 			case "wrapTopAndBottom":
@@ -1186,10 +1336,13 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 		props.Italic = parseOnOff(wVal(e))
 		props.HasItalic = true
 	case "u":
+		// A present w:u enables underline unless val="none"/"off". An absent
+		// val defaults to "single" (Word writes a bare <w:u w:color=.../> to
+		// mean single underline), so only an explicit off value disables it.
 		val := wVal(e)
-		props.Underline = val != "none" && val != ""
+		props.Underline = val != "none" && val != "off"
 		props.HasUnderline = true
-		if val != "" && val != "none" {
+		if val != "" && val != "none" && val != "off" {
 			props.UnderlineStyle = val
 		}
 		if c, ok := parseColor(wColor(e)); ok {
@@ -1230,6 +1383,7 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 		if c, ok := highlightColor(wVal(e)); ok {
 			props.Highlight = c
 			props.HasHighlight = true
+			props.HighlightName = wVal(e)
 		}
 	case "caps":
 		props.Caps = parseOnOff(wVal(e))
@@ -1405,12 +1559,8 @@ func parseTc(dec *xml.Decoder) (TableCell, error) {
 					return cell, err
 				}
 			default:
-				blk, _, err := parseBlockChild(dec, t)
-				if err != nil {
+				if _, err := appendBlockChild(dec, t, &cell.Blocks); err != nil {
 					return cell, err
-				}
-				if blk != nil {
-					cell.Blocks = append(cell.Blocks, *blk)
 				}
 			}
 		case xml.EndElement:
