@@ -140,11 +140,17 @@ func (dw *docWriter) writeHyperlink(sb *strings.Builder, h *Hyperlink, inDelete 
 // omitted — the parser drops such runs, so emitting one would break the
 // round-trip fixed point.
 func (dw *docWriter) writeRun(sb *strings.Builder, r *Run, inDelete bool) error {
-	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && !r.hasCommentRef() {
+	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && !r.hasCommentRef() && r.NoteSep == NoteSepNone {
 		return nil
 	}
 	sb.WriteString("<w:r>")
 	writeRPr(sb, r.Props)
+	switch r.NoteSep {
+	case NoteSepSeparator:
+		sb.WriteString("<w:separator/>")
+	case NoteSepContinuation:
+		sb.WriteString("<w:continuationSeparator/>")
+	}
 	if r.Text != "" {
 		writeRunText(sb, r.Text, inDelete)
 	}

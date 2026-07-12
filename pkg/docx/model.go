@@ -334,7 +334,24 @@ type Run struct {
 	// Document.Comments.
 	CommentRef    int
 	HasCommentRef bool
+	// NoteSep marks a run inside a footnotes/endnotes part's reserved separator
+	// notes (ids -1 and 0): it carries a <w:separator/> or <w:continuationSeparator/>
+	// element instead of text. NoteSepNone for ordinary runs.
+	NoteSep NoteSepKind
 }
+
+// NoteSepKind classifies the separator element a reserved footnote/endnote run
+// carries.
+type NoteSepKind int
+
+const (
+	// NoteSepNone is an ordinary run (no separator element).
+	NoteSepNone NoteSepKind = iota
+	// NoteSepSeparator is a <w:separator/> run (footnote separator, id -1).
+	NoteSepSeparator
+	// NoteSepContinuation is a <w:continuationSeparator/> run (id 0).
+	NoteSepContinuation
+)
 
 // BreakKind classifies a w:br inside a run.
 type BreakKind int

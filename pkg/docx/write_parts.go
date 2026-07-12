@@ -212,6 +212,11 @@ func DefaultStyles() *Styles {
 			Style: "single", SizeEighthPt: 6, Color: rgb(0xD8, 0xDE, 0xE4), HasColor: true}}}})
 	add(&Style{ID: "CodeChar", Name: "Code Char", Type: "character",
 		Run: RunProps{Family: "Courier New"}})
+	// VerbatimChar is the pandoc/HTML-export inline-code character style. It is a
+	// synonym of CodeChar kept under the name other tools (and tinycld) recognize
+	// on read, so an inline-code run round-trips its semantic.
+	add(&Style{ID: "VerbatimChar", Name: "Verbatim Char", Type: "character",
+		Run: RunProps{Family: "Courier New"}})
 	add(&Style{ID: "Hyperlink", Name: "Hyperlink", Type: "character",
 		Run: RunProps{Color: rgb(0x05, 0x63, 0xC1), HasColor: true, Underline: true, HasUnderline: true, UnderlineStyle: "single"}})
 	return st

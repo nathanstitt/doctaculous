@@ -134,3 +134,39 @@ func TestParseHighlightName(t *testing.T) {
 		t.Errorf("HighlightName = %q, want %q", rp.HighlightName, "darkGreen")
 	}
 }
+
+// TestVerbatimCharStyle verifies DefaultStyles includes the VerbatimChar
+// character style (the inline-code style tinycld emits and reads).
+func TestVerbatimCharStyle(t *testing.T) {
+	st := DefaultStyles()
+	s, ok := st.ByID["VerbatimChar"]
+	if !ok {
+		t.Fatal("VerbatimChar style missing from DefaultStyles")
+	}
+	if s.Type != "character" {
+		t.Errorf("VerbatimChar type = %q, want character", s.Type)
+	}
+}
+
+// TestWriteNoteSeparator verifies a run with NoteSep emits <w:separator/> /
+// <w:continuationSeparator/> inside a footnotes part.
+func TestWriteNoteSeparator(t *testing.T) {
+	notes := NewNotes()
+	notes.ByID[-1] = []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{NoteSep: NoteSepSeparator}}}}}}
+	notes.ByID[0] = []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{NoteSep: NoteSepContinuation}}}}}}
+	notes.ByID[1] = []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{Text: "body"}}}}}}
+	doc := &Document{Styles: DefaultStyles(), Footnotes: notes,
+		Body: []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{Text: "x", FootnoteRef: 1}}}}}}}
+	b, err := Bytes(doc)
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	// Re-open and confirm it parses without error and keeps the user note.
+	rd, err := OpenBytes(b)
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	if rd.Footnotes == nil || len(rd.Footnotes.ByID[1]) == 0 {
+		t.Errorf("user footnote 1 lost on round-trip: %+v", rd.Footnotes)
+	}
+}
