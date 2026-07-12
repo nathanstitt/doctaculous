@@ -1,6 +1,6 @@
 module github.com/nathanstitt/doctaculous
 
-go 1.26.3
+go 1.25.0
 
 require (
 	github.com/adrg/sysfont v0.1.2
