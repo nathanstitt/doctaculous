@@ -136,15 +136,21 @@ func (dw *docWriter) writeHyperlink(sb *strings.Builder, h *Hyperlink, inDelete 
 	return nil
 }
 
-// writeRun renders a w:r. A run with no content (text, break, or reference) is
-// omitted — the parser drops such runs, so emitting one would break the
-// round-trip fixed point.
+// writeRun renders a w:r. A run with no content (text, break, reference, or note
+// separator) is omitted — the parser drops such runs, so emitting one would break
+// the round-trip fixed point.
 func (dw *docWriter) writeRun(sb *strings.Builder, r *Run, inDelete bool) error {
-	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && !r.hasCommentRef() {
+	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && !r.hasCommentRef() && r.NoteSep == NoteSepNone {
 		return nil
 	}
 	sb.WriteString("<w:r>")
 	writeRPr(sb, r.Props)
+	switch r.NoteSep {
+	case NoteSepSeparator:
+		sb.WriteString("<w:separator/>")
+	case NoteSepContinuation:
+		sb.WriteString("<w:continuationSeparator/>")
+	}
 	if r.Text != "" {
 		writeRunText(sb, r.Text, inDelete)
 	}
@@ -224,7 +230,13 @@ func writeRPrDepth(sb *strings.Builder, p RunProps, withChange bool) {
 		b.WriteString(`<w:sz w:val="` + strconv.Itoa(p.SizeHalfPts) + `"/>`)
 	}
 	if p.HasHighlight {
-		if name, ok := highlightName(p.Highlight); ok {
+		// Prefer the parsed name (round-trips the exact token, e.g. "darkGray"), but
+		// only if it is a valid ST_HighlightColor — a consumer-supplied name outside
+		// the palette (e.g. a hex color) would produce an invalid w:highlight, so fall
+		// back to remapping the resolved RGBA to a palette name for hand-built docs.
+		if isHighlightName(p.HighlightName) {
+			b.WriteString(`<w:highlight w:val="` + escXMLAttr.Replace(p.HighlightName) + `"/>`)
+		} else if name, ok := highlightName(p.Highlight); ok {
 			b.WriteString(`<w:highlight w:val="` + name + `"/>`)
 		}
 	}
@@ -493,6 +505,10 @@ func (dw *docWriter) writeDrawingRun(sb *strings.Builder, dr *Drawing) error {
 	id := dw.drawings
 	name := escXMLAttr.Replace(fmt.Sprintf("Picture %d", id))
 	desc := escXMLAttr.Replace(dr.Description)
+	titleAttr := ""
+	if dr.Title != "" {
+		titleAttr = fmt.Sprintf(` title="%s"`, escXMLAttr.Replace(dr.Title))
+	}
 
 	sb.WriteString("<w:r><w:drawing>")
 	if dr.Anchored {
@@ -517,11 +533,11 @@ func (dw *docWriter) writeDrawingRun(sb *strings.Builder, dr *Drawing) error {
 		default: // "square" (and unset degrades to square — the common wrap)
 			sb.WriteString(`<wp:wrapSquare wrapText="bothSides"/>`)
 		}
-		fmt.Fprintf(sb, `<wp:docPr id="%d" name="%s" descr="%s"/>`, id, name, desc)
+		fmt.Fprintf(sb, `<wp:docPr id="%d" name="%s" descr="%s"%s/>`, id, name, desc, titleAttr)
 	} else {
 		sb.WriteString(`<wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">`)
 		fmt.Fprintf(sb, `<wp:extent cx="%d" cy="%d"/>`, dr.WidthEMU, dr.HeightEMU)
-		fmt.Fprintf(sb, `<wp:docPr id="%d" name="%s" descr="%s"/>`, id, name, desc)
+		fmt.Fprintf(sb, `<wp:docPr id="%d" name="%s" descr="%s"%s/>`, id, name, desc, titleAttr)
 	}
 	relID := escXMLAttr.Replace(dr.RelID)
 	fmt.Fprintf(sb, `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">`+

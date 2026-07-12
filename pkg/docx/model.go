@@ -191,6 +191,9 @@ type Drawing struct {
 	AlignH string
 	// Description is the wp:docPr descr attribute (alt text), or "".
 	Description string
+	// Title is the wp:docPr title attribute, or "". Distinct from Description:
+	// Word exposes both a title and a longer description in the alt-text dialog.
+	Title string
 }
 
 // Table is a w:tbl: a column grid plus rows. Props carries table-level borders,
@@ -331,7 +334,24 @@ type Run struct {
 	// Document.Comments.
 	CommentRef    int
 	HasCommentRef bool
+	// NoteSep marks a run inside a footnotes/endnotes part's reserved separator
+	// notes (ids -1 and 0): it carries a <w:separator/> or <w:continuationSeparator/>
+	// element instead of text. NoteSepNone for ordinary runs.
+	NoteSep NoteSepKind
 }
+
+// NoteSepKind classifies the separator element a reserved footnote/endnote run
+// carries.
+type NoteSepKind int
+
+const (
+	// NoteSepNone is an ordinary run (no separator element).
+	NoteSepNone NoteSepKind = iota
+	// NoteSepSeparator is a <w:separator/> run (footnote separator, id -1).
+	NoteSepSeparator
+	// NoteSepContinuation is a <w:continuationSeparator/> run (id 0).
+	NoteSepContinuation
+)
 
 // BreakKind classifies a w:br inside a run.
 type BreakKind int
@@ -483,6 +503,10 @@ type RunProps struct {
 	// Highlight is the w:highlight color; HasHighlight marks it set.
 	Highlight    color.RGBA
 	HasHighlight bool
+	// HighlightName is the raw w:highlight val (e.g. "yellow", "darkGreen"), kept
+	// for the conversion path so a consumer can apply its own name→color palette
+	// instead of the resolved RGBA. "" when the highlight is unset.
+	HighlightName string
 	// Caps/SmallCaps are w:caps/w:smallCaps; Has* mark them set.
 	Caps, HasCaps           bool
 	SmallCaps, HasSmallCaps bool

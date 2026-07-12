@@ -166,7 +166,7 @@ var modelCore = []modelFixture{
 			textRun("underlined", RunProps{Underline: true, HasUnderline: true, UnderlineStyle: "double",
 				UnderlineColor: rgba(0, 0x80, 0), HasUnderlineColor: true}),
 			textRun("no-underline", RunProps{Underline: false, HasUnderline: true}),
-			textRun("marked", RunProps{Highlight: rgba(0xFF, 0xFF, 0), HasHighlight: true,
+			textRun("marked", RunProps{Highlight: rgba(0xFF, 0xFF, 0), HasHighlight: true, HighlightName: "yellow",
 				Shd: Shading{Fill: rgba(0xEE, 0xEE, 0xEE), HasFill: true}, VertAlign: VertAlignSuperscript}),
 		)}}
 	}},

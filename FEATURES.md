@@ -457,6 +457,25 @@ out-of-scope note):
   LibreOffice number comments from 0 — now `HasCommentRef`), and a bare `<w:ilvl>` without
   `numId` (Word's own Subtitle style) was dropped on write.
 
+**DOCX model — content controls, drawing title, note separators** (`pkg/docx`, additive
+read+write vocabulary for the tinycld text adoption path):
+
+- **`w:sdt` content controls unwrapped** — block, inline, and nested structured-document-tag
+  wrappers have their `w:sdtContent` parsed transparently (as if the wrapper were absent) so the
+  inner text/tables/lists survive parsing instead of being silently dropped. Empty/unbound
+  controls drain cleanly and contribute nothing.
+- **`Drawing.Title`** — `wp:docPr@title` parsed/written, distinct from `@descr`/`Description`
+  (Word's alt-text dialog exposes both).
+- **`RunProps.HighlightName`** — the raw `w:highlight` name (e.g. `darkGreen`) preserved so a
+  consumer can apply its own palette; the writer prefers it over remapping the resolved RGBA.
+- **`VerbatimChar`** character style in `DefaultStyles` (the pandoc/HTML-export inline-code
+  synonym of `CodeChar` other tools recognize on read).
+- **`Run.NoteSep`** — the reserved footnote/endnote separator notes (ids -1/0) round-trip:
+  `<w:separator/>` / `<w:continuationSeparator/>` write AND parse back, so a content-less
+  separator run is a Parse∘Write fixed point rather than being culled.
+- **val-less `<w:u>` fix** — a bare `<w:u w:color=.../>` (Word's shorthand for single underline)
+  now reads as underline-ON; it was previously read as underline-off.
+
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
