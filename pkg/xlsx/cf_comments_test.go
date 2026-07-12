@@ -161,6 +161,65 @@ func TestCFSetAuthoritative(t *testing.T) {
 	}
 }
 
+// TestCFRawWithStyleMintsDxf pins the legacy-upgrade shape: a Raw rule with
+// Style set gets a freshly minted dxf and its dxfId stamped onto the raw
+// element, while a Raw rule without Style keeps its embedded dxfId verbatim.
+func TestCFRawWithStyleMintsDxf(t *testing.T) {
+	f, err := Edit(cfFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, err := f.Sheet("CF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := sh.ConditionalFormats()
+	typedRaw := existing[0].Rules[0].Raw // carries dxfId="0" (bold/9C0006)
+
+	next := []ConditionalFormatting{
+		// Verbatim: the embedded dxfId="0" must survive untouched.
+		{Ranges: []string{"A1:A9"}, Rules: []CFRule{{Raw: typedRaw}}},
+		// Raw body synthesized by a caller (no dxfId), Style supplies the dxf.
+		{Ranges: []string{"B1:B9"}, Rules: []CFRule{{
+			Raw:   []byte(`<cfRule type="duplicateValues"/>`),
+			Style: &Style{Font: Font{Italic: true}, Fill: Fill{Bg: Color{RGB: "FFEB9C"}}},
+		}}},
+	}
+	if err := sh.SetConditionalFormats(next); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wb, err := OpenBytes(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfs := wb.Sheets[0].CondFmts
+	if len(cfs) != 2 {
+		t.Fatalf("blocks = %d, want 2", len(cfs))
+	}
+	verbatim := cfs[0].Rules[0]
+	if verbatim.Style == nil || !verbatim.Style.Font.Bold || verbatim.Style.Font.Color.RGB != "9C0006" {
+		t.Errorf("verbatim Raw rule lost its original dxf: %+v", verbatim.Style)
+	}
+	if !bytes.Contains(verbatim.Raw, []byte(`dxfId="0"`)) {
+		t.Errorf("verbatim Raw rule's embedded dxfId changed:\n%s", verbatim.Raw)
+	}
+	minted := cfs[1].Rules[0]
+	if minted.Type != "duplicateValues" {
+		t.Errorf("minted rule type = %q", minted.Type)
+	}
+	if minted.Style == nil || !minted.Style.Font.Italic || minted.Style.Fill.Bg.RGB != "FFEB9C" {
+		t.Errorf("Raw+Style did not mint a resolvable dxf: %+v", minted.Style)
+	}
+	if !bytes.Contains(minted.Raw, []byte(`dxfId="1"`)) {
+		t.Errorf("minted rule missing appended dxfId:\n%s", minted.Raw)
+	}
+}
+
 // TestCommentsRoundTrip pins notes end to end: set on a fresh workbook
 // (creating the comments part, VML, rels, and content types), read back
 // through both the editor and the Workbook reader, replace, and remove.

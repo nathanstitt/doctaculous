@@ -57,6 +57,31 @@ func (e *Element) Attr(key string) (string, bool) {
 	return v, ok
 }
 
+// SiblingIndex returns e's 1-based position among its parent's element children
+// (from the start and from the end), plus the same restricted to siblings with
+// e's tag. Implements css.SiblingIndexer, enabling the structural pseudo-classes.
+// The root element counts as the first and only child.
+func (e *Element) SiblingIndex() (pos, last, typePos, typeLast int) {
+	if e.parent == nil {
+		return 1, 1, 1, 1
+	}
+	total, typeTotal := 0, 0
+	for _, c := range e.parent.children {
+		el, ok := c.(*Element)
+		if !ok {
+			continue
+		}
+		total++
+		if el.tag == e.tag {
+			typeTotal++
+		}
+		if el == e {
+			pos, typePos = total, typeTotal
+		}
+	}
+	return pos, total - pos + 1, typePos, typeTotal - typePos + 1
+}
+
 // Text is an owned character-data node. Data is exported directly (no accessor)
 // because Text is a simple value carrier: it has no interface contract and box
 // generation reads it as a plain string.

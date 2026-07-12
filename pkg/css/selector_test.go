@@ -154,8 +154,9 @@ func TestPseudoClassParsing(t *testing.T) {
 	if s := parseSelectorList("*:link"); len(s) != 1 || s[0].Specificity() != (Specificity{0, 1, 0}) {
 		t.Errorf("*:link = %v specificity %v, want {0 1 0}", s, s[0].Specificity())
 	}
-	// Pseudo-elements and functional pseudos drop the selector.
-	for _, dropped := range []string{"div::before", "p:before", "a:not(.x)", "li:nth-child(2)", "a:"} {
+	// Pseudo-elements and unsupported functional pseudos drop the selector (the
+	// structural :nth-*() family is supported — see selector_structural_test.go).
+	for _, dropped := range []string{"div::before", "p:before", "a:not(.x)", "li:is(a)", "a:"} {
 		if s := parseSelectorList(dropped); len(s) != 0 {
 			t.Errorf("%q should be dropped, got %d selectors", dropped, len(s))
 		}

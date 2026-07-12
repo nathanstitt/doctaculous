@@ -349,7 +349,16 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	frag.Box = b
 	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
 	if len(in.collapsedBorders) > 0 {
+		// The collapsed grid strips were built from the interior's cell fragments —
+		// page-space X but the local content-top-0 Y frame (like in.children). Shift
+		// their Y into page space exactly as the children were shifted above; without
+		// this the grid paints marginTop+borderTop+paddingTop too high (invisible only
+		// when all three are zero — a table with margin-top drew its grid in the
+		// margin band).
 		frag.Collapsed = in.collapsedBorders
+		for i := range frag.Collapsed {
+			frag.Collapsed[i].YPt += contentTopY + leadingGap
+		}
 	}
 	frag.Border[layout.EdgeTop] = BorderEdge{Width: ed.bT, Color: b.Style.BorderTopColor, Style: mapBorderStyle(b.Style.BorderTopStyle)}
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}

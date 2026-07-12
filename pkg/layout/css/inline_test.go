@@ -686,3 +686,50 @@ func TestTextIndentNegativeHanging(t *testing.T) {
 		t.Errorf("hanging indent = %v, want 20", d)
 	}
 }
+
+// TestInlineBrForcesLineBreak: <br> lowers to a preserved-newline leaf and must
+// split the paragraph onto two lines even in a wide viewport, with the second
+// line's baseline strictly below the first (CSS "forced line break").
+func TestInlineBrForcesLineBreak(t *testing.T) {
+	p := layoutOne(t, reset+`<p>alpha<br>beta</p>`, 1000)
+	if len(p.Lines) != 2 {
+		t.Fatalf("paragraph lines = %d, want 2 (br must force a break)", len(p.Lines))
+	}
+	if p.Lines[1].BaselineY <= p.Lines[0].BaselineY {
+		t.Errorf("second baseline %v not below first %v", p.Lines[1].BaselineY, p.Lines[0].BaselineY)
+	}
+	// The break itself contributes no ink: both lines carry glyphs.
+	for i, ln := range p.Lines {
+		if len(ln.Glyphs) == 0 {
+			t.Errorf("line %d has no glyphs", i)
+		}
+	}
+}
+
+// TestInlineBrInsideFlexItem: the same forced break must survive inside a flex
+// item's inline content (the htmldoc masthead tagline regression — the break was
+// previously collapsed away by the parent-keyed whitespace pass).
+func TestInlineBrInsideFlexItem(t *testing.T) {
+	flexbox := layoutOne(t, reset+`<div style="display:flex"><p>alpha<br>beta</p></div>`, 1000)
+	var lined *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if lined != nil {
+			return
+		}
+		if len(f.Lines) > 0 {
+			lined = f
+			return
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(flexbox)
+	if lined == nil {
+		t.Fatal("no line-bearing fragment found under the flex container")
+	}
+	if len(lined.Lines) != 2 {
+		t.Fatalf("flex-item paragraph lines = %d, want 2 (br must force a break)", len(lined.Lines))
+	}
+}

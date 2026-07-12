@@ -35,6 +35,13 @@ Image output writes one page by default, or many with
 `--max-width`/`--max-height` produce fit-within thumbnails without knowing page
 sizes up front.
 
+**Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
+rendering specimen — one document exercising every implemented HTML/CSS/image
+slice — and [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
+is the PDF `doctaculous convert` typesets from it: 15 Letter pages with running
+headers, page counters, a WOFF2 script wordmark, floats, flexbox, grid, and
+tables — all selectable text.
+
 ## Quick start
 
 ```sh

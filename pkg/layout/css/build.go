@@ -183,6 +183,15 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running 
 		b.ColSpan = attrSpan(e, "span")
 	}
 
+	// <br> forces a line break. It lowers to a preserved-newline text leaf (the
+	// IFC hard-break mechanism, the same lowering the DOCX frontend uses for
+	// w:br); the element is empty by definition, so no children are walked.
+	if e.Tag() == "br" {
+		t := makeTextBox("\n", cs)
+		t.Style.WhiteSpace = "pre-line"
+		return t
+	}
+
 	if kind, skip := classifyControl(e.Tag(), elemAttrs(e)); kind != cssbox.CtrlNone || skip {
 		if skip {
 			return nil // <input type=hidden>: no box
