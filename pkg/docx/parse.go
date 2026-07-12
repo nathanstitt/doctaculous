@@ -1058,6 +1058,19 @@ func parseRun(dec *xml.Decoder) ([]Run, []*Drawing, error) {
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
 				}
+			case "separator", "continuationSeparator":
+				// The two reserved separator notes (footnote/endnote ids -1 and 0)
+				// carry a <w:separator/> / <w:continuationSeparator/> in place of text.
+				// Round-tripping it keeps writeRun from culling the now-content-less run.
+				flushText()
+				kind := NoteSepSeparator
+				if t.Name.Local == "continuationSeparator" {
+					kind = NoteSepContinuation
+				}
+				out = append(out, Run{Props: props, NoteSep: kind})
+				if err := dec.Skip(); err != nil {
+					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
+				}
 			default:
 				if err := dec.Skip(); err != nil {
 					return nil, nil, fmt.Errorf("%w: r: %v", ErrMalformedXML, err)
@@ -1398,26 +1411,40 @@ func applyRPrChild(props *RunProps, e xml.StartElement) {
 
 // highlightColor maps a w:highlight named color to an RGBA. Unknown names yield
 // ok=false. These are the 16 WordprocessingML highlight names.
-func highlightColor(name string) (color.RGBA, bool) {
-	m := map[string]color.RGBA{
-		"yellow":      {R: 0xFF, G: 0xFF, B: 0x00, A: 0xFF},
-		"green":       {R: 0x00, G: 0xFF, B: 0x00, A: 0xFF},
-		"cyan":        {R: 0x00, G: 0xFF, B: 0xFF, A: 0xFF},
-		"magenta":     {R: 0xFF, G: 0x00, B: 0xFF, A: 0xFF},
-		"blue":        {R: 0x00, G: 0x00, B: 0xFF, A: 0xFF},
-		"red":         {R: 0xFF, G: 0x00, B: 0x00, A: 0xFF},
-		"darkBlue":    {R: 0x00, G: 0x00, B: 0x8B, A: 0xFF},
-		"darkCyan":    {R: 0x00, G: 0x8B, B: 0x8B, A: 0xFF},
-		"darkGreen":   {R: 0x00, G: 0x64, B: 0x00, A: 0xFF},
-		"darkMagenta": {R: 0x8B, G: 0x00, B: 0x8B, A: 0xFF},
-		"darkRed":     {R: 0x8B, G: 0x00, B: 0x00, A: 0xFF},
-		"darkYellow":  {R: 0x80, G: 0x80, B: 0x00, A: 0xFF},
-		"darkGray":    {R: 0xA9, G: 0xA9, B: 0xA9, A: 0xFF},
-		"lightGray":   {R: 0xD3, G: 0xD3, B: 0xD3, A: 0xFF},
-		"black":       {R: 0x00, G: 0x00, B: 0x00, A: 0xFF},
-		"white":       {R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF},
+// highlightPalette is the fixed ST_HighlightColor name→RGBA table. It is the only
+// set of values a valid w:highlight can carry; the writer validates HighlightName
+// against its keys before emitting.
+var highlightPalette = map[string]color.RGBA{
+	"yellow":      {R: 0xFF, G: 0xFF, B: 0x00, A: 0xFF},
+	"green":       {R: 0x00, G: 0xFF, B: 0x00, A: 0xFF},
+	"cyan":        {R: 0x00, G: 0xFF, B: 0xFF, A: 0xFF},
+	"magenta":     {R: 0xFF, G: 0x00, B: 0xFF, A: 0xFF},
+	"blue":        {R: 0x00, G: 0x00, B: 0xFF, A: 0xFF},
+	"red":         {R: 0xFF, G: 0x00, B: 0x00, A: 0xFF},
+	"darkBlue":    {R: 0x00, G: 0x00, B: 0x8B, A: 0xFF},
+	"darkCyan":    {R: 0x00, G: 0x8B, B: 0x8B, A: 0xFF},
+	"darkGreen":   {R: 0x00, G: 0x64, B: 0x00, A: 0xFF},
+	"darkMagenta": {R: 0x8B, G: 0x00, B: 0x8B, A: 0xFF},
+	"darkRed":     {R: 0x8B, G: 0x00, B: 0x00, A: 0xFF},
+	"darkYellow":  {R: 0x80, G: 0x80, B: 0x00, A: 0xFF},
+	"darkGray":    {R: 0xA9, G: 0xA9, B: 0xA9, A: 0xFF},
+	"lightGray":   {R: 0xD3, G: 0xD3, B: 0xD3, A: 0xFF},
+	"black":       {R: 0x00, G: 0x00, B: 0x00, A: 0xFF},
+	"white":       {R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF},
+}
+
+// isHighlightName reports whether name is a valid ST_HighlightColor value ("none"
+// is spec-valid — it explicitly clears highlighting — even though it has no RGBA).
+func isHighlightName(name string) bool {
+	if name == "none" {
+		return true
 	}
-	c, ok := m[name]
+	_, ok := highlightPalette[name]
+	return ok
+}
+
+func highlightColor(name string) (color.RGBA, bool) {
+	c, ok := highlightPalette[name]
 	return c, ok
 }
 

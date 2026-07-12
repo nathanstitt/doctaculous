@@ -136,9 +136,9 @@ func (dw *docWriter) writeHyperlink(sb *strings.Builder, h *Hyperlink, inDelete 
 	return nil
 }
 
-// writeRun renders a w:r. A run with no content (text, break, or reference) is
-// omitted — the parser drops such runs, so emitting one would break the
-// round-trip fixed point.
+// writeRun renders a w:r. A run with no content (text, break, reference, or note
+// separator) is omitted — the parser drops such runs, so emitting one would break
+// the round-trip fixed point.
 func (dw *docWriter) writeRun(sb *strings.Builder, r *Run, inDelete bool) error {
 	if r.Text == "" && r.Break == BreakNone && r.FootnoteRef == 0 && r.EndnoteRef == 0 && !r.hasCommentRef() && r.NoteSep == NoteSepNone {
 		return nil
@@ -230,9 +230,11 @@ func writeRPrDepth(sb *strings.Builder, p RunProps, withChange bool) {
 		b.WriteString(`<w:sz w:val="` + strconv.Itoa(p.SizeHalfPts) + `"/>`)
 	}
 	if p.HasHighlight {
-		// Prefer the parsed name (round-trips the exact token, e.g. "darkGray");
-		// fall back to mapping the RGBA back to a palette name for hand-built docs.
-		if p.HighlightName != "" {
+		// Prefer the parsed name (round-trips the exact token, e.g. "darkGray"), but
+		// only if it is a valid ST_HighlightColor — a consumer-supplied name outside
+		// the palette (e.g. a hex color) would produce an invalid w:highlight, so fall
+		// back to remapping the resolved RGBA to a palette name for hand-built docs.
+		if isHighlightName(p.HighlightName) {
 			b.WriteString(`<w:highlight w:val="` + escXMLAttr.Replace(p.HighlightName) + `"/>`)
 		} else if name, ok := highlightName(p.Highlight); ok {
 			b.WriteString(`<w:highlight w:val="` + name + `"/>`)

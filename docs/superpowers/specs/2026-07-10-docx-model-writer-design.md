@@ -44,8 +44,13 @@ marker-based run rewriting, hyperlink rel post-processing, and zip injection.
   through/none).
 - **Zero SectionProps** means "unspecified" and emits Word's Letter defaults — the same
   defaults the parser substitutes, so hand-built documents produce a valid page.
-- **highlight** is the fixed 16-name palette; only exact RGBA matches emit (the parser can
-  only produce those values).
+- **highlight**: `RunProps.HighlightName` (the raw parsed `w:val`, e.g. `darkGreen`) is
+  preferred when set, round-tripping the exact token; a hand-built doc that sets only the RGBA
+  falls back to the fixed 16-name palette, emitting only on an exact RGBA match.
+- **note separators**: the two reserved footnote/endnote notes (ids -1 and 0) carry a
+  `Run.NoteSep` instead of text; the writer emits `<w:separator/>` / `<w:continuationSeparator/>`
+  and the parser reads them back, so a content-less separator run is a round-trip fixed point
+  rather than being culled by writeRun's empty-run guard.
 
 ## The round-trip contract (pinned in write_test.go + write_idempotence_test.go)
 
