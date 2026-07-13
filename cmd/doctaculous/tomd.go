@@ -39,7 +39,7 @@ func tomdCmd(args []string) error {
 		return err
 	}
 
-	doc, err := openInput(input, doctaculous.FormatUnknown, "", *bundledFonts, false)
+	doc, err := openInput(input, doctaculous.FormatUnknown, "", *bundledFonts, false, nil)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}

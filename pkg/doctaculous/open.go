@@ -14,12 +14,18 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
-// OpenOption configures generic opening. It is an alias of HTMLOption: the
-// options configure reflow layout and resource loading, and apply to inputs
-// that flow through the HTML pipeline (HTML files and URLs); PDF and DOCX
-// inputs ignore them. Format-specific rendering knobs live on the Write side
-// (RasterOptions, PDFOptions, ...).
-type OpenOption = HTMLOption
+// OpenOption configures opening an input document — the universal option type
+// shared by every open entry point (Open, OpenBytes, OpenAs, and each
+// format-specific OpenXLSX*/OpenPPTX*/... frontend). It carries two kinds of
+// knob: input-selection concerns that a frontend applies before layout (e.g.
+// WithSheets, which restricts an XLSX input to named worksheets) and reflow
+// layout/resource-loading concerns (WithPageSize, WithViewportWidth,
+// WithResourceLoader, ...). Each frontend honors the options that apply to it
+// and ignores the rest — WithSheets is inert for a PDF input, WithPageSize is
+// inert for an XLSX input's sheet selection, and so on. Format-specific
+// rendering knobs live on the Write side instead (RasterOptions, PDFOptions,
+// ...). HTMLOption is a backward-compatible alias of this type.
+type OpenOption func(*openConfig)
 
 // Open opens the document at path, detecting its format from content and
 // filename (see DetectFormat) — a PDF, DOCX, or HTML file regardless of how it

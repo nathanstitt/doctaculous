@@ -13,6 +13,22 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/doctaculous"
 )
 
+// stringList is a repeatable string flag: each occurrence appends a value, so
+// "--sheet A --sheet B" collects ["A", "B"]. A single occurrence may also carry a
+// comma-separated list ("--sheet A,B") for convenience.
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, ",") }
+
+func (l *stringList) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			*l = append(*l, part)
+		}
+	}
+	return nil
+}
+
 // convertCmd parses flags for the "convert" subcommand — the generic verb that
 // converts any supported input (PDF, DOCX, HTML file, or http(s) URL) to any
 // supported output (pdf, md, txt, html, png, jpg). The input format is
@@ -29,6 +45,9 @@ func convertCmd(args []string) error {
 
 		pageSize = fs.String("page-size", "letter", "HTML pagination: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers (pdf and image outputs)")
+
+		// xlsx input
+		sheets stringList
 
 		// pdf output
 		pageW  = fs.Float64("page-width", 0, "PDF page width in points (default US Letter, 612)")
@@ -53,6 +72,7 @@ func convertCmd(args []string) error {
 
 		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
+	fs.Var(&sheets, "sheet", "xlsx input: render only this worksheet by name; repeat or comma-separate for several, in order (default: all visible sheets)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: doctaculous convert <input.pdf|.docx|.html|.md|.txt|URL> <output.pdf|.docx|.md|.txt|.html|.png|.jpg> [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
@@ -86,7 +106,7 @@ func convertCmd(args []string) error {
 		}
 	}
 
-	doc, err := openInput(input, fromFormat, *pageSize, *bundledFonts, *print)
+	doc, err := openInput(input, fromFormat, *pageSize, *bundledFonts, *print, sheets)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -221,8 +241,11 @@ func resolveInOut(inFlag, outFlag string, positional []string) (in, out string, 
 // (or as the explicit from format, when set). pageSize/bundledFonts/printMedia
 // shape the layout of inputs that flow through the HTML pipeline and are
 // ignored by PDF/DOCX inputs.
-func openInput(input string, from doctaculous.Format, pageSize string, bundledFonts, printMedia bool) (*doctaculous.Document, error) {
+func openInput(input string, from doctaculous.Format, pageSize string, bundledFonts, printMedia bool, sheets []string) (*doctaculous.Document, error) {
 	opts := htmlOpts(pageSize, bundledFonts, printMedia)
+	if len(sheets) > 0 {
+		opts = append(opts, doctaculous.WithSheets(sheets...))
+	}
 	if isHTTPURL(input) {
 		if from != doctaculous.FormatUnknown && from != doctaculous.FormatHTML {
 			return nil, fmt.Errorf("an http(s) URL is always fetched as a web page; --from %s does not apply", from)
@@ -311,4 +334,5 @@ var convertValueFlags = map[string]bool{
 	"-quality": true, "--quality": true,
 	"-page": true, "--page": true,
 	"-pages": true, "--pages": true,
+	"-sheet": true, "--sheet": true,
 }

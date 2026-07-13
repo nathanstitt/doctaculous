@@ -257,6 +257,54 @@ func TestConvertCmdXLSXInput(t *testing.T) {
 	}
 }
 
+// xlsxFixture returns the named generated xlsx fixture's bytes.
+func xlsxFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	for _, f := range genxlsx.Core {
+		if f.Name == name {
+			return f.Bytes()
+		}
+	}
+	t.Fatalf("no xlsx fixture %q", name)
+	return nil
+}
+
+func TestConvertCmdXLSXSheetFlag(t *testing.T) {
+	// --sheet selects one worksheet: only its content, and no sheet heading.
+	in := writeConvertInput(t, "book.xlsx", xlsxFixture(t, "multisheet"))
+	out := filepath.Join(t.TempDir(), "one.md")
+	if err := convertCmd([]string{in, out, "--sheet", "Second"}); err != nil {
+		t.Fatalf("convertCmd --sheet: %v", err)
+	}
+	got, _ := os.ReadFile(out)
+	if !strings.Contains(string(got), "second sheet cell") {
+		t.Errorf("selected sheet missing:\n%s", got)
+	}
+	if strings.Contains(string(got), "first sheet cell") {
+		t.Errorf("unselected sheet leaked:\n%s", got)
+	}
+
+	// Repeated --sheet selects several, in order.
+	out2 := filepath.Join(t.TempDir(), "two.md")
+	if err := convertCmd([]string{in, out2, "--sheet", "Second", "--sheet", "First"}); err != nil {
+		t.Fatalf("convertCmd repeated --sheet: %v", err)
+	}
+	got2, _ := os.ReadFile(out2)
+	if i, j := strings.Index(string(got2), "## Second"), strings.Index(string(got2), "## First"); i < 0 || j < 0 || i > j {
+		t.Errorf("repeated --sheet not rendered in order:\n%s", got2)
+	}
+
+	// An unknown sheet name is a hard error naming the sheet; no output file.
+	out3 := filepath.Join(t.TempDir(), "none.md")
+	err := convertCmd([]string{in, out3, "--sheet", "Nope"})
+	if err == nil || !strings.Contains(err.Error(), "Nope") {
+		t.Fatalf("want error naming missing sheet, got %v", err)
+	}
+	if _, statErr := os.Stat(out3); statErr == nil {
+		t.Errorf("no output file should be created on a bad --sheet")
+	}
+}
+
 func TestConvertCmdXLSXOutput(t *testing.T) {
 	in := writeConvertInput(t, "in.html", []byte(`<html><body>
 	<table><tr><th>A</th></tr><tr><td>1</td></tr></table></body></html>`))

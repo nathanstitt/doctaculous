@@ -32,7 +32,7 @@ func OpenRTFFile(path string, opts ...HTMLOption) (*Document, error) {
 // applies and every output format follows.
 func OpenRTFBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 	// Surface the converter's degradation diagnostics through WithLogf.
-	cfg := defaultHTMLConfig()
+	cfg := defaultOpenConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
