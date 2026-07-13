@@ -45,10 +45,12 @@ func xlsxSpecimen() []byte {
 		Bytes()
 }
 
-// TestXLSXGolden renders the specimen workbook end to end — the XLSX visual
-// entry, mirroring TestMarkdownTextGolden. Run with -update, then eyeball.
-func TestXLSXGolden(t *testing.T) {
-	doc, err := OpenXLSXBytes(xlsxSpecimen(), WithViewportWidth(460), WithBundledFonts())
+// renderXLSXGolden opens the specimen with opts, rasterizes its single page, and
+// compares against (or updates) testdata/golden/<name>.png. Shared by the XLSX
+// visual entries so each is one line of intent.
+func renderXLSXGolden(t *testing.T, name string, opts ...OpenOption) {
+	t.Helper()
+	doc, err := OpenXLSXBytes(xlsxSpecimen(), opts...)
 	if err != nil {
 		t.Fatalf("OpenXLSXBytes: %v", err)
 	}
@@ -65,7 +67,7 @@ func TestXLSXGolden(t *testing.T) {
 	}
 
 	dir := filepath.Join("testdata", "golden")
-	path := filepath.Join(dir, "xlsx-specimen.png")
+	path := filepath.Join(dir, name+".png")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -81,4 +83,18 @@ func TestXLSXGolden(t *testing.T) {
 	if diff, n := compareImages(want, got); diff {
 		t.Errorf("render differs from golden %s: %d pixels beyond tolerance", path, n)
 	}
+}
+
+// TestXLSXGolden renders the specimen workbook end to end — the XLSX visual
+// entry, mirroring TestMarkdownTextGolden. Run with -update, then eyeball.
+func TestXLSXGolden(t *testing.T) {
+	renderXLSXGolden(t, "xlsx-specimen", WithViewportWidth(460), WithBundledFonts())
+}
+
+// TestXLSXSheetSelectionGolden is the visual entry for WithSheets: the same
+// specimen restricted to a single named sheet renders just that sheet's table
+// (and, being the only sheet, without a heading). Run with -update, then eyeball
+// that only the "Merges" sheet appears.
+func TestXLSXSheetSelectionGolden(t *testing.T) {
+	renderXLSXGolden(t, "xlsx-one-sheet", WithViewportWidth(460), WithBundledFonts(), WithSheets("Merges"))
 }

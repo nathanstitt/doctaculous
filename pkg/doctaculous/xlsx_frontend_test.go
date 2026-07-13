@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -80,6 +81,74 @@ func TestXLSXMultisheet(t *testing.T) {
 	}
 	if strings.Contains(got, "hidden cell") || strings.Contains(got, "Secrets") {
 		t.Errorf("hidden sheet leaked:\n%s", got)
+	}
+}
+
+// multisheetMarkdown opens the multisheet fixture with the given options and
+// returns its Markdown rendering.
+func multisheetMarkdown(t *testing.T, opts ...OpenOption) string {
+	t.Helper()
+	doc, err := OpenXLSXBytes(fixtureBytes(t, "multisheet"), opts...)
+	if err != nil {
+		t.Fatalf("OpenXLSXBytes: %v", err)
+	}
+	var out bytes.Buffer
+	if err := doc.WriteMarkdown(context.Background(), &out, MarkdownOptions{}); err != nil {
+		t.Fatalf("WriteMarkdown: %v", err)
+	}
+	return out.String()
+}
+
+// WithSheets selecting one sheet renders only that sheet, and — because it is
+// then the single rendered sheet — emits no sheet-name heading.
+func TestXLSXWithSheetsSingle(t *testing.T) {
+	got := multisheetMarkdown(t, WithBundledFonts(), WithSheets("Second"))
+	if !strings.Contains(got, "second sheet cell") {
+		t.Errorf("selected sheet content missing:\n%s", got)
+	}
+	if strings.Contains(got, "first sheet cell") || strings.Contains(got, "hidden cell") {
+		t.Errorf("unselected sheet leaked:\n%s", got)
+	}
+	if strings.Contains(got, "## Second") || strings.Contains(got, "## First") {
+		t.Errorf("single selected sheet should emit no heading:\n%s", got)
+	}
+}
+
+// WithSheets selecting several sheets renders exactly those, in the requested
+// order (which may differ from file order), each with its heading.
+func TestXLSXWithSheetsOrder(t *testing.T) {
+	got := multisheetMarkdown(t, WithBundledFonts(), WithSheets("Second", "First"))
+	first := strings.Index(got, "## Second")
+	second := strings.Index(got, "## First")
+	if first < 0 || second < 0 {
+		t.Fatalf("both selected headings should appear:\n%s", got)
+	}
+	if first > second {
+		t.Errorf("sheets not in requested order (Second before First):\n%s", got)
+	}
+	if strings.Contains(got, "hidden cell") {
+		t.Errorf("hidden sheet leaked:\n%s", got)
+	}
+}
+
+// WithSheets can name a hidden sheet explicitly; unlike the default render it is
+// then included.
+func TestXLSXWithSheetsHiddenExplicit(t *testing.T) {
+	got := multisheetMarkdown(t, WithBundledFonts(), WithSheets("Secrets"))
+	if !strings.Contains(got, "hidden cell") {
+		t.Errorf("explicitly named hidden sheet should render:\n%s", got)
+	}
+}
+
+// A name no sheet carries fails with ErrSheetNotFound, naming the missing sheet;
+// no document is produced.
+func TestXLSXWithSheetsNotFound(t *testing.T) {
+	_, err := OpenXLSXBytes(fixtureBytes(t, "multisheet"), WithBundledFonts(), WithSheets("First", "Nope"))
+	if !errors.Is(err, ErrSheetNotFound) {
+		t.Fatalf("want ErrSheetNotFound, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Nope") {
+		t.Errorf("error should name the missing sheet %q: %v", "Nope", err)
 	}
 }
 

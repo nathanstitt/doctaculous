@@ -15,11 +15,16 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
 
-// HTMLOption configures HTML layout via OpenHTML / OpenHTMLBytes.
-type HTMLOption func(*htmlConfig)
+// HTMLOption is a backward-compatible alias for OpenOption. HTML-layout options
+// (WithPageSize, WithViewportWidth, ...) are a subset of the universal open
+// options, so the two are interchangeable; new code should prefer OpenOption.
+type HTMLOption = OpenOption
 
-// htmlConfig is the resolved HTML layout configuration.
-type htmlConfig struct {
+// openConfig is the resolved open/input configuration shared by every reflow
+// frontend: input-selection concerns (which XLSX sheets) alongside the reflow
+// layout and resource-loading knobs. A frontend reads only the fields that apply
+// to it and ignores the rest.
+type openConfig struct {
 	viewportPt   float64
 	pageHeightPt float64
 	// paged requests pagination using the document's @page rules (set by
@@ -41,6 +46,12 @@ type htmlConfig struct {
 	// defaults to context.Background() and is set (unexported) by the
 	// ctx-taking entry points via withOpenContext.
 	ctx context.Context
+	// sheets, when non-nil, restricts an XLSX input to the named visible sheets
+	// (in the given order); it is read and consumed by the XLSX frontend before
+	// HTML generation and is inert for every other frontend. Set by WithSheets.
+	// A nil slice means "all visible sheets" (the default); a non-nil empty
+	// slice is not producible through WithSheets.
+	sheets []string
 }
 
 // defaultViewportPt is the default layout viewport width in points (px:pt 1:1).
@@ -48,18 +59,18 @@ type htmlConfig struct {
 // tall image model); content flows to whatever height it needs.
 const defaultViewportPt = 1280
 
-// defaultHTMLConfig returns the baseline configuration before options are
+// defaultOpenConfig returns the baseline configuration before options are
 // applied: the default viewport width, no loader (links are skipped), and a
 // no-op logger.
-func defaultHTMLConfig() htmlConfig {
-	return htmlConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil, media: css.MediaScreen, ctx: context.Background()}
+func defaultOpenConfig() openConfig {
+	return openConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil, media: css.MediaScreen, ctx: context.Background()}
 }
 
 // withOpenContext threads a caller's context into open-time layout and
 // resource loading. Unexported: the ctx-taking entry points (OpenReader,
 // OpenReaderAs, Convert) prepend it; a nil ctx is ignored.
 func withOpenContext(ctx context.Context) HTMLOption {
-	return func(c *htmlConfig) {
+	return func(c *openConfig) {
 		if ctx != nil {
 			c.ctx = ctx
 		}
@@ -69,7 +80,7 @@ func withOpenContext(ctx context.Context) HTMLOption {
 // WithViewportWidth sets the layout viewport width in CSS pixels (treated 1:1 as
 // points). Defaults to 1280. Values <= 0 are ignored.
 func WithViewportWidth(px float64) HTMLOption {
-	return func(c *htmlConfig) {
+	return func(c *openConfig) {
 		if px > 0 {
 			c.viewportPt = px
 		}
@@ -91,7 +102,7 @@ const (
 // Without WithPageSize (or WithDefaultPaged) the document renders as a single tall
 // page (the default). widthPt or heightPt <= 0 is ignored (no pagination).
 func WithPageSize(widthPt, heightPt float64) HTMLOption {
-	return func(c *htmlConfig) {
+	return func(c *openConfig) {
 		if widthPt > 0 && heightPt > 0 {
 			c.viewportPt = widthPt
 			c.pageHeightPt = heightPt
@@ -107,7 +118,7 @@ func WithPageSize(widthPt, heightPt float64) HTMLOption {
 // it sets no explicit size, so an @page `size` is honored. Without it (and without
 // WithPageSize) the document renders as a single tall page.
 func WithDefaultPaged() HTMLOption {
-	return func(c *htmlConfig) {
+	return func(c *openConfig) {
 		c.paged = true
 		c.explicitSize = false
 		if c.pageHeightPt <= 0 {
@@ -121,14 +132,14 @@ func WithDefaultPaged() HTMLOption {
 // later, images/fonts). Defaults to no loader (links are skipped). OpenHTML
 // supplies a DirLoader rooted at the document's directory.
 func WithResourceLoader(l resource.ResourceLoader) HTMLOption {
-	return func(c *htmlConfig) { c.loader = l }
+	return func(c *openConfig) { c.loader = l }
 }
 
 // WithSystemFontProvider sets the provider used to resolve @font-face local()
 // sources. Defaults to nil (local() never matches; the next src is tried). OpenHTML
 // supplies a DiskFontProvider rooted at the document's directory.
 func WithSystemFontProvider(p layoutfont.SystemFontProvider) HTMLOption {
-	return func(c *htmlConfig) { c.sys = p }
+	return func(c *openConfig) { c.sys = p }
 }
 
 // WithBundledFonts selects hermetic bundled-font mode: non-embedded families resolve
@@ -137,13 +148,29 @@ func WithSystemFontProvider(p layoutfont.SystemFontProvider) HTMLOption {
 // the bundled substitutes when none match. The golden/reference tests use this option
 // for reproducibility.
 func WithBundledFonts() HTMLOption {
-	return func(c *htmlConfig) { c.bundledFonts = true }
+	return func(c *openConfig) { c.bundledFonts = true }
 }
 
 // WithLogf sets a logger for layout/degradation diagnostics (may be called during
 // Build and Layout). Defaults to a no-op.
 func WithLogf(f func(string, ...any)) HTMLOption {
-	return func(c *htmlConfig) { c.logf = f }
+	return func(c *openConfig) { c.logf = f }
+}
+
+// WithSheets restricts an XLSX input to the named worksheets, rendered in the
+// order given, instead of the default (every visible sheet). Names match a
+// sheet's tab name exactly (case-sensitive); a name that no sheet carries makes
+// OpenXLSX* fail with an error wrapping ErrSheetNotFound, so a typo does not
+// silently yield an empty or wrong document. Selecting a single sheet suppresses
+// the per-sheet name heading, exactly as a naturally single-sheet workbook does.
+// Hidden sheets can be named explicitly and will render. The option is inert for
+// every non-XLSX input. Calling it with no names is a no-op (keeps the default).
+func WithSheets(names ...string) OpenOption {
+	return func(c *openConfig) {
+		if len(names) > 0 {
+			c.sheets = names
+		}
+	}
 }
 
 // WithPrintMedia makes box generation honor @media print rules (and exclude
@@ -151,7 +178,7 @@ func WithLogf(f func(string, ...any)) HTMLOption {
 // cascade uses the screen context (the default). @media all and top-level rules
 // apply in both, so a document with no @media blocks is unaffected.
 func WithPrintMedia() HTMLOption {
-	return func(c *htmlConfig) { c.media = css.MediaPrint }
+	return func(c *openConfig) { c.media = css.MediaPrint }
 }
 
 // OpenHTML reads and renders an HTML file at path, laying it out at the default
@@ -219,7 +246,7 @@ func OpenURL(rawURL string, opts ...HTMLOption) (*Document, error) {
 // OpenHTMLBytes parses and renders in-memory HTML, applying any options, and
 // returns a Document ready to rasterize.
 func OpenHTMLBytes(data []byte, opts ...HTMLOption) (*Document, error) {
-	cfg := defaultHTMLConfig()
+	cfg := defaultOpenConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -230,7 +257,7 @@ func OpenHTMLBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 // and wraps the resulting pages for rasterization, mirroring docxDocument. Layout
 // runs once here (the document lays out into a single tall page); rasterization
 // then proceeds over that page.
-func htmlDocument(data []byte, cfg htmlConfig) (*Document, error) {
+func htmlDocument(data []byte, cfg openConfig) (*Document, error) {
 	doc, err := html.Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: parse html: %w", err)

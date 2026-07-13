@@ -234,6 +234,12 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   `<h2>`-headed ruled tables through the HTML pipeline; a bold first row becomes the header row
   via the writers' existing detector. ZIP detection generalized to an OPC classifier
   (`word/`→DOCX, `xl/`→XLSX). `xlsx-specimen` golden. `2026-07-09-xlsx-input-design.md`.
+- **Sheet selection** (`WithSheets(names...)` open option, `convert --sheet` CLI flag,
+  repeatable/comma-separated): render only named worksheets, in the given order, instead of every
+  visible sheet; a single selected sheet drops its heading, an explicitly named hidden sheet
+  renders, and an unknown name fails with `ErrSheetNotFound`. `WithSheets` is a universal
+  `OpenOption` (inert for non-XLSX inputs); the option type is now `OpenOption` with `HTMLOption`
+  a back-compat alias.
 
 **XLSX output** (`pkg/render/xlsxwrite`, `WriteXLSX`, `convert ... out.xlsx`):
 
