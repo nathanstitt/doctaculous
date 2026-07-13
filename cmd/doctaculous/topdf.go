@@ -55,7 +55,7 @@ func topdfCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or empty)", *pageSize)
 	}
 
-	doc, err := openInput(input, doctaculous.FormatUnknown, *pageSize, *bundledFonts, *print)
+	doc, err := openInput(input, doctaculous.FormatUnknown, *pageSize, *bundledFonts, *print, nil)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
