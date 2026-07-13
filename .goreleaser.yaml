@@ -1,0 +1,83 @@
+# goreleaser configuration — https://goreleaser.com
+# Builds and publishes the `doctaculous` CLI on a pushed v* tag (see
+# .github/workflows/release.yml). Pure Go, so every target cross-compiles with
+# CGO disabled; the dev-only cmd/dumpfixtures tool is deliberately not shipped.
+version: 2
+
+project_name: doctaculous
+
+before:
+  hooks:
+    # Fail early on a dirty/broken module rather than mid-build.
+    - go mod tidy
+
+builds:
+  - id: doctaculous
+    main: ./cmd/doctaculous
+    binary: doctaculous
+    env:
+      - CGO_ENABLED=0
+    # Reproducible builds: pin the timestamp to the commit.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    # Inject the version into the existing `main.version` var (default "dev").
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .CommitDate }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: doctaculous
+    ids:
+      - doctaculous
+    # tar.gz everywhere except Windows, which gets a .zip.
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  # Build the release notes from git log, dropping noise.
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?(feat|xlsx|docx|pdf|html|cli|epub|pptx|rtf|csv)(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+
+release:
+  # Draft is false: the tag push publishes the release directly. Prerelease is
+  # auto-detected from the tag (e.g. v0.1.0-rc1 → prerelease).
+  draft: false
+  prerelease: auto

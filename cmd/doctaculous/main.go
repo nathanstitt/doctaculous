@@ -14,8 +14,14 @@ import (
 	"strings"
 )
 
-// version is overridden at build time via -ldflags "-X main.version=...".
-var version = "dev"
+// version, commit, and date are overridden at build time via
+// -ldflags "-X main.version=... -X main.commit=... -X main.date=..."
+// (see .goreleaser.yaml). They default to a dev build.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -44,7 +50,13 @@ func run(args []string) error {
 	case "todocx":
 		return todocxCmd(args[1:])
 	case "version", "-v", "--version":
-		fmt.Println("doctaculous", version)
+		// A goreleaser build fills commit/date; a plain `go build` leaves the
+		// defaults, so only decorate when they were injected.
+		if commit == "none" {
+			fmt.Println("doctaculous", version)
+		} else {
+			fmt.Printf("doctaculous %s (%s, %s)\n", version, commit, date)
+		}
 		return nil
 	case "help", "-h", "--help":
 		usage()
