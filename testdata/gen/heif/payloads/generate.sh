@@ -54,4 +54,15 @@ enc src-64x64.png x265-64x64-qp27-nosdh-nofilt    yuv420p "qp=27:keyint=1:no-sig
 enc src-64x64.png x265-64x64-qp27-ctu16-nofilt    yuv420p "qp=27:keyint=1:ctu=16:no-sao=1:no-deblock=1"
 enc src-96x80.png x265-96x80-qp27-ctu16-nofilt    yuv420p "qp=27:keyint=1:ctu=16:no-sao=1:no-deblock=1"
 
+# kvazaar tile fixtures (x265 cannot emit tiles): all-intra, SAO+deblock on.
+kvz() { # kvz <src.png> <WxH> <out base> <extra kvazaar args...>
+  src=$1; res=$2; base=$3; shift 3
+  ffmpeg -v error -y -i "$src" -f rawvideo -pix_fmt yuv420p "$base-in.yuv"
+  kvazaar -i "$base-in.yuv" --input-res "$res" -q 27 -p 1 --frames 1 "$@" -o "$base.hevc" >/dev/null 2>&1
+  ffmpeg -v error -y -i "$base.hevc" -f rawvideo "$base.yuv"
+  gzip -9 -n -f "$base.yuv"; rm -f "$base-in.yuv"
+}
+kvz src-96x80.png   96x80   kvazaar-96x80-qp27-tiles2x2   --tiles 2x2 --no-wpp
+kvz src-512x512.png 512x512 kvazaar-512x512-qp27-tiles2x2 --tiles 2x2 --no-wpp
+
 rm -f src-*.png

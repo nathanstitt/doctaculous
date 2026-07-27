@@ -53,12 +53,6 @@ func DecodeFrame(ps ParamSets, sliceNALs [][]byte) (*Frame, error) {
 				return nil, err
 			}
 		}
-		if hdr.saoLuma || hdr.saoChroma {
-			return nil, fmt.Errorf("%w: SAO decoding lands with the loop-filter milestone", ErrUnsupported)
-		}
-		if p.tilesEnabled {
-			return nil, fmt.Errorf("%w: tiles land with the loop-filter milestone", ErrUnsupported)
-		}
 		if d == nil {
 			d = newSliceDecoder(s, p)
 		} else if d.sps != s {
@@ -73,6 +67,10 @@ func DecodeFrame(ps ParamSets, sliceNALs [][]byte) (*Frame, error) {
 	}
 	if !d.complete() {
 		return nil, fmt.Errorf("%w: picture is missing coded CTUs", ErrInvalid)
+	}
+	d.deblockPicture()
+	if d.sps.saoEnabled {
+		d.applySAO()
 	}
 	d.frame.applyConformanceWindow(d.sps)
 	return d.frame, nil
@@ -110,6 +108,17 @@ type sliceDecoder struct {
 	qpMap    []int8  // QpY per 4x4 for QP prediction
 
 	ctbSlice []int // slice id (by first segment addr) per CTB, for availability
+	tiles    *tileInfo
+
+	// Loop-filter state, populated during parsing and consumed by the
+	// picture-wide filter passes after all slices decode.
+	vertEdge, horEdge  []bool // TU/CU edges at 4x4 granularity
+	noFilter           []bool // PCM (loop filter disabled) or bypass samples
+	ctbSao             []saoCtbParams
+	ctbDeblockDisabled []bool
+	ctbBetaOff         []int32
+	ctbTcOff           []int32
+	ctbLFAcrossSlice   []bool
 
 	scaling *scalingMatrices // nil = flat
 
@@ -132,6 +141,7 @@ type sliceDecoder struct {
 	wppSaved []ctxModel
 
 	sliceID     int
+	curTile     int
 	ctusDecoded int
 }
 
@@ -152,6 +162,15 @@ func newSliceDecoder(s *sps, p *pps) *sliceDecoder {
 	for i := range d.ctbSlice {
 		d.ctbSlice[i] = -1
 	}
+	d.tiles = buildTileInfo(s, p)
+	d.vertEdge = make([]bool, d.width4*d.height4)
+	d.horEdge = make([]bool, d.width4*d.height4)
+	d.noFilter = make([]bool, d.width4*d.height4)
+	d.ctbSao = make([]saoCtbParams, s.picSizeCtbs)
+	d.ctbDeblockDisabled = make([]bool, s.picSizeCtbs)
+	d.ctbBetaOff = make([]int32, s.picSizeCtbs)
+	d.ctbTcOff = make([]int32, s.picSizeCtbs)
+	d.ctbLFAcrossSlice = make([]bool, s.picSizeCtbs)
 	var err error
 	if s.scalingListEnabled {
 		sl := s.scalingList
@@ -205,6 +224,10 @@ func (d *sliceDecoder) decodeSliceSegment(hdr *sliceHeader, rbsp []byte, removed
 		return errInvalidStream("dependent slice segment without predecessor")
 	}
 
+	if p.entropyCodingSync && p.tilesEnabled {
+		return errInvalidStream("WPP combined with tiles")
+	}
+	ctbTs := d.tiles.rsToTs[hdr.segmentAddress]
 	ctbAddr := hdr.segmentAddress
 	firstRow := ctbAddr / s.picWidthCtbs
 	sub := 0
@@ -214,10 +237,28 @@ func (d *sliceDecoder) decodeSliceSegment(hdr *sliceHeader, rbsp []byte, removed
 	}
 
 	for {
+		ctbAddr = d.tiles.tsToRs[ctbTs]
 		col := ctbAddr % s.picWidthCtbs
 		row := ctbAddr / s.picWidthCtbs
 		if row >= s.picHeightCtbs {
 			return errInvalidStream("CTU address beyond picture")
+		}
+
+		if p.tilesEnabled && ctbTs > d.tiles.rsToTs[hdr.segmentAddress] &&
+			d.tileID(ctbAddr) != d.tileID(d.tiles.tsToRs[ctbTs-1]) {
+			// Tile start: next substream, fresh contexts, QP predictor
+			// reset (spec 9.3.1).
+			sub++
+			r = newBitReader(substream(sub), "tile substream")
+			if r.b == nil {
+				return errInvalidStream("missing tile substream")
+			}
+			if err := d.cabac.init(r); err != nil {
+				return err
+			}
+			d.ctx = newCtxModels(d.sliceQP)
+			d.qpYPrev = d.sliceQP
+			d.lastCuQpY = d.sliceQP
 		}
 
 		if p.entropyCodingSync && col == 0 && ctbAddr != hdr.segmentAddress {
@@ -241,6 +282,14 @@ func (d *sliceDecoder) decodeSliceSegment(hdr *sliceHeader, rbsp []byte, removed
 		}
 
 		d.ctbSlice[ctbAddr] = d.sliceID
+		d.curTile = d.tileID(ctbAddr)
+		d.ctbDeblockDisabled[ctbAddr] = hdr.deblockDisabled
+		d.ctbBetaOff[ctbAddr] = hdr.betaOffsetDiv2
+		d.ctbTcOff[ctbAddr] = hdr.tcOffsetDiv2
+		d.ctbLFAcrossSlice[ctbAddr] = hdr.loopFilterAcrossSlices
+		if s.saoEnabled && (hdr.saoLuma || hdr.saoChroma) {
+			d.parseSAO(ctbAddr, col, row)
+		}
 		x0 := col << s.ctbLog2SizeY
 		y0 := row << s.ctbLog2SizeY
 		// Force a fresh quantization group at the CTU boundary.
@@ -262,7 +311,7 @@ func (d *sliceDecoder) decodeSliceSegment(hdr *sliceHeader, rbsp []byte, removed
 			dbg("end_of_slice at ctb %d: bitpos %d of %d", ctbAddr, d.cabac.r.pos, len(d.cabac.r.b)*8)
 			return nil
 		}
-		if ctbAddr == s.picSizeCtbs-1 {
+		if ctbTs == s.picSizeCtbs-1 {
 			dbg("terminate=0 at last ctb: bitpos %d of %d", d.cabac.r.pos, len(d.cabac.r.b)*8)
 			return errInvalidStream("missing end_of_slice flag")
 		}
@@ -272,7 +321,12 @@ func (d *sliceDecoder) decodeSliceSegment(hdr *sliceHeader, rbsp []byte, removed
 				return errInvalidStream("end of WPP substream")
 			}
 		}
-		ctbAddr++
+		if p.tilesEnabled && d.tileID(ctbAddr) != d.tileID(d.tiles.tsToRs[ctbTs+1]) {
+			if d.cabac.decodeTerminate() != 1 {
+				return errInvalidStream("end of tile substream")
+			}
+		}
+		ctbTs++
 	}
 }
 
@@ -301,7 +355,21 @@ func (d *sliceDecoder) availableAt(x, y int) bool {
 		return false
 	}
 	ctb := (y>>d.sps.ctbLog2SizeY)*d.sps.picWidthCtbs + x>>d.sps.ctbLog2SizeY
-	return d.ctbSlice[ctb] == d.sliceID
+	return d.ctbSlice[ctb] == d.sliceID && d.tileID(ctb) == d.curTile
+}
+
+// curTile is maintained by the CTU loop so availability checks can compare
+// tiles without recomputing the current CTB address.
+
+// markNoFilter exempts a CU's samples from the in-loop filters.
+func (d *sliceDecoder) markNoFilter(x, y, size int) {
+	for yy := y; yy < y+size; yy += 4 {
+		for xx := x; xx < x+size; xx += 4 {
+			if xx < d.sps.width && yy < d.sps.height {
+				d.noFilter[d.idx4(xx, yy)] = true
+			}
+		}
+	}
 }
 
 func (d *sliceDecoder) markDecoded(x, y, w, h int) {
@@ -335,7 +403,7 @@ func (d *sliceDecoder) modeAvailableAt(x, y int) bool {
 		return false
 	}
 	ctb := (y>>d.sps.ctbLog2SizeY)*d.sps.picWidthCtbs + x>>d.sps.ctbLog2SizeY
-	return d.ctbSlice[ctb] == d.sliceID
+	return d.ctbSlice[ctb] == d.sliceID && d.tileID(ctb) == d.curTile
 }
 
 func (d *sliceDecoder) intraMode4x4(x, y int) int { return int(d.intraModes[d.idx4(x, y)]) }

@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -137,6 +136,28 @@ var bitExactCases = []struct {
 	{"x265-96x80-qp27-10bit-nofilt", 96, 80, 10},
 	{"x265-96x80-qp27-ctu16-nofilt", 96, 80, 8},
 	{"x265-512x512-qp27-nofilt", 512, 512, 8},
+	{"x265-16x16-qp12", 16, 16, 8},
+	{"x265-16x16-qp27", 16, 16, 8},
+	{"x265-16x16-qp40", 16, 16, 8},
+	{"x265-16x16-qp27-10bit", 16, 16, 10},
+	{"x265-30x22-qp27", 30, 22, 8},
+	{"x265-64x64-qp12", 64, 64, 8},
+	{"x265-64x64-qp27", 64, 64, 8},
+	{"x265-64x64-qp40", 64, 64, 8},
+	{"x265-64x64-qp27-10bit", 64, 64, 10},
+	{"x265-64x64-qp27-tskip", 64, 64, 8},
+	{"x265-64x64-qp27-lossless", 64, 64, 8},
+	{"x265-64x64-qp27-scaling", 64, 64, 8},
+	{"x265-64x64-qp27-nosdh", 64, 64, 8},
+	{"x265-64x64-qp27-ctu16", 64, 64, 8},
+	{"x265-64x64-qp27-nowpp", 64, 64, 8},
+	{"x265-96x80-qp12", 96, 80, 8},
+	{"x265-96x80-qp27", 96, 80, 8},
+	{"x265-96x80-qp40", 96, 80, 8},
+	{"x265-96x80-qp27-10bit", 96, 80, 10},
+	{"x265-512x512-qp27", 512, 512, 8},
+	{"kvazaar-96x80-qp27-tiles2x2", 96, 80, 8},
+	{"kvazaar-512x512-qp27-tiles2x2", 512, 512, 8},
 }
 
 func TestDecodeBitExact(t *testing.T) {
@@ -194,21 +215,4 @@ func FuzzDecodeFrame(f *testing.F) {
 		}
 		_, _ = DecodeFrame(params, slices)
 	})
-}
-
-func TestDecodeRejectsFilteredStreamsForNow(t *testing.T) {
-	// Default-toolset payloads carry SAO, which lands with the loop-filter
-	// milestone; until then they must fail with the typed error, not
-	// misdecode.
-	params, slices := loadStream(t, "x265-64x64-qp27.hevc")
-	nals := make([][]byte, 0, len(slices))
-	for _, s := range slices {
-		nal := []byte{byte(uint16(s.typ) << 1), byte(s.temporalID + 1)}
-		nal = append(nal, s.payload...)
-		nals = append(nals, nal)
-	}
-	_, err := DecodeFrame(params, nals)
-	if err == nil || !strings.Contains(err.Error(), "SAO") {
-		t.Fatalf("expected SAO unsupported error, got %v", err)
-	}
 }
