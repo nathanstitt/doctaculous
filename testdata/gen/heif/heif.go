@@ -276,6 +276,73 @@ func GridPayload(rows, cols int, w, h uint32) []byte {
 	})
 }
 
+// HvcCFromAnnexB builds an HEVCDecoderConfigurationRecord (4-byte NAL
+// lengths) plus the matching length-prefixed hvc1 item payload from an
+// Annex-B intra stream, so tests can wrap real encoder output in containers.
+func HvcCFromAnnexB(stream []byte) (hvcc, payload []byte) {
+	var vps, sps, pps, slices [][]byte
+	for _, nal := range splitAnnexB(stream) {
+		if len(nal) < 2 {
+			continue
+		}
+		switch nal[0] >> 1 & 0x3f {
+		case 32:
+			vps = append(vps, nal)
+		case 33:
+			sps = append(sps, nal)
+		case 34:
+			pps = append(pps, nal)
+		default:
+			if nal[0]>>1&0x3f < 32 {
+				slices = append(slices, nal)
+			}
+		}
+	}
+	hvcc = append(hvcc, 1)                                     // configurationVersion
+	hvcc = append(hvcc, make([]byte, 12)...)                   // profile/compat/constraints/level
+	hvcc = append(hvcc, 0xf0, 0, 0xfc, 0xfd, 0xf8, 0xf8, 0, 0) // reserved fields + avgFrameRate
+	hvcc = append(hvcc, 0x03|0x0c)                             // lengthSizeMinusOne=3
+	arrays := [][2]any{{byte(32), vps}, {byte(33), sps}, {byte(34), pps}}
+	hvcc = append(hvcc, 3)
+	for _, a := range arrays {
+		hvcc = append(hvcc, a[0].(byte)|0x80)
+		nals := a[1].([][]byte)
+		hvcc = append(hvcc, u16(uint16(len(nals)))...)
+		for _, n := range nals {
+			hvcc = append(hvcc, u16(uint16(len(n)))...)
+			hvcc = append(hvcc, n...)
+		}
+	}
+	for _, n := range slices {
+		payload = append(payload, u32(uint32(len(n)))...)
+		payload = append(payload, n...)
+	}
+	return hvcc, payload
+}
+
+// splitAnnexB splits a start-code-delimited stream (00 00 01 / 00 00 00 01).
+func splitAnnexB(data []byte) [][]byte {
+	var out [][]byte
+	start := -1
+	for i := 0; i+2 < len(data); i++ {
+		if data[i] == 0 && data[i+1] == 0 && data[i+2] == 1 {
+			if start >= 0 {
+				end := i
+				for end > start && data[end-1] == 0 {
+					end--
+				}
+				out = append(out, data[start:end])
+			}
+			start = i + 3
+			i += 2
+		}
+	}
+	if start >= 0 && start < len(data) {
+		out = append(out, data[start:])
+	}
+	return out
+}
+
 func flatten(parts [][]byte) []byte {
 	var out []byte
 	for _, p := range parts {

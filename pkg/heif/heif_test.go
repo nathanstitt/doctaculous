@@ -165,9 +165,10 @@ func TestDecodeConfigGridWithoutIspe(t *testing.T) {
 }
 
 func TestDecodeGridValidation(t *testing.T) {
-	// A structurally sound grid reaches the not-yet-implemented codec gate.
+	// A structurally sound grid proceeds to tile decoding, where the
+	// placeholder hvcC (wrong configuration version) is rejected.
 	_, err := Decode(bytes.NewReader(gridFile(nil)))
-	if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "not yet implemented") {
+	if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "configuration version") {
 		t.Fatalf("valid grid: %v", err)
 	}
 	// Tile-count mismatch is caught as a container error.
@@ -265,7 +266,7 @@ func TestInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestDecodeNotYetImplemented(t *testing.T) {
+func TestDecodePlaceholderPayloadRejected(t *testing.T) {
 	_, err := Decode(bytes.NewReader(singleHVC1(100, 80)))
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("want ErrUnsupported, got %v", err)

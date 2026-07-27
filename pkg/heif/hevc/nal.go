@@ -70,6 +70,13 @@ func (n nalUnit) isIRAP() bool { return n.typ >= nalBlaWLP && n.typ <= nalRsvIra
 // slice headers).
 func (n nalUnit) isIDR() bool { return n.typ == nalIdrWRadl || n.typ == nalIdrNLP }
 
+// SplitNALs splits an hvcC-style stream of [length][NAL] records, as stored
+// in an hvc1 item payload. lengthSize is 1, 2, or 4 (hvcC
+// lengthSizeMinusOne + 1).
+func SplitNALs(data []byte, lengthSize int) ([][]byte, error) {
+	return splitLengthPrefixed(data, lengthSize)
+}
+
 // splitLengthPrefixed splits an hvcC-style stream of [length][NAL] records.
 // lengthSize is 1, 2, or 4 (hvcC lengthSizeMinusOne + 1).
 func splitLengthPrefixed(data []byte, lengthSize int) ([][]byte, error) {

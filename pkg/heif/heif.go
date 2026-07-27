@@ -76,16 +76,22 @@ func DecodeWithOptions(ctx context.Context, r io.Reader, opts *Options) (img ima
 	if _, _, err := c.configDims(primary); err != nil {
 		return nil, err
 	}
-	if primary.itemType == "grid" {
-		if _, _, err := c.validateGrid(primary); err != nil {
-			return nil, err
-		}
+	workers := 0
+	if opts != nil {
+		workers = opts.Workers
 	}
-	_ = ctx
-	_ = opts
-	// The container is fully parsed and the primary item located; pixel
-	// decoding lands with the pkg/heif/hevc milestones.
-	return nil, fmt.Errorf("%w: HEVC pixel decoding not yet implemented", ErrUnsupported)
+	planes, err := c.decodePlanes(ctx, primary, workers)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	alpha, alphaDepth, err := c.decodeAlpha(ctx, primary.id, planes.width, planes.height, workers)
+	if err != nil {
+		return nil, err
+	}
+	return toImage(planes, alpha, alphaDepth, primary), nil
 }
 
 // DecodeConfig returns the dimensions and color model of the primary image
