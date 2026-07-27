@@ -183,3 +183,17 @@ func TestDecodeRealSipsFileToImage(t *testing.T) {
 	check(16, 36, false, false, true) // bottom-left: blue
 	check(48, 36, true, true, false)  // bottom-right: yellow
 }
+
+func TestDecodeRealHeifEncFile(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "heifenc-noise-96x80.heic"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	img, name, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("image.Decode: %v", err)
+	}
+	if name != "heif" || img.Bounds().Dx() != 96 || img.Bounds().Dy() != 80 {
+		t.Fatalf("format %q bounds %v", name, img.Bounds())
+	}
+}

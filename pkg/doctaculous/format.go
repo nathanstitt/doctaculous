@@ -44,6 +44,9 @@ const (
 	FormatPNG Format = "png"
 	// FormatJPEG is a JPEG image (a rasterized page).
 	FormatJPEG Format = "jpeg"
+	// FormatHEIC is a HEIF/HEIC still image (HEVC-coded), decoded by the
+	// pure-Go pkg/heif decoder. Input only: the toolkit does not encode HEVC.
+	FormatHEIC Format = "heic"
 )
 
 // Sentinel errors for format handling, for callers to branch on via errors.Is.
@@ -79,6 +82,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatEPUB:     {input: true, output: true},
 	FormatPNG:      {input: true, output: true},
 	FormatJPEG:     {input: true, output: true},
+	FormatHEIC:     {input: true, output: false},
 }
 
 // ValidInput reports whether f is a supported conversion input (a format the
@@ -146,6 +150,8 @@ func ParseFormat(s string) (Format, error) {
 		return FormatPNG, nil
 	case "jpeg", "jpg":
 		return FormatJPEG, nil
+	case "heic", "heif":
+		return FormatHEIC, nil
 	default:
 		return FormatUnknown, fmt.Errorf("doctaculous: format %q: %w", s, ErrUnknownFormat)
 	}
@@ -176,6 +182,8 @@ var mimeFormats = map[string]Format{
 	"image/png":            FormatPNG,
 	"image/jpeg":           FormatJPEG,
 	"image/jpg":            FormatJPEG,
+	"image/heic":           FormatHEIC,
+	"image/heif":           FormatHEIC,
 
 	// Deliberate refusals. Legacy binary Office formats have no pure-Go reader
 	// and are not the OOXML formats their names resemble.
@@ -183,9 +191,8 @@ var mimeFormats = map[string]Format{
 	"application/vnd.ms-word":       FormatUnknown,
 	"application/vnd.ms-excel":      FormatUnknown,
 	"application/vnd.ms-powerpoint": FormatUnknown,
-	// No viable pure-Go HEIC/HEIF decoder exists.
-	"image/heic":          FormatUnknown,
-	"image/heif":          FormatUnknown,
+	// HEIF image sequences remain refused: pkg/heif decodes still images
+	// only (msf1 sequences are rejected by design).
 	"image/heic-sequence": FormatUnknown,
 	"image/heif-sequence": FormatUnknown,
 	// Generic containers say nothing about their content; use DetectFormat.
@@ -252,6 +259,8 @@ func (f Format) MIME() string {
 		return "image/png"
 	case FormatJPEG:
 		return "image/jpeg"
+	case FormatHEIC:
+		return "image/heic"
 	default:
 		return ""
 	}
@@ -289,6 +298,8 @@ func FormatFromPath(path string) Format {
 		return FormatPNG
 	case ".jpg", ".jpeg":
 		return FormatJPEG
+	case ".heic", ".heif":
+		return FormatHEIC
 	default:
 		return FormatUnknown
 	}

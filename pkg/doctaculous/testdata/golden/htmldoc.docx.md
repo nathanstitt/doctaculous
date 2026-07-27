@@ -140,6 +140,12 @@ none + position
 
 The four‑quadrant PNG makes orientation unambiguous: _contain_ letterboxes the whole square, _cover_ fills and crops, and _none_ pins the unscaled image to the bottom‑right.
 
+HEIC (pure‑Go HEVC decode)
+
+PNG reference
+
+The same quad image as an Apple‑encoded HEIC decoded by the in‑tree HEVC decoder, beside its lossless PNG twin — identical layout, near‑identical pixels (HEIC is lossy 4:2:0).
+
 **09 / FORMS**
 
 ## Form Controls

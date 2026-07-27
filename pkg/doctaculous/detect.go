@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"io"
 	"strings"
 )
@@ -57,12 +58,49 @@ func detectMagic(data []byte) Format {
 	case bytes.HasPrefix(data, []byte(`{\rtf`)):
 		return FormatRTF
 	}
+	if f := classifyISOBMFF(data); f != FormatUnknown {
+		return f
+	}
 	window := data
 	if len(window) > pdfHeaderWindow {
 		window = window[:pdfHeaderWindow]
 	}
 	if bytes.Contains(window, []byte("%PDF-")) {
 		return FormatPDF
+	}
+	return FormatUnknown
+}
+
+// heifBrands are the ftyp brands identifying HEVC-coded still HEIF. The
+// allowlist is deliberately tight: .mp4/.mov/.avif files share the ftyp
+// container signature and must stay FormatUnknown (a silent misdetection is
+// worse than a clean error). The structural mif1 brand counts only when an
+// heic-family brand also appears in the compatible list.
+var heifBrands = map[string]bool{
+	"heic": true, "heix": true, "heim": true, "heis": true,
+	"hevc": true, "hevx": true, "hevm": true, "hevs": true,
+}
+
+// classifyISOBMFF identifies an ISO base-media file ("<size>ftyp<brand>...")
+// as HEIC when its brands say so, else FormatUnknown.
+func classifyISOBMFF(data []byte) Format {
+	if len(data) < 12 || !bytes.Equal(data[4:8], []byte("ftyp")) {
+		return FormatUnknown
+	}
+	size := int(binary.BigEndian.Uint32(data))
+	if size < 16 || size > len(data) {
+		return FormatUnknown
+	}
+	if heifBrands[string(data[8:12])] {
+		return FormatHEIC
+	}
+	if string(data[8:12]) == "mif1" {
+		// Compatible brands start after the minor version.
+		for off := 16; off+4 <= size; off += 4 {
+			if heifBrands[string(data[off:off+4])] {
+				return FormatHEIC
+			}
+		}
 	}
 	return FormatUnknown
 }

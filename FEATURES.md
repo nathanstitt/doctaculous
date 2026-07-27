@@ -64,8 +64,8 @@ bullet's design doc is in `docs/superpowers/specs/`:
   min/max, margins incl. vertical collapsing, padding, borders, backgrounds), IFC (shaping/breaking,
   `text-align`, `line-height`), fragment tree. `2026-06-23-html-block-inline-flow-design.md`.
 - **Replaced content + images** (`pkg/layout/css/image.go`+`replaced.go`): `<img>` decode (PNG/JPEG/
-  GIF, stdlib) → CSS replaced-sizing → paint via `DrawImage`, with `object-fit`/`object-position`.
-  `2026-06-24-html-replaced-images-design.md`.
+  GIF stdlib, HEIC via `pkg/heif`) → CSS replaced-sizing → paint via `DrawImage`, with
+  `object-fit`/`object-position`. `2026-06-24-html-replaced-images-design.md`.
 - **Floats + clear** (`pkg/layout/css/floats.go`): per-BFC float context, narrowing/wrapping,
   `clear`, own paint layer. `2026-06-24-html-floats-design.md`.
 - **Positioning** (`pkg/layout/css/positioning.go`): relative (paint-time offset) + absolute/fixed
@@ -254,7 +254,7 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
 **Stream + MIME input surface** (`pkg/doctaculous` format.go/open.go, first tinycld-adoption PR):
 
 - `FormatFromMIME`/`Format.MIME()` (params stripped/case-folded; explicit-Unknown pins for
-  legacy binary Office — never the OOXML cousins — HEIC, zip, octet-stream; unlisted `text/*` →
+  legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream; unlisted `text/*` →
   FormatText with `text/rtf` excepted; rows flip to PPTX/EPUB/RTF when those frontends land);
   `OpenReader`/`OpenReaderAs(ctx, ...)` stream entry points (fully buffered) threading a real
   open-time context through layout — a cancelled open ERRORS rather than returning a silently
@@ -427,6 +427,18 @@ out-of-scope note):
   transcodes, markdown carries a data: URI, plain-text/tables-only outputs are empty by
   design; png→png stays ErrSameFormat. Input capability bits flipped; conversion matrix
   extended. `2026-07-10-image-input-design.md`.
+
+**HEIF/HEIC input — pure-Go HEVC intra decoder** (`pkg/heif`, `pkg/heif/hevc`):
+
+- A from-scratch, in-tree HEVC intra-only decoder (CABAC, all 35 intra modes, residual
+  coding with sign hiding, deblocking, SAO, WPP + tiles — the full toolset real HEIC
+  encoders emit; Main/Main 10/Main Still, 4:2:0, 8/10-bit) beneath a HEIF container layer
+  (grids of tiles, auxiliary alpha, irot/imir/clap, nclx colour). Bit-exact against
+  reference decodes on a 42-fixture corpus; WPP rows/tiles decode in parallel with
+  byte-identical output. Registered with `image.RegisterFormat`; `.heic` lights up as a
+  document input, inside HTML/EPUB `<img>`, and transcodes to PNG inside DOCX/PPTX/RTF/EPUB
+  outputs (`pkg/render/imageconv`). Image *sequences* (msf1) and AVIF stay refused.
+  `2026-07-27-heif-hevc-decoder.md`.
 
 **XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):
 

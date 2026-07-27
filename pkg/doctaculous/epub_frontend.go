@@ -98,6 +98,8 @@ func epubContentType(ref string) string {
 		return "image/png"
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
+	case ".heic", ".heif":
+		return "image/heic"
 	case ".gif":
 		return "image/gif"
 	case ".svg":

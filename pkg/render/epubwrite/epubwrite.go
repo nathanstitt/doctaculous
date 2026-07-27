@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"image"
+
+	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
 	"io"
 	"strings"
 	"time"
@@ -229,7 +231,12 @@ func (w *writer) imageSrc(src string) string {
 	case "gif":
 		ext, mt = "gif", "image/gif"
 	default:
-		return keep("image %q has unsupported format %q", src, format)
+		// Transcode container-unsupported formats (e.g. HEIC) to PNG.
+		pngData, _, perr := imageconv.TranscodeToPNG(data)
+		if perr != nil {
+			return keep("image %q has unsupported format %q", src, format)
+		}
+		data, ext, mt = pngData, "png", "image/png"
 	}
 	href := fmt.Sprintf("images/img%d.%s", len(w.mediaParts)+1, ext)
 	w.mediaParts = append(w.mediaParts, mediaPart{href: href, mediaType: mt, data: data})

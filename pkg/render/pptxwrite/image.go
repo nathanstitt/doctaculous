@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+
+	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
 	"strconv"
 	"strings"
 
@@ -60,7 +62,12 @@ func (w *writer) imageRun(rc *cssbox.ReplacedContent) string {
 		}
 		ext, ok := mediaExt[format]
 		if !ok {
-			return fail("image %q has unsupported format %q", src, format)
+			// Transcode container-unsupported formats (e.g. HEIC) to PNG.
+			pngData, pngCfg, perr := imageconv.TranscodeToPNG(data)
+			if perr != nil {
+				return fail("image %q has unsupported format %q", src, format)
+			}
+			data, cfg, ext = pngData, pngCfg, "png"
 		}
 		idx = len(w.mediaParts)
 		w.mediaParts = append(w.mediaParts, mediaPart{

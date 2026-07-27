@@ -17,7 +17,7 @@ looks up a single `mimeFormats` table. Three deliberate design points:
   FormatText (unknown text renders as plain text — the browser rule), but listed exceptions
   (`text/rtf`) stay Unknown until their frontend lands. Legacy binary Office types
   (`application/msword`, `vnd.ms-excel`, `vnd.ms-powerpoint`, `vnd.ms-word`) are pinned Unknown
-  by test: they must never map to their OOXML cousins. HEIC/HEIF (no viable pure-Go decoder),
+  by test: they must never map to their OOXML cousins. HEIC/HEIF *sequences* (still images decode via the in-tree pkg/heif decoder since 2026-07; msf1 sequences stay refused),
   `application/zip`, and `application/octet-stream` (generic containers) are Unknown; callers
   compose with content detection: `f := FormatFromMIME(mt); if f == FormatUnknown { f =
   DetectFormat(data, name) }`.
