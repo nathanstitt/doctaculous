@@ -259,6 +259,20 @@
     <p class="caption">The four&#8209;quadrant PNG makes orientation unambiguous:
       <em>contain</em> letterboxes the whole square, <em>cover</em> fills and crops, and
       <em>none</em> pins the unscaled image to the bottom&#8209;right.</p>
+
+    <div class="gallery">
+      <figure>
+        <img class="fit contain" src="img/quad.heic" alt="quad heic">
+        <figcaption>HEIC (pure&#8209;Go HEVC decode)</figcaption>
+      </figure>
+      <figure>
+        <img class="fit contain" src="img/quad.png" alt="quad png reference">
+        <figcaption>PNG reference</figcaption>
+      </figure>
+    </div>
+    <p class="caption">The same quad image as an Apple&#8209;encoded HEIC decoded by the
+      in&#8209;tree HEVC decoder, beside its lossless PNG twin &mdash; identical layout, near&#8209;identical
+      pixels (HEIC is lossy 4:2:0).</p>
   </section>
 
   <!-- ===================== 9 · FORMS ===================== -->

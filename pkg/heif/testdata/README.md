@@ -14,3 +14,14 @@ License: self-authored, same license as the repository (MIT).
 
 All other containers used by tests are built deterministically in memory by
 `testdata/gen/heif`.
+
+`heifenc-noise-96x80.heic` — the same kind of self-authored source (the
+96x80 gradient+noise pattern from `testdata/gen/heif/payloads/gen_sources.go`)
+encoded with libheif's `heif-enc -q 60`, exercising libheif's container
+boxing on top of an x265 bitstream:
+
+```
+heif-enc -q 60 -o heifenc-noise-96x80.heic src-96x80.png
+```
+
+License: self-authored, same license as the repository (MIT).

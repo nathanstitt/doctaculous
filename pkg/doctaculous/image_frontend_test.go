@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -127,5 +129,22 @@ func TestImageConversions(t *testing.T) {
 	}
 	if !strings.Contains(md.String(), "![](data:image/png;base64,") {
 		t.Errorf("png→md should carry the image:\n%s", md.String())
+	}
+}
+
+func TestOpenImageBytesHEIC(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "heif", "testdata", "sips-quad-64x48.heic"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doc, err := OpenImageBytes(data)
+	if err != nil {
+		t.Fatalf("OpenImageBytes: %v", err)
+	}
+	if doc.Format() != FormatHEIC {
+		t.Errorf("format = %q, want heic", doc.Format())
+	}
+	if n := doc.PageCount(); n != 1 {
+		t.Errorf("pages = %d, want 1", n)
 	}
 }

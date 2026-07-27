@@ -195,6 +195,8 @@ func TestFormatFromMIME(t *testing.T) {
 		{"text/vcard", FormatText},
 		// A malformed parameter section still matches on the media type.
 		{"text/html; charset", FormatHTML},
+		{"image/heic", FormatHEIC},
+		{"image/heif", FormatHEIC},
 	}
 	for _, c := range cases {
 		if got := FormatFromMIME(c.in); got != c.want {
@@ -210,8 +212,6 @@ func TestFormatFromMIME(t *testing.T) {
 		"application/vnd.ms-word",
 		"application/vnd.ms-excel",
 		"application/vnd.ms-powerpoint",
-		"image/heic",
-		"image/heif",
 		"image/heic-sequence",
 		"image/heif-sequence",
 		"application/zip",

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/pkg/docx"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
 )
 
 // emuPerPx is 9525 EMU per CSS pixel (96dpi; 12700 EMU per point).
@@ -54,7 +55,13 @@ func (w *writer) imageRun(rc *cssbox.ReplacedContent) string {
 		}
 		ext, ok := mediaExt[format]
 		if !ok {
-			return fail("image %q has unsupported format %q", src, format)
+			// The container cannot hold this format natively (e.g. HEIC):
+			// embed a PNG rendition instead of degrading to alt text.
+			pngData, pngCfg, perr := imageconv.TranscodeToPNG(data)
+			if perr != nil {
+				return fail("image %q has unsupported format %q", src, format)
+			}
+			data, cfg, ext = pngData, pngCfg, "png"
 		}
 		name := fmt.Sprintf("image%d.%s", len(w.media)+1, ext)
 		m = mediaRef{relID: w.doc.AddImage(name, data), pxW: cfg.Width, pxH: cfg.Height}

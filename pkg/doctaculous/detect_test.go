@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/testdata/gen"
@@ -155,5 +157,47 @@ func TestDetectFormatUnknown(t *testing.T) {
 	}
 	if got := DetectFormat(nil, ""); got != FormatUnknown {
 		t.Errorf("DetectFormat(nil) = %q, want unknown", got)
+	}
+}
+
+func TestDetectISOBMFF(t *testing.T) {
+	ftyp := func(major string, compat ...string) []byte {
+		body := []byte(major)
+		body = append(body, 0, 0, 0, 0) // minor version
+		for _, c := range compat {
+			body = append(body, c...)
+		}
+		out := []byte{0, 0, 0, byte(8 + len(body))}
+		out = append(out, "ftyp"...)
+		return append(out, body...)
+	}
+	cases := []struct {
+		name string
+		data []byte
+		want Format
+	}{
+		{"heic major", ftyp("heic", "mif1"), FormatHEIC},
+		{"heix major", ftyp("heix"), FormatHEIC},
+		{"mif1 with heic compat", ftyp("mif1", "miaf", "heic"), FormatHEIC},
+		// The ftyp container signature is shared with video and AVIF: a
+		// silent misdetection is worse than a clean error.
+		{"mp4", ftyp("isom", "iso2", "mp41"), FormatUnknown},
+		{"quicktime", ftyp("qt  "), FormatUnknown},
+		{"avif", ftyp("avif", "mif1"), FormatUnknown},
+		{"bare mif1", ftyp("mif1", "miaf"), FormatUnknown},
+	}
+	for _, c := range cases {
+		if got := detectMagic(c.data); got != c.want {
+			t.Errorf("%s: detectMagic = %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	// A real HEIC end to end through DetectFormat.
+	data, err := os.ReadFile(filepath.Join("..", "heif", "testdata", "sips-quad-64x48.heic"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if got := DetectFormat(data, "photo.bin"); got != FormatHEIC {
+		t.Errorf("DetectFormat(real heic) = %q", got)
 	}
 }

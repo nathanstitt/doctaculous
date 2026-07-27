@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
+
+	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
 	"strconv"
 	"strings"
 
@@ -60,7 +62,12 @@ func (w *writer) imageRun(rc *cssbox.ReplacedContent) string {
 	case "jpeg":
 		blip = `\jpegblip`
 	default:
-		return fail("image %q has format %q (RTF carries png/jpeg)", src, format)
+		// Transcode container-unsupported formats (e.g. HEIC, GIF) to PNG.
+		pngData, pngCfg, perr := imageconv.TranscodeToPNG(data)
+		if perr != nil {
+			return fail("image %q has format %q (RTF carries png/jpeg)", src, format)
+		}
+		data, cfg, blip = pngData, pngCfg, `\pngblip`
 	}
 
 	// Extent: explicit width/height attributes (CSS px) win; else the

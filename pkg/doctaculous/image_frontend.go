@@ -42,6 +42,8 @@ func OpenImageBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 		format, mime = FormatPNG, "image/png"
 	case "jpeg":
 		format, mime = FormatJPEG, "image/jpeg"
+	case "heif":
+		format, mime = FormatHEIC, "image/heic"
 	default:
 		return nil, fmt.Errorf("doctaculous: image format %q: %w", kind, ErrUnsupportedFormat)
 	}
