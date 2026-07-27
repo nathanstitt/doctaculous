@@ -28,8 +28,8 @@ const (
 	ctxLastSigXPrefix      = ctxTransformSkipChroma + 1 // 18
 	ctxLastSigYPrefix      = ctxLastSigXPrefix + 18     // 18
 	ctxCodedSubBlock       = ctxLastSigYPrefix + 18     // 4
-	ctxSigCoeffFlag        = ctxCodedSubBlock + 4       // 44 (42 + 2 transform-skip)
-	ctxCoeffAbsGt1         = ctxSigCoeffFlag + 44       // 24
+	ctxSigCoeffFlag        = ctxCodedSubBlock + 4       // 42 (27 luma + 15 chroma)
+	ctxCoeffAbsGt1         = ctxSigCoeffFlag + 42       // 24
 	ctxCoeffAbsGt2         = ctxCoeffAbsGt1 + 24        // 6
 	numCtxModels           = ctxCoeffAbsGt2 + 6
 )
@@ -65,9 +65,7 @@ func buildCtxInitValues() [numCtxModels]uint8 {
 	put(ctxSigCoeffFlag,
 		111, 111, 125, 110, 110, 94, 124, 108, 124, 107, 125, 141, 179, 153, 125, 107,
 		125, 141, 179, 153, 125, 107, 125, 141, 179, 153, 125, 140, 139, 182, 182, 152,
-		136, 152, 136, 153, 136, 139, 111, 136, 139, 111,
-		// The two transform-skip significance contexts (42, 43).
-		141, 111)
+		136, 152, 136, 153, 136, 139, 111, 136, 139, 111)
 	put(ctxCoeffAbsGt1,
 		140, 92, 137, 138, 140, 152, 138, 139, 153, 74, 149, 92,
 		139, 107, 122, 152, 140, 179, 166, 182, 140, 227, 122, 197)

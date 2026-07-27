@@ -45,4 +45,13 @@ enc src-64x64.png x265-64x64-qp27-nosdh    yuv420p "qp=27:keyint=1:no-signhide=1
 # ctu16: 4 CTU rows in 64 px, so WPP substreams/entry points are exercised.
 enc src-64x64.png x265-64x64-qp27-ctu16    yuv420p "qp=27:keyint=1:ctu=16"
 
+# Pre-filter (no SAO/deblock) variants of each coding tool, so the
+# reconstruction milestone can verify them bit-exact before loop filters land:
+enc src-64x64.png x265-64x64-qp27-tskip-nofilt    yuv420p "qp=27:keyint=1:tskip=1:no-sao=1:no-deblock=1"
+enc src-64x64.png x265-64x64-qp27-lossless-nofilt yuv420p "lossless=1:keyint=1:no-sao=1:no-deblock=1"
+enc src-64x64.png x265-64x64-qp27-scaling-nofilt  yuv420p "qp=27:keyint=1:scaling-list=default:no-sao=1:no-deblock=1"
+enc src-64x64.png x265-64x64-qp27-nosdh-nofilt    yuv420p "qp=27:keyint=1:no-signhide=1:no-sao=1:no-deblock=1"
+enc src-64x64.png x265-64x64-qp27-ctu16-nofilt    yuv420p "qp=27:keyint=1:ctu=16:no-sao=1:no-deblock=1"
+enc src-96x80.png x265-96x80-qp27-ctu16-nofilt    yuv420p "qp=27:keyint=1:ctu=16:no-sao=1:no-deblock=1"
+
 rm -f src-*.png

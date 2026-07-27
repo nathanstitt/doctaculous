@@ -119,7 +119,9 @@ func parseSliceHeader(rbsp []byte, nal nalUnit, s *sps, p *pps) (*sliceHeader, e
 		// P/B-only syntax (ref lists, weights, merge candidates) cannot
 		// appear: slice_type is I.
 		h.sliceQP = p.initQP + r.se()
-		if h.sliceQP < -12 || h.sliceQP > 51 {
+		// SliceQpY range is [-QpBdOffsetY, 51] (spec 7.4.7.1), which keeps
+		// the final Qp' non-negative.
+		if h.sliceQP < -int32(6*(s.bitDepthLuma-8)) || h.sliceQP > 51 {
 			return nil, fmt.Errorf("%w: slice QP %d", ErrInvalid, h.sliceQP)
 		}
 		if p.sliceChromaQpOffsets {

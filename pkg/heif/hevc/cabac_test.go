@@ -24,7 +24,7 @@ func TestRangeTabSpotValues(t *testing.T) {
 }
 
 func TestTransIdxSpotValues(t *testing.T) {
-	cases := map[int]uint8{0: 0, 1: 0, 2: 1, 5: 4, 13: 11, 28: 23, 29: 22, 62: 38, 63: 63}
+	cases := map[int]uint8{0: 0, 1: 0, 2: 1, 5: 4, 13: 11, 28: 22, 29: 22, 30: 23, 62: 38, 63: 63}
 	for state, want := range cases {
 		if got := transIdxLPS[state]; got != want {
 			t.Errorf("transIdxLPS[%d] = %d, want %d", state, got, want)
@@ -69,8 +69,8 @@ func TestCtxInitTableFullyPopulated(t *testing.T) {
 			t.Errorf("ctxInitValues[%d] is zero: offset table gap", i)
 		}
 	}
-	if numCtxModels != 136 {
-		t.Errorf("numCtxModels = %d, want 136", numCtxModels)
+	if numCtxModels != 134 {
+		t.Errorf("numCtxModels = %d, want 134", numCtxModels)
 	}
 }
 

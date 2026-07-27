@@ -18,7 +18,7 @@ var rangeTabLPS = [64][4]uint32{
 	{62, 76, 90, 104}, {59, 72, 86, 99}, {56, 69, 81, 94}, {53, 65, 77, 89},
 	{51, 62, 73, 85}, {48, 59, 69, 80}, {46, 56, 66, 76}, {43, 53, 63, 72},
 	{41, 50, 59, 69}, {39, 48, 56, 65}, {37, 45, 54, 62}, {35, 43, 51, 59},
-	{33, 41, 48, 56}, {32, 39, 46, 53}, {30, 37, 43, 50}, {28, 35, 41, 48},
+	{33, 41, 48, 56}, {32, 39, 46, 53}, {30, 37, 43, 50}, {29, 35, 41, 48},
 	{27, 33, 39, 45}, {26, 31, 37, 43}, {24, 30, 35, 41}, {23, 28, 33, 39},
 	{22, 27, 32, 37}, {21, 26, 30, 35}, {20, 24, 29, 33}, {19, 23, 27, 31},
 	{18, 22, 26, 30}, {17, 21, 25, 28}, {16, 20, 23, 27}, {15, 19, 22, 25},
@@ -33,7 +33,7 @@ var rangeTabLPS = [64][4]uint32{
 // The MPS transition is min(pStateIdx+1, 62).
 var transIdxLPS = [64]uint8{
 	0, 0, 1, 2, 2, 4, 4, 5, 6, 7, 8, 9, 9, 11, 11, 12,
-	13, 13, 15, 15, 16, 16, 18, 18, 19, 19, 21, 21, 23, 22, 23, 24,
+	13, 13, 15, 15, 16, 16, 18, 18, 19, 19, 21, 21, 22, 22, 23, 24,
 	24, 25, 26, 26, 27, 27, 28, 29, 29, 30, 30, 30, 31, 32, 32, 33,
 	33, 33, 34, 34, 35, 35, 35, 36, 36, 36, 37, 37, 37, 38, 38, 63,
 }
@@ -76,6 +76,8 @@ func (c *cabacDecoder) init(r *bitReader) error {
 // decodeBin decodes one context-coded bin (spec 9.3.4.3.2).
 func (c *cabacDecoder) decodeBin(ctxs []ctxModel, ctxIdx int) uint32 {
 	ctx := &ctxs[ctxIdx]
+	preState := ctx.state
+	preMPS := ctx.mps
 	qIdx := c.ivlRange >> 6 & 3
 	lpsRange := rangeTabLPS[ctx.state][qIdx]
 	c.ivlRange -= lpsRange
@@ -101,7 +103,9 @@ func (c *cabacDecoder) decodeBin(ctxs []ctxModel, ctxIdx int) uint32 {
 		c.ivlOffset = c.ivlOffset<<1 | c.r.u(1)
 	}
 	if c.trace != nil {
-		c.trace(ctxIdx, bin, ctx.state, ctx.mps, c.ivlRange, c.ivlOffset)
+		// The trace reports the PRE-decode context state: that is what a
+		// reference decoder's log shows, so divergence diffs align.
+		c.trace(ctxIdx, bin, preState, preMPS, c.ivlRange, c.ivlOffset)
 	}
 	return bin
 }
@@ -109,11 +113,15 @@ func (c *cabacDecoder) decodeBin(ctxs []ctxModel, ctxIdx int) uint32 {
 // decodeBypass decodes one bypass bin (spec 9.3.4.3.4).
 func (c *cabacDecoder) decodeBypass() uint32 {
 	c.ivlOffset = c.ivlOffset<<1 | c.r.u(1)
+	var bin uint32
 	if c.ivlOffset >= c.ivlRange {
 		c.ivlOffset -= c.ivlRange
-		return 1
+		bin = 1
 	}
-	return 0
+	if c.trace != nil {
+		c.trace(-1, bin, 0, 0, c.ivlRange, c.ivlOffset)
+	}
+	return bin
 }
 
 // decodeBypassBits decodes n bypass bins as an unsigned MSB-first value.
@@ -129,14 +137,19 @@ func (c *cabacDecoder) decodeBypassBits(n int) uint32 {
 // (spec 9.3.4.3.5). A result of 1 means terminate.
 func (c *cabacDecoder) decodeTerminate() uint32 {
 	c.ivlRange -= 2
+	var bin uint32
 	if c.ivlOffset >= c.ivlRange {
-		return 1
+		bin = 1
+	} else {
+		for c.ivlRange < 256 {
+			c.ivlRange <<= 1
+			c.ivlOffset = c.ivlOffset<<1 | c.r.u(1)
+		}
 	}
-	for c.ivlRange < 256 {
-		c.ivlRange <<= 1
-		c.ivlOffset = c.ivlOffset<<1 | c.r.u(1)
+	if c.trace != nil {
+		c.trace(-2, bin, 0, 0, c.ivlRange, c.ivlOffset)
 	}
-	return 0
+	return bin
 }
 
 // failed reports whether the underlying reader ran out of data (a malformed
