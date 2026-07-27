@@ -130,6 +130,51 @@ func splitAnnexB(data []byte) [][]byte {
 	return out
 }
 
+// unescapeWithMap is unescapeRBSP that additionally reports the positions
+// (indexes into the escaped input) of every removed emulation byte. WPP/tile
+// entry-point offsets are expressed in escaped bytes, so converting them to
+// RBSP offsets needs this map.
+func unescapeWithMap(p []byte) (rbsp []byte, removed []int) {
+	out := make([]byte, 0, len(p))
+	zeros := 0
+	for i := range p {
+		if zeros >= 2 && p[i] == 3 {
+			zeros = 0
+			removed = append(removed, i)
+			continue
+		}
+		if p[i] == 0 {
+			zeros++
+		} else {
+			zeros = 0
+		}
+		out = append(out, p[i])
+	}
+	return out, removed
+}
+
+// escapedToRBSP converts an offset in the escaped payload to the
+// corresponding RBSP offset given the removed-byte positions.
+func escapedToRBSP(off int, removed []int) int {
+	n := 0
+	for _, r := range removed {
+		if r < off {
+			n++
+		}
+	}
+	return off - n
+}
+
+// rbspToEscaped is the inverse of escapedToRBSP.
+func rbspToEscaped(off int, removed []int) int {
+	for _, r := range removed {
+		if r <= off {
+			off++
+		}
+	}
+	return off
+}
+
 // unescapeRBSP removes emulation-prevention bytes (00 00 03 -> 00 00) from a
 // NAL payload, yielding the raw byte sequence payload the bit readers parse.
 func unescapeRBSP(p []byte) []byte {

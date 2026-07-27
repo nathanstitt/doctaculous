@@ -86,6 +86,14 @@ func parseSPS(rbsp []byte) (*sps, error) {
 	}
 	s.width = int(r.ue())
 	s.height = int(r.ue())
+	// Bound allocations before they happen: a lying header must not be able
+	// to demand gigabytes. 16384 per axis and 2^26 luma samples comfortably
+	// cover real single-picture HEIC content (~50 MP); larger images arrive
+	// as grids of small tiles.
+	if s.width <= 0 || s.height <= 0 || s.width > 16384 || s.height > 16384 ||
+		int64(s.width)*int64(s.height) > 1<<26 {
+		return nil, fmt.Errorf("%w: picture size %dx%d", ErrUnsupported, s.width, s.height)
+	}
 	if r.flag() { // conformance_window_flag
 		for i := range s.confWin {
 			s.confWin[i] = r.ue()
@@ -118,8 +126,12 @@ func parseSPS(rbsp []byte) (*sps, error) {
 	s.maxTbLog2Size = s.minTbLog2Size + int(r.ue())
 	s.maxTransformHierarchyDepthInter = int(r.ue())
 	s.maxTransformHierarchyDepthIntra = int(r.ue())
+	// Spec 7.4.3.2.1 size constraints; log2_min_transform_block_size must be
+	// strictly below log2_min_luma_coding_block_size so the NxN transform
+	// split of a minimum CU still lands on a legal transform size.
 	if s.ctbLog2SizeY < 4 || s.ctbLog2SizeY > 6 || s.minCbLog2SizeY < 3 ||
-		s.minTbLog2Size < 2 || s.maxTbLog2Size > 5 || s.maxTbLog2Size > s.ctbLog2SizeY {
+		s.minTbLog2Size < 2 || s.minTbLog2Size >= s.minCbLog2SizeY ||
+		s.maxTbLog2Size > 5 || s.maxTbLog2Size > s.ctbLog2SizeY {
 		return nil, fmt.Errorf("%w: coding/transform block size bounds", ErrInvalid)
 	}
 	s.scalingListEnabled = r.flag()
@@ -141,6 +153,10 @@ func parseSPS(rbsp []byte) (*sps, error) {
 		s.pcmMinCbLog2 = int(r.ue()) + 3
 		s.pcmMaxCbLog2 = s.pcmMinCbLog2 + int(r.ue())
 		s.pcmLoopFilterDisable = r.flag()
+		if s.pcmBitDepthLuma > s.bitDepthLuma || s.pcmBitDepthChroma > s.bitDepthChroma ||
+			s.pcmMaxCbLog2 > s.ctbLog2SizeY {
+			return nil, fmt.Errorf("%w: PCM parameters", ErrInvalid)
+		}
 	}
 	s.numShortTermRPS = r.ue()
 	if s.numShortTermRPS > 64 {

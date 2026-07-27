@@ -50,7 +50,9 @@ func resolveParamSets(ps ParamSets) (*resolvedParams, error) {
 	return out, nil
 }
 
-// lookup returns the SPS+PPS pair a slice referencing ppsID decodes against.
+// lookup returns the SPS+PPS pair a slice referencing ppsID decodes against,
+// after validating the constraints that couple the two (each parses alone, so
+// cross-parameter rules can only be checked here).
 func (rp *resolvedParams) lookup(ppsID uint32) (*sps, *pps, error) {
 	p, ok := rp.pps[ppsID]
 	if !ok {
@@ -59,6 +61,12 @@ func (rp *resolvedParams) lookup(ppsID uint32) (*sps, *pps, error) {
 	s, ok := rp.sps[p.spsID]
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: PPS references missing SPS %d", ErrInvalid, p.spsID)
+	}
+	if p.diffCuQpDeltaDepth < 0 || p.diffCuQpDeltaDepth > s.ctbLog2SizeY-s.minCbLog2SizeY {
+		return nil, nil, fmt.Errorf("%w: diff_cu_qp_delta_depth %d", ErrInvalid, p.diffCuQpDeltaDepth)
+	}
+	if p.tilesEnabled && (p.numTileColumns > s.picWidthCtbs || p.numTileRows > s.picHeightCtbs) {
+		return nil, nil, fmt.Errorf("%w: tile grid exceeds picture", ErrInvalid)
 	}
 	return s, p, nil
 }
