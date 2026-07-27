@@ -1,6 +1,9 @@
 package hevc
 
-import "slices"
+import (
+	"slices"
+	"sync"
+)
 
 // Sample-adaptive offset (spec 7.3.8.3 syntax, 8.7.3 application). Params
 // are parsed per CTB during slice decoding and applied picture-wide after
@@ -28,9 +31,11 @@ func (d *sliceDecoder) parseSAO(ctbAddr, col, row int) {
 	hdr := d.hdr
 	p := &d.ctbSao[ctbAddr]
 
-	// Merge candidates must be in the same slice and tile.
+	// Merge candidates must be in the same slice and tile. The tile check
+	// (immutable geometry) runs first so a concurrently-decoding foreign
+	// tile's ctbSlice cell is never read.
 	mergeOK := func(other int) bool {
-		return d.ctbSlice[other] == d.sliceID && d.tileID(other) == d.tileID(ctbAddr)
+		return d.tileID(other) == d.tileID(ctbAddr) && d.ctbSlice[other] == d.sliceID
 	}
 	if col > 0 && mergeOK(ctbAddr-1) {
 		if d.cabac.decodeBin(d.ctx, ctxSaoMergeFlag) == 1 {
@@ -102,14 +107,38 @@ func (d *sliceDecoder) parseSAO(ctbAddr, col, row int) {
 }
 
 // applySAO runs SAO over the whole picture, using copies of the deblocked
-// planes as classification input.
-func (d *sliceDecoder) applySAO() {
+// planes as classification input. CTB regions are disjoint, so the work
+// splits into contiguous CTB ranges across workers.
+func (d *sliceDecoder) applySAO(workers int) {
 	s := d.sps
 	srcY := slices.Clone(d.frame.Y)
 	srcCb := slices.Clone(d.frame.Cb)
 	srcCr := slices.Clone(d.frame.Cr)
 
-	for ctb := range s.picSizeCtbs {
+	if workers <= 1 || s.picSizeCtbs < 2 {
+		d.applySAORange(srcY, srcCb, srcCr, 0, s.picSizeCtbs)
+		return
+	}
+	if workers > s.picSizeCtbs {
+		workers = s.picSizeCtbs
+	}
+	var wg sync.WaitGroup
+	for b := range workers {
+		from := b * s.picSizeCtbs / workers
+		to := (b + 1) * s.picSizeCtbs / workers
+		wg.Add(1)
+		go func(from, to int) {
+			defer wg.Done()
+			d.applySAORange(srcY, srcCb, srcCr, from, to)
+		}(from, to)
+	}
+	wg.Wait()
+}
+
+// applySAORange applies SAO to CTBs [from, to).
+func (d *sliceDecoder) applySAORange(srcY, srcCb, srcCr []uint16, from, to int) {
+	s := d.sps
+	for ctb := from; ctb < to; ctb++ {
 		p := &d.ctbSao[ctb]
 		col := ctb % s.picWidthCtbs
 		row := ctb / s.picWidthCtbs

@@ -83,7 +83,7 @@ func TestTraceSmallest(t *testing.T) {
 			d.deblockPicture()
 		}
 		if s0.saoEnabled && os.Getenv("HEVC_NO_SAO") == "" {
-			d.applySAO()
+			d.applySAO(1)
 		}
 	}
 
