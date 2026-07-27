@@ -1,79 +1,10 @@
 package hevc
 
-import "fmt"
-
 // DecodeFrame decodes one intra still picture from its parameter sets and
-// slice NAL units (as extracted from an hvcC sample or an Annex-B stream).
-// Slices are decoded sequentially; WPP substreams within a slice are decoded
-// in order with the spec's context save/restore.
+// slice NAL units (as extracted from an hvcC sample or an Annex-B stream),
+// using all available CPUs for WPP/tile streams.
 func DecodeFrame(ps ParamSets, sliceNALs [][]byte) (*Frame, error) {
-	rp, err := resolveParamSets(ps)
-	if err != nil {
-		return nil, err
-	}
-
-	var d *sliceDecoder
-	for _, raw := range sliceNALs {
-		nal, err := parseNAL(raw)
-		if err != nil {
-			return nil, err
-		}
-		if !nal.isSlice() {
-			continue // SEI etc. interleaved with slices
-		}
-		if !nal.isIRAP() {
-			return nil, fmt.Errorf("%w: non-IRAP slice NAL type %d", ErrUnsupported, nal.typ)
-		}
-		rbsp, removed := unescapeWithMap(nal.payload)
-		// The PPS id lives early in the header; parse the header against
-		// it after a peek. Headers are parsed twice cheaply: once to get
-		// the PPS id (via a throwaway parse against any PPS), once for
-		// real. Fixtures carry a single PPS, so read it directly.
-		var hdr *sliceHeader
-		var s *sps
-		var p *pps
-		for id := range rp.pps {
-			s, p, err = rp.lookup(id)
-			if err != nil {
-				return nil, err
-			}
-			hdr, err = parseSliceHeader(rbsp, nal, s, p)
-			if err != nil {
-				return nil, err
-			}
-			break
-		}
-		if len(rp.pps) > 1 {
-			s, p, err = rp.lookup(hdr.ppsID)
-			if err != nil {
-				return nil, err
-			}
-			hdr, err = parseSliceHeader(rbsp, nal, s, p)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if d == nil {
-			d = newSliceDecoder(s, p)
-		} else if d.sps != s {
-			return nil, fmt.Errorf("%w: slices reference different SPS", ErrInvalid)
-		}
-		if err := d.decodeSliceSegment(hdr, rbsp, removed); err != nil {
-			return nil, err
-		}
-	}
-	if d == nil {
-		return nil, fmt.Errorf("%w: no slice data", ErrInvalid)
-	}
-	if !d.complete() {
-		return nil, fmt.Errorf("%w: picture is missing coded CTUs", ErrInvalid)
-	}
-	d.deblockPicture()
-	if d.sps.saoEnabled {
-		d.applySAO()
-	}
-	d.frame.applyConformanceWindow(d.sps)
-	return d.frame, nil
+	return DecodeFrameOpts(ps, sliceNALs, nil)
 }
 
 // debugSyntax, when non-nil, receives syntax-level decode events. Set only
@@ -142,6 +73,7 @@ type sliceDecoder struct {
 
 	sliceID     int
 	curTile     int
+	curCtbAddr  int
 	ctusDecoded int
 }
 
@@ -283,6 +215,7 @@ func (d *sliceDecoder) decodeSliceSegment(hdr *sliceHeader, rbsp []byte, removed
 
 		d.ctbSlice[ctbAddr] = d.sliceID
 		d.curTile = d.tileID(ctbAddr)
+		d.curCtbAddr = ctbAddr
 		d.ctbDeblockDisabled[ctbAddr] = hdr.deblockDisabled
 		d.ctbBetaOff[ctbAddr] = hdr.betaOffsetDiv2
 		d.ctbTcOff[ctbAddr] = hdr.tcOffsetDiv2
@@ -351,11 +284,26 @@ func (d *sliceDecoder) availableAt(x, y int) bool {
 	if x < 0 || y < 0 || x >= d.sps.width || y >= d.sps.height {
 		return false
 	}
-	if !d.decoded[d.idx4(x, y)] {
+	// Ordering and tile/slice checks come BEFORE any shared-map read:
+	// during parallel decoding, cells belonging to other tiles or to
+	// not-yet-reached CTBs are being written concurrently, and these
+	// short-circuits keep this goroutine from ever reading them. A CTB
+	// after the current one in decode order can never be available anyway
+	// (z-scan), so rejecting it early is also spec-correct.
+	ctb := (y>>d.sps.ctbLog2SizeY)*d.sps.picWidthCtbs + x>>d.sps.ctbLog2SizeY
+	if d.ctbAfterCurrent(ctb) {
 		return false
 	}
-	ctb := (y>>d.sps.ctbLog2SizeY)*d.sps.picWidthCtbs + x>>d.sps.ctbLog2SizeY
-	return d.ctbSlice[ctb] == d.sliceID && d.tileID(ctb) == d.curTile
+	if d.tileID(ctb) != d.curTile || d.ctbSlice[ctb] != d.sliceID {
+		return false
+	}
+	return d.decoded[d.idx4(x, y)]
+}
+
+// ctbAfterCurrent reports whether a CTB follows the current one in raster
+// order (such cells may be under concurrent write by other workers).
+func (d *sliceDecoder) ctbAfterCurrent(ctb int) bool {
+	return ctb > d.curCtbAddr
 }
 
 // curTile is maintained by the CTU loop so availability checks can compare
@@ -399,11 +347,14 @@ func (d *sliceDecoder) modeAvailableAt(x, y int) bool {
 	if x < 0 || y < 0 || x >= d.sps.width || y >= d.sps.height {
 		return false
 	}
-	if !d.modeSet[d.idx4(x, y)] {
+	ctb := (y>>d.sps.ctbLog2SizeY)*d.sps.picWidthCtbs + x>>d.sps.ctbLog2SizeY
+	if d.ctbAfterCurrent(ctb) {
 		return false
 	}
-	ctb := (y>>d.sps.ctbLog2SizeY)*d.sps.picWidthCtbs + x>>d.sps.ctbLog2SizeY
-	return d.ctbSlice[ctb] == d.sliceID && d.tileID(ctb) == d.curTile
+	if d.tileID(ctb) != d.curTile || d.ctbSlice[ctb] != d.sliceID {
+		return false
+	}
+	return d.modeSet[d.idx4(x, y)]
 }
 
 func (d *sliceDecoder) intraMode4x4(x, y int) int { return int(d.intraModes[d.idx4(x, y)]) }

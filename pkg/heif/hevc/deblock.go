@@ -29,9 +29,14 @@ func (d *sliceDecoder) deblockPicture() {
 
 // deblockPass filters all vertical (vertical=true) or horizontal edges.
 func (d *sliceDecoder) deblockPass(vertical bool) {
+	d.deblockRange(vertical, 0, d.sps.height)
+}
+
+// deblockRange runs one pass over rows [y0, y1).
+func (d *sliceDecoder) deblockRange(vertical bool, y0, y1 int) {
 	s := d.sps
 	// Luma: edges on the 8x8 grid, 4-sample segments.
-	for y := 0; y < s.height; y += 4 {
+	for y := y0; y < y1; y += 4 {
 		for x := 0; x < s.width; x += 4 {
 			if vertical {
 				if x == 0 || x%8 != 0 || !d.vertEdge[d.idx4(x, y)] {

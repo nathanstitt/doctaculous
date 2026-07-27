@@ -10,7 +10,7 @@ import (
 
 // loadStream reads a committed Annex-B payload and splits it into NAL units
 // grouped by type.
-func loadStream(t *testing.T, name string) (params ParamSets, slices []nalUnit) {
+func loadStream(t testing.TB, name string) (params ParamSets, slices []nalUnit) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "gen", "heif", "payloads", name))
 	if err != nil {
