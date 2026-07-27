@@ -78,6 +78,14 @@ func TestTraceSmallest(t *testing.T) {
 	defer func() { debugSyntax = nil }()
 	err = d.decodeSliceSegment(hdr, rbsp, removed)
 	fmt.Printf("decode: err=%v totalCtxBins=%d ctus=%d\n", err, bins, d.ctusDecoded)
+	if err == nil {
+		if os.Getenv("HEVC_NO_DEBLOCK") == "" {
+			d.deblockPicture()
+		}
+		if s0.saoEnabled && os.Getenv("HEVC_NO_SAO") == "" {
+			d.applySAO()
+		}
+	}
 
 	// Compare whatever was reconstructed against the reference dump, per
 	// 8x8 block, to localize the first spatial divergence.

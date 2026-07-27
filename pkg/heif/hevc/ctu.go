@@ -222,6 +222,19 @@ func (d *sliceDecoder) decodePCM(x0, y0, log2CbSize int) error {
 	d.markIntraMode(x0, y0, size, intraDC)
 	d.markDecoded(x0, y0, size, size)
 	d.setCuQP(x0, y0, size, d.deriveQPY())
+	if x0%8 == 0 && x0 > 0 {
+		for yy := y0; yy < y0+size && yy < s.height; yy += 4 {
+			d.vertEdge[d.idx4(x0, yy)] = true
+		}
+	}
+	if y0%8 == 0 && y0 > 0 {
+		for xx := x0; xx < x0+size && xx < s.width; xx += 4 {
+			d.horEdge[d.idx4(xx, y0)] = true
+		}
+	}
+	if s.pcmLoopFilterDisable {
+		d.markNoFilter(x0, y0, size)
+	}
 	return d.cabac.init(r)
 }
 
@@ -236,7 +249,9 @@ func (d *sliceDecoder) transformTree(x0, y0, xBase, yBase, log2Size, depth, blkI
 		split = true
 	case intraSplitHere:
 		split = true
-	case log2Size == s.minTbLog2Size || depth == maxDepth:
+	case log2Size == s.minTbLog2Size || depth >= maxDepth:
+		// A forced split (log2 > MaxTb) can leave depth beyond
+		// MaxTrafoDepth, so the presence condition is >=, not ==.
 		split = false
 	default:
 		split = d.cabac.decodeBin(d.ctx, ctxSplitTransform+5-log2Size) == 1
@@ -315,6 +330,24 @@ func (d *sliceDecoder) transformUnit(x0, y0, xBase, yBase, log2Size, blkIdx int,
 				d.cuQpDeltaVal = val
 			}
 		}
+	}
+
+	// Record deblocking edges: every TU boundary aligned to the 8x8 luma
+	// grid is a filtered edge in all-intra content (CU and PU boundaries
+	// coincide with TU boundaries).
+	n := 1 << log2Size
+	if x0%8 == 0 && x0 > 0 {
+		for yy := y0; yy < y0+n && yy < d.sps.height; yy += 4 {
+			d.vertEdge[d.idx4(x0, yy)] = true
+		}
+	}
+	if y0%8 == 0 && y0 > 0 {
+		for xx := x0; xx < x0+n && xx < d.sps.width; xx += 4 {
+			d.horEdge[d.idx4(xx, y0)] = true
+		}
+	}
+	if d.cuBypass {
+		d.markNoFilter(x0, y0, n)
 	}
 
 	// The luma QP for this CU becomes final at the first coded TU; setting

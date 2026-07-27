@@ -65,8 +65,25 @@ func (rp *resolvedParams) lookup(ppsID uint32) (*sps, *pps, error) {
 	if p.diffCuQpDeltaDepth < 0 || p.diffCuQpDeltaDepth > s.ctbLog2SizeY-s.minCbLog2SizeY {
 		return nil, nil, fmt.Errorf("%w: diff_cu_qp_delta_depth %d", ErrInvalid, p.diffCuQpDeltaDepth)
 	}
-	if p.tilesEnabled && (p.numTileColumns > s.picWidthCtbs || p.numTileRows > s.picHeightCtbs) {
-		return nil, nil, fmt.Errorf("%w: tile grid exceeds picture", ErrInvalid)
+	if p.tilesEnabled {
+		if p.numTileColumns > s.picWidthCtbs || p.numTileRows > s.picHeightCtbs {
+			return nil, nil, fmt.Errorf("%w: tile grid exceeds picture", ErrInvalid)
+		}
+		if !p.uniformSpacing {
+			// Explicit widths/heights cover all but the last column/row,
+			// which must keep at least one CTB.
+			sumW := 0
+			for _, w := range p.tileColumnWidths[:p.numTileColumns-1] {
+				sumW += int(w)
+			}
+			sumH := 0
+			for _, h := range p.tileRowHeights[:p.numTileRows-1] {
+				sumH += int(h)
+			}
+			if sumW >= s.picWidthCtbs || sumH >= s.picHeightCtbs {
+				return nil, nil, fmt.Errorf("%w: tile sizes exceed picture", ErrInvalid)
+			}
+		}
 	}
 	return s, p, nil
 }
