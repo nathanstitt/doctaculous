@@ -121,9 +121,18 @@ bullet's design doc is in `docs/superpowers/specs/`:
   selector engine has no attribute selectors, so the spec's `[dir=rtl]` UA rules are not
   expressible — hint rank is equivalent); `bdi`/`bdo` isolation; `effectiveDirection` (an anonymous
   box's Style is zero-valued, so `Direction` is `""` not `"ltr"` — never read the field directly);
-  RTL text-indent edge. `dir=auto` degrades + logs. Box mirroring and inline reordering are later
-  slices — **RTL text still renders in logical glyph order.**
-  `2026-07-27-rtl-cascade-design.md`.
+  RTL text-indent edge. `dir=auto` degrades + logs. `2026-07-27-rtl-cascade-design.md`.
+- **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
+  slice 2 of 5, retiring **all three** "laying out LTR" logs: tables mirror their solved column
+  x-offsets (and `buildCollapsedBorders` flips its index→physical-side mapping, or collapsed
+  borders resolve against the wrong neighbor with no log); flex resolves direction in `axisFor`
+  (a row XORs `reverseMain`, so RTL composes with `row-reverse`; a column flips the CROSS axis,
+  the case the old guard skipped silently); grid mirrors track positions AND resolves
+  `justify-items`/`justify-self` `start`/`end` logically (both flips are required —
+  mutation-verified independently). Also fixes `crossOffset` ignoring the Box Alignment
+  `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
+  reordered — RTL script renders in logical glyph order.**
+  `2026-07-27-rtl-box-layout-design.md`.
 - **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` as static native widgets (classic chrome, non-interactive).
   `2026-06-29-html-forms-design.md`.

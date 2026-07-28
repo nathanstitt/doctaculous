@@ -286,7 +286,38 @@ An obsolete <font> still works: large red text, and an <ol type="I" start="3"> n
 III. Third in Roman
 IV. Fourth in Roman
 
-15 / LANDSCAPE
+15 / DIRECTION
+
+RTL & Bidirectional Layout
+
+direction: rtl runs the inline axis right‑to‑left. Tables mirror their column order, flex rows reverse their main axis, grids mirror their tracks, and the direction‑relative start/end keywords resolve against it.
+
+The table below sets dir="rtl". Column one is the right‑most, and the border‑collapse grid lines mirror with it:
+
+First           Second       Third        
+Rightmost cell  Middle cell  Leftmost cell
+
+A flex row under dir="rtl" packs from the right. The items are authored one‑two‑three in source order, so item one takes the right‑most slot:
+
+One
+
+Two
+
+Three
+
+A grid mirrors its tracks the same way — the 1fr 2fr ratio is preserved, but the single‑width track is now on the right:
+
+1fr (right)
+
+2fr (left)
+
+Finally, text-align takes the logical keywords. Both paragraphs below use text-align: end; only their direction differs, so end resolves to opposite edges:
+
+LTR: end is the right edge.
+
+RTL: end is the left edge.
+
+16 / LANDSCAPE
 
 Landscape Reflow
 

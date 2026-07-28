@@ -77,6 +77,10 @@ var wptReftests = []struct {
 	{"grid-span", 300, "a grid-column span-2 item == an abs box of the spanned width", nil},
 	{"grid-areas", 200, "a grid-template-areas layout == abs boxes at the named-area rects", nil},
 	{"text-align-start", 320, "text-align:start (and the `start` initial value) == the physical `left` in an LTR block", nil},
+	{"rtl-table", 200, "a dir=rtl table mirrors its column order == the same swatches authored in mirrored source order", nil},
+	{"rtl-flex-row", 240, "direction:rtl on a flex row == flex-direction:row-reverse under LTR (both resolve through reverseMain)", nil},
+	{"rtl-grid", 200, "direction:rtl on a grid mirrors its tracks == abs boxes at the mirrored rects", nil},
+	{"rtl-text-align-end", 320, "text-align start/end under direction:rtl == the mirrored physical keywords", nil},
 }
 
 // webfontReftestLoader serves the committed Pacifico WOFF2 as web.woff2 for the

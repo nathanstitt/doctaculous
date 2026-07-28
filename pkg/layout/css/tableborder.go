@@ -144,7 +144,13 @@ func cellEdge(b *cssbox.Box, s layout.EdgeSide, owner edgeOwner) collapsedBorder
 // its grid line. cellAt maps a (row,col) slot to its originating cell (nil for an empty
 // slot). It reads each cell's positioned fragment rect (gc.frag) for geometry. Returns
 // nil if the grid is empty.
-func (g *tableGrid) buildCollapsedBorders(cellAt func(r, c int) *gridCell) []layout.BorderItem {
+//
+// rtl reports whether the column grid was mirrored (direction:rtl). This function
+// mixes GRID-INDEX reasoning ("column 0", "the previous column") with PHYSICAL
+// geometry (the fragment's x, and which physical side a strip is drawn on), and those
+// two agree only under LTR. When the grid is mirrored, column 0 is at the LARGEST x,
+// so the index→physical-side mapping has to flip with it.
+func (g *tableGrid) buildCollapsedBorders(cellAt func(r, c int) *gridCell, rtl bool) []layout.BorderItem {
 	var out []layout.BorderItem
 	emit := func(cbd collapsedBorder, x, y, w, h float64, side layout.EdgeSide) {
 		if cbd.style == "hidden" || cbd.width <= 0 {
@@ -168,11 +174,20 @@ func (g *tableGrid) buildCollapsedBorders(cellAt func(r, c int) *gridCell) []lay
 			continue
 		}
 		x, y, w, h := gc.frag.X, gc.frag.Y, gc.frag.W, gc.frag.H
-		// LEFT edge of this cell, resolved against the left neighbor (or the table).
+		// LEFT edge of this cell, resolved against whichever cell is physically to its
+		// left. Under RTL the column grid is mirrored (column 0 lays out rightmost), so
+		// the cell physically to the left is the NEXT one in grid order, not the
+		// previous one — and the outer edge reached at the left is the grid's END, not
+		// its start. Getting this wrong is invisible in the common separate-borders
+		// case and silently mis-resolves every collapsed border under RTL.
+		leftNbCol, leftIsOuter := gc.col-1, gc.col == 0
+		if rtl {
+			leftNbCol, leftIsOuter = gc.col+gc.colSpan, gc.col+gc.colSpan == len(g.cols)
+		}
 		left := cellEdge(gc.box, layout.EdgeLeft, ownerCell)
-		if gc.col == 0 {
+		if leftIsOuter {
 			left = resolveCollapsedEdge(left, cellEdge(g.table, layout.EdgeLeft, ownerTable))
-		} else if nb := cellAt(gc.row, gc.col-1); nb != nil {
+		} else if nb := cellAt(gc.row, leftNbCol); nb != nil {
 			left = resolveCollapsedEdge(left, cellEdge(nb.box, layout.EdgeRight, ownerCell))
 		}
 		emit(left, x, y, w, h, layout.EdgeLeft)
@@ -184,8 +199,14 @@ func (g *tableGrid) buildCollapsedBorders(cellAt func(r, c int) *gridCell) []lay
 			top = resolveCollapsedEdge(top, cellEdge(nb.box, layout.EdgeBottom, ownerCell))
 		}
 		emit(top, x, y, w, h, layout.EdgeTop)
-		// Outer RIGHT edge (last column).
-		if gc.col+gc.colSpan == len(g.cols) {
+		// Outer RIGHT edge. The inner right edges are already covered by the left-edge
+		// pass of the cell to the right, so only the physically-rightmost cell emits
+		// here: the last column under LTR, the first under RTL.
+		rightIsOuter := gc.col+gc.colSpan == len(g.cols)
+		if rtl {
+			rightIsOuter = gc.col == 0
+		}
+		if rightIsOuter {
 			right := resolveCollapsedEdge(cellEdge(gc.box, layout.EdgeRight, ownerCell), cellEdge(g.table, layout.EdgeRight, ownerTable))
 			emit(right, x+w, y, w, h, layout.EdgeRight)
 		}
