@@ -157,6 +157,12 @@ func assembleLine(glyphs []glyph) line {
 	}
 	endWord()
 
+	// The words above are in VISUAL order with their text read left-to-right, which
+	// is also the logical order for Latin. Right-to-left text is stored by position,
+	// so it comes out reversed; put it back. This is a no-op for a line with no
+	// right-to-left character, keeping Latin extraction byte-identical.
+	words = reorderWordsToLogical(words)
+
 	return line{
 		y:     lineBaseline(glyphs),
 		x0:    lineLeft(words),

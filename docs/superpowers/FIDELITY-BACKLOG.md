@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## A. Cross-cutting (highest leverage — unblocks several modes at once)
 
-- ◐ **A1. RTL / bidi (`direction`)** — *Large.* **Sequencing DECIDED: first**, so the per-mode RTL items
+- ☑ **A1. RTL / bidi (`direction`)** — *Large; ALL FIVE SLICES DONE.* **Sequencing DECIDED: first**, so the per-mode RTL items
   (H2/I3 + the table deferral) become free rather than being written LTR-only and reopened. Split into five
   independently shippable slices:
   - ☑ **A1.1 cascade + plumbing** — *DONE.* `text-align: start|end|match-parent` (initial value moved from
@@ -61,7 +61,16 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
     test could not see it — it only checked the concatenation, which still matched.
     Remaining: GPOS vertical offsets unapplied (marks sit on the baseline), one face per segment,
     no `font-feature-settings`. `2026-07-28-rtl-arabic-shaping-design.md`.
-  - ☐ **A1.5 PDF extraction visual→logical** — independent; RTL PDFs currently extract in visual order.
+  - ☑ **A1.5 PDF extraction visual→logical** — *DONE.* A PDF stores glyphs by POSITION, so extraction — which sorts a line left-to-right —
+    yielded RTL text reversed (`אבג` → `גבא`, reproduced before fixing). The inverse of L2 cannot be obtained by
+    running the bidi algorithm over the extracted text: that text is ALREADY scrambled, and the algorithm needs
+    logical order as input. What is recoverable is the run structure, so each maximal RTL run is reversed.
+    **Two levels**: the characters within each RTL word AND the order of consecutive RTL words —
+    mutation-verified independently (removing the word-order reversal fails a different test). Runs AFTER word
+    grouping, because grouping splits on the x-gap from the previous glyph's right edge and would break on
+    reordered glyphs; working on words also keeps each word's geometry for table/block detection. No-op for
+    Latin (zero golden churn). Limits: embedded digit sequences reverse with their word (digits are weak, not
+    neutral, in UAX#9), one level of nesting, no `/ReversedChars`. `2026-07-28-rtl-pdf-extraction-design.md`.
 
 ---
 

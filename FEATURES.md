@@ -217,6 +217,12 @@ CLI `tomd <pdf>` / `tohtml`):
   `pkg/render/htmlwrite` serializes `cssbox`→HTML (native `colspan`/`rowspan`). PDF `Document`
   satisfies `reflowTree` via lazy extraction. ToUnicode CMaps (Type0/CID text), font weight/slant, and
   scanned-PDF OCR are follow-ups. `2026-07-08-pdf-to-html-markdown-design.md`.
+- **Right-to-left text extracts in LOGICAL order** (`pkg/pdf/extract/bidi.go`). A PDF stores glyphs by
+  POSITION, so sorting a line left-to-right yielded RTL script reversed. Each maximal RTL run is
+  reversed back, at BOTH levels the PDF mirrors: the characters within a word and the order of
+  consecutive RTL words. Runs after word grouping (which splits on x-gaps and would break on reordered
+  glyphs), so each word keeps the geometry table/block detection needs. No-op for Latin.
+  `2026-07-28-rtl-pdf-extraction-design.md`.
 
 **Unified conversion core** (`pkg/doctaculous/format.go`+`detect.go`+`open.go`+`convert.go`+
 `image_backend.go`, CLI `convert`):

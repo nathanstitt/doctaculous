@@ -133,15 +133,15 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
 **Open fidelity follow-ups** (the engine renders these paths; these are the known approximations —
 each degrades gracefully and is documented in the relevant spec):
 
-- **RTL / `direction` / bidi** — in progress, sequenced FIRST as five slices (see backlog A1).
-  Landed: slice 1 (cascade + plumbing), slice 2 (box-level mirroring — tables, flex, and grid honor
-  `direction`, retiring all three "laying out LTR" logs), and slice 3 (inline bidi reordering — UAX#9
-  L2 per line + L4 bracket mirroring, so Hebrew reads right-to-left), and slice 4 (Arabic contextual
-  shaping through harfbuzz, so letters connect). Noto Sans Hebrew + Noto Naskh Arabic (OFL) ship
-  bundled, resolved by per-rune script fallback. Still open: **visual→logical PDF extraction** (RTL
-  PDFs currently extract in visual order, i.e. reversed). Known shaping limits: GPOS vertical
-  offsets are not applied (marks sit on the baseline), and `font-feature-settings` is not plumbed
-  through.
+- **RTL / `direction` / bidi** — **DONE** (backlog A1, five slices): cascade plumbing
+  (`text-align: start|end`, `unicode-bidi`, the `dir` attribute); box-level mirroring for tables,
+  flex, and grid, retiring all three "laying out LTR" logs; inline bidi reordering (UAX#9 L2 per line
+  + L4 bracket mirroring, so Hebrew reads right-to-left); Arabic contextual shaping through harfbuzz,
+  so letters connect; and visual→logical PDF extraction, so RTL text extracts in reading order. Noto
+  Sans Hebrew + Noto Naskh Arabic (OFL) ship bundled, resolved by per-rune script fallback.
+  Remaining approximations: GPOS vertical offsets are not applied (marks sit on the baseline),
+  `font-feature-settings` is not plumbed through, nested bidi embeddings deeper than one level
+  collapse, and a digit sequence embedded in RTL text reverses with its word on extraction.
 - **Multi-line flexbox** — DONE (backlog H1): `flex-wrap`, `align-content`, the cross gap, and
   `flex-flow` all ship; wrapped rows paginate between lines. Remaining flex approximation: a single
   line taller than the page still moves whole rather than splitting its items.
