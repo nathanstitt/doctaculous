@@ -94,6 +94,31 @@ func LoadStandard(family string, style Style) (*Face, bool) {
 	}, true
 }
 
+// LoadScriptFallback returns a Face covering r for a rune the requested family
+// cannot map, or ok=false when no bundled face covers it.
+//
+// It exists because each bundled face covers one script: the Latin substitutes have
+// no Hebrew or Arabic, and the two Noto faces have no Latin. A run carries a single
+// family but its text can mix scripts, so the covering face has to be chosen per
+// rune. Callers should cache by (rune-script, style) rather than calling per glyph —
+// parsing the program is the expensive step.
+func LoadScriptFallback(r rune, style Style) (*Face, bool) {
+	sub, ok := standard.ScriptFallback(r, style.Bold, style.Italic)
+	if !ok {
+		return nil, false
+	}
+	prog, err := parseProgram(sub.Data, substituteKind(sub.Kind))
+	if err != nil {
+		return nil, false
+	}
+	return &Face{
+		prog:     prog,
+		names:    prog.nameToGID(),
+		progData: sub.Data,
+		progKind: programKindFromStandard(sub.Kind),
+	}, true
+}
+
 // programKindFromStandard maps a bundled substitute's Kind to a ProgramKind so the
 // PDF writer picks the right /FontFile flavor for the embedded substitute.
 func programKindFromStandard(k standard.Kind) ProgramKind {

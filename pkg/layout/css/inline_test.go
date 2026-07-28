@@ -879,30 +879,41 @@ func TestBidiEndToEndLTRUnaffected(t *testing.T) {
 	}
 }
 
-// TestBidiEndToEndRTLOverridePaintsReversed drives the reorder end-to-end using
-// characters the BUNDLED fonts actually cover.
-//
-// Asserting on Hebrew or Arabic here is impossible: no bundled face (TeX Gyre
-// Heros/Termes, Inconsolata) has RTL script coverage, and Shape DROPS a rune its face
-// cannot map (shape.go, `if !ok { continue }`), so RTL text never reaches the reorder
-// as glyphs at all. Depending on a system font would break hermeticity.
-//
-// U+202E RIGHT-TO-LEFT OVERRIDE gives a genuine RTL context over Latin characters:
-// bidi ordering is decided by character properties, not by whether a face has the
-// glyph, so the whole path (box generation -> shaping -> breaking -> reorder -> glyph
-// emission) is exercised with renderable output.
+// TestBidiEndToEndRTLOverridePaintsReversed drives the reorder with an explicit
+// RIGHT-TO-LEFT OVERRIDE over Latin characters, which isolates the reordering machinery
+// from font coverage entirely: bidi ordering is decided by character properties.
 func TestBidiEndToEndRTLOverridePaintsReversed(t *testing.T) {
-	// RLO reverses the run that follows it.
 	got := bidiGlyphOrder(t, "<p>\u202Eabcdef</p>")
 	if want := "fedcba"; got != want {
 		t.Errorf("painted order under RLO = %q, want %q (the run must paint reversed)", got, want)
 	}
 }
 
-// TestBidiEndToEndRTLParagraphOverride: the same override inside a dir=rtl block.
-func TestBidiEndToEndRTLParagraphOverride(t *testing.T) {
-	got := bidiGlyphOrder(t, "<p dir=\"rtl\">\u202Eabcdef</p>")
-	if want := "fedcba"; got != want {
+// TestBidiEndToEndHebrewIsland: real Hebrew inside an LTR paragraph paints
+// right-to-left while the Latin around it does not. This works because the bundled
+// Noto Sans Hebrew face is reached through per-rune script fallback — before that, the
+// shaper DROPPED every Hebrew rune (no Latin substitute covers the script), so the
+// text vanished before the reorder could see it.
+func TestBidiEndToEndHebrewIsland(t *testing.T) {
+	// Source order is "abc אבג def"; the Hebrew reads reversed on the page. Spaces
+	// carry no Runes, so they do not appear in the comparison.
+	if got, want := bidiGlyphOrder(t, `<p>abc אבג def</p>`), "abcגבאdef"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
+	}
+}
+
+// TestBidiEndToEndHebrewParagraph: a wholly-Hebrew RTL paragraph reverses.
+func TestBidiEndToEndHebrewParagraph(t *testing.T) {
+	if got, want := bidiGlyphOrder(t, `<p dir="rtl">אבג</p>`), "גבא"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
+	}
+}
+
+// TestBidiEndToEndArabicParagraph: Arabic reorders too. NOTE it still renders as
+// disconnected ISOLATED forms — contextual shaping needs a cluster model (slice 4) —
+// but the ORDER is correct, which is what this asserts.
+func TestBidiEndToEndArabicParagraph(t *testing.T) {
+	if got, want := bidiGlyphOrder(t, `<p dir="rtl">مرحبا</p>`), "ابحرم"; got != want {
 		t.Errorf("painted order = %q, want %q", got, want)
 	}
 }
