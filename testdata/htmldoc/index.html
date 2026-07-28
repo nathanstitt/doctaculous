@@ -117,8 +117,8 @@
   <section class="section break">
     <span class="kicker">04 / FLEX</span>
     <h2>Flexbox</h2>
-    <p class="lede">Single&#8209;line flex containers: proportional growth, space
-      distribution, and cross&#8209;axis centering.</p>
+    <p class="lede">Proportional growth, space distribution, cross&#8209;axis
+      centering, and multi&#8209;line wrapping with <code>align-content</code>.</p>
 
     <h4><code>flex-grow</code> in 1 : 2 : 3 proportion</h4>
     <div class="flexrow">
@@ -141,6 +141,28 @@
       <div class="tall"></div>
     </div>
     <p class="caption">A short and a tall item, both centered in the strip.</p>
+
+    <h4><code>flex-wrap: wrap</code> with <code>gap</code></h4>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+      <div style="width: 230px; height: 34px; background: #c8401a;"></div>
+      <div style="width: 230px; height: 34px; background: #d9822b;"></div>
+      <div style="width: 230px; height: 34px; background: #3a7d5a;"></div>
+      <div style="width: 230px; height: 34px; background: #3a4a5a;"></div>
+    </div>
+    <p class="caption">Items too wide to share one line break onto the next; the
+      <code>gap</code> applies both between items and between the lines.</p>
+
+    <h4><code>align-content: space-between</code> on a taller container</h4>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; height: 130px;
+                align-content: space-between; background: #f4f1e8; padding: 6px;">
+      <div style="width: 420px; height: 28px; background: #8a8272;"></div>
+      <div style="width: 420px; height: 28px; background: #8a8272;"></div>
+      <div style="width: 420px; height: 28px; background: #8a8272;"></div>
+    </div>
+    <p class="caption">With more cross space than the lines need,
+      <code>align-content</code> distributes the surplus between them &mdash; here
+      pinning the first and last lines to the container's edges. The default is
+      <code>stretch</code>, which instead grows each line to absorb it.</p>
   </section>
 
   <!-- ===================== 5 · GRID ===================== -->

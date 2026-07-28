@@ -83,9 +83,15 @@ bullet's design doc is in `docs/superpowers/specs/`:
 - **Web fonts** (`pkg/css/fontface.go`, `pkg/font/sfnt.go`/`woff1.go`/`woff2*.go`,
   `pkg/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode (incl. glyf/loca transform), `local()`
   via `DiskFontProvider`, family-fallback-list resolution. `2026-06-26-html-webfonts-design.md`.
-- **Flexbox** (single-line; `pkg/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout,
-  §9.7 flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`.
-  `2026-06-26-html-flexbox-design.md`.
+- **Flexbox** (`pkg/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout, §9.7
+  flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`, and
+  **multi-line wrapping** — `flex-wrap: wrap`/`wrap-reverse`, §9.3 line collection,
+  `align-content` (incl. the flex `stretch` initial, which differs from the shared grid default),
+  the cross-axis gap between lines, and the `flex-flow` shorthand. justify-content and baseline
+  groups resolve per LINE; the §9.4 step-8 cross clamp is gated to single-line containers.
+  wrap-reverse XORs with the RTL cross flip. Wrapped rows paginate between lines for free
+  (`splitFlexGridForPage` is geometry-driven). `2026-06-26-html-flexbox-design.md`,
+  `2026-07-28-flex-wrap-design.md`.
 - **CSS Grid** (explicit grid; `pkg/layout/css/grid.go`+`grid_track.go`+`grid_place.go`+`gridfix.go`
   +`baseline.go`): §11 track-sizing + §8 placement (spans, named areas, auto-placement sparse/dense),
   item + content-distribution alignment, `inline-grid`, cross-cutting baseline backport (grid + flex

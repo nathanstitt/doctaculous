@@ -205,7 +205,18 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## H. HTML/CSS — flexbox
 
-- ☐ **H1. multi-line flex** (`flex-wrap: wrap`/`wrap-reverse` + `align-content`) — the big one. *Large.*
+- ☑ **H1. multi-line flex** — *DONE.* §9.3 `collectLines` partitions items into `flexLine`s; nowrap is now
+  the one-line special case rather than a separate path. `resolveFlexibleLengths` needed NO change (it was
+  already written per-line). Five things became per-line: the §9.4 step-8 cross clamp (gated to
+  `len(lines)==1` — with several lines the leftover belongs to align-content, and stretching one line would
+  swallow the others), `contentHeight`, the placement loop, the `innerMain` overwrite that the reverse formula
+  flips within, and the baseline post-pass. **The align-content trap:** `ComputedStyle.AlignContent` defaults
+  to `"start"` (grid's convention) but CSS Flexbox's initial is `stretch` — mapped at the flex use site rather
+  than changing the shared default grid relies on. `wrap-reverse` XORs with the RTL cross flip (two flips
+  cancel). Pagination came FREE: `splitFlexGridForPage` is geometry-driven, so a wrapped row is one band per
+  line — tested anyway, since nothing in the pagination code says "flex line". Every per-line change
+  mutation-verified independently, each failing a DISTINCT test set. Sequenced after RTL so the placement loop
+  was written direction-aware once. `2026-07-28-flex-wrap-design.md`.
 - ☑ **H2. RTL/`direction`** on a row — *DONE via A1.2.* Plus the column cross-axis, which was never
   covered by the old row-only log.
 - ☑ **H3. line cross size clamped to a definite container cross size** — *DONE.* For a single-line flex
@@ -225,7 +236,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   width, so a paragraph of prose overflowed its container by ~2.5x (497pt inside a 200pt container). The cross
   width is now clamped to the container's inner cross size. Both halves are mutation-verified independently —
   reverting either fails a different test.
-- ☐ **H5. `flex-grow`/`shrink` cross-axis gap factors** (revisit with multi-line). *Small (with H1).*
+- ☑ **H5. cross-axis gap** — *DONE with H1.* `flexCrossGap` mirrors `flexMainGap` on the other axis and is
+  consulted only when `len(lines) > 1` (a single line has no between-lines gap, which is why the value was
+  previously stored and never read).
 - ☑ **H6. column-container `align-items: baseline`** — *CONFIRMED CORRECT (no fix).* CSS Flexbox §9.4.3:
   baseline self-alignment in a column flex container resolves to `flex-start` (there is no cross-axis text
   baseline). The engine already falls back to `flex-start` and logs it — spec-compliant, not a gap.
