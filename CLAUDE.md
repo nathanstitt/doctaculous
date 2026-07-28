@@ -135,6 +135,7 @@ each degrades gracefully and is documented in the relevant spec):
 
 - **RTL / `direction` / bidi** — the engine has no bidi support; tables, flex, and grid lay out
   LTR-only (parsed but not acted on, logged). This is the single largest cross-cutting gap.
+  (PDF *extraction* of RTL text is fixed — see backlog A1.5 — and is independent of the layout work.)
 - **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
   `nowrap` with overflow); column `flex-basis: auto`/`content` uses a max-content-width proxy.
 - **Grid** — named-line placement (`[name]` tokens parsed-and-ignored → auto-placement), `subgrid`

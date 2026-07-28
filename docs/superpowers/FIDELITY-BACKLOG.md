@@ -12,6 +12,18 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## A. Cross-cutting (highest leverage — unblocks several modes at once)
 
+- ☑ **A1.5 PDF extraction visual→logical** — *DONE.* (Filed as its own entry: this slice is independent of
+  the A1 layout work below and landed on a branch off `main`, since `pkg/pdf/extract` does not depend on
+  `pkg/layout/inline`.) A PDF stores glyphs by POSITION, so extraction — which sorts a line left-to-right —
+  yielded RTL text reversed (`אבג` → `גבא`, reproduced before fixing). The inverse of L2 cannot be obtained by
+  running the bidi algorithm over the extracted text: that text is ALREADY scrambled, and the algorithm needs
+  logical order as input. What is recoverable is the run structure, so each maximal RTL run is reversed.
+  **Two levels**: the characters within each RTL word AND the order of consecutive RTL words —
+  mutation-verified independently (removing the word-order reversal fails a different test). Runs AFTER word
+  grouping, because grouping splits on the x-gap from the previous glyph's right edge and would break on
+  reordered glyphs; working on words also keeps each word's geometry for table/block detection. No-op for
+  Latin (zero golden churn). Limits: embedded digit sequences reverse with their word (digits are weak, not
+  neutral, in UAX#9), one level of nesting, no `/ReversedChars`. `2026-07-28-rtl-pdf-extraction-design.md`.
 - ☐ **A1. RTL / bidi (`direction`)** — *Large.* The engine has **no** `direction`/bidi support anywhere. It is
   the **sole** deferral in tables, flexbox, AND grid (each logs "laying out LTR"), and also affects
   inline/block text order. One sub-project unblocks all three modes + general inline. **Touches:** the inline
