@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<!-- TEST: direction:rtl on a grid mirrors the inline axis — column track 1 is the
+     right-most. Distinct track widths (60px 120px) distinguish a true mirror from
+     an index reversal. -->
+<html><head><style>
+  body { margin: 0; }
+  .g { display: grid; grid-template-columns: 60px 120px; direction: rtl; width: 180px; }
+  .a { height: 40px; background: #c8401a; }
+  .b { height: 40px; background: #3a7d5a; }
+</style></head><body>
+  <div class="g"><div class="a"></div><div class="b"></div></div>
+</body></html>

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!-- TEST: text-align:start is direction-relative. In an LTR block the start edge is
+     the left edge, so `start` must lay out identically to the physical `left`. The
+     initial value of text-align is `start`, so the third block (which sets no
+     alignment at all) must also match. -->
+<html>
+<head>
+<style>
+  body { margin: 0; font-family: serif; font-size: 16px; }
+  div { width: 300px; }
+  #a { text-align: start; }
+  #b { direction: ltr; text-align: start; }
+  #c { /* no text-align: exercises the "start" initial value */ }
+</style>
+</head>
+<body>
+  <div id="a">Ridge</div>
+  <div id="b">Ridge</div>
+  <div id="c">Ridge</div>
+</body>
+</html>

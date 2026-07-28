@@ -107,7 +107,50 @@ func presentationalHints(n Node) []Declaration {
 	// --- link colors from <body link=...> ---
 	ds = appendLinkColor(ds, n, tag)
 
+	// --- dir (global attribute; any element, so it sits outside the tag switches) ---
+	ds = appendDir(ds, n, tag)
+
 	return ds
+}
+
+// appendDir maps the global HTML `dir` attribute to CSS. Per HTML §15.3.3 the UA
+// stylesheet expresses this with attribute selectors ([dir=ltr] etc.); this engine's
+// selector parser has no attribute-selector support, so `dir` is applied as a
+// presentational hint instead. The cascade rank is equivalent for every case that
+// matters: a hint outranks the UA sheet and loses to any author rule, so
+// `<div dir=rtl style="direction:ltr">` still resolves LTR.
+//
+// `dir` also establishes a bidi isolate on every element except <bdo>, which
+// overrides instead. That mirrors the HTML-spec UA rules — the value is stored now
+// and acted on when inline bidi reordering lands.
+//
+// dir=auto requires first-strong-character detection over the element's text, which
+// needs the bidi character database; it degrades to the initial direction and is
+// reported by the caller (see dirAutoRequested).
+func appendDir(ds []Declaration, n Node, tag string) []Declaration {
+	v, ok := n.Attr("dir")
+	if !ok {
+		return ds
+	}
+	d := strings.ToLower(strings.TrimSpace(v))
+	switch d {
+	case "ltr", "rtl":
+		ds = append(ds, Declaration{Property: "direction", Value: d})
+		bidi := "isolate"
+		if tag == "bdo" {
+			bidi = "isolate-override"
+		}
+		return append(ds, Declaration{Property: "unicode-bidi", Value: bidi})
+	}
+	return ds
+}
+
+// dirAutoRequested reports whether n carries dir="auto", which this engine does not
+// resolve (it needs first-strong detection). The resolver logs it once per element so
+// the degradation is visible rather than silent.
+func dirAutoRequested(n Node) bool {
+	v, ok := n.Attr("dir")
+	return ok && strings.EqualFold(strings.TrimSpace(v), "auto")
 }
 
 // appendColor adds a color declaration if v parses as a legacy color (a #hex, a bare

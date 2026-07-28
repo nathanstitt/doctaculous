@@ -167,7 +167,49 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		}
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
 		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
-		for _, rn := range r.Text {
+		// Complex-script segments (Arabic and friends) are shaped as whole runs through
+		// harfbuzz rather than rune-at-a-time, since a letter's form depends on its
+		// neighbours. runes carries the run's text once so segments can be sliced from
+		// it; skipTo lets the per-rune loop below jump past a segment already emitted.
+		runes := []rune(r.Text)
+		skipTo := 0
+		for ri := 0; ri < len(runes); ri++ {
+			rn := runes[ri]
+			if ri < skipTo {
+				continue
+			}
+			if needsComplexShaping(rn) {
+				end := ri + 1
+				for end < len(runes) && needsComplexShaping(runes[end]) {
+					end++
+				}
+				seg := runes[ri:end]
+				// The run's own face may not cover the script (a Latin family with an
+				// Arabic phrase in it); fall back to the covering bundled face first, so
+				// shaping runs against the face that actually has the glyphs.
+				shapeFace := face
+				if _, _, ok := face.Glyph(rn); !ok {
+					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+						shapeFace = fb
+					}
+				}
+				if shaped, ok := shapeComplex(shapeFace, seg); ok {
+					for _, sg := range shaped {
+						g := base
+						g.Face = shapeFace
+						g.GID = sg.gid
+						g.Outline = shapeFace.Outline(sg.gid)
+						g.Advance = sg.advance * r.SizePt
+						g.Runes = sg.runes
+						out = append(out, g)
+						lineCol += g.Advance
+					}
+					skipTo = end
+					continue
+				}
+				// Shaping unavailable (no layout tables, or it produced nothing): fall
+				// through to the per-rune path, which still renders isolated forms.
+			}
 			switch {
 			case rn == '\n' && preserveNL:
 				// A preserved newline becomes a hard break and re-bases the tab column.
@@ -196,19 +238,46 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 				if rn == '\n' || rn == '\t' {
 					rn = ' '
 				}
+				// A bidi control (LRM/RLM, the embedding/override set, the isolates) draws
+				// nothing but DETERMINES ordering, so it must survive shaping as a
+				// zero-width glyph — the reorder reads the line's runes, and dropping the
+				// control here would silently discard the author's directional intent.
+				if isBidiControlRune(rn) {
+					g := base
+					g.Runes = []rune{rn}
+					g.Face = nil // no outline to draw; not a font glyph
+					out = append(out, g)
+					continue
+				}
 				outline, advEm, ok := face.Glyph(rn)
+				glyphFace := face
+				if !ok {
+					// The run's family has no glyph for this rune. Before dropping it,
+					// try a bundled face that covers its script: each bundled face
+					// covers one script, so Hebrew or Arabic inside an otherwise-Latin
+					// paragraph resolves here rather than vanishing.
+					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+						if o, a, gOK := fb.Glyph(rn); gOK {
+							outline, advEm, ok, glyphFace = o, a, true, fb
+						}
+					}
+				}
 				if !ok {
 					continue
 				}
 				g := base
+				g.Face = glyphFace
 				g.Outline = outline
 				g.Advance = advEm * r.SizePt
 				g.Space = rn == ' '
-				// Carry font identity ONLY for a real font glyph. When face.GID fails the
+				// Carry font identity ONLY for a real font glyph. When GID lookup fails the
 				// outline came from a synthesized marker (e.g. a bullet the face lacks) —
 				// its GID would be .notdef, so a text-emitting backend must not re-fetch by
 				// GID; clear Face so paint fills the synthesized Outline directly.
-				if gid, ok := face.GID(rn); ok {
+				// NOTE: this resolves against glyphFace, which for a fallback glyph is the
+				// covering script face, not the run's own — a GID is only meaningful
+				// against the face it came from.
+				if gid, ok := glyphFace.GID(rn); ok {
 					g.GID = gid
 					g.Runes = []rune{rn}
 				} else {

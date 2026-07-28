@@ -198,18 +198,39 @@ func resolveFlexibleLengths(items []flexItemSizing, innerMain, totalGap float64)
 type flexAxis struct {
 	vertical    bool // true for column / column-reverse (main axis is vertical)
 	reverseMain bool // true for row-reverse / column-reverse
+	// reverseCross flips the cross axis. It is set only for an RTL COLUMN container,
+	// where the cross axis is horizontal and therefore direction-sensitive: cross-start
+	// is the right edge, so align-items/align-self start and end swap.
+	reverseCross bool
+	// reverseCrossLines flips the order LINES are stacked in, for flex-wrap:wrap-reverse.
+	// It is reverseCross XOR wrap-reverse: an RTL column with wrap-reverse flips the
+	// cross axis twice and the two cancel. Set by layoutFlex, which knows the wrap value;
+	// axisFor deals only with flex-direction and direction.
+	reverseCrossLines bool
 }
 
-func axisFor(dir string) flexAxis {
+// axisFor resolves the flex axes from flex-direction and the used `direction`.
+//
+// For a ROW container the main axis is the inline axis, so RTL simply reverses it —
+// which is exactly what reverseMain already expresses. RTL therefore composes with
+// row-reverse by XOR: `direction:rtl` + `row-reverse` lays out in LTR-row order (two
+// flips cancel). justify-content needs no special handling because justifyOffsets
+// works in abstract main-axis terms and the placement loop applies the reverse
+// formula uniformly, so flex-start/flex-end/space-around/space-evenly all flip with it.
+//
+// For a COLUMN container the main axis is vertical and unaffected by direction; the
+// CROSS axis is the inline one, so RTL flips that instead (reverseCross).
+func axisFor(dir, direction string) flexAxis {
+	rtl := direction == "rtl"
 	switch dir {
 	case "column":
-		return flexAxis{vertical: true}
+		return flexAxis{vertical: true, reverseCross: rtl}
 	case "column-reverse":
-		return flexAxis{vertical: true, reverseMain: true}
+		return flexAxis{vertical: true, reverseMain: true, reverseCross: rtl}
 	case "row-reverse":
-		return flexAxis{reverseMain: true}
+		return flexAxis{reverseMain: !rtl}
 	default: // row
-		return flexAxis{}
+		return flexAxis{reverseMain: rtl}
 	}
 }
 
@@ -229,13 +250,12 @@ func (a flexAxis) rect(originMain, originCross, mainPos, crossPos, mainSize, cro
 func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
 	_ = bandOriginY
 	_ = fc
-	ax := axisFor(b.Style.FlexDirection)
-	if b.Style.Direction == "rtl" && !ax.vertical {
-		e.logf("css layout: RTL flex rows not supported; laying out LTR")
-	}
-	if b.Style.FlexWrap == "wrap" || b.Style.FlexWrap == "wrap-reverse" {
-		e.logf("css layout: flex-wrap:%s not supported; laying out single-line (nowrap)", b.Style.FlexWrap)
-	}
+	ax := axisFor(b.Style.FlexDirection, effectiveDirection(b))
+	// wrap-reverse stacks the lines from the cross-END rather than the cross-start. It
+	// XORs with the RTL cross flip for the same reason reverseMain does on the main
+	// axis: an RTL column with wrap-reverse flips the cross axis twice, and two flips
+	// cancel.
+	ax.reverseCrossLines = ax.reverseCross != (b.Style.FlexWrap == "wrap-reverse")
 
 	items := flexItemBoxes(b)
 	if len(items) == 0 {
@@ -248,64 +268,90 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 
 	// Per-item flex base size + hypothetical main size + used min/max main.
 	sizings := make([]flexItemSizing, len(items))
+	// availCross is the container's inner CROSS size, used to clamp a column item's
+	// auto cross width before its content height is measured against it. For a row the
+	// cross axis is vertical and the sizing path never consults it (-1 = no clamp).
+	availCross := -1.0
+	if ax.vertical {
+		availCross = contentW
+	}
 	for i, it := range items {
-		sizings[i] = e.itemSizing(ctx, it, ax, innerMain)
+		sizings[i] = e.itemSizing(ctx, it, ax, innerMain, availCross)
 	}
 
 	// Main-axis gap (column-gap for row, row-gap for column) between adjacent items.
 	mainGap := e.flexMainGap(b, ax)
-	totalGap := mainGap * float64(len(items)-1)
 
-	// If the main size is indefinite (column auto-height), there is no free space:
-	// the container is sized to the items, so used main = hypothetical for every item.
-	var usedMain []float64
-	if !mainDefinite {
-		usedMain = make([]float64, len(items))
-		sum := totalGap
-		for i := range sizings {
-			usedMain[i] = sizings[i].hypothetical
-			sum += usedMain[i]
+	// §9.3: partition the items into flex lines. nowrap yields exactly one line
+	// spanning every item, so the single-line behavior is a special case rather than a
+	// separate code path.
+	lines := collectLines(sizings, wrapEnabled(b.Style.FlexWrap), innerMain, mainGap, mainDefinite)
+
+	// §9.7 per line: resolve each line's flexible lengths against the container's inner
+	// main size. resolveFlexibleLengths is already a per-LINE function, so it needs no
+	// change — it is simply called once per line rather than once per container.
+	//
+	// lineMain is the main extent the reverse-placement formula flips within. For a
+	// definite main size that is the container's; for an indefinite one (a column with
+	// auto height) the container is sized to its content, so it is the line's own
+	// consumed extent.
+	lineMain := make([]float64, len(lines))
+	for li := range lines {
+		ln := &lines[li]
+		gaps := mainGap * float64(ln.len()-1)
+		if !mainDefinite {
+			ln.usedMain = make([]float64, ln.len())
+			sum := gaps
+			for i := ln.start; i < ln.end; i++ {
+				ln.usedMain[i-ln.start] = sizings[i].hypothetical
+				sum += ln.usedMain[i-ln.start]
+			}
+			lineMain[li] = sum
+		} else {
+			ln.usedMain = resolveFlexibleLengths(sizings[ln.start:ln.end], innerMain, gaps)
+			lineMain[li] = innerMain
 		}
-		// For column-reverse, innerMain must equal the content extent so the reverse
-		// formula (innerMain - mainPos - usedMain[i]) flips within the content bounds.
-		innerMain = sum
-	} else {
-		usedMain = resolveFlexibleLengths(sizings, innerMain, totalGap)
 	}
 
 	// Lay out each item's contents at its used main size; capture its cross size.
 	frags := make([]*Fragment, len(items))
 	crossSizes := make([]float64, len(items))
-	for i, it := range items {
-		frags[i], crossSizes[i] = e.layoutFlexItem(ctx, it, ax, usedMain[i])
-	}
-
-	// Line cross size: for a single-line flex container the line's cross size is the
-	// container's inner cross size when that is DEFINITE (CSS Flexbox §9.4 step 8 — the
-	// line stretches to fill), else the max item's outer cross size. A definite cross size
-	// is what makes align-items:center/flex-end align within the container's extent rather
-	// than the tallest item's. (lineCross is still floored at the max item size so an item
-	// taller than a too-small definite container is not clipped by the line metric.)
-	lineCross := 0.0
-	for _, cs := range crossSizes {
-		if cs > lineCross {
-			lineCross = cs
+	for li := range lines {
+		ln := &lines[li]
+		for i := ln.start; i < ln.end; i++ {
+			frags[i], crossSizes[i] = e.layoutFlexItem(ctx, items[i], ax, ln.usedMain[i-ln.start], availCross)
 		}
 	}
-	if def, ok := e.flexCrossSize(b, contentW, ax); ok && def > lineCross {
-		lineCross = def
+
+	// Per-line cross size: the tallest item on the line. For a SINGLE-line container the
+	// line instead fills the container's inner cross size when that is DEFINITE (CSS
+	// Flexbox §9.4 step 8) — that is what makes align-items:center/flex-end align within
+	// the container's extent rather than the tallest item's. The clamp is single-line
+	// only: with several lines the leftover cross space is align-content's to distribute,
+	// and stretching one line to the whole container would swallow the others.
+	// (Still floored at the max item so a too-small definite container does not clip.)
+	for li := range lines {
+		ln := &lines[li]
+		for i := ln.start; i < ln.end; i++ {
+			if crossSizes[i] > ln.cross {
+				ln.cross = crossSizes[i]
+			}
+		}
+	}
+	if len(lines) == 1 {
+		if def, ok := e.flexCrossSize(b, contentW, ax); ok && def > lines[0].cross {
+			lines[0].cross = def
+		}
 	}
 
-	// Total main extent consumed by items + gaps (used for reverse placement and the
-	// column content height).
-	consumed := totalGap
-	for i := range items {
-		consumed += usedMain[i]
+	// Cross-axis gap between lines, and align-content's distribution of the leftover
+	// cross space. Both are meaningful only for a multi-line container.
+	crossGap := 0.0
+	crossLead, crossBetween := 0.0, 0.0
+	if len(lines) > 1 {
+		crossGap = e.flexCrossGap(b, ax)
+		crossLead, crossBetween = e.alignContentOffsets(b, lines, contentW, ax, crossGap)
 	}
-
-	// Distribute free main space according to justify-content.
-	freeMain := innerMain - consumed
-	leading, between := justifyOffsets(b.Style.JustifyContent, freeMain, len(items))
 
 	// Origins for rect(): the horizontal (x) position must be absolute page space (the
 	// content-box left = contentX), while the vertical (y) position must be in the local
@@ -320,49 +366,69 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		originMain, originCross = 0, contentX
 	}
 
-	// Position items along the main axis, applying cross-axis alignment per item.
-	// For reverse directions, item i sits at (innerMain - mainPos - usedMain[i]) so it
-	// packs from the main-end. The leading and between offsets accumulate in mainPos
-	// identically in both cases.
-	mainPos := leading
-	for i := range items {
-		align := resolvedAlign(b, items[i])
-		itemCross := crossSizes[i]
-
-		// stretch: grow an auto-cross item to the line cross size and relayout its
-		// contents at that cross measure (a row item's width is its main size, which is
-		// fixed; stretch grows its HEIGHT — pin the fragment height to lineCross).
-		if align == "stretch" && !itemHasDefiniteCross(items[i], ax) {
-			frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, usedMain[i], lineCross)
+	// Assign each line its cross-axis offset, then place its items. wrap-reverse stacks
+	// the lines from the cross-END, so they are assigned offsets in reverse order.
+	crossPos := crossLead
+	for li := range lines {
+		idx := li
+		if ax.reverseCrossLines {
+			idx = len(lines) - 1 - li
 		}
-
-		crossPos := crossOffset(align, lineCross, itemCross)
-		pos := mainPos
-		if ax.reverseMain {
-			pos = innerMain - mainPos - usedMain[i]
-		}
-		placeFlexFragment(frags[i], ax, originMain, originCross, pos, crossPos, usedMain[i], itemCross)
-		mainPos += usedMain[i] + mainGap + between
+		lines[idx].crossPos = crossPos
+		crossPos += lines[idx].cross + crossGap + crossBetween
 	}
 
-	// Baseline alignment post-pass: for a ROW container, items with baseline alignment
-	// form one group. alignBaselineGroup shifts each participating item DOWN so its first
-	// baseline coincides with the group maximum, returning the largest downward shift as a
-	// conservative extra cross extent. Grow lineCross by extra so the line encloses the
-	// shifted items. For a COLUMN container, the cross axis is horizontal and there is no
-	// meaningful text baseline — baseline falls back to flex-start (crossOffset already
-	// returns 0 for baseline, which is correct for column). When no item is baseline-aligned,
-	// alignBaselineGroup returns 0 and nothing shifts (byte-identical for non-baseline flex).
-	if !ax.vertical {
-		var group []baselineItem
-		for i := range items {
-			group = append(group, baselineItem{frag: frags[i], baseline: resolvedAlign(b, items[i]) == "baseline"})
+	for li := range lines {
+		ln := &lines[li]
+		// justify-content distributes free MAIN space within each line independently
+		// (§9.5), so the leading/between offsets are computed per line.
+		consumed := mainGap * float64(ln.len()-1)
+		for i := range ln.usedMain {
+			consumed += ln.usedMain[i]
 		}
-		extra := alignBaselineGroup(group)
-		if extra > 0 {
-			lineCross += extra
+		leading, between := justifyOffsets(b.Style.JustifyContent, lineMain[li]-consumed, ln.len())
+
+		mainPos := leading
+		for i := ln.start; i < ln.end; i++ {
+			used := ln.usedMain[i-ln.start]
+			align := resolvedAlign(b, items[i])
+			itemCross := crossSizes[i]
+
+			// stretch: grow an auto-cross item to the line cross size and relayout its
+			// contents at that cross measure (a row item's width is its main size, which
+			// is fixed; stretch grows its HEIGHT — pin the fragment height to the line).
+			if align == "stretch" && !itemHasDefiniteCross(items[i], ax) {
+				frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, used, ln.cross)
+			}
+
+			cp := ln.crossPos + crossOffset(align, ln.cross, itemCross, ax)
+			pos := mainPos
+			if ax.reverseMain {
+				pos = lineMain[li] - mainPos - used
+			}
+			placeFlexFragment(frags[i], ax, originMain, originCross, pos, cp, used, itemCross)
+			mainPos += used + mainGap + between
 		}
-	} else {
+
+		// Baseline alignment post-pass, PER LINE (§9.4 baseline groups are per-line).
+		// For a ROW container, the line's baseline-aligned items form one group;
+		// alignBaselineGroup shifts each DOWN so its first baseline coincides with the
+		// group maximum, returning the largest shift as a conservative extra cross
+		// extent. Grow the line's cross size so it encloses the shifted items.
+		// For a COLUMN container the cross axis is horizontal, so there is no meaningful
+		// text baseline and it falls back to flex-start (crossOffset already returns 0).
+		// With no baseline-aligned item this returns 0 and nothing shifts.
+		if !ax.vertical {
+			var group []baselineItem
+			for i := ln.start; i < ln.end; i++ {
+				group = append(group, baselineItem{frag: frags[i], baseline: resolvedAlign(b, items[i]) == "baseline"})
+			}
+			if extra := alignBaselineGroup(group); extra > 0 {
+				ln.cross += extra
+			}
+		}
+	}
+	if ax.vertical {
 		// column: log once if any item requests baseline (fallback to flex-start).
 		for i := range items {
 			if resolvedAlign(b, items[i]) == "baseline" {
@@ -372,9 +438,22 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		}
 	}
 
-	contentHeight := lineCross
+	// The container's content extent along the BLOCK axis. For a row the lines stack
+	// vertically, so it is the sum of the line cross sizes plus the gaps between them;
+	// for a column the block axis is the main one, so it is the longest line's extent.
+	contentHeight := 0.0
 	if ax.vertical {
-		contentHeight = consumed
+		for li := range lines {
+			if lineMain[li] > contentHeight {
+				contentHeight = lineMain[li]
+			}
+		}
+	} else {
+		for li := range lines {
+			contentHeight += lines[li].cross
+		}
+		contentHeight += (crossGap + crossBetween) * float64(len(lines)-1)
+		contentHeight += crossLead
 	}
 	// NB: do NOT set interior.intrinsicWidth — that field shrink-to-fits a TABLE box;
 	// a flex container fills its containing-block width like a normal block.
@@ -400,15 +479,28 @@ func resolvedAlign(container, item *cssbox.Box) string {
 // crossOffset returns the item's cross-axis position within a line of size lineCross for
 // an item of outer cross size itemCross under alignment a (stretch is handled separately
 // before this is called, by which point itemCross == lineCross).
-func crossOffset(a string, lineCross, itemCross float64) float64 {
+//
+// ax.reverseCross flips the cross-start edge, which happens for an RTL column container
+// (there the cross axis is the inline one). The abstract cross offset is measured from
+// cross-start, so flipping means measuring from the other end.
+//
+// The CSS Box Alignment spellings "start"/"end" are accepted alongside the Flexbox
+// "flex-start"/"flex-end": the cascade parses both for align-items/align-self, and
+// without these cases "align-items: end" would silently fall through to flex-start.
+func crossOffset(a string, lineCross, itemCross float64, ax flexAxis) float64 {
+	off := 0.0
 	switch a {
-	case "flex-end":
-		return lineCross - itemCross
+	case "flex-end", "end":
+		off = lineCross - itemCross
 	case "center":
-		return (lineCross - itemCross) / 2
-	default: // flex-start, stretch; baseline items start here (shifted by the post-pass for rows)
-		return 0
+		off = (lineCross - itemCross) / 2
+	default: // flex-start, start, stretch; baseline items start here (shifted by the row post-pass)
+		off = 0
 	}
+	if ax.reverseCross {
+		return lineCross - itemCross - off
+	}
+	return off
 }
 
 // itemHasDefiniteCross reports whether the item has a definite cross size (so stretch
@@ -546,14 +638,130 @@ func (e *Engine) flexMainGap(b *cssbox.Box, ax flexAxis) float64 {
 	return v
 }
 
+// flexCrossGap is the gap BETWEEN flex lines: row-gap for a row container (lines
+// stack vertically), column-gap for a column container. It mirrors flexMainGap on the
+// other axis.
+//
+// It is only consulted for a multi-line container: with one line there is no
+// between-lines gap, which is why the cross gap was previously stored and never read.
+func (e *Engine) flexCrossGap(b *cssbox.Box, ax flexAxis) float64 {
+	g := b.Style.RowGap
+	if ax.vertical {
+		g = b.Style.ColumnGap
+	}
+	v, _ := resolveLen(g, b.Style.FontSizePt, 0)
+	if v < 0 {
+		v = 0
+	}
+	return v
+}
+
+// wrapEnabled reports whether a flex-wrap value permits multiple lines. The empty
+// string is the initial value (nowrap), so a caller that never sets it is unaffected.
+func wrapEnabled(v string) bool { return v == "wrap" || v == "wrap-reverse" }
+
+// alignContentOffsets distributes the leftover CROSS space among a multi-line
+// container's lines (CSS Flexbox §9.6), returning the leading offset before the first
+// line and the extra spacing between adjacent lines.
+//
+// Under `stretch` the leftover is instead absorbed INTO the lines: each grows by an
+// equal share, so the lines together fill the container. That is simpler than grid's
+// stretchTracks, which has to filter on which tracks are growable.
+//
+// NOTE the initial value. ComputedStyle.AlignContent defaults to "start", which is
+// grid's convention — but CSS Flexbox's initial `align-content` is `stretch`. Mapping
+// happens here rather than by changing the shared default, which grid relies on.
+func (e *Engine) alignContentOffsets(b *cssbox.Box, lines []flexLine, contentW float64, ax flexAxis, crossGap float64) (leading, between float64) {
+	def, ok := e.flexCrossSize(b, contentW, ax)
+	if !ok {
+		return 0, 0 // indefinite cross size: the container hugs its lines, no leftover
+	}
+	total := crossGap * float64(len(lines)-1)
+	for i := range lines {
+		total += lines[i].cross
+	}
+	leftover := def - total
+	if leftover <= 0 {
+		return 0, 0
+	}
+
+	value := b.Style.AlignContent
+	if value == "" || value == "start" || value == "normal" {
+		// The grid-convenient default; for flex the initial value is stretch.
+		value = "stretch"
+	}
+	if value == "stretch" {
+		share := leftover / float64(len(lines))
+		for i := range lines {
+			lines[i].cross += share
+		}
+		return 0, 0
+	}
+	return contentOffsets(value, leftover, len(lines))
+}
+
+// flexLine is one line of a flex container: a contiguous range of item indices
+// [start,end) plus the per-line results that used to be single container-wide values.
+//
+// A nowrap container has exactly one line spanning every item, so the single-line
+// behavior is a special case of this rather than a separate path.
+type flexLine struct {
+	start, end int       // item index range, [start,end)
+	usedMain   []float64 // flexed main size per item in the line (indexed from start)
+	cross      float64   // the line's cross size
+	crossPos   float64   // the line's cross-axis offset within the container
+}
+
+// len returns the number of items on the line.
+func (l flexLine) len() int { return l.end - l.start }
+
+// collectLines implements CSS Flexbox §9.3: partition items into flex lines.
+//
+// For nowrap (the default) every item goes on one line, whatever the widths — the
+// container overflows instead. For wrap, items accumulate until adding the next would
+// exceed the container's inner main size, counting the gaps between them; an item
+// always lands on an empty line even when it alone overflows, so the loop always makes
+// progress.
+//
+// Breaking uses each item's OUTER HYPOTHETICAL main size (its flex base clamped by
+// min/max), per the spec — not its flexed size, which is only resolved per line
+// afterwards.
+//
+// An indefinite main size cannot be broken against, so it collapses to a single line:
+// the container is sized to its content, so there is no width to overflow.
+func collectLines(sizings []flexItemSizing, wrap bool, innerMain, mainGap float64, mainDefinite bool) []flexLine {
+	n := len(sizings)
+	if !wrap || !mainDefinite || n == 0 {
+		return []flexLine{{start: 0, end: n}}
+	}
+	var lines []flexLine
+	start := 0
+	used := 0.0
+	for i := 0; i < n; i++ {
+		h := sizings[i].hypothetical
+		next := used + h
+		if i > start {
+			next += mainGap
+		}
+		if i > start && next > innerMain {
+			lines = append(lines, flexLine{start: start, end: i})
+			start = i
+			used = h
+			continue
+		}
+		used = next
+	}
+	return append(lines, flexLine{start: start, end: n})
+}
+
 // itemSizing computes a flex item's flex base size, hypothetical main size, and used
 // min/max main size: the numeric inputs to resolveFlexibleLengths. The base size comes
 // from flexBaseSize (flex-basis: auto/content/percentage/length, CSS Flexbox §9.2); the
 // used min/max come from usedMinMaxMain (explicit min/max plus the §4.5 automatic
 // minimum); the hypothetical main size is the base clamped to [minMain, maxMain].
-func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain float64) flexItemSizing {
-	base := e.flexBaseSize(ctx, it, ax, innerMain)
-	minMain, maxMain := e.usedMinMaxMain(ctx, it, ax)
+func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain, availCross float64) flexItemSizing {
+	base := e.flexBaseSize(ctx, it, ax, innerMain, availCross)
+	minMain, maxMain := e.usedMinMaxMain(ctx, it, ax, availCross)
 	return flexItemSizing{
 		base:         base,
 		hypothetical: clampF(base, minMain, maxMain),
@@ -571,7 +779,7 @@ func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, in
 // NOTE: for a column container, measureMaxContent returns a width, not a height —
 // using it as the column main-axis content base is a documented approximation for
 // slice 1; refine in 9b.
-func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain float64) float64 {
+func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain, availCross float64) float64 {
 	fb := it.Style.FlexBasis
 	switch fb.Unit {
 	case gcss.UnitAuto:
@@ -583,9 +791,9 @@ func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, 
 			v, _ := resolveLen(mainLen, it.Style.FontSizePt, 0)
 			return v
 		}
-		return e.measureMaxContent(ctx, it)
+		return e.mainContentSize(ctx, it, ax, availCross)
 	case gcss.UnitContent:
-		return e.measureMaxContent(ctx, it)
+		return e.mainContentSize(ctx, it, ax, availCross)
 	case gcss.UnitPercent:
 		return innerMain * fb.Value / 100
 	default:
@@ -598,7 +806,7 @@ func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, 
 // When min-(width|height) is auto, the automatic minimum size (CSS Flexbox §4.5)
 // applies: the item's min-content size, capped by a definite main-size property if
 // smaller, and capped by maxMain if maxMain >= 0.
-func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis) (minMain, maxMain float64) {
+func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis, availCross float64) (minMain, maxMain float64) {
 	minL, maxL := it.Style.MinWidth, it.Style.MaxWidth
 	if ax.vertical {
 		minL, maxL = it.Style.MinHeight, it.Style.MaxHeight
@@ -613,7 +821,7 @@ func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis
 	// minimum size (CSS Flexbox §4.5): the min-content size, capped by an explicit main
 	// size or max (the spec's min()). For row, the content min size is measureMinContent.
 	if minL.Unit == gcss.UnitAuto {
-		autoMin := e.measureMinContent(ctx, it)
+		autoMin := e.mainMinContentSize(ctx, it, ax, availCross)
 		// Cap by a definite main size if smaller (a fixed-size item's auto-min is its size).
 		mainLen := it.Style.Width
 		if ax.vertical {
@@ -634,13 +842,82 @@ func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis
 	return minMain, maxMain
 }
 
+// mainContentSize is the item's intrinsic MAIN-axis content size, dispatched on the
+// axis so the width/height choice is made in exactly one place: a row's main axis is
+// horizontal (max-content width), a column's is vertical (content height, measured by
+// laying the item out — see measureColumnMainContent).
+func (e *Engine) mainContentSize(ctx context.Context, it *cssbox.Box, ax flexAxis, availCross float64) float64 {
+	if ax.vertical {
+		return e.measureColumnMainContent(ctx, it, availCross)
+	}
+	return e.measureMaxContent(ctx, it)
+}
+
+// mainMinContentSize is the min-content counterpart used for the automatic minimum
+// size (CSS Flexbox §4.5). On a column the min-content HEIGHT of a block is its
+// height at its widest reasonable measure, which for this engine's purposes is the
+// same laid-out height mainContentSize computes: a block's height does not shrink
+// further once its width is fixed.
+func (e *Engine) mainMinContentSize(ctx context.Context, it *cssbox.Box, ax flexAxis, availCross float64) float64 {
+	if ax.vertical {
+		return e.measureColumnMainContent(ctx, it, availCross)
+	}
+	return e.measureMinContent(ctx, it)
+}
+
+// columnItemCrossWidth resolves the CROSS-axis (horizontal) measure a column flex
+// item is laid out at: its definite width when it has one, else its max-content
+// width. availCross, when >= 0, clamps the max-content result to the container's
+// inner cross size — an auto-width item must not be measured wider than the
+// container it sits in (a paragraph of prose has a max-content width equal to the
+// whole unwrapped string, which would otherwise overflow the container by a large
+// multiple and, worse, be the width its content height is measured at).
+//
+// A definite width of 0 is pathological; fall back to max-content rather than
+// laying out at zero width.
+func (e *Engine) columnItemCrossWidth(ctx context.Context, it *cssbox.Box, availCross float64) float64 {
+	if it.Style.Width.Unit != gcss.UnitAuto && it.Style.Width.Unit != gcss.UnitPercent {
+		if v, _ := resolveLen(it.Style.Width, it.Style.FontSizePt, 0); v > 0 {
+			return v
+		}
+	}
+	w := e.measureMaxContent(ctx, it)
+	if availCross >= 0 && w > availCross {
+		w = availCross
+	}
+	return w
+}
+
+// measureColumnMainContent returns a column flex item's content HEIGHT — its main-axis
+// content contribution — by laying it out at its cross-axis width and reading the
+// resulting fragment height.
+//
+// This is the vertical counterpart of measureMaxContent. It exists because the main
+// axis of a column container is vertical, so the intrinsic main size is a height;
+// measureMaxContent returns a WIDTH and using it as a column item's main base size
+// compares a horizontal measure against a vertical budget. It follows the same
+// two-phase pattern grid already uses for row-track sizing (lay the item out at the
+// known cross measure, then read back frag.H).
+//
+// Returns 0 if the item produces no fragment.
+func (e *Engine) measureColumnMainContent(ctx context.Context, it *cssbox.Box, availCross float64) float64 {
+	w := e.columnItemCrossWidth(ctx, it, availCross)
+	pos := &positionedContext{}
+	res := e.layoutBlock(ctx, it, w, 0, 0, 0,
+		&floatContext{cbLeft: 0, cbRight: w}, pos, posCBOwner{isPage: true})
+	if res.frag == nil {
+		return 0
+	}
+	return res.frag.H
+}
+
 // layoutFlexItem lays out one flex item's contents at its used main size and returns its
 // fragment and its outer cross size. For a vertical (column) axis it delegates to
 // layoutFlexItemColumn; for a horizontal (row) axis, used main = content width and the
 // fragment height is the cross size.
-func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis, usedMain float64) (*Fragment, float64) {
+func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis, usedMain, availCross float64) (*Fragment, float64) {
 	if ax.vertical {
-		return e.layoutFlexItemColumn(ctx, it, usedMain) // column axis: cross = width, main = height
+		return e.layoutFlexItemColumn(ctx, it, usedMain, availCross) // column axis: cross = width, main = height
 	}
 	pos := &positionedContext{}
 	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
@@ -660,16 +937,8 @@ func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis
 // container will stretch/shrink it — for now lay out at the item's own width if definite,
 // otherwise at its max-content width as the natural cross size). Returns the fragment and
 // its outer cross size (the width). The fragment's height is pinned to usedMain.
-func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedMain float64) (*Fragment, float64) {
-	// Cross (width) basis: a definite width, else max-content.
-	crossW := e.measureMaxContent(ctx, it)
-	if it.Style.Width.Unit != gcss.UnitAuto && it.Style.Width.Unit != gcss.UnitPercent {
-		// v > 0: a width:0 column item is pathological; fall back to max-content rather
-		// than laying it out at zero width (graceful degradation).
-		if v, _ := resolveLen(it.Style.Width, it.Style.FontSizePt, 0); v > 0 {
-			crossW = v
-		}
-	}
+func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedMain, availCross float64) (*Fragment, float64) {
+	crossW := e.columnItemCrossWidth(ctx, it, availCross)
 	pos := &positionedContext{}
 	res := e.layoutBlock(ctx, it, crossW, 0, 0, 0,
 		&floatContext{cbLeft: 0, cbRight: crossW}, pos, posCBOwner{isPage: true})

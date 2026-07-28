@@ -71,17 +71,17 @@ func TestGridSubgridDegradesToImplicit(t *testing.T) {
 	assertRect(t, frags[1], 0, 40, 100, 40)
 }
 
-// --- 2. RTL → LTR ---
+// --- 2. RTL mirrors the inline axis ---
 
-// TestGridRTLDegradesToLTR covers the documented RTL deferral: direction:rtl on a
-// grid acts as LTR (column line 1 remains leftmost). The test asserts the same item
-// positions as a LTR grid (NOT mirrored). layoutGrid logs the RTL deferral but the
-// test harness does not capture logs, so we assert geometry only.
-func TestGridRTLDegradesToLTR(t *testing.T) {
-	// 2-column 80px 120px grid (distinct widths so a LTR vs RTL difference is clear):
-	// LTR: item0 at x=0 (80px wide), item1 at x=80 (120px wide).
-	// RTL (if honored): item0 at x=120, item1 at x=0 (reversed).
-	// Documented fallback: acts as LTR → item0 at x=0, item1 at x=80.
+// TestGridRTLMirrorsTracks: direction:rtl runs the inline axis right-to-left, so
+// column track 1 is the RIGHTMOST. Distinct track widths (80/120) make a true mirror
+// distinguishable from a plain index reversal.
+//
+// This replaces TestGridRTLDegradesToLTR, which asserted the LTR fallback.
+func TestGridRTLMirrorsTracks(t *testing.T) {
+	// 2-column 80px/120px grid in a 400px container.
+	//   LTR: item0 (80 wide) at x=0,   item1 (120 wide) at x=80.
+	//   RTL: item0 sits flush RIGHT  → [320,400); item1 to its left → [200,320).
 	cols := mustTrackList(80, 120)
 	rowsTL := mustTrackList(40)
 	items := []*cssbox.Box{
@@ -93,7 +93,23 @@ func TestGridRTLDegradesToLTR(t *testing.T) {
 	if len(frags) != 2 {
 		t.Fatalf("RTL grid: got %d frags, want 2", len(frags))
 	}
-	// LTR fallback: first item (80px) at x=0, second (120px) at x=80.
+	assertRect(t, frags[0], 320, 0, 80, 40)
+	assertRect(t, frags[1], 200, 0, 120, 40)
+}
+
+// TestGridLTRUnchanged pins that the LTR path is untouched by the mirroring, using
+// the exact geometry the old degradation test asserted.
+func TestGridLTRUnchanged(t *testing.T) {
+	cols := mustTrackList(80, 120)
+	rowsTL := mustTrackList(40)
+	items := []*cssbox.Box{
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+		gridItemBox(0, 0, gcss.GridPlacement{}),
+	}
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{}, items...), 400, 0)
+	if len(frags) != 2 {
+		t.Fatalf("LTR grid: got %d frags, want 2", len(frags))
+	}
 	assertRect(t, frags[0], 0, 0, 80, 40)
 	assertRect(t, frags[1], 80, 0, 120, 40)
 }
@@ -370,3 +386,65 @@ func TestGridBaselineFreeVsTextItemNoShift(t *testing.T) {
 // normal operation. It is tested where it actually lives, in
 // pkg/css/grid_cascade_test.go (TestGridUnknownAlignmentValueKeepsDefault), rather than
 // asserted indirectly through layoutGrid here.
+
+// TestGridRTLSpanAndAlignment is the double-mirroring guard.
+//
+// RTL grid needs TWO independent flips: the track POSITIONS mirror, and
+// justify-items/justify-self start/end resolve logically within the area. Applying
+// only one is the classic bug — items land in the right track but aligned to the
+// wrong edge, or aligned correctly inside a mirrored-away area. A spanning item plus
+// an explicit start/end alignment exercises both at once.
+func TestGridRTLSpanAndAlignment(t *testing.T) {
+	cols := mustTrackList(100, 100, 100)
+	rowsTL := mustTrackList(40)
+
+	// One item spanning columns 1-2 (the first two tracks in grid order) and a narrow
+	// item in column 3. Under RTL the span occupies the RIGHT 200px: [100,300) in a
+	// 300px container, and the third track is leftmost at [0,100).
+	spanning := gridItemBox(0, 0, gcss.GridPlacement{
+		ColStart: numLine(1), ColEnd: numLine(3),
+	})
+	frags := gridFrags(t, gridContainerTL(cols, rowsTL, gcss.ComputedStyle{Direction: "rtl"}, spanning), 300, 0)
+	if len(frags) != 1 {
+		t.Fatalf("want 1 frag, got %d", len(frags))
+	}
+	// The area is the mirror of LTR's [0,200): under RTL it is [100,300).
+	assertRect(t, frags[0], 100, 0, 200, 40)
+}
+
+// TestGridRTLJustifyItemsStartIsRightEdge: justify-items is LOGICAL, so `start` under
+// RTL pins an item to its area's RIGHT edge. With a narrow item in a wide track the
+// difference between the two flips is visible.
+func TestGridRTLJustifyItemsStartIsRightEdge(t *testing.T) {
+	cols := mustTrackList(200)
+	rowsTL := mustTrackList(40)
+
+	mk := func(dir, justify string) *Fragment {
+		it := gridItemBox(0, 0, gcss.GridPlacement{})
+		// A definite width narrower than the track so alignment within the area matters.
+		it.Style.Width = gcss.Length{Value: 50, Unit: gcss.UnitPx}
+		st := gcss.ComputedStyle{Direction: dir, JustifyItems: justify}
+		frags := gridFrags(t, gridContainerTL(cols, rowsTL, st, it), 200, 0)
+		if len(frags) != 1 {
+			t.Fatalf("want 1 frag, got %d", len(frags))
+		}
+		return frags[0]
+	}
+
+	// LTR: start = left edge of the 200px track.
+	if got := mk("ltr", "start").X; got != 0 {
+		t.Errorf("LTR justify-items:start => x%v, want 0", got)
+	}
+	// RTL: start = RIGHT edge, so a 50-wide item sits at x=150.
+	if got := mk("rtl", "start").X; got != 150 {
+		t.Errorf("RTL justify-items:start => x%v, want 150 (start is the right edge)", got)
+	}
+	// RTL: end = left edge.
+	if got := mk("rtl", "end").X; got != 0 {
+		t.Errorf("RTL justify-items:end => x%v, want 0 (end is the left edge)", got)
+	}
+	// center is direction-invariant.
+	if l, r := mk("ltr", "center").X, mk("rtl", "center").X; l != r {
+		t.Errorf("center should be direction-invariant; ltr x%v vs rtl x%v", l, r)
+	}
+}

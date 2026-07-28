@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<!-- TEST: flex-wrap:wrap breaks items onto new lines when they no longer fit. Four
+     70px items in a 160px row: two per line, two lines. -->
+<html><head><style>
+  body { margin: 0; }
+  .row { display: flex; flex-wrap: wrap; width: 160px; }
+  .box { width: 70px; height: 30px; background: #336699; }
+</style></head><body>
+  <div class="row">
+    <div class="box"></div><div class="box"></div>
+    <div class="box"></div><div class="box"></div>
+  </div>
+</body></html>

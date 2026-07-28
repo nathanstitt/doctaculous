@@ -12,24 +12,65 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## A. Cross-cutting (highest leverage — unblocks several modes at once)
 
-- ☑ **A1.5 PDF extraction visual→logical** — *DONE.* (Filed as its own entry: this slice is independent of
-  the A1 layout work below and landed on a branch off `main`, since `pkg/pdf/extract` does not depend on
-  `pkg/layout/inline`.) A PDF stores glyphs by POSITION, so extraction — which sorts a line left-to-right —
-  yielded RTL text reversed (`אבג` → `גבא`, reproduced before fixing). The inverse of L2 cannot be obtained by
-  running the bidi algorithm over the extracted text: that text is ALREADY scrambled, and the algorithm needs
-  logical order as input. What is recoverable is the run structure, so each maximal RTL run is reversed.
-  **Two levels**: the characters within each RTL word AND the order of consecutive RTL words —
-  mutation-verified independently (removing the word-order reversal fails a different test). Runs AFTER word
-  grouping, because grouping splits on the x-gap from the previous glyph's right edge and would break on
-  reordered glyphs; working on words also keeps each word's geometry for table/block detection. No-op for
-  Latin (zero golden churn). Limits: embedded digit sequences reverse with their word (digits are weak, not
-  neutral, in UAX#9), one level of nesting, no `/ReversedChars`. `2026-07-28-rtl-pdf-extraction-design.md`.
-- ☐ **A1. RTL / bidi (`direction`)** — *Large.* The engine has **no** `direction`/bidi support anywhere. It is
-  the **sole** deferral in tables, flexbox, AND grid (each logs "laying out LTR"), and also affects
-  inline/block text order. One sub-project unblocks all three modes + general inline. **Touches:** the inline
-  core (`pkg/layout/inline`), `pkg/layout/css` block/inline/table/flex/grid, `pkg/css` `direction`/`unicode-bidi`.
-  Sequence this either first (so the per-mode RTL items below become free) or last (after the cheaper per-mode
-  fixes). Decision needed.
+- ☑ **A1. RTL / bidi (`direction`)** — *Large; ALL FIVE SLICES DONE.* **Sequencing DECIDED: first**, so the per-mode RTL items
+  (H2/I3 + the table deferral) become free rather than being written LTR-only and reopened. Split into five
+  independently shippable slices:
+  - ☑ **A1.1 cascade + plumbing** — *DONE.* `text-align: start|end|match-parent` (initial value moved from
+    physical `left` to `start` — verified byte-identical: all 8 `TextAlign` consumers default to left, and the
+    one that looks like a passthrough, `pptxwrite.alignOf`, is allowlist-guarded and now pinned by a test);
+    `unicode-bidi` parsed + stored (NOT inherited, unlike `direction`); the HTML `dir` attribute via
+    presentational hints (the selector engine has no attribute selectors, so `[dir=rtl]` UA rules are not
+    expressible — hint rank is equivalent: above UA, below author); `bdi`/`bdo` UA isolation rules;
+    `effectiveDirection` + direction-aware `mapTextAlign`; RTL text-indent edge. Zero golden churn (asserted by
+    running the full suite without `-update`). `dir=auto` degrades + logs (needs first-strong detection).
+    **The anonymous-box trap** — `BoxAnonBlock` has a zero-value Style so `Direction == ""`, not `"ltr"` — is
+    why `effectiveDirection` exists; never read `b.Style.Direction` directly. Mutation-verified regression test.
+    `2026-07-27-rtl-cascade-design.md`.
+  - ☑ **A1.2 box-level RTL** — *DONE.* All three "laying out LTR" logs retired. Tables mirror their solved
+    column x-offsets; `buildCollapsedBorders` gained the matching index→physical-side flip (it mixes
+    grid-index logic with fragment geometry, so a mirrored grid otherwise resolves the table's left border
+    onto the rightmost cell and picks the wrong neighbor at every interior line — silently). Flex resolves
+    direction in `axisFor`: a row XORs `reverseMain` (so RTL composes with `row-reverse` — both flips
+    cancel), and a column flips the CROSS axis, the case the old `&& !ax.vertical` guard skipped entirely.
+    Grid needs TWO independent flips (track positions AND logical `justify-items`/`justify-self`);
+    mutation-verified independently — removing either fails a different test. Also fixed `crossOffset`
+    ignoring the Box Alignment `start`/`end` spellings. Showcase §15 (Latin text — real script was added
+    later, in A1.4, once RTL faces were bundled) + 4 WPT reftests, `rtl-flex-row` being the strongest oracle (rtl row ≡
+    row-reverse LTR through independent inputs). `2026-07-27-rtl-box-layout-design.md`.
+  - ☑ **A1.3 inline bidi reordering** — *DONE.* Shaping and breaking stay LOGICAL; `MakeVisualLine` applies
+    rule L2 per line AFTER the break is chosen (L2 reorders within a line, and line membership is only known
+    post-break). `x/text` promoted indirect→direct — no new module, and L2 is applied here because x/text's own
+    display-order `Reorder` is unimplemented upstream. Rule L4 bracket mirroring via
+    `unicodedata.LookupMirrorChar`, keeping the ORIGINAL rune in `Glyph.Runes` so `/ToUnicode` recovers the
+    authored text.
+    **The metrics trap:** `WidthPt`/`CountSpaces` exclude the space that ENDS the text and find it by scanning
+    from the slice end — but a reordered RTL line has that space at its VISUAL start, so metrics are computed
+    on the logical slice and transplanted.
+    **Bug found:** `Shape` dropped every rune the face couldn't map, including the invisible bidi controls
+    (LRM/RLM/ALM, embeddings, overrides, isolates) that draw nothing but DETERMINE ordering — silently
+    discarding the author's directional intent. They now survive as zero-width, face-less glyphs.
+    Nested embeddings deeper than one level collapse (x/text exposes runs, not per-rune levels); the common
+    cases are exact. `2026-07-27-rtl-inline-bidi-design.md`.
+  - ☑ **A1.4 Arabic shaping** — *DONE.* Joining scripts (Arabic/Syriac/Thaana; Hebrew is non-joining
+    and stays per-rune) shape as whole segments through harfbuzz, resolving GSUB for contextual forms
+    and ligatures. `Face.OpenTypeFont` exposes the SFNT, which satisfies `harfbuzz.FaceOpentype`
+    directly — no adapter. **Shaping is forced LTR**: harfbuzz emits VISUAL order for RTL by default,
+    which the L2 pass would then reverse a second time. Cluster attribution gives each cluster's runes
+    to exactly one glyph so `/ToUnicode` stays exact; the first version assumed ascending clusters
+    (true only because of the LTR force) and mutation testing caught both that AND the fact that the
+    test could not see it — it only checked the concatenation, which still matched.
+    Remaining: GPOS vertical offsets unapplied (marks sit on the baseline), one face per segment,
+    no `font-feature-settings`. `2026-07-28-rtl-arabic-shaping-design.md`.
+  - ☑ **A1.5 PDF extraction visual→logical** — *DONE.* A PDF stores glyphs by POSITION, so extraction — which sorts a line left-to-right —
+    yielded RTL text reversed (`אבג` → `גבא`, reproduced before fixing). The inverse of L2 cannot be obtained by
+    running the bidi algorithm over the extracted text: that text is ALREADY scrambled, and the algorithm needs
+    logical order as input. What is recoverable is the run structure, so each maximal RTL run is reversed.
+    **Two levels**: the characters within each RTL word AND the order of consecutive RTL words —
+    mutation-verified independently (removing the word-order reversal fails a different test). Runs AFTER word
+    grouping, because grouping splits on the x-gap from the previous glyph's right edge and would break on
+    reordered glyphs; working on words also keeps each word's geometry for table/block detection. No-op for
+    Latin (zero golden churn). Limits: embedded digit sequences reverse with their word (digits are weak, not
+    neutral, in UAX#9), one level of nesting, no `/ReversedChars`. `2026-07-28-rtl-pdf-extraction-design.md`.
 
 ---
 
@@ -127,7 +168,8 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## F. HTML/CSS — tables
 
-- ☐ **F1. RTL/`direction`** (column order) — *covered by A1.*
+- ☑ **F1. RTL/`direction`** (column order) — *DONE via A1.2.* Tables mirror their solved column x-offsets;
+  `buildCollapsedBorders` gained the matching index→physical-side flip. The "laying out LTR" log is gone.
 - ☑ **F2. Six background layers** — *DONE.* Column-group, column, row-group, and row backgrounds now paint
   behind the cells in CSS 17.5.1 order (table → col-groups → cols → row-groups → rows → cells). `gridCol` carries
   its `<col>` box; `tableGrid` retains col-group/row-group spans; `backgroundLayers` emits a background fragment
@@ -173,8 +215,20 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## H. HTML/CSS — flexbox
 
-- ☐ **H1. multi-line flex** (`flex-wrap: wrap`/`wrap-reverse` + `align-content`) — the big one. *Large.*
-- ☐ **H2. RTL/`direction`** on a row — *covered by A1.*
+- ☑ **H1. multi-line flex** — *DONE.* §9.3 `collectLines` partitions items into `flexLine`s; nowrap is now
+  the one-line special case rather than a separate path. `resolveFlexibleLengths` needed NO change (it was
+  already written per-line). Five things became per-line: the §9.4 step-8 cross clamp (gated to
+  `len(lines)==1` — with several lines the leftover belongs to align-content, and stretching one line would
+  swallow the others), `contentHeight`, the placement loop, the `innerMain` overwrite that the reverse formula
+  flips within, and the baseline post-pass. **The align-content trap:** `ComputedStyle.AlignContent` defaults
+  to `"start"` (grid's convention) but CSS Flexbox's initial is `stretch` — mapped at the flex use site rather
+  than changing the shared default grid relies on. `wrap-reverse` XORs with the RTL cross flip (two flips
+  cancel). Pagination came FREE: `splitFlexGridForPage` is geometry-driven, so a wrapped row is one band per
+  line — tested anyway, since nothing in the pagination code says "flex line". Every per-line change
+  mutation-verified independently, each failing a DISTINCT test set. Sequenced after RTL so the placement loop
+  was written direction-aware once. `2026-07-28-flex-wrap-design.md`.
+- ☑ **H2. RTL/`direction`** on a row — *DONE via A1.2.* Plus the column cross-axis, which was never
+  covered by the old row-only log.
 - ☑ **H3. line cross size clamped to a definite container cross size** — *DONE.* For a single-line flex
   container the line cross size is now the container's DEFINITE inner cross size when set (`flexCrossSize`),
   so `align-items:center`/`flex-end` align within the container's extent (e.g. a fixed row height), not the
@@ -182,9 +236,19 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   `TestFlexAlignCenterUsesDefiniteHeight` (mutation-verified); the `flex-align-center` golden + WPT reftest
   reference corrected to the browser-accurate centered offsets (eyeballed); the column-stretch unit test
   updated (an auto-width column item correctly stretches to the container width).
-- ☐ **H4. column `flex-basis: auto`/`content` height** (max-content width proxy today). *Deferred (Medium)* —
-  same vertical-content-measurement limitation as I4/D3.
-- ☐ **H5. `flex-grow`/`shrink` cross-axis gap factors** (revisit with multi-line). *Small (with H1).*
+- ☑ **H4. column `flex-basis: auto`/`content` height** — *DONE.* A column container's main axis is VERTICAL,
+  but `flexBaseSize` returned `measureMaxContent` (a WIDTH), comparing a horizontal measure against a vertical
+  budget. Now `mainContentSize` dispatches on the axis: a row still uses max-content width, a column uses the
+  new `measureColumnMainContent`, which lays the item out at its cross width and reads back `frag.H` — the same
+  two-phase pattern grid already uses for row tracks (see I4). `usedMinMaxMain`'s `min:auto` path had the same
+  bug and takes the same fix.
+  **Found alongside:** `layoutFlexItemColumn` laid an auto-width column item out at its unclamped max-content
+  width, so a paragraph of prose overflowed its container by ~2.5x (497pt inside a 200pt container). The cross
+  width is now clamped to the container's inner cross size. Both halves are mutation-verified independently —
+  reverting either fails a different test.
+- ☑ **H5. cross-axis gap** — *DONE with H1.* `flexCrossGap` mirrors `flexMainGap` on the other axis and is
+  consulted only when `len(lines) > 1` (a single line has no between-lines gap, which is why the value was
+  previously stored and never read).
 - ☑ **H6. column-container `align-items: baseline`** — *CONFIRMED CORRECT (no fix).* CSS Flexbox §9.4.3:
   baseline self-alignment in a column flex container resolves to `flex-start` (there is no cross-axis text
   baseline). The engine already falls back to `flex-start` and logs it — spec-compliant, not a gap.
@@ -197,9 +261,12 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 - ☐ **I2. flow-axis-locked auto-placement** (definite flow-axis line + auto cross axis honors span, ignores
   start line). *Deferred (Small)* — a documented, non-overlapping simplification (`grid_place.go` scans the
   locked line from 0 rather than continuing the sparse cursor); niche, intentional.
-- ☐ **I3. RTL/`direction`** — *covered by A1.*
-- ☐ **I4. row-track content-height width-proxy** (`measureMaxContent` returns WIDTH for a ROW track). *Medium*
-  (shared root cause with H4, F-rowspan — vertical content sizing).
+- ☑ **I3. RTL/`direction`** — *DONE via A1.2* (track mirroring + logical `justify-items`/`justify-self`).
+- ☑ **I4. row-track content-height width-proxy** — *ALREADY CORRECT (entry was stale).* Verified while fixing
+  H4: `contributions` (`grid.go`) is COLUMN-only and correctly uses min/max-content WIDTHS; row tracks size
+  from `rowContributions`, built from each item's laid-out `frag.H` after phase 5a. A probe confirms auto row
+  tracks take real wrapped-text heights (24.6/73.7pt), not width proxies. This two-phase shape is the pattern
+  H4's fix copies. No code change.
 - ☑ **I5. conservative baseline-group extra** — *DONE.* `alignBaselineGroup` now returns the EXACT extra cross
   size (`max(bottom after shift) − max(bottom before shift)` over participants), not the largest single shift —
   so a row/line is no longer over-expanded when the most-shifted item doesn't reach lowest. Tests:
@@ -270,7 +337,10 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
 - ☐ **N3. Honoring a genuinely MID-BLOCK forced break on a nested block** (edge breaks now propagate). *Medium* (depends on N1).
 - ☐ **N4. Per-page float distribution.** *Medium.*
 - ☐ **N5. Per-page bottom-anchored `fixed`** (per-page `resolveAbsolute` height). *Medium.*
-- ☐ **N6. CSS paged media: `@page` size/margins/named pages + running headers/footers.** *Large.*
+- ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16
+  margin boxes, running headers/footers with page counters, `marks`/`bleed`, and `string-set`/`string()` are
+  all in (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and
+  `2026-06-30-html-paged-media-design.md`. No code change.
 
 ---
 

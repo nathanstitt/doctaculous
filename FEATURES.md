@@ -83,9 +83,15 @@ bullet's design doc is in `docs/superpowers/specs/`:
 - **Web fonts** (`pkg/css/fontface.go`, `pkg/font/sfnt.go`/`woff1.go`/`woff2*.go`,
   `pkg/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode (incl. glyf/loca transform), `local()`
   via `DiskFontProvider`, family-fallback-list resolution. `2026-06-26-html-webfonts-design.md`.
-- **Flexbox** (single-line; `pkg/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout,
-  §9.7 flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`.
-  `2026-06-26-html-flexbox-design.md`.
+- **Flexbox** (`pkg/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout, §9.7
+  flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`, and
+  **multi-line wrapping** — `flex-wrap: wrap`/`wrap-reverse`, §9.3 line collection,
+  `align-content` (incl. the flex `stretch` initial, which differs from the shared grid default),
+  the cross-axis gap between lines, and the `flex-flow` shorthand. justify-content and baseline
+  groups resolve per LINE; the §9.4 step-8 cross clamp is gated to single-line containers.
+  wrap-reverse XORs with the RTL cross flip. Wrapped rows paginate between lines for free
+  (`splitFlexGridForPage` is geometry-driven). `2026-06-26-html-flexbox-design.md`,
+  `2026-07-28-flex-wrap-design.md`.
 - **CSS Grid** (explicit grid; `pkg/layout/css/grid.go`+`grid_track.go`+`grid_place.go`+`gridfix.go`
   +`baseline.go`): §11 track-sizing + §8 placement (spans, named areas, auto-placement sparse/dense),
   item + content-distribution alignment, `inline-grid`, cross-cutting baseline backport (grid + flex
@@ -112,8 +118,58 @@ bullet's design doc is in `docs/superpowers/specs/`:
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing. `2026-06-30-html-link-pseudo-classes-design.md`.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
-  `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`… mapped to
+  `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… mapped to
   CSS below author rules (HN renders with its bgcolor). `2026-06-30-html-presentational-attributes-design.md`.
+- **Direction-relative alignment + bidi plumbing** (`pkg/css/cascade.go`, `pkg/css/hints.go`,
+  `pkg/layout/css/inline.go`) — RTL slice 1 of 5: `text-align: start|end|match-parent` (the initial
+  value is now `start`, byte-identical for LTR since every consumer defaults to left);
+  `unicode-bidi` parsed + stored (not inherited); the global `dir` attribute as a hint (the
+  selector engine has no attribute selectors, so the spec's `[dir=rtl]` UA rules are not
+  expressible — hint rank is equivalent); `bdi`/`bdo` isolation; `effectiveDirection` (an anonymous
+  box's Style is zero-valued, so `Direction` is `""` not `"ltr"` — never read the field directly);
+  RTL text-indent edge. `dir=auto` degrades + logs. `2026-07-27-rtl-cascade-design.md`.
+- **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
+  slice 2 of 5, retiring **all three** "laying out LTR" logs: tables mirror their solved column
+  x-offsets (and `buildCollapsedBorders` flips its index→physical-side mapping, or collapsed
+  borders resolve against the wrong neighbor with no log); flex resolves direction in `axisFor`
+  (a row XORs `reverseMain`, so RTL composes with `row-reverse`; a column flips the CROSS axis,
+  the case the old guard skipped silently); grid mirrors track positions AND resolves
+  `justify-items`/`justify-self` `start`/`end` logically (both flips are required —
+  mutation-verified independently). Also fixes `crossOffset` ignoring the Box Alignment
+  `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
+  reordered — RTL script renders in logical glyph order.**
+  `2026-07-27-rtl-box-layout-design.md`.
+- **Arabic contextual shaping** (`pkg/layout/inline/complex.go`) — RTL slice 4 of 5: a run of
+  joining script (Arabic/Syriac/Thaana; Hebrew is non-joining and stays on the cheap per-rune
+  path) is shaped as a whole segment through harfbuzz, resolving the font's GSUB tables so
+  letters take their initial/medial/final/isolated forms and ligatures fuse. `Face.OpenTypeFont`
+  exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping is forced
+  LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder — harfbuzz would
+  otherwise emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly
+  once, so `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
+  `2026-07-28-rtl-arabic-shaping-design.md`.
+- **Bundled RTL faces + per-rune script fallback** (`pkg/font/standard`, `pkg/layout/font/cache.go`,
+  `pkg/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
+  Font Name) ship alongside the Latin substitutes. Because each bundled face covers exactly ONE
+  script — the Latin faces have no Hebrew/Arabic and the Noto faces have no Latin — the covering
+  face is resolved per **rune**, not per run: a Hebrew or Arabic phrase inside an otherwise-Latin
+  paragraph now shapes instead of being silently dropped. Results cache per (script, style); the
+  fallback consults bundled faces only. A fallback glyph carries the face it resolved from, since a
+  GID is only meaningful against its own face.
+- **Inline bidi reordering** (`pkg/layout/inline/bidi.go`) — RTL slice 3 of 5: shaping and breaking stay
+  in LOGICAL order; `MakeVisualLine` applies UAX#9 rule L2 per line after the break is chosen, plus rule
+  L4 bracket mirroring (`Glyph.Runes` keeps the ORIGINAL character so `/ToUnicode` recovers the authored
+  text). `golang.org/x/text` promoted indirect→direct for UAX#9 — no new module. Line metrics are
+  computed on the logical slice, because the space that ends the text reorders to an RTL line's visual
+  START. Bidi control characters now survive shaping as zero-width glyphs (they were being dropped,
+  silently discarding directional intent). **Arabic reorders but renders as isolated forms** — contextual
+  shaping needs a cluster model (slice 4). `2026-07-27-rtl-inline-bidi-design.md`.
+- **Column flex vertical content sizing** (`pkg/layout/css/flex.go`): a column container's main axis is
+  vertical, so `flex-basis: auto`/`content` (and the `min:auto` automatic minimum) now resolve to the
+  item's content HEIGHT — measured by laying it out at its cross width and reading back the fragment
+  height (`measureColumnMainContent`), the same two-phase pattern grid uses for row tracks — instead of
+  a max-content WIDTH compared against a vertical budget. An auto-width column item's cross width is
+  also clamped to the container, fixing a ~2.5x overflow for prose. Backlog H4.
 - **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` as static native widgets (classic chrome, non-interactive).
   `2026-06-29-html-forms-design.md`.

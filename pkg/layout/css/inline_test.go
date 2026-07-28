@@ -2,9 +2,11 @@ package css
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
@@ -731,5 +733,187 @@ func TestInlineBrInsideFlexItem(t *testing.T) {
 	}
 	if len(lined.Lines) != 2 {
 		t.Fatalf("flex-item paragraph lines = %d, want 2 (br must force a break)", len(lined.Lines))
+	}
+}
+
+// TestMapTextAlignDirectionRelative: the physical keywords never flip; start/end
+// resolve against the used direction. The initial value is "start", so an
+// LTR document is byte-identical to the pre-RTL behavior (everything → AlignLeft).
+func TestMapTextAlignDirectionRelative(t *testing.T) {
+	cases := []struct {
+		align, dir string
+		want       inline.Align
+	}{
+		{"start", "ltr", inline.AlignLeft},
+		{"start", "rtl", inline.AlignRight},
+		{"end", "ltr", inline.AlignRight},
+		{"end", "rtl", inline.AlignLeft},
+		// Physical keywords are direction-invariant.
+		{"left", "ltr", inline.AlignLeft},
+		{"left", "rtl", inline.AlignLeft},
+		{"right", "ltr", inline.AlignRight},
+		{"right", "rtl", inline.AlignRight},
+		{"center", "rtl", inline.AlignCenter},
+		{"justify", "rtl", inline.AlignJustify},
+		// Empty/unknown/empty-dir fall back to left (the pre-RTL default).
+		{"", "ltr", inline.AlignLeft},
+		{"bogus", "rtl", inline.AlignLeft},
+		{"start", "", inline.AlignLeft},
+	}
+	for _, c := range cases {
+		if got := mapTextAlign(c.align, c.dir); got != c.want {
+			t.Errorf("mapTextAlign(%q, %q) = %v, want %v", c.align, c.dir, got, c.want)
+		}
+	}
+}
+
+// TestEffectiveDirectionAnonymousBox is the regression test for the anonymous-box
+// trap: an anonymous block carries a ZERO-VALUE ComputedStyle, so its Direction is ""
+// and NOT "ltr". Reading b.Style.Direction directly would silently lay the anonymous
+// block out LTR inside an RTL subtree. effectiveDirection must recover the inherited
+// value from an inline descendant (the cascade copies it onto every one).
+func TestEffectiveDirectionAnonymousBox(t *testing.T) {
+	anon := &cssbox.Box{
+		Kind:       cssbox.BoxAnonBlock,
+		Display:    cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC,
+		// Style deliberately left zero-valued, as box-gen produces it.
+		Children: []*cssbox.Box{{
+			Kind:  cssbox.BoxText,
+			Style: gcss.ComputedStyle{Direction: "rtl", FontSizePt: 16},
+		}},
+	}
+	if got := effectiveDirection(anon); got != "rtl" {
+		t.Errorf("effectiveDirection(anon block in RTL subtree) = %q, want rtl", got)
+	}
+	if anon.Style.Direction != "" {
+		t.Fatal("test premise broken: the anonymous box should have a zero-value Style")
+	}
+
+	// A real element box uses its own value.
+	real := &cssbox.Box{Kind: cssbox.BoxBlock, Style: gcss.ComputedStyle{Direction: "rtl"}}
+	if got := effectiveDirection(real); got != "rtl" {
+		t.Errorf("effectiveDirection(element) = %q, want rtl", got)
+	}
+	// Nothing anywhere carries a direction: resolve to ltr, never "".
+	bare := &cssbox.Box{Kind: cssbox.BoxAnonBlock}
+	if got := effectiveDirection(bare); got != "ltr" {
+		t.Errorf("effectiveDirection(bare) = %q, want ltr", got)
+	}
+}
+
+// TestEffectiveTextAlignStartUnderRTL: start/end resolve through the same
+// anonymous-box recovery as the direction itself.
+func TestEffectiveTextAlignStartUnderRTL(t *testing.T) {
+	anon := &cssbox.Box{
+		Kind:       cssbox.BoxAnonBlock,
+		Display:    cssbox.DisplayBlock,
+		Formatting: cssbox.InlineFC,
+		Children: []*cssbox.Box{{
+			Kind:  cssbox.BoxText,
+			Style: gcss.ComputedStyle{Direction: "rtl", TextAlign: "start", FontSizePt: 16},
+		}},
+	}
+	if got := effectiveTextAlign(anon); got != inline.AlignRight {
+		t.Errorf("text-align:start in an RTL anon block = %v, want AlignRight", got)
+	}
+}
+
+// bidiGlyphOrder lays out an HTML fragment and returns the emitted glyphs sorted by
+// their painted X position, as a string. That is the VISUAL reading order: what a
+// reader sees left-to-right on the page.
+//
+// It asserts on Runes rather than pixels because no bundled font carries Hebrew or
+// Arabic coverage (TeX Gyre + Inconsolata), so an RTL glyph has no outline to
+// rasterize — but the shaper still records the rune it stood for, and reordering is
+// exactly a question of which order those land in.
+func bidiGlyphOrder(t *testing.T, bodyHTML string) string {
+	t.Helper()
+	src := `<!DOCTYPE html><html><head><style>body{margin:0;font-family:serif;font-size:16px}</style></head><body>` +
+		bodyHTML + `</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, 400)
+
+	type placed struct {
+		x float64
+		r []rune
+	}
+	var gs []placed
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		for li := range f.Lines {
+			for _, g := range f.Lines[li].Glyphs {
+				if len(g.Runes) > 0 {
+					gs = append(gs, placed{g.X, g.Runes})
+				}
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	sort.Slice(gs, func(i, j int) bool { return gs[i].x < gs[j].x })
+	var out []rune
+	for _, g := range gs {
+		out = append(out, g.r...)
+	}
+	return string(out)
+}
+
+// TestBidiEndToEndLTRUnaffected pins that a Latin-only paragraph is painted in source
+// order: the reorder must be a no-op for the overwhelmingly common case.
+func TestBidiEndToEndLTRUnaffected(t *testing.T) {
+	if got, want := bidiGlyphOrder(t, `<p>thequickbrownfox</p>`), "thequickbrownfox"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
+	}
+}
+
+// TestBidiEndToEndRTLOverridePaintsReversed drives the reorder with an explicit
+// RIGHT-TO-LEFT OVERRIDE over Latin characters, which isolates the reordering machinery
+// from font coverage entirely: bidi ordering is decided by character properties.
+func TestBidiEndToEndRTLOverridePaintsReversed(t *testing.T) {
+	got := bidiGlyphOrder(t, "<p>\u202Eabcdef</p>")
+	if want := "fedcba"; got != want {
+		t.Errorf("painted order under RLO = %q, want %q (the run must paint reversed)", got, want)
+	}
+}
+
+// TestBidiEndToEndHebrewIsland: real Hebrew inside an LTR paragraph paints
+// right-to-left while the Latin around it does not. This works because the bundled
+// Noto Sans Hebrew face is reached through per-rune script fallback — before that, the
+// shaper DROPPED every Hebrew rune (no Latin substitute covers the script), so the
+// text vanished before the reorder could see it.
+func TestBidiEndToEndHebrewIsland(t *testing.T) {
+	// Source order is "abc אבג def"; the Hebrew reads reversed on the page. Spaces
+	// carry no Runes, so they do not appear in the comparison.
+	if got, want := bidiGlyphOrder(t, `<p>abc אבג def</p>`), "abcגבאdef"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
+	}
+}
+
+// TestBidiEndToEndHebrewParagraph: a wholly-Hebrew RTL paragraph reverses.
+func TestBidiEndToEndHebrewParagraph(t *testing.T) {
+	if got, want := bidiGlyphOrder(t, `<p dir="rtl">אבג</p>`), "גבא"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
+	}
+}
+
+// TestBidiEndToEndArabicParagraph: Arabic reorders too. NOTE it still renders as
+// disconnected ISOLATED forms — contextual shaping needs a cluster model (slice 4) —
+// but the ORDER is correct, which is what this asserts.
+func TestBidiEndToEndArabicParagraph(t *testing.T) {
+	if got, want := bidiGlyphOrder(t, `<p dir="rtl">مرحبا</p>`), "ابحرم"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
 	}
 }

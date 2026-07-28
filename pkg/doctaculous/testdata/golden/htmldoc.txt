@@ -60,7 +60,7 @@ A clear:left block drops below the float and spans the full width beneath it.
 
 Flexbox
 
-Single‑line flex containers: proportional growth, space distribution, and cross‑axis centering.
+Proportional growth, space distribution, cross‑axis centering, and multi‑line wrapping with align-content.
 
 flex-grow in 1 : 2 : 3 proportion
 
@@ -69,6 +69,14 @@ justify-content: space-between
 align-items: center
 
 A short and a tall item, both centered in the strip.
+
+flex-wrap: wrap with gap
+
+Items too wide to share one line break onto the next; the gap applies both between items and between the lines.
+
+align-content: space-between on a taller container
+
+With more cross space than the lines need, align-content distributes the surplus between them — here pinning the first and last lines to the container's edges. The default is stretch, which instead grows each line to absorb it.
 
 05 / GRID
 
@@ -286,7 +294,54 @@ An obsolete <font> still works: large red text, and an <ol type="I" start="3"> n
 III. Third in Roman
 IV. Fourth in Roman
 
-15 / LANDSCAPE
+15 / DIRECTION
+
+RTL & Bidirectional Layout
+
+direction: rtl runs the inline axis right‑to‑left. Tables mirror their column order, flex rows reverse their main axis, grids mirror their tracks, and the direction‑relative start/end keywords resolve against it.
+
+The table below sets dir="rtl". Column one is the right‑most, and the border‑collapse grid lines mirror with it:
+
+First           Second       Third        
+Rightmost cell  Middle cell  Leftmost cell
+
+A flex row under dir="rtl" packs from the right. The items are authored one‑two‑three in source order, so item one takes the right‑most slot:
+
+One
+
+Two
+
+Three
+
+A grid mirrors its tracks the same way — the 1fr 2fr ratio is preserved, but the single‑width track is now on the right:
+
+1fr — right track
+
+2fr — left track
+
+Finally, text-align takes the logical keywords. Both paragraphs below use text-align: end; only their direction differs, so end resolves to opposite edges:
+
+LTR — end resolves to the right edge
+
+RTL — end resolves to the left edge
+
+15 / DIRECTION
+
+Real script
+
+Everything above mirrors boxes. Text inside a line is reordered separately, per UAX #9: shaping and line‑breaking run in logical order, and each line is reordered to visual order once the break is chosen. The Hebrew below is authored left‑to‑right in the source and reads right‑to‑left on the page:
+
+שלום עולם
+
+A right‑to‑left phrase inside an otherwise left‑to‑right paragraph reorders in place, and the Latin around it does not move — the bracket pairs mirror too (rule L4):
+
+The greeting (שלום) sits inline.
+
+Arabic additionally needs contextual shaping: a letter takes a different form depending on whether it joins to its neighbours, and some pairs fuse into one glyph. These are shaped through the font’s OpenType tables, so the letters connect rather than standing as isolated forms:
+
+مرحبا بالعالم
+
+16 / LANDSCAPE
 
 Landscape Reflow
 

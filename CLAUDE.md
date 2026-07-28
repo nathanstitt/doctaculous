@@ -133,13 +133,21 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
 **Open fidelity follow-ups** (the engine renders these paths; these are the known approximations —
 each degrades gracefully and is documented in the relevant spec):
 
-- **RTL / `direction` / bidi** — the engine has no bidi support; tables, flex, and grid lay out
-  LTR-only (parsed but not acted on, logged). This is the single largest cross-cutting gap.
-  (PDF *extraction* of RTL text is fixed — see backlog A1.5 — and is independent of the layout work.)
-- **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
-  `nowrap` with overflow); column `flex-basis: auto`/`content` uses a max-content-width proxy.
+- **RTL / `direction` / bidi** — **DONE** (backlog A1, five slices): cascade plumbing
+  (`text-align: start|end`, `unicode-bidi`, the `dir` attribute); box-level mirroring for tables,
+  flex, and grid, retiring all three "laying out LTR" logs; inline bidi reordering (UAX#9 L2 per line
+  + L4 bracket mirroring, so Hebrew reads right-to-left); Arabic contextual shaping through harfbuzz,
+  so letters connect; and visual→logical PDF extraction, so RTL text extracts in reading order. Noto
+  Sans Hebrew + Noto Naskh Arabic (OFL) ship bundled, resolved by per-rune script fallback.
+  Remaining approximations: GPOS vertical offsets are not applied (marks sit on the baseline),
+  `font-feature-settings` is not plumbed through, nested bidi embeddings deeper than one level
+  collapse, and a digit sequence embedded in RTL text reverses with its word on extraction.
+- **Multi-line flexbox** — DONE (backlog H1): `flex-wrap`, `align-content`, the cross gap, and
+  `flex-flow` all ship; wrapped rows paginate between lines. Remaining flex approximation: a single
+  line taller than the page still moves whole rather than splitting its items.
 - **Grid** — named-line placement (`[name]` tokens parsed-and-ignored → auto-placement), `subgrid`
-  (→ `none`), `auto-fit` empty-track collapse approximate, ROW-track content-height width-proxy.
+  (→ `none`), `auto-fit` empty-track collapse approximate. (The ROW-track "width-proxy" entry was
+  stale: row tracks already size from laid-out item heights — see backlog I4.)
 - **Absolute/replaced sizing edge cases** — precise static-position solve for an all-`auto`-offset
   abs box (C1), `bottom`-only auto-height abs box (C5, needs vertical shrink-to-fit), percentage
   `top`/`bottom`/`height` against an auto-height CB (C4/D3), `position:relative` on a text-only

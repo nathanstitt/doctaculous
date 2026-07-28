@@ -71,6 +71,35 @@ func Place(align Align, originX, availWidth, widthPt float64, spaceCount int, la
 // those in AtomAscentPt/AtomDescentPt lets the caller drop the baseline below a tall
 // atom (e.g. an image taller than the text) without scaling the atom's height by the
 // line-height leading multiplier (which applies to the font metrics only).
+// MakeVisualLine is MakeLine with bidirectional reordering applied: the glyphs are
+// rearranged from logical into visual order (UAX#9 L2) against the paragraph direction
+// before the line is built.
+//
+// Callers that emit glyphs left-to-right at increasing x — every engine emitter — must
+// use this rather than MakeLine, because a line's glyph slice is walked in the order it
+// is painted. For an LTR paragraph of Latin-only text Reorder is a no-op returning the
+// same slice, so this is byte-identical to MakeLine there.
+//
+// The reorder happens HERE, at line construction, rather than in the breaker: rule L2
+// reorders within a line, and which glyphs share a line is only known once the break
+// has been chosen. Shaping and breaking both stay in logical order.
+// The width metrics are computed from the LOGICAL order and then transplanted onto
+// the reordered line. That matters because "trailing space" is a logical property —
+// the space that ends the text — and VisibleWidth/CountSpaces find it by scanning from
+// the end of the slice. In a right-to-left line that space reorders to the visual
+// START, so measuring the visual slice would count it toward the line's ink width and
+// justify against the wrong gap count.
+func MakeVisualLine(glyphs []Glyph, dir ParagraphDirection) Line {
+	l := MakeLine(glyphs)
+	if reordered, changed := reorder(glyphs, dir); changed {
+		l.Glyphs = reordered
+	}
+	return l
+}
+
+// MakeLine builds a Line from glyphs in the order given. See MakeVisualLine for the
+// bidi-aware constructor; this one is the right choice when the glyphs are already in
+// the intended order or when only the metrics are wanted (e.g. measuring a width).
 func MakeLine(glyphs []Glyph) Line {
 	l := Line{Glyphs: glyphs, WidthPt: VisibleWidth(glyphs)}
 	for i := range glyphs {
