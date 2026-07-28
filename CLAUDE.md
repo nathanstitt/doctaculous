@@ -136,15 +136,18 @@ each degrades gracefully and is documented in the relevant spec):
 - **RTL / `direction` / bidi** — in progress, sequenced FIRST as five slices (see backlog A1).
   Landed: slice 1 (cascade + plumbing), slice 2 (box-level mirroring — tables, flex, and grid honor
   `direction`, retiring all three "laying out LTR" logs), and slice 3 (inline bidi reordering — UAX#9
-  L2 per line + L4 bracket mirroring, so Hebrew reads right-to-left). Still open: **Arabic shaping**
-  (`Glyph.Runes` is one-rune-per-glyph, so there is no cluster model for contextual forms — Arabic
-  reorders correctly but renders as disconnected isolated forms; needs harfbuzz) and visual→logical
-  PDF extraction. NOTE: no bundled font covers Hebrew/Arabic, and `Shape` drops unmappable runes, so
-  RTL script cannot be exercised end-to-end without a bundled RTL face.
+  L2 per line + L4 bracket mirroring, so Hebrew reads right-to-left), and slice 4 (Arabic contextual
+  shaping through harfbuzz, so letters connect). Noto Sans Hebrew + Noto Naskh Arabic (OFL) ship
+  bundled, resolved by per-rune script fallback. Still open: **visual→logical PDF extraction** (RTL
+  PDFs currently extract in visual order, i.e. reversed). Known shaping limits: GPOS vertical
+  offsets are not applied (marks sit on the baseline), and `font-feature-settings` is not plumbed
+  through.
 - **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
-  `nowrap` with overflow); column `flex-basis: auto`/`content` uses a max-content-width proxy.
+  `nowrap` with overflow). (Column `flex-basis: auto`/`content` no longer uses a width proxy — H4 is
+  fixed; it measures the item's content height.)
 - **Grid** — named-line placement (`[name]` tokens parsed-and-ignored → auto-placement), `subgrid`
-  (→ `none`), `auto-fit` empty-track collapse approximate, ROW-track content-height width-proxy.
+  (→ `none`), `auto-fit` empty-track collapse approximate. (The ROW-track "width-proxy" entry was
+  stale: row tracks already size from laid-out item heights — see backlog I4.)
 - **Absolute/replaced sizing edge cases** — precise static-position solve for an all-`auto`-offset
   abs box (C1), `bottom`-only auto-height abs box (C5, needs vertical shrink-to-fit), percentage
   `top`/`bottom`/`height` against an auto-height CB (C4/D3), `position:relative` on a text-only

@@ -97,6 +97,49 @@ func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, 
 	return face, ok
 }
 
+// ResolveScriptFallback returns a bundled face covering r, for a rune the run's own
+// family cannot map, or ok=false when none does.
+//
+// Each bundled face covers one script — the Latin substitutes have no Hebrew or
+// Arabic, and the two Noto faces have no Latin — so a paragraph mixing scripts needs
+// a covering face chosen per RUNE. Results are cached under a synthetic family key so
+// the program is parsed once per (script, style), not once per glyph.
+//
+// It deliberately consults only the BUNDLED faces: a fallback triggers when the
+// author's chosen family lacks the character, and quietly substituting a downloaded
+// @font-face or a system font there would be a surprising second guess at intent.
+func (c *FaceCache) ResolveScriptFallback(r rune, style pkgfont.Style) (*pkgfont.Face, bool) {
+	script, ok := fallbackScriptOf(r)
+	if !ok {
+		return nil, false
+	}
+	key := faceKey{family: "\x00fallback:" + script, style: style}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, found := c.faces[key]; found {
+		return e.face, e.ok
+	}
+	face, ok := pkgfont.LoadScriptFallback(r, style)
+	c.faces[key] = cacheEntry{face: face, ok: ok}
+	return face, ok
+}
+
+// fallbackScriptOf names the script r belongs to for fallback-cache purposes, or
+// ok=false if no bundled face covers it. The names only have to be stable and
+// distinct — they key the cache, nothing else reads them.
+func fallbackScriptOf(r rune) (string, bool) {
+	switch {
+	case r >= 0x0590 && r <= 0x05FF, r >= 0xFB1D && r <= 0xFB4F:
+		return "hebrew", true
+	case r >= 0x0600 && r <= 0x06FF, r >= 0x0750 && r <= 0x077F,
+		r >= 0x08A0 && r <= 0x08FF, r >= 0xFB50 && r <= 0xFDFF,
+		r >= 0xFE70 && r <= 0xFEFF:
+		return "arabic", true
+	}
+	return "", false
+}
+
 // resolveList tries each comma-separated candidate in the font-family list in
 // order, returning the first face that resolves. For each candidate the resolution
 // chain is: @font-face sources (so a downloaded face beats a bundled look-alike of

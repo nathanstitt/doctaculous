@@ -133,6 +133,23 @@ bullet's design doc is in `docs/superpowers/specs/`:
   `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
   reordered — RTL script renders in logical glyph order.**
   `2026-07-27-rtl-box-layout-design.md`.
+- **Arabic contextual shaping** (`pkg/layout/inline/complex.go`) — RTL slice 4 of 5: a run of
+  joining script (Arabic/Syriac/Thaana; Hebrew is non-joining and stays on the cheap per-rune
+  path) is shaped as a whole segment through harfbuzz, resolving the font's GSUB tables so
+  letters take their initial/medial/final/isolated forms and ligatures fuse. `Face.OpenTypeFont`
+  exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping is forced
+  LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder — harfbuzz would
+  otherwise emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly
+  once, so `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
+  `2026-07-28-rtl-arabic-shaping-design.md`.
+- **Bundled RTL faces + per-rune script fallback** (`pkg/font/standard`, `pkg/layout/font/cache.go`,
+  `pkg/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
+  Font Name) ship alongside the Latin substitutes. Because each bundled face covers exactly ONE
+  script — the Latin faces have no Hebrew/Arabic and the Noto faces have no Latin — the covering
+  face is resolved per **rune**, not per run: a Hebrew or Arabic phrase inside an otherwise-Latin
+  paragraph now shapes instead of being silently dropped. Results cache per (script, style); the
+  fallback consults bundled faces only. A fallback glyph carries the face it resolved from, since a
+  GID is only meaningful against its own face.
 - **Inline bidi reordering** (`pkg/layout/inline/bidi.go`) — RTL slice 3 of 5: shaping and breaking stay
   in LOGICAL order; `MakeVisualLine` applies UAX#9 rule L2 per line after the break is chosen, plus rule
   L4 bracket mirroring (`Glyph.Runes` keeps the ORIGINAL character so `/ToUnicode` recovers the authored

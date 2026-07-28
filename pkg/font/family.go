@@ -2,6 +2,7 @@ package font
 
 import (
 	"github.com/benoitkugler/textlayout/fonts"
+	"github.com/benoitkugler/textlayout/fonts/truetype"
 
 	"github.com/nathanstitt/doctaculous/pkg/font/standard"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -94,6 +95,31 @@ func LoadStandard(family string, style Style) (*Face, bool) {
 	}, true
 }
 
+// LoadScriptFallback returns a Face covering r for a rune the requested family
+// cannot map, or ok=false when no bundled face covers it.
+//
+// It exists because each bundled face covers one script: the Latin substitutes have
+// no Hebrew or Arabic, and the two Noto faces have no Latin. A run carries a single
+// family but its text can mix scripts, so the covering face has to be chosen per
+// rune. Callers should cache by (rune-script, style) rather than calling per glyph —
+// parsing the program is the expensive step.
+func LoadScriptFallback(r rune, style Style) (*Face, bool) {
+	sub, ok := standard.ScriptFallback(r, style.Bold, style.Italic)
+	if !ok {
+		return nil, false
+	}
+	prog, err := parseProgram(sub.Data, substituteKind(sub.Kind))
+	if err != nil {
+		return nil, false
+	}
+	return &Face{
+		prog:     prog,
+		names:    prog.nameToGID(),
+		progData: sub.Data,
+		progKind: programKindFromStandard(sub.Kind),
+	}, true
+}
+
 // programKindFromStandard maps a bundled substitute's Kind to a ProgramKind so the
 // PDF writer picks the right /FontFile flavor for the embedded substitute.
 func programKindFromStandard(k standard.Kind) ProgramKind {
@@ -147,6 +173,24 @@ func (f *Face) gidForRune(r rune) (fonts.GID, bool) {
 // program (the PDF writer then falls back to drawing outlines).
 func (f *Face) ProgramBytes() (data []byte, kind ProgramKind) {
 	return f.progData, f.progKind
+}
+
+// OpenTypeFont returns the parsed SFNT this face was built from, for callers that
+// need its OpenType layout tables (GSUB/GPOS) — complex-script shaping above all.
+// ok is false for a face whose program is not SFNT-based (a classic Type1 face such
+// as the bundled TeX Gyre substitutes), which carries no layout tables at all.
+//
+// The returned value satisfies harfbuzz.FaceOpentype directly, so a shaper can build
+// a harfbuzz font from it with no adapter. It is deliberately typed as the upstream
+// *truetype.Font rather than an interface of our own: this package already depends on
+// textlayout for parsing, so a wrapper would add a layer with no behavior. The font
+// is read-only after parsing and safe for concurrent use.
+func (f *Face) OpenTypeFont() (*truetype.Font, bool) {
+	tt, ok := f.prog.gp.(ttProgram)
+	if !ok {
+		return nil, false
+	}
+	return tt.f, true
 }
 
 // UnitsPerEm returns the face's units-per-em (always > 0).
