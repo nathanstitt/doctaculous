@@ -134,10 +134,11 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
 each degrades gracefully and is documented in the relevant spec):
 
 - **RTL / `direction` / bidi** — in progress, sequenced FIRST as five slices (see backlog A1).
-  Slice 1 (cascade + plumbing: `text-align: start|end`, `unicode-bidi`, the `dir` attribute,
-  `effectiveDirection`) has landed. Still open: box-level mirroring (tables, flex, and grid lay out
-  LTR-only and log it), inline bidi reordering (RTL text renders in logical glyph order), Arabic
-  shaping, and visual→logical PDF extraction. Still the largest cross-cutting gap.
+  Landed: slice 1 (cascade + plumbing: `text-align: start|end`, `unicode-bidi`, the `dir` attribute,
+  `effectiveDirection`) and slice 2 (box-level mirroring — tables, flex, and grid now honor
+  `direction`, retiring all three "laying out LTR" logs). Still open: **inline bidi reordering**
+  (RTL text still renders in logical glyph order — the largest remaining piece), Arabic shaping,
+  and visual→logical PDF extraction.
 - **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
   `nowrap` with overflow); column `flex-basis: auto`/`content` uses a max-content-width proxy.
 - **Grid** — named-line placement (`[name]` tokens parsed-and-ignored → auto-placement), `subgrid`

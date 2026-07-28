@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<!-- TEST: text-align is direction-relative. Under direction:rtl the `end` edge is
+     the LEFT edge, so `text-align: end` must lay out like physical `left`. The
+     second block checks the converse: `start` under rtl is the right edge. -->
+<html><head><style>
+  body { margin: 0; font-family: serif; font-size: 16px; }
+  div { width: 300px; direction: rtl; }
+</style></head><body>
+  <div style="text-align: end;">Ridge</div>
+  <div style="text-align: start;">Ridge</div>
+</body></html>

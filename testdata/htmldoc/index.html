@@ -470,9 +470,68 @@ newline is kept.</p>
 
   </section>
 
-  <!-- ===================== 15 · LANDSCAPE (named page) ===================== -->
+  <!-- ===================== 15 · RTL / BIDIRECTIONAL ===================== -->
+  <!-- NOTE: this section deliberately uses LATIN text. No bundled font (TeX Gyre
+       Heros/Termes, Inconsolata) carries Hebrew or Arabic coverage, so real
+       right-to-left script would rasterize as .notdef boxes and lock a meaningless
+       golden. What this section demonstrates is BOX-level mirroring, which is what
+       has shipped: reordering of glyphs WITHIN a line is a later slice, so a
+       right-to-left script would still render in logical order here. -->
+  <section class="section break">
+    <span class="kicker">15 / DIRECTION</span>
+    <h2>RTL &amp; Bidirectional Layout</h2>
+    <p class="lede"><code>direction: rtl</code> runs the inline axis
+      right&#8209;to&#8209;left. Tables mirror their column order, flex rows reverse
+      their main axis, grids mirror their tracks, and the
+      direction&#8209;relative <code>start</code>/<code>end</code> keywords resolve
+      against it.</p>
+
+    <p>The table below sets <code>dir="rtl"</code>. Column one is the
+      right&#8209;most, and the border&#8209;collapse grid lines mirror with it:</p>
+
+    <table dir="rtl" style="border-collapse: collapse; width: 100%;">
+      <tr style="background: #3a4a5a; color: #fff;">
+        <th style="border: 3px solid #22303c; padding: 6px;">First</th>
+        <th style="border: 2px solid #22303c; padding: 6px;">Second</th>
+        <th style="border: 1px solid #22303c; padding: 6px;">Third</th>
+      </tr>
+      <tr>
+        <td style="border: 3px solid #8a8272; padding: 6px;">Rightmost cell</td>
+        <td style="border: 2px solid #8a8272; padding: 6px;">Middle cell</td>
+        <td style="border: 1px solid #8a8272; padding: 6px;">Leftmost cell</td>
+      </tr>
+    </table>
+
+    <p>A flex row under <code>dir="rtl"</code> packs from the right. The items are
+      authored one&#8209;two&#8209;three in source order, so item&nbsp;one takes the
+      right&#8209;most slot:</p>
+    <div dir="rtl" style="display: flex; gap: 8px; margin: 10px 0;">
+      <div style="background: #c8401a; color: #fff; padding: 8px 0; width: 120px; text-align: center;">One</div>
+      <div style="background: #d9822b; color: #fff; padding: 8px 0; width: 120px; text-align: center;">Two</div>
+      <div style="background: #3a7d5a; color: #fff; padding: 8px 0; width: 120px; text-align: center;">Three</div>
+    </div>
+
+    <p>A grid mirrors its tracks the same way &mdash; the
+      <code>1fr&nbsp;2fr</code> ratio is preserved, but the single&#8209;width track
+      is now on the right:</p>
+    <div dir="rtl" style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin: 10px 0;">
+      <div style="background: #efe9d8; border: 1px solid #8a8272; padding: 8px;">1fr (right)</div>
+      <div style="background: #efe9d8; border: 1px solid #8a8272; padding: 8px;">2fr (left)</div>
+    </div>
+
+    <p>Finally, <code>text-align</code> takes the logical keywords. Both paragraphs
+      below use <code>text-align: end</code>; only their <code>direction</code>
+      differs, so <em>end</em> resolves to opposite edges:</p>
+    <p style="direction: ltr; text-align: end; background: #f4f1e8; padding: 6px;">
+      LTR: <code>end</code> is the right edge.</p>
+    <p style="direction: rtl; text-align: end; background: #f4f1e8; padding: 6px;">
+      RTL: <code>end</code> is the left edge.</p>
+
+  </section>
+
+  <!-- ===================== 16 · LANDSCAPE (named page) ===================== -->
   <section class="section break land">
-    <span class="kicker">15 / LANDSCAPE</span>
+    <span class="kicker">16 / LANDSCAPE</span>
     <h2>Landscape Reflow</h2>
     <p class="lede">This section selects a wider <code>@page landscape</code> via
       <code>page: landscape</code>; its content reflows to the wider measure of a

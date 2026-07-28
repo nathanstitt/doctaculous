@@ -1168,3 +1168,69 @@ func TestRTLCollapsedBordersMirror(t *testing.T) {
 		}
 	}
 }
+
+// TestRTLTablePaginates: an RTL table that fragments across a page break must keep
+// its mirrored column order on every fragment. Mirroring happens once per layout
+// pass while pagination splits the resulting fragments, so this checks the two
+// compose (the mirror is not re-applied per fragment, which would un-mirror the tail).
+func TestRTLTablePaginates(t *testing.T) {
+	rows := make([]*cssbox.Box, 0, 12)
+	for i := 0; i < 12; i++ {
+		rows = append(rows, &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow,
+			Formatting: cssbox.TableFC, Children: []*cssbox.Box{fixedCell(40, 30), fixedCell(80, 30)}})
+	}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: rows}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "fixed", Direction: "rtl", Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+
+	frag := New(nil, nil, nil).layoutTree(context.Background(), body, 300)
+	if frag == nil {
+		t.Fatal("nil fragment")
+	}
+	// Collect every cell fragment, grouped by row (Y).
+	byRow := map[float64][]*Fragment{}
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.H == 30 && f.W > 0 && f.W < 300 {
+			byRow[f.Y] = append(byRow[f.Y], f)
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if len(byRow) < 2 {
+		t.Fatalf("want several rows of cells, got %d", len(byRow))
+	}
+	// In EVERY row, the narrow (40px) cell is the first in document order and so must
+	// sit to the RIGHT of the wide (80px) one.
+	for y, cells := range byRow {
+		if len(cells) != 2 {
+			t.Errorf("row y=%v: want 2 cells, got %d", y, len(cells))
+			continue
+		}
+		var narrow, wide *Fragment
+		for _, c := range cells {
+			if c.W == 40 {
+				narrow = c
+			} else {
+				wide = c
+			}
+		}
+		if narrow == nil || wide == nil {
+			t.Errorf("row y=%v: expected a 40px and an 80px cell, got %v/%v", y, cells[0].W, cells[1].W)
+			continue
+		}
+		if narrow.X <= wide.X {
+			t.Errorf("row y=%v: RTL should put the first (40px) cell right of the second; got narrow x%v, wide x%v",
+				y, narrow.X, wide.X)
+		}
+	}
+}

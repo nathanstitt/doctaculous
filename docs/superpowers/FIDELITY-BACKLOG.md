@@ -26,10 +26,17 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
     **The anonymous-box trap** — `BoxAnonBlock` has a zero-value Style so `Direction == ""`, not `"ltr"` — is
     why `effectiveDirection` exists; never read `b.Style.Direction` directly. Mutation-verified regression test.
     `2026-07-27-rtl-cascade-design.md`.
-  - ☐ **A1.2 box-level RTL** — table column mirroring (plus the collapsed-border index→side swap in
-    `buildCollapsedBorders`, which mixes grid-index logic with geometry and would otherwise break silently),
-    flex `reverseMain` + column cross-axis, grid inline axis + logical `start`/`end`. Retires all three
-    "laying out LTR" logs. Showcase entry lands here (Latin text — no bundled font has Hebrew/Arabic coverage).
+  - ☑ **A1.2 box-level RTL** — *DONE.* All three "laying out LTR" logs retired. Tables mirror their solved
+    column x-offsets; `buildCollapsedBorders` gained the matching index→physical-side flip (it mixes
+    grid-index logic with fragment geometry, so a mirrored grid otherwise resolves the table's left border
+    onto the rightmost cell and picks the wrong neighbor at every interior line — silently). Flex resolves
+    direction in `axisFor`: a row XORs `reverseMain` (so RTL composes with `row-reverse` — both flips
+    cancel), and a column flips the CROSS axis, the case the old `&& !ax.vertical` guard skipped entirely.
+    Grid needs TWO independent flips (track positions AND logical `justify-items`/`justify-self`);
+    mutation-verified independently — removing either fails a different test. Also fixed `crossOffset`
+    ignoring the Box Alignment `start`/`end` spellings. Showcase §15 (Latin text: no bundled font has
+    Hebrew/Arabic coverage) + 4 WPT reftests, `rtl-flex-row` being the strongest oracle (rtl row ≡
+    row-reverse LTR through independent inputs). `2026-07-27-rtl-box-layout-design.md`.
   - ☐ **A1.3 inline bidi reordering** — *the real "Large".* `golang.org/x/text/unicode/bidi` (already in the
     module graph as indirect; full UAX#9 incl. bracket pairs) for level resolution, logical-vs-visual split in
     `Line.Glyphs`, L2 per-line reorder, mirroring. Gets Hebrew fully correct.
@@ -179,7 +186,8 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 ## H. HTML/CSS — flexbox
 
 - ☐ **H1. multi-line flex** (`flex-wrap: wrap`/`wrap-reverse` + `align-content`) — the big one. *Large.*
-- ☐ **H2. RTL/`direction`** on a row — *covered by A1.*
+- ☑ **H2. RTL/`direction`** on a row — *DONE via A1.2.* Plus the column cross-axis, which was never
+  covered by the old row-only log.
 - ☑ **H3. line cross size clamped to a definite container cross size** — *DONE.* For a single-line flex
   container the line cross size is now the container's DEFINITE inner cross size when set (`flexCrossSize`),
   so `align-items:center`/`flex-end` align within the container's extent (e.g. a fixed row height), not the
@@ -202,7 +210,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 - ☐ **I2. flow-axis-locked auto-placement** (definite flow-axis line + auto cross axis honors span, ignores
   start line). *Deferred (Small)* — a documented, non-overlapping simplification (`grid_place.go` scans the
   locked line from 0 rather than continuing the sparse cursor); niche, intentional.
-- ☐ **I3. RTL/`direction`** — *covered by A1.*
+- ☑ **I3. RTL/`direction`** — *DONE via A1.2* (track mirroring + logical `justify-items`/`justify-self`).
 - ☐ **I4. row-track content-height width-proxy** (`measureMaxContent` returns WIDTH for a ROW track). *Medium*
   (shared root cause with H4, F-rowspan — vertical content sizing).
 - ☑ **I5. conservative baseline-group extra** — *DONE.* `alignBaselineGroup` now returns the EXACT extra cross

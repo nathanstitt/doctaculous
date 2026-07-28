@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<!-- REFERENCE for rtl-grid.html. Item 1 occupies the 60px track at the RIGHT
+     ([120,180)) and item 2 the 120px track at the left ([0,120)). Authored as
+     absolutely positioned boxes at those rects, independent of the grid code. -->
+<html><head><style>
+  body { margin: 0; position: relative; height: 40px; }
+  .box { position: absolute; top: 0; height: 40px; }
+</style></head><body>
+  <div class="box" style="left: 120px; width: 60px; background: #c8401a;"></div>
+  <div class="box" style="left: 0; width: 120px; background: #3a7d5a;"></div>
+</body></html>

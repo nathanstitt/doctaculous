@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<!-- REFERENCE for rtl-flex-row.html. row-reverse under LTR packs from the right in
+     exactly the same order, so the two must rasterize identically. This is a
+     self-consistency oracle between two independent code paths: the direction flip
+     and the flex-direction flip both resolve through reverseMain, and a sign error
+     in either one breaks the match. -->
+<html><head><style>
+  body { margin: 0; }
+  .row { display: flex; flex-direction: row-reverse; width: 200px; }
+  .a { width: 30px; height: 40px; background: #c8401a; }
+  .b { width: 50px; height: 40px; background: #d9822b; }
+  .c { width: 20px; height: 40px; background: #3a7d5a; }
+</style></head><body>
+  <div class="row"><div class="a"></div><div class="b"></div><div class="c"></div></div>
+</body></html>
