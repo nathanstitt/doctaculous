@@ -76,6 +76,7 @@ var wptReftests = []struct {
 	{"grid-fr", 300, "an fr grid (1fr 2fr) == abs boxes at the distributed widths (100/200)", nil},
 	{"grid-span", 300, "a grid-column span-2 item == an abs box of the spanned width", nil},
 	{"grid-areas", 200, "a grid-template-areas layout == abs boxes at the named-area rects", nil},
+	{"text-align-start", 320, "text-align:start (and the `start` initial value) == the physical `left` in an LTR block", nil},
 }
 
 // webfontReftestLoader serves the committed Pacifico WOFF2 as web.woff2 for the

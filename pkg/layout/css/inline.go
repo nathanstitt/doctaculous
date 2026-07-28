@@ -44,6 +44,11 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	// 2. Shape once (width-independent).
 	glyphs := inline.Shape(e.faces, runs, e.logf)
 	align := effectiveTextAlign(b)
+	// Used direction for this IFC: resolves start/end alignment (inside
+	// effectiveTextAlign) and the edge the first-line indent insets from. NOTE: this
+	// does NOT reorder glyphs within a line — inline bidi reordering is a separate
+	// slice, so right-to-left script still renders in logical order.
+	dir := effectiveDirection(b)
 	// The block's white-space controls whether lines wrap at the available width
 	// (normal/pre-wrap/pre-line wrap; nowrap/pre do not). A non-wrapping IFC takes the
 	// whole run (to the next hard break) per line, overflowing the width.
@@ -115,8 +120,15 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 		spaceCount := inline.CountSpaces(line.Glyphs)
 		isLast := len(rest) == 0
 		// availLeft is the absolute page-space left for this line; avail is its width.
-		// The first-line indent insets the start and narrows the placement width.
-		p := inline.Place(align, availLeft+lineIndent, avail-lineIndent, line.WidthPt, spaceCount, isLast)
+		// The first-line indent insets the START edge and narrows the placement width.
+		// Under LTR the start edge is the left, so the origin shifts right by the
+		// indent; under RTL the start edge is the right, so the width shrinks by the
+		// same amount but the left origin does not move.
+		startX := availLeft + lineIndent
+		if dir == "rtl" {
+			startX = availLeft
+		}
+		p := inline.Place(align, startX, avail-lineIndent, line.WidthPt, spaceCount, isLast)
 
 		var emitted []GlyphFragment
 		x := p.StartX
@@ -433,11 +445,15 @@ func attrPx(s string) float64 {
 // TextAlign is "", so the alignment is read from the inherited Style of its first
 // descendant text/inline box that carries a non-empty TextAlign (the cascade copies
 // text-align onto every inline descendant), falling back to left.
+//
+// The direction-relative keywords ("start"/"end", and the initial value) resolve
+// against effectiveDirection(b), which applies the same anonymous-box recovery.
 func effectiveTextAlign(b *cssbox.Box) inline.Align {
+	dir := effectiveDirection(b)
 	if b.Kind == cssbox.BoxAnonBlock {
-		return mapTextAlign(firstInlineTextAlign(b))
+		return mapTextAlign(firstInlineTextAlign(b), dir)
 	}
-	return mapTextAlign(b.Style.TextAlign)
+	return mapTextAlign(b.Style.TextAlign, dir)
 }
 
 // textIndentPt resolves a block's text-indent to points. px/pt are absolute; em
@@ -493,8 +509,11 @@ func firstInlineLineHeight(b *cssbox.Box) (lh gcss.Length, fontSizePt float64, o
 }
 
 // mapTextAlign maps a CSS text-align keyword to the inline core's neutral Align,
-// defaulting (empty / unknown / "left") to AlignLeft.
-func mapTextAlign(s string) inline.Align {
+// resolving the direction-relative keywords ("start"/"end", and the initial value)
+// against dir. The physical keywords never flip. An empty or unknown value, and an
+// empty dir, default to AlignLeft — matching the pre-RTL behavior exactly, so LTR
+// content is unaffected.
+func mapTextAlign(s, dir string) inline.Align {
 	switch s {
 	case "right":
 		return inline.AlignRight
@@ -502,9 +521,54 @@ func mapTextAlign(s string) inline.Align {
 		return inline.AlignCenter
 	case "justify":
 		return inline.AlignJustify
+	case "start":
+		if dir == "rtl" {
+			return inline.AlignRight
+		}
+		return inline.AlignLeft
+	case "end":
+		if dir == "rtl" {
+			return inline.AlignLeft
+		}
+		return inline.AlignRight
 	default:
 		return inline.AlignLeft
 	}
+}
+
+// effectiveDirection resolves the used `direction` for b. It mirrors
+// effectiveTextAlign: an anonymous box carries a zero-value Style whose Direction is
+// "" (NOT "ltr"), so reading b.Style.Direction directly would silently lay an
+// anonymous block out LTR inside an RTL subtree. The value is recovered from the
+// first inline descendant that carries one, since the cascade copies the inherited
+// direction onto every inline descendant.
+//
+// Always use this instead of b.Style.Direction — an empty value resolves to "ltr" so
+// callers never have to spell the zero case themselves.
+func effectiveDirection(b *cssbox.Box) string {
+	d := b.Style.Direction
+	if d == "" {
+		d = firstInlineDirection(b)
+	}
+	if d == "" {
+		return "ltr"
+	}
+	return d
+}
+
+// firstInlineDirection returns the first non-empty Direction found walking b's
+// inline descendants depth-first, or "" if none carries one. Mirrors
+// firstInlineTextAlign.
+func firstInlineDirection(b *cssbox.Box) string {
+	for _, c := range b.Children {
+		if c.Style.Direction != "" {
+			return c.Style.Direction
+		}
+		if d := firstInlineDirection(c); d != "" {
+			return d
+		}
+	}
+	return ""
 }
 
 // effectiveLineHeight computes a line's height from b's line-height and the line's

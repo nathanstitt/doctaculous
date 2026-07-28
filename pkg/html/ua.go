@@ -32,6 +32,13 @@ colgroup { display: table-column-group; }
 caption { display: table-caption; }
 head, title, meta, link, style, script { display: none; }
 
+/* Bidi isolation (HTML §15.3.3). Both are display:inline by the CSS initial value,
+   so only the isolation behavior is declared here; the dir attribute itself
+   arrives as a presentational hint (this engine has no attribute selectors). The
+   values are stored and take effect when inline bidi reordering lands. */
+bdi { unicode-bidi: isolate; }
+bdo { unicode-bidi: isolate-override; }
+
 /* Heading margins follow the W3C CSS2.1 sample UA sheet (~0.67em of the
    heading's font-size), so they decrease with font-size rather than inverting. */
 h1 { font-size: 32px; font-weight: bold; margin-top: 21px; margin-bottom: 21px; }

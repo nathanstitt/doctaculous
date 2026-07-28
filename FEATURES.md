@@ -112,8 +112,18 @@ bullet's design doc is in `docs/superpowers/specs/`:
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing. `2026-06-30-html-link-pseudo-classes-design.md`.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
-  `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`… mapped to
+  `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… mapped to
   CSS below author rules (HN renders with its bgcolor). `2026-06-30-html-presentational-attributes-design.md`.
+- **Direction-relative alignment + bidi plumbing** (`pkg/css/cascade.go`, `pkg/css/hints.go`,
+  `pkg/layout/css/inline.go`) — RTL slice 1 of 5: `text-align: start|end|match-parent` (the initial
+  value is now `start`, byte-identical for LTR since every consumer defaults to left);
+  `unicode-bidi` parsed + stored (not inherited); the global `dir` attribute as a hint (the
+  selector engine has no attribute selectors, so the spec's `[dir=rtl]` UA rules are not
+  expressible — hint rank is equivalent); `bdi`/`bdo` isolation; `effectiveDirection` (an anonymous
+  box's Style is zero-valued, so `Direction` is `""` not `"ltr"` — never read the field directly);
+  RTL text-indent edge. `dir=auto` degrades + logs. Box mirroring and inline reordering are later
+  slices — **RTL text still renders in logical glyph order.**
+  `2026-07-27-rtl-cascade-design.md`.
 - **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` as static native widgets (classic chrome, non-interactive).
   `2026-06-29-html-forms-design.md`.
