@@ -11,11 +11,11 @@ require (
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/image v0.43.0
 	golang.org/x/net v0.43.0
+	golang.org/x/text v0.38.0
 )
 
 require (
 	github.com/adrg/strutil v0.2.2 // indirect
 	github.com/adrg/xdg v0.3.0 // indirect
 	github.com/benoitkugler/pstokenizer v1.0.1 // indirect
-	golang.org/x/text v0.38.0 // indirect
 )
