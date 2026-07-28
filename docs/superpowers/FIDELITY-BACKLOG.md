@@ -37,9 +37,20 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
     ignoring the Box Alignment `start`/`end` spellings. Showcase §15 (Latin text: no bundled font has
     Hebrew/Arabic coverage) + 4 WPT reftests, `rtl-flex-row` being the strongest oracle (rtl row ≡
     row-reverse LTR through independent inputs). `2026-07-27-rtl-box-layout-design.md`.
-  - ☐ **A1.3 inline bidi reordering** — *the real "Large".* `golang.org/x/text/unicode/bidi` (already in the
-    module graph as indirect; full UAX#9 incl. bracket pairs) for level resolution, logical-vs-visual split in
-    `Line.Glyphs`, L2 per-line reorder, mirroring. Gets Hebrew fully correct.
+  - ☑ **A1.3 inline bidi reordering** — *DONE.* Shaping and breaking stay LOGICAL; `MakeVisualLine` applies
+    rule L2 per line AFTER the break is chosen (L2 reorders within a line, and line membership is only known
+    post-break). `x/text` promoted indirect→direct — no new module, and L2 is applied here because x/text's own
+    display-order `Reorder` is unimplemented upstream. Rule L4 bracket mirroring via
+    `unicodedata.LookupMirrorChar`, keeping the ORIGINAL rune in `Glyph.Runes` so `/ToUnicode` recovers the
+    authored text.
+    **The metrics trap:** `WidthPt`/`CountSpaces` exclude the space that ENDS the text and find it by scanning
+    from the slice end — but a reordered RTL line has that space at its VISUAL start, so metrics are computed
+    on the logical slice and transplanted.
+    **Bug found:** `Shape` dropped every rune the face couldn't map, including the invisible bidi controls
+    (LRM/RLM/ALM, embeddings, overrides, isolates) that draw nothing but DETERMINE ordering — silently
+    discarding the author's directional intent. They now survive as zero-width, face-less glyphs.
+    Nested embeddings deeper than one level collapse (x/text exposes runs, not per-rune levels); the common
+    cases are exact. `2026-07-27-rtl-inline-bidi-design.md`.
   - ☐ **A1.4 Arabic shaping** — needs a cluster model (`Glyph.Runes` is hardcoded 1:1 today) + harfbuzz.
   - ☐ **A1.5 PDF extraction visual→logical** — independent; RTL PDFs currently extract in visual order.
 

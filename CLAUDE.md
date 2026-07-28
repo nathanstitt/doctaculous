@@ -134,11 +134,13 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
 each degrades gracefully and is documented in the relevant spec):
 
 - **RTL / `direction` / bidi** — in progress, sequenced FIRST as five slices (see backlog A1).
-  Landed: slice 1 (cascade + plumbing: `text-align: start|end`, `unicode-bidi`, the `dir` attribute,
-  `effectiveDirection`) and slice 2 (box-level mirroring — tables, flex, and grid now honor
-  `direction`, retiring all three "laying out LTR" logs). Still open: **inline bidi reordering**
-  (RTL text still renders in logical glyph order — the largest remaining piece), Arabic shaping,
-  and visual→logical PDF extraction.
+  Landed: slice 1 (cascade + plumbing), slice 2 (box-level mirroring — tables, flex, and grid honor
+  `direction`, retiring all three "laying out LTR" logs), and slice 3 (inline bidi reordering — UAX#9
+  L2 per line + L4 bracket mirroring, so Hebrew reads right-to-left). Still open: **Arabic shaping**
+  (`Glyph.Runes` is one-rune-per-glyph, so there is no cluster model for contextual forms — Arabic
+  reorders correctly but renders as disconnected isolated forms; needs harfbuzz) and visual→logical
+  PDF extraction. NOTE: no bundled font covers Hebrew/Arabic, and `Shape` drops unmappable runes, so
+  RTL script cannot be exercised end-to-end without a bundled RTL face.
 - **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
   `nowrap` with overflow); column `flex-basis: auto`/`content` uses a max-content-width proxy.
 - **Grid** — named-line placement (`[name]` tokens parsed-and-ignored → auto-placement), `subgrid`

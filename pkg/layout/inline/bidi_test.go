@@ -2,6 +2,8 @@ package inline
 
 import (
 	"testing"
+
+	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 )
 
 // synth builds one glyph per rune of s, as the shaper would for a single run. No font
@@ -202,4 +204,87 @@ func sortedRunes(s string) string {
 		}
 	}
 	return string(rs)
+}
+
+// TestMirrorGlyphSwapsBracketShape covers rule L4: a bracket inside a right-to-left
+// run is DRAWN as its mirror image, while the character it stands for is unchanged.
+//
+// It shapes through a real bundled face because mirroring must re-resolve the outline
+// and GID from the font — the synthetic glyphs the other tests use carry no Face, so
+// they exercise ordering but not L4.
+func TestMirrorGlyphSwapsBracketShape(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+	shaped := Shape(faces, []Run{{Text: "()", Family: "serif", SizePt: 16}}, nil)
+	if len(shaped) != 2 {
+		t.Fatalf("shaped %d glyphs for %q, want 2", len(shaped), "()")
+	}
+	open, close := shaped[0], shaped[1]
+	if open.Face == nil || close.Face == nil {
+		t.Skip("bundled face did not resolve; nothing to mirror")
+	}
+	if open.GID == close.GID {
+		t.Fatal("'(' and ')' resolved to the same GID; the fixture cannot detect mirroring")
+	}
+
+	// Mirroring '(' must produce the ')' shape...
+	g := open
+	mirrorGlyph(&g)
+	if g.GID != close.GID {
+		t.Errorf("mirrored '(' has GID %d, want %d (the ')' glyph)", g.GID, close.GID)
+	}
+	// ...while still REPORTING the original character, so a text-emitting backend's
+	// /ToUnicode recovers what the author actually wrote.
+	if len(g.Runes) != 1 || g.Runes[0] != '(' {
+		t.Errorf("mirrored glyph Runes = %q, want %q (the ORIGINAL character)", string(g.Runes), "(")
+	}
+
+	// A non-mirrorable character is untouched.
+	letters := Shape(faces, []Run{{Text: "a", Family: "serif", SizePt: 16}}, nil)
+	if len(letters) == 1 {
+		before := letters[0]
+		after := before
+		mirrorGlyph(&after)
+		if after.GID != before.GID {
+			t.Errorf("'a' should not mirror; GID changed %d -> %d", before.GID, after.GID)
+		}
+	}
+}
+
+// TestReorderMirrorsBracketsInRTLRun: brackets around an RTL run mirror, brackets in
+// the surrounding LTR text do not. Uses real faces so L4 can resolve outlines.
+func TestReorderMirrorsBracketsInRTLRun(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+	// The RLO makes the following Latin an RTL run, so its bracket must mirror.
+	glyphs := Shape(faces, []Run{{Text: "\u202e(a)", Family: "serif", SizePt: 16}}, nil)
+	openGID, closeGID := bracketGIDs(t, faces)
+
+	out, changed := reorder(glyphs, DirLTR)
+	if !changed {
+		t.Fatal("an RLO run must reorder")
+	}
+	// Visual order reverses to ")a(" in POSITION; each bracket also mirrors in SHAPE,
+	// so the first painted bracket carries the '(' glyph and the last the ')' glyph.
+	var gids []uint16
+	for _, g := range out {
+		if g.Face != nil && (len(g.Runes) == 1 && (g.Runes[0] == '(' || g.Runes[0] == ')')) {
+			gids = append(gids, g.GID)
+		}
+	}
+	if len(gids) != 2 {
+		t.Fatalf("found %d bracket glyphs, want 2", len(gids))
+	}
+	if gids[0] != openGID || gids[1] != closeGID {
+		t.Errorf("bracket GIDs in visual order = %v, want [%d %d] — a ')' reordered to the "+
+			"visual start must be DRAWN as '(' (rule L4)", gids, openGID, closeGID)
+	}
+}
+
+// bracketGIDs returns the GIDs the bundled serif face uses for '(' and ')'.
+func bracketGIDs(t *testing.T, faces *layoutfont.FaceCache) (open, close uint16) {
+	t.Helper()
+	gs := Shape(faces, []Run{{Text: "()", Family: "serif", SizePt: 16}}, nil)
+	if len(gs) != 2 || gs[0].Face == nil {
+		t.Skip("bundled face did not resolve brackets")
+	}
+	return gs[0].GID, gs[1].GID
 }
