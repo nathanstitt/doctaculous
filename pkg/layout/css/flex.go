@@ -261,8 +261,15 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 
 	// Per-item flex base size + hypothetical main size + used min/max main.
 	sizings := make([]flexItemSizing, len(items))
+	// availCross is the container's inner CROSS size, used to clamp a column item's
+	// auto cross width before its content height is measured against it. For a row the
+	// cross axis is vertical and the sizing path never consults it (-1 = no clamp).
+	availCross := -1.0
+	if ax.vertical {
+		availCross = contentW
+	}
 	for i, it := range items {
-		sizings[i] = e.itemSizing(ctx, it, ax, innerMain)
+		sizings[i] = e.itemSizing(ctx, it, ax, innerMain, availCross)
 	}
 
 	// Main-axis gap (column-gap for row, row-gap for column) between adjacent items.
@@ -290,7 +297,7 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	frags := make([]*Fragment, len(items))
 	crossSizes := make([]float64, len(items))
 	for i, it := range items {
-		frags[i], crossSizes[i] = e.layoutFlexItem(ctx, it, ax, usedMain[i])
+		frags[i], crossSizes[i] = e.layoutFlexItem(ctx, it, ax, usedMain[i], availCross)
 	}
 
 	// Line cross size: for a single-line flex container the line's cross size is the
@@ -577,9 +584,9 @@ func (e *Engine) flexMainGap(b *cssbox.Box, ax flexAxis) float64 {
 // from flexBaseSize (flex-basis: auto/content/percentage/length, CSS Flexbox §9.2); the
 // used min/max come from usedMinMaxMain (explicit min/max plus the §4.5 automatic
 // minimum); the hypothetical main size is the base clamped to [minMain, maxMain].
-func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain float64) flexItemSizing {
-	base := e.flexBaseSize(ctx, it, ax, innerMain)
-	minMain, maxMain := e.usedMinMaxMain(ctx, it, ax)
+func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain, availCross float64) flexItemSizing {
+	base := e.flexBaseSize(ctx, it, ax, innerMain, availCross)
+	minMain, maxMain := e.usedMinMaxMain(ctx, it, ax, availCross)
 	return flexItemSizing{
 		base:         base,
 		hypothetical: clampF(base, minMain, maxMain),
@@ -597,7 +604,7 @@ func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, in
 // NOTE: for a column container, measureMaxContent returns a width, not a height —
 // using it as the column main-axis content base is a documented approximation for
 // slice 1; refine in 9b.
-func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain float64) float64 {
+func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain, availCross float64) float64 {
 	fb := it.Style.FlexBasis
 	switch fb.Unit {
 	case gcss.UnitAuto:
@@ -609,9 +616,9 @@ func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, 
 			v, _ := resolveLen(mainLen, it.Style.FontSizePt, 0)
 			return v
 		}
-		return e.measureMaxContent(ctx, it)
+		return e.mainContentSize(ctx, it, ax, availCross)
 	case gcss.UnitContent:
-		return e.measureMaxContent(ctx, it)
+		return e.mainContentSize(ctx, it, ax, availCross)
 	case gcss.UnitPercent:
 		return innerMain * fb.Value / 100
 	default:
@@ -624,7 +631,7 @@ func (e *Engine) flexBaseSize(ctx context.Context, it *cssbox.Box, ax flexAxis, 
 // When min-(width|height) is auto, the automatic minimum size (CSS Flexbox §4.5)
 // applies: the item's min-content size, capped by a definite main-size property if
 // smaller, and capped by maxMain if maxMain >= 0.
-func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis) (minMain, maxMain float64) {
+func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis, availCross float64) (minMain, maxMain float64) {
 	minL, maxL := it.Style.MinWidth, it.Style.MaxWidth
 	if ax.vertical {
 		minL, maxL = it.Style.MinHeight, it.Style.MaxHeight
@@ -639,7 +646,7 @@ func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis
 	// minimum size (CSS Flexbox §4.5): the min-content size, capped by an explicit main
 	// size or max (the spec's min()). For row, the content min size is measureMinContent.
 	if minL.Unit == gcss.UnitAuto {
-		autoMin := e.measureMinContent(ctx, it)
+		autoMin := e.mainMinContentSize(ctx, it, ax, availCross)
 		// Cap by a definite main size if smaller (a fixed-size item's auto-min is its size).
 		mainLen := it.Style.Width
 		if ax.vertical {
@@ -660,13 +667,82 @@ func (e *Engine) usedMinMaxMain(ctx context.Context, it *cssbox.Box, ax flexAxis
 	return minMain, maxMain
 }
 
+// mainContentSize is the item's intrinsic MAIN-axis content size, dispatched on the
+// axis so the width/height choice is made in exactly one place: a row's main axis is
+// horizontal (max-content width), a column's is vertical (content height, measured by
+// laying the item out — see measureColumnMainContent).
+func (e *Engine) mainContentSize(ctx context.Context, it *cssbox.Box, ax flexAxis, availCross float64) float64 {
+	if ax.vertical {
+		return e.measureColumnMainContent(ctx, it, availCross)
+	}
+	return e.measureMaxContent(ctx, it)
+}
+
+// mainMinContentSize is the min-content counterpart used for the automatic minimum
+// size (CSS Flexbox §4.5). On a column the min-content HEIGHT of a block is its
+// height at its widest reasonable measure, which for this engine's purposes is the
+// same laid-out height mainContentSize computes: a block's height does not shrink
+// further once its width is fixed.
+func (e *Engine) mainMinContentSize(ctx context.Context, it *cssbox.Box, ax flexAxis, availCross float64) float64 {
+	if ax.vertical {
+		return e.measureColumnMainContent(ctx, it, availCross)
+	}
+	return e.measureMinContent(ctx, it)
+}
+
+// columnItemCrossWidth resolves the CROSS-axis (horizontal) measure a column flex
+// item is laid out at: its definite width when it has one, else its max-content
+// width. availCross, when >= 0, clamps the max-content result to the container's
+// inner cross size — an auto-width item must not be measured wider than the
+// container it sits in (a paragraph of prose has a max-content width equal to the
+// whole unwrapped string, which would otherwise overflow the container by a large
+// multiple and, worse, be the width its content height is measured at).
+//
+// A definite width of 0 is pathological; fall back to max-content rather than
+// laying out at zero width.
+func (e *Engine) columnItemCrossWidth(ctx context.Context, it *cssbox.Box, availCross float64) float64 {
+	if it.Style.Width.Unit != gcss.UnitAuto && it.Style.Width.Unit != gcss.UnitPercent {
+		if v, _ := resolveLen(it.Style.Width, it.Style.FontSizePt, 0); v > 0 {
+			return v
+		}
+	}
+	w := e.measureMaxContent(ctx, it)
+	if availCross >= 0 && w > availCross {
+		w = availCross
+	}
+	return w
+}
+
+// measureColumnMainContent returns a column flex item's content HEIGHT — its main-axis
+// content contribution — by laying it out at its cross-axis width and reading the
+// resulting fragment height.
+//
+// This is the vertical counterpart of measureMaxContent. It exists because the main
+// axis of a column container is vertical, so the intrinsic main size is a height;
+// measureMaxContent returns a WIDTH and using it as a column item's main base size
+// compares a horizontal measure against a vertical budget. It follows the same
+// two-phase pattern grid already uses for row-track sizing (lay the item out at the
+// known cross measure, then read back frag.H).
+//
+// Returns 0 if the item produces no fragment.
+func (e *Engine) measureColumnMainContent(ctx context.Context, it *cssbox.Box, availCross float64) float64 {
+	w := e.columnItemCrossWidth(ctx, it, availCross)
+	pos := &positionedContext{}
+	res := e.layoutBlock(ctx, it, w, 0, 0, 0,
+		&floatContext{cbLeft: 0, cbRight: w}, pos, posCBOwner{isPage: true})
+	if res.frag == nil {
+		return 0
+	}
+	return res.frag.H
+}
+
 // layoutFlexItem lays out one flex item's contents at its used main size and returns its
 // fragment and its outer cross size. For a vertical (column) axis it delegates to
 // layoutFlexItemColumn; for a horizontal (row) axis, used main = content width and the
 // fragment height is the cross size.
-func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis, usedMain float64) (*Fragment, float64) {
+func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis, usedMain, availCross float64) (*Fragment, float64) {
 	if ax.vertical {
-		return e.layoutFlexItemColumn(ctx, it, usedMain) // column axis: cross = width, main = height
+		return e.layoutFlexItemColumn(ctx, it, usedMain, availCross) // column axis: cross = width, main = height
 	}
 	pos := &positionedContext{}
 	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
@@ -686,16 +762,8 @@ func (e *Engine) layoutFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxis
 // container will stretch/shrink it — for now lay out at the item's own width if definite,
 // otherwise at its max-content width as the natural cross size). Returns the fragment and
 // its outer cross size (the width). The fragment's height is pinned to usedMain.
-func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedMain float64) (*Fragment, float64) {
-	// Cross (width) basis: a definite width, else max-content.
-	crossW := e.measureMaxContent(ctx, it)
-	if it.Style.Width.Unit != gcss.UnitAuto && it.Style.Width.Unit != gcss.UnitPercent {
-		// v > 0: a width:0 column item is pathological; fall back to max-content rather
-		// than laying it out at zero width (graceful degradation).
-		if v, _ := resolveLen(it.Style.Width, it.Style.FontSizePt, 0); v > 0 {
-			crossW = v
-		}
-	}
+func (e *Engine) layoutFlexItemColumn(ctx context.Context, it *cssbox.Box, usedMain, availCross float64) (*Fragment, float64) {
+	crossW := e.columnItemCrossWidth(ctx, it, availCross)
 	pos := &positionedContext{}
 	res := e.layoutBlock(ctx, it, crossW, 0, 0, 0,
 		&floatContext{cbLeft: 0, cbRight: crossW}, pos, posCBOwner{isPage: true})

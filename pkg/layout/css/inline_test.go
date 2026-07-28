@@ -2,9 +2,11 @@ package css
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
@@ -814,5 +816,93 @@ func TestEffectiveTextAlignStartUnderRTL(t *testing.T) {
 	}
 	if got := effectiveTextAlign(anon); got != inline.AlignRight {
 		t.Errorf("text-align:start in an RTL anon block = %v, want AlignRight", got)
+	}
+}
+
+// bidiGlyphOrder lays out an HTML fragment and returns the emitted glyphs sorted by
+// their painted X position, as a string. That is the VISUAL reading order: what a
+// reader sees left-to-right on the page.
+//
+// It asserts on Runes rather than pixels because no bundled font carries Hebrew or
+// Arabic coverage (TeX Gyre + Inconsolata), so an RTL glyph has no outline to
+// rasterize — but the shaper still records the rune it stood for, and reordering is
+// exactly a question of which order those land in.
+func bidiGlyphOrder(t *testing.T, bodyHTML string) string {
+	t.Helper()
+	src := `<!DOCTYPE html><html><head><style>body{margin:0;font-family:serif;font-size:16px}</style></head><body>` +
+		bodyHTML + `</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, 400)
+
+	type placed struct {
+		x float64
+		r []rune
+	}
+	var gs []placed
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		for li := range f.Lines {
+			for _, g := range f.Lines[li].Glyphs {
+				if len(g.Runes) > 0 {
+					gs = append(gs, placed{g.X, g.Runes})
+				}
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	sort.Slice(gs, func(i, j int) bool { return gs[i].x < gs[j].x })
+	var out []rune
+	for _, g := range gs {
+		out = append(out, g.r...)
+	}
+	return string(out)
+}
+
+// TestBidiEndToEndLTRUnaffected pins that a Latin-only paragraph is painted in source
+// order: the reorder must be a no-op for the overwhelmingly common case.
+func TestBidiEndToEndLTRUnaffected(t *testing.T) {
+	if got, want := bidiGlyphOrder(t, `<p>thequickbrownfox</p>`), "thequickbrownfox"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
+	}
+}
+
+// TestBidiEndToEndRTLOverridePaintsReversed drives the reorder end-to-end using
+// characters the BUNDLED fonts actually cover.
+//
+// Asserting on Hebrew or Arabic here is impossible: no bundled face (TeX Gyre
+// Heros/Termes, Inconsolata) has RTL script coverage, and Shape DROPS a rune its face
+// cannot map (shape.go, `if !ok { continue }`), so RTL text never reaches the reorder
+// as glyphs at all. Depending on a system font would break hermeticity.
+//
+// U+202E RIGHT-TO-LEFT OVERRIDE gives a genuine RTL context over Latin characters:
+// bidi ordering is decided by character properties, not by whether a face has the
+// glyph, so the whole path (box generation -> shaping -> breaking -> reorder -> glyph
+// emission) is exercised with renderable output.
+func TestBidiEndToEndRTLOverridePaintsReversed(t *testing.T) {
+	// RLO reverses the run that follows it.
+	got := bidiGlyphOrder(t, "<p>\u202Eabcdef</p>")
+	if want := "fedcba"; got != want {
+		t.Errorf("painted order under RLO = %q, want %q (the run must paint reversed)", got, want)
+	}
+}
+
+// TestBidiEndToEndRTLParagraphOverride: the same override inside a dir=rtl block.
+func TestBidiEndToEndRTLParagraphOverride(t *testing.T) {
+	got := bidiGlyphOrder(t, "<p dir=\"rtl\">\u202Eabcdef</p>")
+	if want := "fedcba"; got != want {
+		t.Errorf("painted order = %q, want %q", got, want)
 	}
 }

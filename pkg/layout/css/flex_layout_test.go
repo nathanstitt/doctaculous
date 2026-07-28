@@ -943,3 +943,102 @@ func TestFlexCrossOffsetAcceptsBoxAlignmentSpellings(t *testing.T) {
 		t.Errorf("crossOffset(\"start\") = %v, want %v (same as flex-start)", got, want)
 	}
 }
+
+// h4ColumnFrags lays out a column flex container whose items hold differing amounts
+// of text, and returns the item fragments.
+func h4ColumnFrags(t *testing.T, containerCSS string) []*Fragment {
+	t.Helper()
+	src := `<!DOCTYPE html><html><head><style>
+	  body { margin: 0; }
+	  .col { display: flex; flex-direction: column; width: 200px; ` + containerCSS + ` }
+	  .item { background: #ccc; }
+	</style></head><body>
+	  <div class="col">
+	    <div class="item">short</div>
+	    <div class="item">this one has substantially more text so it wraps onto several lines at this width</div>
+	  </div>
+	</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	frag := New(nil, nil, nil).layoutTree(context.Background(), root, 400)
+	var fc *Fragment
+	var find func(f *Fragment)
+	find = func(f *Fragment) {
+		if f == nil || fc != nil {
+			return
+		}
+		if f.Box != nil && f.Box.Display == cssbox.DisplayFlex {
+			fc = f
+			return
+		}
+		for _, c := range f.Children {
+			find(c)
+		}
+	}
+	find(frag)
+	if fc == nil {
+		t.Fatal("no flex container fragment")
+	}
+	return fc.Children
+}
+
+// TestFlexColumnItemsFitContainerWidth: an auto-width item in a COLUMN flex container
+// is laid out at the container's inner cross size, not at its own max-content width.
+//
+// Regression for the second half of backlog H4: measureMaxContent returns the width of
+// the whole unwrapped string, so a paragraph of prose was laid out several times wider
+// than its container and overflowed it.
+func TestFlexColumnItemsFitContainerWidth(t *testing.T) {
+	frags := h4ColumnFrags(t, "height: 400px;")
+	if len(frags) != 2 {
+		t.Fatalf("want 2 items, got %d", len(frags))
+	}
+	for i, f := range frags {
+		if f.W > 200.01 {
+			t.Errorf("item %d width = %v, want <= 200 (the container's inner cross size); "+
+				"an auto-width column item must not be laid out at its max-content width", i, f.W)
+		}
+	}
+}
+
+// TestFlexColumnBaseSizeIsContentHeight: on a COLUMN container the main axis is
+// VERTICAL, so an auto/content flex-basis must resolve to the item's content HEIGHT.
+// It used to resolve to measureMaxContent — a WIDTH — comparing a horizontal measure
+// against a vertical budget (backlog H4).
+//
+// The container is auto-height so the items keep their hypothetical (base) main sizes
+// rather than being flexed to fill: the item with more text must therefore end up
+// TALLER than the one-liner, and both heights must be plausible line-height multiples
+// rather than a leftover-space split.
+func TestFlexColumnBaseSizeIsContentHeight(t *testing.T) {
+	frags := h4ColumnFrags(t, "") // no height => indefinite main size
+	if len(frags) != 2 {
+		t.Fatalf("want 2 items, got %d", len(frags))
+	}
+	short, long := frags[0], frags[1]
+	if short.H <= 0 || long.H <= 0 {
+		t.Fatalf("items should have positive heights; got %v and %v", short.H, long.H)
+	}
+	if long.H <= short.H {
+		t.Errorf("the item with more text should be taller: short h=%v, long h=%v", short.H, long.H)
+	}
+	// The discriminating check. The long item's text wraps to a handful of lines at
+	// 200px, so its height is a small multiple of the line height (~74pt). Its
+	// max-content WIDTH — the whole string unwrapped — is ~498pt. Using the width as
+	// the main size therefore produces a height far taller than the item is wide, which
+	// wrapped text can never be at this measure.
+	if long.H > long.W {
+		t.Errorf("wrapped item is taller (%v) than it is wide (%v): the main size looks like "+
+			"a max-content WIDTH being used as a HEIGHT (backlog H4)", long.H, long.W)
+	}
+	// Sanity: a single line of text is about one line-height tall.
+	if short.H > 40 {
+		t.Errorf("single-line item height = %v, want ~1 line-height (<40)", short.H)
+	}
+}

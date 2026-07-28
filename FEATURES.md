@@ -133,6 +133,20 @@ bullet's design doc is in `docs/superpowers/specs/`:
   `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
   reordered — RTL script renders in logical glyph order.**
   `2026-07-27-rtl-box-layout-design.md`.
+- **Inline bidi reordering** (`pkg/layout/inline/bidi.go`) — RTL slice 3 of 5: shaping and breaking stay
+  in LOGICAL order; `MakeVisualLine` applies UAX#9 rule L2 per line after the break is chosen, plus rule
+  L4 bracket mirroring (`Glyph.Runes` keeps the ORIGINAL character so `/ToUnicode` recovers the authored
+  text). `golang.org/x/text` promoted indirect→direct for UAX#9 — no new module. Line metrics are
+  computed on the logical slice, because the space that ends the text reorders to an RTL line's visual
+  START. Bidi control characters now survive shaping as zero-width glyphs (they were being dropped,
+  silently discarding directional intent). **Arabic reorders but renders as isolated forms** — contextual
+  shaping needs a cluster model (slice 4). `2026-07-27-rtl-inline-bidi-design.md`.
+- **Column flex vertical content sizing** (`pkg/layout/css/flex.go`): a column container's main axis is
+  vertical, so `flex-basis: auto`/`content` (and the `min:auto` automatic minimum) now resolve to the
+  item's content HEIGHT — measured by laying it out at its cross width and reading back the fragment
+  height (`measureColumnMainContent`), the same two-phase pattern grid uses for row tracks — instead of
+  a max-content WIDTH compared against a vertical budget. An auto-width column item's cross width is
+  also clamped to the container, fixing a ~2.5x overflow for prose. Backlog H4.
 - **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` as static native widgets (classic chrome, non-interactive).
   `2026-06-29-html-forms-design.md`.

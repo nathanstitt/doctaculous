@@ -112,12 +112,19 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 
 		var lineGlyphs []inline.Glyph
 		lineGlyphs, rest = inline.BreakNextWrap(rest, avail-lineIndent, wrap)
-		line := inline.MakeLine(lineGlyphs)
+		// Breaking happened in logical order; MakeVisualLine reorders this line's
+		// glyphs into visual order (UAX#9 L2) so the emitter below, which walks the
+		// slice left-to-right at increasing x, paints them correctly. For an LTR
+		// paragraph of Latin-only text this is a no-op on the same backing slice.
+		line := inline.MakeVisualLine(lineGlyphs, bidiDir(dir))
 
 		lh := e.effectiveLineHeight(b, line)
 		baselineY := penY + ascentOfLine(line)
 
-		spaceCount := inline.CountSpaces(line.Glyphs)
+		// Count the justification gaps on the LOGICAL glyphs: CountSpaces excludes the
+		// run of spaces that ENDS the text, which it finds by scanning from the end of
+		// the slice — in a reordered RTL line that space sits at the visual start.
+		spaceCount := inline.CountSpaces(lineGlyphs)
 		isLast := len(rest) == 0
 		// availLeft is the absolute page-space left for this line; avail is its width.
 		// The first-line indent insets the START edge and narrows the placement width.
@@ -554,6 +561,16 @@ func effectiveDirection(b *cssbox.Box) string {
 		return "ltr"
 	}
 	return d
+}
+
+// bidiDir maps a CSS `direction` value onto the inline core's neutral paragraph
+// direction. Anything other than "rtl" (including the empty string) is left-to-right,
+// matching effectiveDirection's fallback.
+func bidiDir(dir string) inline.ParagraphDirection {
+	if dir == "rtl" {
+		return inline.DirRTL
+	}
+	return inline.DirLTR
 }
 
 // firstInlineDirection returns the first non-empty Direction found walking b's

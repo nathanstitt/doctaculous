@@ -196,6 +196,17 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 				if rn == '\n' || rn == '\t' {
 					rn = ' '
 				}
+				// A bidi control (LRM/RLM, the embedding/override set, the isolates) draws
+				// nothing but DETERMINES ordering, so it must survive shaping as a
+				// zero-width glyph — the reorder reads the line's runes, and dropping the
+				// control here would silently discard the author's directional intent.
+				if isBidiControlRune(rn) {
+					g := base
+					g.Runes = []rune{rn}
+					g.Face = nil // no outline to draw; not a font glyph
+					out = append(out, g)
+					continue
+				}
 				outline, advEm, ok := face.Glyph(rn)
 				if !ok {
 					continue
