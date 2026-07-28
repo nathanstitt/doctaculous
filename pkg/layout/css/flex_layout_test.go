@@ -518,27 +518,87 @@ func TestInlineFlexClassification(t *testing.T) {
 	}
 }
 
-func TestFlexWrapDegradesToNowrap(t *testing.T) {
-	// flex-wrap:wrap with three wide items that don't fit: they must stay on one line and
-	// overflow (no second row). Assert all three share the same Y and the last overflows.
-	mk := func() *cssbox.Box {
-		st := gcss.ComputedStyle{
-			Width: gcss.Length{Value: 100, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
-			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
-			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
-			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
-		}
-		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+// wrapItem is a fixed-size, non-flexing item for the wrap tests.
+func wrapItem(w, h float64) *cssbox.Box {
+	st := gcss.ComputedStyle{
+		Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: h, Unit: gcss.UnitPx},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+		MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+		FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
 	}
-	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap"}, mk(), mk(), mk()), 150)
+	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+}
+
+// TestFlexWrapBreaksLines: three 100px items in a 150px container wrap onto three
+// lines, each starting back at the main-start. This replaces
+// TestFlexWrapDegradesToNowrap, which asserted the single-line fallback.
+func TestFlexWrapBreaksLines(t *testing.T) {
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap"},
+		wrapItem(100, 40), wrapItem(100, 40), wrapItem(100, 40)), 150)
 	if len(frags) != 3 {
-		t.Fatalf("want 3 frags on one line, got %d", len(frags))
+		t.Fatalf("want 3 frags, got %d", len(frags))
+	}
+	// Each item is too wide to share a line, so all three stack.
+	for i, f := range frags {
+		if f.X != 0 {
+			t.Errorf("item %d X = %v, want 0 (each line restarts at main-start)", i, f.X)
+		}
+		if want := float64(i * 40); f.Y != want {
+			t.Errorf("item %d Y = %v, want %v (line %d)", i, f.Y, want, i)
+		}
+	}
+}
+
+// TestFlexNowrapStillOverflows pins that the default is unchanged: without wrap the
+// items stay on one line and overflow, exactly as before.
+func TestFlexNowrapStillOverflows(t *testing.T) {
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{},
+		wrapItem(100, 40), wrapItem(100, 40), wrapItem(100, 40)), 150)
+	if len(frags) != 3 {
+		t.Fatalf("want 3 frags, got %d", len(frags))
 	}
 	if frags[0].Y != frags[1].Y || frags[1].Y != frags[2].Y {
-		t.Errorf("wrap should degrade to nowrap (one line, same Y); got %v %v %v", frags[0].Y, frags[1].Y, frags[2].Y)
+		t.Errorf("nowrap must keep one line; got Y %v %v %v", frags[0].Y, frags[1].Y, frags[2].Y)
 	}
-	if frags[2].X != 200 { // 0,100,200 — overflows the 150 viewport (nowrap)
+	if frags[2].X != 200 { // 0,100,200 — overflows the 150 viewport
 		t.Errorf("third item should overflow at x200; got %v", frags[2].X)
+	}
+}
+
+// TestFlexWrapPacksMultiplePerLine: items that DO fit together share a line, and the
+// line breaks only when the next item would exceed the container.
+func TestFlexWrapPacksMultiplePerLine(t *testing.T) {
+	// Four 60px items in a 200px container: three fit (180), the fourth wraps.
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap"},
+		wrapItem(60, 30), wrapItem(60, 30), wrapItem(60, 30), wrapItem(60, 30)), 200)
+	if len(frags) != 4 {
+		t.Fatalf("want 4 frags, got %d", len(frags))
+	}
+	for i, want := range []float64{0, 60, 120, 0} {
+		if frags[i].X != want {
+			t.Errorf("item %d X = %v, want %v", i, frags[i].X, want)
+		}
+	}
+	if frags[0].Y != frags[2].Y {
+		t.Errorf("items 0-2 should share a line; Y %v vs %v", frags[0].Y, frags[2].Y)
+	}
+	if frags[3].Y != frags[0].Y+30 {
+		t.Errorf("item 3 should be on the second line at Y %v; got %v", frags[0].Y+30, frags[3].Y)
+	}
+}
+
+// TestFlexWrapOverwideItemGetsOwnLine: an item wider than the container still lands on
+// a line of its own rather than looping forever or being dropped.
+func TestFlexWrapOverwideItemGetsOwnLine(t *testing.T) {
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap"},
+		wrapItem(50, 20), wrapItem(300, 20), wrapItem(50, 20)), 100)
+	if len(frags) != 3 {
+		t.Fatalf("want 3 frags, got %d", len(frags))
+	}
+	// The over-wide item cannot share with either neighbour, so there are three lines.
+	if frags[0].Y == frags[1].Y || frags[1].Y == frags[2].Y {
+		t.Errorf("the over-wide item should occupy its own line; Y %v %v %v",
+			frags[0].Y, frags[1].Y, frags[2].Y)
 	}
 }
 
@@ -1040,5 +1100,127 @@ func TestFlexColumnBaseSizeIsContentHeight(t *testing.T) {
 	// Sanity: a single line of text is about one line-height tall.
 	if short.H > 40 {
 		t.Errorf("single-line item height = %v, want ~1 line-height (<40)", short.H)
+	}
+}
+
+// wrapContainer builds a wrapping row with a definite height, so align-content has
+// leftover cross space to distribute.
+func wrapContainer(st gcss.ComputedStyle, hPx float64, items ...*cssbox.Box) *cssbox.Box {
+	st.FlexWrap = orDefault(st.FlexWrap, "wrap")
+	c := flexRow(st, items...)
+	c.Style.Height = gcss.Length{Value: hPx, Unit: gcss.UnitPx}
+	return c
+}
+
+// TestFlexWrapCrossGapBetweenLines: row-gap separates the LINES of a wrapping row.
+// The cross gap was previously computed and never read, because a single-line
+// container has no between-lines gap.
+func TestFlexWrapCrossGapBetweenLines(t *testing.T) {
+	st := gcss.ComputedStyle{FlexWrap: "wrap", RowGap: gcss.Length{Value: 12, Unit: gcss.UnitPx}}
+	frags := flexFrags(t, flexRow(st, wrapItem(100, 40), wrapItem(100, 40)), 150)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	if got, want := frags[1].Y-frags[0].Y, 52.0; got != want {
+		t.Errorf("line stride = %v, want %v (40 item + 12 row-gap)", got, want)
+	}
+}
+
+// TestFlexAlignContentStretch: the CSS Flexbox initial align-content is STRETCH, so
+// lines grow to fill a definite-height container. ComputedStyle defaults the field to
+// "start" (grid's convention), so this pins that flex maps it correctly — otherwise
+// multi-line content packs to the cross-start and leaves the container's tail empty.
+func TestFlexAlignContentStretch(t *testing.T) {
+	// Two lines of 40px items in a 200px-tall container: 120px leftover, 60 per line.
+	frags := flexFrags(t, wrapContainer(gcss.ComputedStyle{}, 200,
+		wrapItem(100, 40), wrapItem(100, 40)), 150)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	if frags[0].Y != 0 {
+		t.Errorf("first line Y = %v, want 0", frags[0].Y)
+	}
+	// Each line stretched to 100 (40 + 60 share), so the second starts there.
+	if got, want := frags[1].Y, 100.0; got != want {
+		t.Errorf("second line Y = %v, want %v (lines stretch to fill the container)", got, want)
+	}
+}
+
+// TestFlexAlignContentCenter: an explicit align-content packs the lines and centers
+// the block of them, rather than stretching.
+func TestFlexAlignContentCenter(t *testing.T) {
+	st := gcss.ComputedStyle{AlignContent: "center"}
+	frags := flexFrags(t, wrapContainer(st, 200, wrapItem(100, 40), wrapItem(100, 40)), 150)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	// Two 40px lines = 80 tall, centered in 200 => leading 60.
+	if got, want := frags[0].Y, 60.0; got != want {
+		t.Errorf("first line Y = %v, want %v (centered)", got, want)
+	}
+	if got, want := frags[1].Y, 100.0; got != want {
+		t.Errorf("second line Y = %v, want %v", got, want)
+	}
+}
+
+// TestFlexAlignContentSpaceBetween: the lines pin to the container's cross edges.
+func TestFlexAlignContentSpaceBetween(t *testing.T) {
+	st := gcss.ComputedStyle{AlignContent: "space-between"}
+	frags := flexFrags(t, wrapContainer(st, 200, wrapItem(100, 40), wrapItem(100, 40)), 150)
+	if len(frags) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(frags))
+	}
+	if frags[0].Y != 0 {
+		t.Errorf("first line Y = %v, want 0", frags[0].Y)
+	}
+	if got, want := frags[1].Y, 160.0; got != want {
+		t.Errorf("second line Y = %v, want %v (pinned to the cross-end)", got, want)
+	}
+}
+
+// TestFlexWrapReverseStacksFromCrossEnd: wrap-reverse puts the FIRST line at the
+// cross-END, so the line order flips while each line's item order does not.
+func TestFlexWrapReverseStacksFromCrossEnd(t *testing.T) {
+	normal := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap"},
+		wrapItem(100, 40), wrapItem(100, 40)), 150)
+	reversed := flexFrags(t, flexRow(gcss.ComputedStyle{FlexWrap: "wrap-reverse"},
+		wrapItem(100, 40), wrapItem(100, 40)), 150)
+	if len(normal) != 2 || len(reversed) != 2 {
+		t.Fatalf("want 2 frags each, got %d and %d", len(normal), len(reversed))
+	}
+	// wrap: item 0 on the first line (top). wrap-reverse: item 0 on the LAST line.
+	if !(normal[0].Y < normal[1].Y) {
+		t.Errorf("wrap: item 0 should be above item 1; Y %v vs %v", normal[0].Y, normal[1].Y)
+	}
+	if !(reversed[0].Y > reversed[1].Y) {
+		t.Errorf("wrap-reverse: item 0 should be BELOW item 1 (lines stack from the cross-end); Y %v vs %v",
+			reversed[0].Y, reversed[1].Y)
+	}
+	// The items keep their main-axis position either way — only the line order flips.
+	if reversed[0].X != 0 || reversed[1].X != 0 {
+		t.Errorf("wrap-reverse must not move items along the main axis; X %v %v",
+			reversed[0].X, reversed[1].X)
+	}
+}
+
+// TestFlexWrapPerLineJustifyContent: justify-content distributes free space within
+// EACH line independently (§9.5), not across the container.
+func TestFlexWrapPerLineJustifyContent(t *testing.T) {
+	st := gcss.ComputedStyle{FlexWrap: "wrap", JustifyContent: "flex-end"}
+	// Three 80px items in a 200px row: two fit on line 1 (160), the third wraps.
+	frags := flexFrags(t, flexRow(st, wrapItem(80, 30), wrapItem(80, 30), wrapItem(80, 30)), 200)
+	if len(frags) != 3 {
+		t.Fatalf("want 3 frags, got %d", len(frags))
+	}
+	// Line 1 holds two items pushed right: 200-160 = 40 leading.
+	if frags[0].X != 40 || frags[1].X != 120 {
+		t.Errorf("line 1 flex-end: X %v %v, want 40 120", frags[0].X, frags[1].X)
+	}
+	// Line 2 holds ONE item, so its own free space is 120 — not the container's.
+	if got, want := frags[2].X, 120.0; got != want {
+		t.Errorf("line 2 flex-end: X = %v, want %v (justify-content is per-line)", got, want)
+	}
+	if frags[2].Y == frags[0].Y {
+		t.Error("the third item should have wrapped to a second line")
 	}
 }

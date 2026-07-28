@@ -159,7 +159,8 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## F. HTML/CSS — tables
 
-- ☐ **F1. RTL/`direction`** (column order) — *covered by A1.*
+- ☑ **F1. RTL/`direction`** (column order) — *DONE via A1.2.* Tables mirror their solved column x-offsets;
+  `buildCollapsedBorders` gained the matching index→physical-side flip. The "laying out LTR" log is gone.
 - ☑ **F2. Six background layers** — *DONE.* Column-group, column, row-group, and row backgrounds now paint
   behind the cells in CSS 17.5.1 order (table → col-groups → cols → row-groups → rows → cells). `gridCol` carries
   its `<col>` box; `tableGrid` retains col-group/row-group spans; `backgroundLayers` emits a background fragment
@@ -205,7 +206,18 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## H. HTML/CSS — flexbox
 
-- ☐ **H1. multi-line flex** (`flex-wrap: wrap`/`wrap-reverse` + `align-content`) — the big one. *Large.*
+- ☑ **H1. multi-line flex** — *DONE.* §9.3 `collectLines` partitions items into `flexLine`s; nowrap is now
+  the one-line special case rather than a separate path. `resolveFlexibleLengths` needed NO change (it was
+  already written per-line). Five things became per-line: the §9.4 step-8 cross clamp (gated to
+  `len(lines)==1` — with several lines the leftover belongs to align-content, and stretching one line would
+  swallow the others), `contentHeight`, the placement loop, the `innerMain` overwrite that the reverse formula
+  flips within, and the baseline post-pass. **The align-content trap:** `ComputedStyle.AlignContent` defaults
+  to `"start"` (grid's convention) but CSS Flexbox's initial is `stretch` — mapped at the flex use site rather
+  than changing the shared default grid relies on. `wrap-reverse` XORs with the RTL cross flip (two flips
+  cancel). Pagination came FREE: `splitFlexGridForPage` is geometry-driven, so a wrapped row is one band per
+  line — tested anyway, since nothing in the pagination code says "flex line". Every per-line change
+  mutation-verified independently, each failing a DISTINCT test set. Sequenced after RTL so the placement loop
+  was written direction-aware once. `2026-07-28-flex-wrap-design.md`.
 - ☑ **H2. RTL/`direction`** on a row — *DONE via A1.2.* Plus the column cross-axis, which was never
   covered by the old row-only log.
 - ☑ **H3. line cross size clamped to a definite container cross size** — *DONE.* For a single-line flex
@@ -225,7 +237,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   width, so a paragraph of prose overflowed its container by ~2.5x (497pt inside a 200pt container). The cross
   width is now clamped to the container's inner cross size. Both halves are mutation-verified independently —
   reverting either fails a different test.
-- ☐ **H5. `flex-grow`/`shrink` cross-axis gap factors** (revisit with multi-line). *Small (with H1).*
+- ☑ **H5. cross-axis gap** — *DONE with H1.* `flexCrossGap` mirrors `flexMainGap` on the other axis and is
+  consulted only when `len(lines) > 1` (a single line has no between-lines gap, which is why the value was
+  previously stored and never read).
 - ☑ **H6. column-container `align-items: baseline`** — *CONFIRMED CORRECT (no fix).* CSS Flexbox §9.4.3:
   baseline self-alignment in a column flex container resolves to `flex-start` (there is no cross-axis text
   baseline). The engine already falls back to `flex-start` and logs it — spec-compliant, not a gap.
@@ -314,7 +328,10 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
 - ☐ **N3. Honoring a genuinely MID-BLOCK forced break on a nested block** (edge breaks now propagate). *Medium* (depends on N1).
 - ☐ **N4. Per-page float distribution.** *Medium.*
 - ☐ **N5. Per-page bottom-anchored `fixed`** (per-page `resolveAbsolute` height). *Medium.*
-- ☐ **N6. CSS paged media: `@page` size/margins/named pages + running headers/footers.** *Large.*
+- ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16
+  margin boxes, running headers/footers with page counters, `marks`/`bleed`, and `string-set`/`string()` are
+  all in (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and
+  `2026-06-30-html-paged-media-design.md`. No code change.
 
 ---
 

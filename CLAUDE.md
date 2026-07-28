@@ -142,9 +142,9 @@ each degrades gracefully and is documented in the relevant spec):
   PDFs currently extract in visual order, i.e. reversed). Known shaping limits: GPOS vertical
   offsets are not applied (marks sit on the baseline), and `font-feature-settings` is not plumbed
   through.
-- **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
-  `nowrap` with overflow). (Column `flex-basis: auto`/`content` no longer uses a width proxy — H4 is
-  fixed; it measures the item's content height.)
+- **Multi-line flexbox** — DONE (backlog H1): `flex-wrap`, `align-content`, the cross gap, and
+  `flex-flow` all ship; wrapped rows paginate between lines. Remaining flex approximation: a single
+  line taller than the page still moves whole rather than splitting its items.
 - **Grid** — named-line placement (`[name]` tokens parsed-and-ignored → auto-placement), `subgrid`
   (→ `none`), `auto-fit` empty-track collapse approximate. (The ROW-track "width-proxy" entry was
   stale: row tracks already size from laid-out item heights — see backlog I4.)

@@ -998,3 +998,25 @@ func TestDirectionInheritsUnicodeBidiDoesNot(t *testing.T) {
 		t.Errorf("child unicode-bidi = %q, want normal (NOT inherited)", cs.UnicodeBidi)
 	}
 }
+
+func TestFlexFlowShorthand(t *testing.T) {
+	// flex-flow sets flex-direction + flex-wrap in either order; an omitted component
+	// resets to its initial value per the shorthand rules.
+	cases := []struct{ decl, wantDir, wantWrap string }{
+		{"row wrap", "row", "wrap"},
+		{"wrap row", "row", "wrap"}, // order-independent
+		{"column-reverse wrap-reverse", "column-reverse", "wrap-reverse"},
+		{"column", "column", "nowrap"}, // wrap omitted => initial
+		{"wrap", "row", "wrap"},        // direction omitted => initial
+		{"bogus wrap", "row", "wrap"},  // unknown token ignored
+	}
+	for _, c := range cases {
+		sheet := Parse("p { flex-flow: " + c.decl + "; }")
+		r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+		cs := r.ComputeRoot(&fakeNode{tag: "p"})
+		if cs.FlexDirection != c.wantDir || cs.FlexWrap != c.wantWrap {
+			t.Errorf("flex-flow: %s => (%q,%q), want (%q,%q)",
+				c.decl, cs.FlexDirection, cs.FlexWrap, c.wantDir, c.wantWrap)
+		}
+	}
+}

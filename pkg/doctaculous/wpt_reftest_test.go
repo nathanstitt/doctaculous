@@ -81,6 +81,7 @@ var wptReftests = []struct {
 	{"rtl-flex-row", 240, "direction:rtl on a flex row == flex-direction:row-reverse under LTR (both resolve through reverseMain)", nil},
 	{"rtl-grid", 200, "direction:rtl on a grid mirrors its tracks == abs boxes at the mirrored rects", nil},
 	{"rtl-text-align-end", 320, "text-align start/end under direction:rtl == the mirrored physical keywords", nil},
+	{"flex-wrap", 200, "flex-wrap:wrap breaks items onto new lines == abs boxes at the wrapped rects", nil},
 }
 
 // webfontReftestLoader serves the committed Pacifico WOFF2 as web.woff2 for the

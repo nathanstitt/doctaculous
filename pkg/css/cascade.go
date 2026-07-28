@@ -873,6 +873,22 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "nowrap", "wrap", "wrap-reverse":
 			cs.FlexWrap = d.Value
 		}
+	case "flex-flow":
+		// Shorthand for flex-direction + flex-wrap, in either order; either may be
+		// omitted, in which case it resets to its initial value (row / nowrap) per the
+		// shorthand rules. An unrecognized token invalidates nothing on its own — the
+		// recognized components still apply, matching how the other shorthands here
+		// degrade.
+		dir, wrap := "row", "nowrap"
+		for _, tok := range strings.Fields(d.Value) {
+			switch tok {
+			case "row", "row-reverse", "column", "column-reverse":
+				dir = tok
+			case "nowrap", "wrap", "wrap-reverse":
+				wrap = tok
+			}
+		}
+		cs.FlexDirection, cs.FlexWrap = dir, wrap
 	case "justify-content":
 		switch d.Value {
 		case "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly",

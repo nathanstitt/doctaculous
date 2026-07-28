@@ -110,3 +110,35 @@ func TestLineSplittableFlexGrid(t *testing.T) {
 		t.Errorf("break-inside:avoid flex must not be splittable")
 	}
 }
+
+// TestSplitWrappedFlexBetweenLines: a WRAPPING flex row produces one Y band per line,
+// so it paginates between lines rather than moving whole.
+//
+// splitFlexGridForPage is geometry-driven — it groups the placed child fragments into
+// overlapping Y bands and never inspects flex-direction or flex-wrap — so multi-line
+// flex became paginatable with no change to it. This test pins that, since nothing in
+// the pagination code says "flex line" and a future refactor could easily lose it.
+func TestSplitWrappedFlexBetweenLines(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayFlex}
+	f := &Fragment{Y: 0, H: 120, Box: box}
+	// Three lines of two items each: Y bands at 0, 40, 80.
+	for line := 0; line < 3; line++ {
+		for col := 0; col < 2; col++ {
+			ib := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+			f.Children = append(f.Children, &Fragment{
+				X: float64(col) * 40, Y: float64(line) * 40, W: 40, H: 40, Box: ib,
+			})
+		}
+	}
+	// A page boundary after the second line: the first two lines stay, the third moves.
+	res := splitFlexGridForPage(f, 80)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("a wrapped flex row should split between lines; got head=%v tail=%v", res.head, res.tail)
+	}
+	if got := len(res.head.Children); got != 4 {
+		t.Errorf("head has %d items, want 4 (the first two lines)", got)
+	}
+	if got := len(res.tail.Children); got != 2 {
+		t.Errorf("tail has %d items, want 2 (the third line)", got)
+	}
+}

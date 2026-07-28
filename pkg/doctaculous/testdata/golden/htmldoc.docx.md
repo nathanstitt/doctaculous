@@ -60,7 +60,7 @@ A `clear:left` block drops below the float and spans the full width beneath it.
 
 ## Flexbox
 
-Single‑line flex containers: proportional growth, space distribution, and cross‑axis centering.
+Proportional growth, space distribution, cross‑axis centering, and multi‑line wrapping with `align-content`.
 
 #### `flex-grow` in 1 : 2 : 3 proportion
 
@@ -69,6 +69,14 @@ Single‑line flex containers: proportional growth, space distribution, and cros
 #### `align-items: center`
 
 A short and a tall item, both centered in the strip.
+
+#### `flex-wrap: wrap` with `gap`
+
+Items too wide to share one line break onto the next; the `gap` applies both between items and between the lines.
+
+#### `align-content: space-between` on a taller container
+
+With more cross space than the lines need, `align-content` distributes the surplus between them — here pinning the first and last lines to the container's edges. The default is `stretch`, which instead grows each line to absorb it.
 
 **05 / GRID**
 
