@@ -288,3 +288,58 @@ func bracketGIDs(t *testing.T, faces *layoutfont.FaceCache) (open, close uint16)
 	}
 	return gs[0].GID, gs[1].GID
 }
+
+// TestScriptFallbackShapesRTL covers the per-rune script fallback: a run whose family
+// is Latin still shapes Hebrew and Arabic, because each bundled face covers only its
+// own script and the covering face is chosen per RUNE.
+//
+// Before this existed the shaper dropped any rune its run face could not map, so RTL
+// text silently vanished — no error, no log, just missing words.
+func TestScriptFallbackShapesRTL(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+	cases := []struct {
+		name, text string
+		wantRunes  int
+	}{
+		{"hebrew", "אבג", 3},
+		{"arabic", "مرحبا", 5},
+		{"mixed", "ab אב", 5}, // 2 Latin + the space (which the Latin face maps) + 2 Hebrew
+	}
+	for _, c := range cases {
+		// The run asks for "serif", which resolves to TeX Gyre Termes — no RTL coverage.
+		glyphs := Shape(faces, []Run{{Text: c.text, Family: "serif", SizePt: 16}}, nil)
+		got := 0
+		for _, g := range glyphs {
+			if len(g.Runes) > 0 {
+				got++
+			}
+		}
+		if got != c.wantRunes {
+			t.Errorf("%s: shaped %d rune-carrying glyphs from %q, want %d — RTL runes are "+
+				"being dropped instead of falling back to a covering face", c.name, got, c.text, c.wantRunes)
+		}
+	}
+}
+
+// TestScriptFallbackUsesTheCoveringFace: a fallback glyph must carry the face it was
+// actually resolved from, not the run's. A GID is only meaningful against its own
+// face, so mixing them up would make a text-emitting backend embed the wrong program
+// or re-fetch the wrong glyph.
+func TestScriptFallbackUsesTheCoveringFace(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+	glyphs := Shape(faces, []Run{{Text: "aא", Family: "serif", SizePt: 16}}, nil)
+	if len(glyphs) != 2 {
+		t.Fatalf("shaped %d glyphs, want 2", len(glyphs))
+	}
+	latin, hebrew := glyphs[0], glyphs[1]
+	if latin.Face == nil || hebrew.Face == nil {
+		t.Fatal("both glyphs should carry a face")
+	}
+	if latin.Face == hebrew.Face {
+		t.Error("the Hebrew glyph carries the run's Latin face; it must carry the covering " +
+			"script face it was actually resolved from")
+	}
+	if len(hebrew.Runes) != 1 || hebrew.Runes[0] != 'א' {
+		t.Errorf("Hebrew glyph Runes = %q, want %q", string(hebrew.Runes), "א")
+	}
+}

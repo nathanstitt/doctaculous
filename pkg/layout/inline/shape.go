@@ -208,18 +208,34 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 					continue
 				}
 				outline, advEm, ok := face.Glyph(rn)
+				glyphFace := face
+				if !ok {
+					// The run's family has no glyph for this rune. Before dropping it,
+					// try a bundled face that covers its script: each bundled face
+					// covers one script, so Hebrew or Arabic inside an otherwise-Latin
+					// paragraph resolves here rather than vanishing.
+					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+						if o, a, gOK := fb.Glyph(rn); gOK {
+							outline, advEm, ok, glyphFace = o, a, true, fb
+						}
+					}
+				}
 				if !ok {
 					continue
 				}
 				g := base
+				g.Face = glyphFace
 				g.Outline = outline
 				g.Advance = advEm * r.SizePt
 				g.Space = rn == ' '
-				// Carry font identity ONLY for a real font glyph. When face.GID fails the
+				// Carry font identity ONLY for a real font glyph. When GID lookup fails the
 				// outline came from a synthesized marker (e.g. a bullet the face lacks) —
 				// its GID would be .notdef, so a text-emitting backend must not re-fetch by
 				// GID; clear Face so paint fills the synthesized Outline directly.
-				if gid, ok := face.GID(rn); ok {
+				// NOTE: this resolves against glyphFace, which for a fallback glyph is the
+				// covering script face, not the run's own — a GID is only meaningful
+				// against the face it came from.
+				if gid, ok := glyphFace.GID(rn); ok {
 					g.GID = gid
 					g.Runes = []rune{rn}
 				} else {

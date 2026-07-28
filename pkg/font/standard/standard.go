@@ -13,9 +13,21 @@
 //     *requested*, not required, on modification). See fonts/GUST-FONT-LICENSE.txt.
 //   - Inconsolata (monospace, Courier-like), SIL Open Font License 1.1 (OFL) —
 //     free use, modification, and redistribution. See fonts/LICENSE-Inconsolata.txt.
+//   - Noto Sans Hebrew and Noto Naskh Arabic, SIL Open Font License 1.1 (OFL),
+//     from the upstream notofonts.github.io release. Neither declares a Reserved
+//     Font Name, so they ship under their original names. See
+//     fonts/LICENSE-NotoSansHebrew.txt and fonts/LICENSE-NotoNaskhArabic.txt.
 //
 // None are GPL/AGPL. All may be embedded and shipped inside this library and any
 // binary built from it.
+//
+// # Script fallback
+//
+// The Latin substitutes cover no right-to-left script, and the two Noto faces cover
+// ONLY their own script (no Latin, and not each other's). A paragraph is one styled
+// run with one family but its text can mix scripts, so ScriptFallback resolves a
+// covering face per RUNE — without it, Hebrew and Arabic in an otherwise-Latin
+// paragraph are silently dropped by the shaper.
 //
 // # Coverage
 //
@@ -34,6 +46,12 @@ import (
 	_ "embed"
 	"strings"
 )
+
+//go:embed fonts/NotoSansHebrew-Regular.ttf
+var notoHebrewTTF []byte
+
+//go:embed fonts/NotoNaskhArabic-Regular.ttf
+var notoArabicTTF []byte
 
 //go:embed fonts/TeXGyreHeros-Regular.pfb
 var herosPFB []byte
@@ -135,7 +153,50 @@ var (
 		italic:     Substitute{Name: "Inconsolata-Regular", Data: inconsolataTTF, Kind: KindTrueType},  // no upright-italic bundled
 		boldItalic: Substitute{Name: "Inconsolata-Bold", Data: inconsolataBoldTTF, Kind: KindTrueType}, // bold-italic → bold
 	}
+	// Script families. Unlike the Latin substitutes above these are NOT
+	// general-purpose: each covers only its own script (Noto Sans Hebrew has no
+	// Latin or Arabic; Noto Naskh Arabic has no Latin or Hebrew). They exist so a
+	// run of Hebrew or Arabic inside an otherwise-Latin paragraph resolves per
+	// rune rather than being dropped — see ScriptFallback.
+	//
+	// Only a regular weight is bundled for each; bold/italic reuse it rather than
+	// synthesizing, so weighted RTL text renders upright-regular.
+	hebrew = family{
+		regular:    Substitute{Name: "NotoSansHebrew-Regular", Data: notoHebrewTTF, Kind: KindTrueType},
+		bold:       Substitute{Name: "NotoSansHebrew-Regular", Data: notoHebrewTTF, Kind: KindTrueType},
+		italic:     Substitute{Name: "NotoSansHebrew-Regular", Data: notoHebrewTTF, Kind: KindTrueType},
+		boldItalic: Substitute{Name: "NotoSansHebrew-Regular", Data: notoHebrewTTF, Kind: KindTrueType},
+	}
+	arabic = family{
+		regular:    Substitute{Name: "NotoNaskhArabic-Regular", Data: notoArabicTTF, Kind: KindTrueType},
+		bold:       Substitute{Name: "NotoNaskhArabic-Regular", Data: notoArabicTTF, Kind: KindTrueType},
+		italic:     Substitute{Name: "NotoNaskhArabic-Regular", Data: notoArabicTTF, Kind: KindTrueType},
+		boldItalic: Substitute{Name: "NotoNaskhArabic-Regular", Data: notoArabicTTF, Kind: KindTrueType},
+	}
 )
+
+// ScriptFallback returns the bundled face that covers r, for a rune the requested
+// family cannot map. It resolves ONLY the right-to-left scripts that no Latin
+// substitute covers; every other rune returns ok=false so the caller keeps its
+// existing behavior (skip the rune and log).
+//
+// This is a per-RUNE lookup on purpose. A paragraph is one styled run with one
+// family, but its text can mix scripts, and each bundled face covers exactly one —
+// so the fallback has to be decided per character, not per run.
+func ScriptFallback(r rune, bold, italic bool) (Substitute, bool) {
+	switch {
+	case r >= 0x0590 && r <= 0x05FF, // Hebrew
+		r >= 0xFB1D && r <= 0xFB4F: // Hebrew presentation forms
+		return hebrew.pick(bold, italic), true
+	case r >= 0x0600 && r <= 0x06FF, // Arabic
+		r >= 0x0750 && r <= 0x077F, // Arabic Supplement
+		r >= 0x08A0 && r <= 0x08FF, // Arabic Extended-A
+		r >= 0xFB50 && r <= 0xFDFF, // Arabic presentation forms A
+		r >= 0xFE70 && r <= 0xFEFF: // Arabic presentation forms B
+		return arabic.pick(bold, italic), true
+	}
+	return Substitute{}, false
+}
 
 // Lookup returns the bundled substitute face for a font family name, resolving
 // the 14 PDF standard names and common aliases (Arial->Helvetica, CourierNew->

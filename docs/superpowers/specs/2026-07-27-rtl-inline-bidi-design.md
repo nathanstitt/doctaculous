@@ -74,10 +74,15 @@ through the real path rather than only the unit.
 
 ## Testing, and the font constraint
 
-No bundled face (TeX Gyre Heros/Termes, Inconsolata) covers Hebrew or Arabic, and
-`Shape` drops unmappable runes — so **RTL script never reaches the reorder as
-glyphs**. Depending on a system font would break the hermeticity CLAUDE.md
-requires. The tests split accordingly:
+**UPDATE (2026-07-28):** Noto Sans Hebrew and Noto Naskh Arabic now ship bundled,
+reached by per-rune script fallback, so the end-to-end tests below were converted
+to assert on real Hebrew and Arabic. The RLO-over-Latin test is kept because it
+isolates the reordering machinery from font coverage entirely.
+
+At the time this slice landed, no bundled face covered Hebrew or Arabic and
+`Shape` dropped unmappable runes — so **RTL script never reached the reorder as
+glyphs**, and depending on a system font would have broken hermeticity. The tests
+split accordingly:
 
 - **Unit** (`pkg/layout/inline/bidi_test.go`) — real Hebrew and Arabic, asserted
   on glyph ORDER via `Runes` using synthetic glyphs. No font needed, because
@@ -110,6 +115,6 @@ Every fix in this slice is mutation-verified. Reverting the emitter to
   an RTL island inside an LTR paragraph reorders as a single level. The common
   cases — an RTL phrase in an LTR paragraph and vice versa, with bracket pairs —
   are exact.
-- **A showcase entry.** The showcase cannot demonstrate this without RTL glyph
-  coverage; section 15 from slice 2 still describes box-level mirroring
-  accurately. Revisit when a bundled RTL face lands (which slice 4 needs anyway).
+- **A showcase entry.** Deferred when this slice landed for want of RTL glyph
+  coverage. That blocker is now gone (see the update above), so the showcase can
+  and should demonstrate real reordering — worth doing alongside slice 4.
