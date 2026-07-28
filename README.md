@@ -7,15 +7,20 @@
 [![MIT](https://img.shields.io/badge/license-MIT-c8401a?labelColor=211c17)](LICENSE)
 
 A pure-Go document toolkit: parse, lay out, rasterize, extract, convert, and edit
-documents — with its own PDF interpreter and its own CSS layout engine, no CGo,
-no native bindings, no copyleft.
+documents. It brings its own PDF interpreter and its own CSS layout engine. No
+CGo, no native bindings, no copyleft.
 
 ## Read/Write thirteen formats and convert between them
 
-Every supported format is both an input **and** an output — all 156 ordered pairs
+Every supported format is both an input **and** an output. All 156 ordered pairs
 convert (a format to itself is a deliberate `ErrSameFormat`):
 
 > `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg`
+
+Plus one input-only format: **`heic`**. HEIF/HEIC stills decode through an
+in-tree pure-Go HEVC intra decoder (no libheif, no CGo), so an iPhone photo
+converts to any of the thirteen outputs and drops into HTML/EPUB `<img>`
+unchanged.
 
 ```sh
 doctaculous convert report.docx report.pdf         # typeset through the CSS engine
@@ -36,11 +41,11 @@ Image output writes one page by default, or many with
 sizes up front.
 
 **Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
-rendering specimen — one document exercising every implemented HTML/CSS/image
-slice — and [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
+rendering specimen, one document exercising every implemented HTML/CSS/image
+slice. [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
 is the PDF `doctaculous convert` typesets from it: 15 Letter pages with running
 headers, page counters, a WOFF2 script wordmark, floats, flexbox, grid, and
-tables — all selectable text.
+tables, all as selectable text.
 
 ## Quick start
 
@@ -77,13 +82,13 @@ For hosts routing uploads: `OpenReader(ctx, r)` / `OpenReaderAs` accept plain
 
 ## How it works
 
-Three routes, two seams. Everything meets at a single format-neutral CSS box
-tree and a single backend-agnostic paint interface.
+There are three routes through the code, and everything meets at a single
+format-neutral CSS box tree and a single backend-agnostic paint interface.
 
 ```text
  DOCX · HTML · Markdown · text          ┌────────────────────────┐      render.Device
  CSV/TSV · XLSX · RTF · PPTX     ─────▶ │  one CSS layout engine │ ───▶  ├─ raster    → PNG · JPEG
- EPUB · PNG/JPEG · http(s) URLs         │  (pkg/layout/css)      │       └─ pdfwrite  → PDF
+ EPUB · PNG/JPEG/HEIC · http(s) URLs    │  (pkg/layout/css)      │       └─ pdfwrite  → PDF
    frontends lower to a shared          │  blocks · inlines ·    │          (selectable text)
    box tree (pkg/layout/cssbox)         │  floats · tables ·     │
         │                               │  flex · grid ·         │
@@ -102,12 +107,12 @@ tree and a single backend-agnostic paint interface.
   encryption, the full filter set (Flate, LZW, CCITT G3/G4, DCT, JBIG2, …),
   embedded TrueType/CFF/Type1/CID fonts, blend modes, shadings, clipping,
   inline images.
-- **The reflow engine** is a from-scratch CSS 2.1+ layout engine — cascade,
+- **The reflow engine** is a from-scratch CSS 2.1+ layout engine: cascade,
   floats, absolute positioning, Appendix E stacking, both table border models,
   flexbox, grid, web fonts (WOFF1/WOFF2), CSS counters, and CSS Paged Media
-  (`@page`, margin boxes, named pages, running headers/footers). DOCX doesn't get
-  a bespoke renderer; it lowers into the same engine.
-- **The structure writers** convert by walking the box tree — so a PDF's
+  (`@page`, margin boxes, named pages, running headers/footers). DOCX lowers into
+  this same engine rather than getting a bespoke renderer.
+- **The structure writers** convert by walking the box tree, so a PDF's
   recovered headings and tables come out as real Markdown headings and pipe
   tables, and `pdf → xlsx` extracts spreadsheet-ready tables.
 
@@ -119,12 +124,12 @@ equal `html → md`), golden images, and WPT-style reftests.
 Two packages are supported public surfaces of their own, built for programs that
 edit files rather than convert them:
 
-- **`pkg/xlsx`** — a preservation-first spreadsheet editor. `Edit` + `Save` of an
+- **`pkg/xlsx`** is a preservation-first spreadsheet editor. `Edit` + `Save` of an
   untouched workbook is **part-for-part byte-identical**; edits rewrite only the
   dirty XML parts, keeping unknown elements, attributes, and prefixes intact.
   Typed cell writes, style patches (patch-not-replace), conditional formats,
   comments, pivot tables, defined names, frozen panes, merges.
-- **`pkg/docx`** — a full document model with a deterministic writer.
+- **`pkg/docx`** is a full document model with a deterministic writer.
   `Parse ∘ Write` is a fixed point over both generated and real Word/LibreOffice
   corpora: tracked changes, comments, footnotes/endnotes, numbering, sections,
   drawings, and unmodeled parts all survive the round trip.
@@ -132,8 +137,8 @@ edit files rather than convert them:
 ## Why?
 
 The high-fidelity incumbents (PDFium, MuPDF, Poppler) require CGo and/or carry
-copyleft licenses. doctaculous implements the whole stack — PDF interpretation,
-font parsing, CSS layout, rasterization, OOXML — in Go, so it cross-compiles
+copyleft licenses. doctaculous implements the whole stack in Go: PDF
+interpretation, font parsing, CSS layout, rasterization, OOXML. It cross-compiles
 freely, builds as a single static binary, and stays MIT. The few dependencies
 are pure-Go and permissively licensed (see `go.mod`); the one vendored decoder
 is Apache-2.0.
@@ -145,17 +150,21 @@ packages respectively.
 
 ## Limitations
 
-Unsupported constructs degrade gracefully — a skip and a debug log, or a typed
-error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …) — never a panic;
-one bad page can't kill a batch. The notable gaps today:
+Unsupported constructs degrade gracefully. You get a skip and a debug log, or a
+typed error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …), never a
+panic, and one bad page can't kill a batch. The notable gaps today:
 
-- **No bidi/RTL** — the largest cross-cutting gap; everything lays out LTR.
-- **CJK text extraction from PDFs** — ToUnicode CMap parsing is pending, so
+- **No bidi/RTL.** The largest cross-cutting gap; everything lays out LTR.
+- **CJK text extraction from PDFs.** ToUnicode CMap parsing is pending, so
   Type0/CID text can extract as unknown runes (it still *renders* correctly).
-- **No OCR** — scanned PDFs rasterize fine but extract no text.
+- **No OCR.** Scanned PDFs rasterize fine but extract no text.
 - Flexbox is single-line (`flex-wrap` pending); grid lacks named-line placement
   and subgrid; JPEG2000 images and PDF tiling patterns are skipped;
   password-protected PDFs open only with an empty user password.
+- **HEIC is stills-only and read-only.** HEIF image *sequences* (`msf1`) and
+  AVIF are refused with a typed error, and nothing writes HEIC. Decoding is
+  intra-only 4:2:0 at 8/10-bit (Main/Main 10/Main Still); P/B slices, range
+  extensions, and >10-bit are rejected rather than approximated.
 
 The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 
@@ -170,23 +179,24 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 | Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, and structure output |
 | API / CLI | `pkg/doctaculous`, `cmd/doctaculous` | Public entry points, format detection, the conversion matrix |
 
-The `render.Device` interface is the seam: parsing, interpretation, and layout
+The `render.Device` interface is the seam. Parsing, interpretation, and layout
 never know which backend they're painting into, so new backends bolt on without
 touching them.
 
 ## Testing
 
-The project lives or dies on its corpus:
+Fidelity work is only as good as what it's tested against, so the corpus carries
+a lot of weight here:
 
-- **Generated fixtures** — test PDFs, DOCX, and XLSX are built deterministically
+- **Generated fixtures.** Test PDFs, DOCX, and XLSX are built deterministically
   in `testdata/gen` (readable Go, not opaque blobs). Materialize them with
   `go run ./cmd/dumpfixtures`.
-- **Golden images** — rendered pages are compared to committed PNGs with a
+- **Golden images.** Rendered pages are compared to committed PNGs with a
   per-pixel tolerance; every intentional change is regenerated and eyeballed.
-- **Real-world corpus** — `testdata/external/` holds third-party PDFs, DOCX, and
+- **Real-world corpus.** `testdata/external/` holds third-party PDFs, DOCX, and
   XLSX files that must parse, render, convert, and (for the editors) round-trip
   byte-identically.
-- **Round-trip parity** — structure writers are pinned so converting through an
+- **Round-trip parity.** Structure writers are pinned so converting through an
   intermediate format equals converting directly.
 
 ```sh
@@ -206,7 +216,7 @@ isolated and never shipped with the library:
   [xiaoqidun/jbig2](https://github.com/xiaoqidun/jbig2) (pure-Go JBIG2 decoding,
   **Apache-2.0**, MIT-compatible) with its upstream `LICENSE` and `NOTICE`.
 - [`testdata/external/`](testdata/external/) holds third-party **test inputs
-  only** under their own licenses — PDFs (CC-BY-SA-4.0, from
+  only** under their own licenses: PDFs (CC-BY-SA-4.0, from
   [py-pdf/sample-files](https://github.com/py-pdf/sample-files)) and DOCX/XLSX
   files (Apache-2.0 / MPL-2.0 / MIT, from Apache POI, LibreOffice, and
   Open-XML-SDK). Each directory's README carries per-file provenance.
