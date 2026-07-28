@@ -159,7 +159,8 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## F. HTML/CSS — tables
 
-- ☐ **F1. RTL/`direction`** (column order) — *covered by A1.*
+- ☑ **F1. RTL/`direction`** (column order) — *DONE via A1.2.* Tables mirror their solved column x-offsets;
+  `buildCollapsedBorders` gained the matching index→physical-side flip. The "laying out LTR" log is gone.
 - ☑ **F2. Six background layers** — *DONE.* Column-group, column, row-group, and row backgrounds now paint
   behind the cells in CSS 17.5.1 order (table → col-groups → cols → row-groups → rows → cells). `gridCol` carries
   its `<col>` box; `tableGrid` retains col-group/row-group spans; `backgroundLayers` emits a background fragment
@@ -327,7 +328,10 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
 - ☐ **N3. Honoring a genuinely MID-BLOCK forced break on a nested block** (edge breaks now propagate). *Medium* (depends on N1).
 - ☐ **N4. Per-page float distribution.** *Medium.*
 - ☐ **N5. Per-page bottom-anchored `fixed`** (per-page `resolveAbsolute` height). *Medium.*
-- ☐ **N6. CSS paged media: `@page` size/margins/named pages + running headers/footers.** *Large.*
+- ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16
+  margin boxes, running headers/footers with page counters, `marks`/`bleed`, and `string-set`/`string()` are
+  all in (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and
+  `2026-06-30-html-paged-media-design.md`. No code change.
 
 ---
 
