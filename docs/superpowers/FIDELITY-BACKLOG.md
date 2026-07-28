@@ -195,8 +195,16 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   `TestFlexAlignCenterUsesDefiniteHeight` (mutation-verified); the `flex-align-center` golden + WPT reftest
   reference corrected to the browser-accurate centered offsets (eyeballed); the column-stretch unit test
   updated (an auto-width column item correctly stretches to the container width).
-- ☐ **H4. column `flex-basis: auto`/`content` height** (max-content width proxy today). *Deferred (Medium)* —
-  same vertical-content-measurement limitation as I4/D3.
+- ☑ **H4. column `flex-basis: auto`/`content` height** — *DONE.* A column container's main axis is VERTICAL,
+  but `flexBaseSize` returned `measureMaxContent` (a WIDTH), comparing a horizontal measure against a vertical
+  budget. Now `mainContentSize` dispatches on the axis: a row still uses max-content width, a column uses the
+  new `measureColumnMainContent`, which lays the item out at its cross width and reads back `frag.H` — the same
+  two-phase pattern grid already uses for row tracks (see I4). `usedMinMaxMain`'s `min:auto` path had the same
+  bug and takes the same fix.
+  **Found alongside:** `layoutFlexItemColumn` laid an auto-width column item out at its unclamped max-content
+  width, so a paragraph of prose overflowed its container by ~2.5x (497pt inside a 200pt container). The cross
+  width is now clamped to the container's inner cross size. Both halves are mutation-verified independently —
+  reverting either fails a different test.
 - ☐ **H5. `flex-grow`/`shrink` cross-axis gap factors** (revisit with multi-line). *Small (with H1).*
 - ☑ **H6. column-container `align-items: baseline`** — *CONFIRMED CORRECT (no fix).* CSS Flexbox §9.4.3:
   baseline self-alignment in a column flex container resolves to `flex-start` (there is no cross-axis text
@@ -211,8 +219,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   start line). *Deferred (Small)* — a documented, non-overlapping simplification (`grid_place.go` scans the
   locked line from 0 rather than continuing the sparse cursor); niche, intentional.
 - ☑ **I3. RTL/`direction`** — *DONE via A1.2* (track mirroring + logical `justify-items`/`justify-self`).
-- ☐ **I4. row-track content-height width-proxy** (`measureMaxContent` returns WIDTH for a ROW track). *Medium*
-  (shared root cause with H4, F-rowspan — vertical content sizing).
+- ☑ **I4. row-track content-height width-proxy** — *ALREADY CORRECT (entry was stale).* Verified while fixing
+  H4: `contributions` (`grid.go`) is COLUMN-only and correctly uses min/max-content WIDTHS; row tracks size
+  from `rowContributions`, built from each item's laid-out `frag.H` after phase 5a. A probe confirms auto row
+  tracks take real wrapped-text heights (24.6/73.7pt), not width proxies. This two-phase shape is the pattern
+  H4's fix copies. No code change.
 - ☑ **I5. conservative baseline-group extra** — *DONE.* `alignBaselineGroup` now returns the EXACT extra cross
   size (`max(bottom after shift) − max(bottom before shift)` over participants), not the largest single shift —
   so a row/line is no longer over-expanded when the most-shifted item doesn't reach lowest. Tests:

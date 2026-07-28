@@ -133,6 +133,12 @@ bullet's design doc is in `docs/superpowers/specs/`:
   `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
   reordered — RTL script renders in logical glyph order.**
   `2026-07-27-rtl-box-layout-design.md`.
+- **Column flex vertical content sizing** (`pkg/layout/css/flex.go`): a column container's main axis is
+  vertical, so `flex-basis: auto`/`content` (and the `min:auto` automatic minimum) now resolve to the
+  item's content HEIGHT — measured by laying it out at its cross width and reading back the fragment
+  height (`measureColumnMainContent`), the same two-phase pattern grid uses for row tracks — instead of
+  a max-content WIDTH compared against a vertical budget. An auto-width column item's cross width is
+  also clamped to the container, fixing a ~2.5x overflow for prose. Backlog H4.
 - **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` as static native widgets (classic chrome, non-interactive).
   `2026-06-29-html-forms-design.md`.
