@@ -193,6 +193,20 @@ func mirrorGlyph(g *Glyph) {
 	// its rendered form is mirrored, and /ToUnicode must recover what the author wrote.
 }
 
+// isBidiControlRune reports whether r is one of the invisible bidi formatting
+// characters: the marks (LRM/RLM/ALM), the embedding/override set, and the isolates.
+// They carry no ink but decide ordering, so shaping keeps them as zero-width glyphs.
+func isBidiControlRune(r rune) bool {
+	switch r {
+	case 0x200E, 0x200F, // LRM, RLM
+		0x061C,                                 // ALM
+		0x202A, 0x202B, 0x202C, 0x202D, 0x202E, // LRE, RLE, PDF, LRO, RLO
+		0x2066, 0x2067, 0x2068, 0x2069: // LRI, RLI, FSI, PDI
+		return true
+	}
+	return false
+}
+
 // hasBidiControl reports whether text contains any character that could introduce
 // right-to-left ordering: a strong RTL character (Hebrew, Arabic, Syriac, Thaana,
 // N'Ko, Samaritan, and the RTL presentation forms) or an explicit bidi control.
