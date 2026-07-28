@@ -167,7 +167,49 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		}
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
 		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
-		for _, rn := range r.Text {
+		// Complex-script segments (Arabic and friends) are shaped as whole runs through
+		// harfbuzz rather than rune-at-a-time, since a letter's form depends on its
+		// neighbours. runes carries the run's text once so segments can be sliced from
+		// it; skipTo lets the per-rune loop below jump past a segment already emitted.
+		runes := []rune(r.Text)
+		skipTo := 0
+		for ri := 0; ri < len(runes); ri++ {
+			rn := runes[ri]
+			if ri < skipTo {
+				continue
+			}
+			if needsComplexShaping(rn) {
+				end := ri + 1
+				for end < len(runes) && needsComplexShaping(runes[end]) {
+					end++
+				}
+				seg := runes[ri:end]
+				// The run's own face may not cover the script (a Latin family with an
+				// Arabic phrase in it); fall back to the covering bundled face first, so
+				// shaping runs against the face that actually has the glyphs.
+				shapeFace := face
+				if _, _, ok := face.Glyph(rn); !ok {
+					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+						shapeFace = fb
+					}
+				}
+				if shaped, ok := shapeComplex(shapeFace, seg); ok {
+					for _, sg := range shaped {
+						g := base
+						g.Face = shapeFace
+						g.GID = sg.gid
+						g.Outline = shapeFace.Outline(sg.gid)
+						g.Advance = sg.advance * r.SizePt
+						g.Runes = sg.runes
+						out = append(out, g)
+						lineCol += g.Advance
+					}
+					skipTo = end
+					continue
+				}
+				// Shaping unavailable (no layout tables, or it produced nothing): fall
+				// through to the per-rune path, which still renders isolated forms.
+			}
 			switch {
 			case rn == '\n' && preserveNL:
 				// A preserved newline becomes a hard break and re-bases the tab column.

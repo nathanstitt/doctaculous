@@ -471,12 +471,12 @@ newline is kept.</p>
   </section>
 
   <!-- ===================== 15 · RTL / BIDIRECTIONAL ===================== -->
-  <!-- NOTE: this section deliberately uses LATIN text. No bundled font (TeX Gyre
-       Heros/Termes, Inconsolata) carries Hebrew or Arabic coverage, so real
-       right-to-left script would rasterize as .notdef boxes and lock a meaningless
-       golden. What this section demonstrates is BOX-level mirroring, which is what
-       has shipped: reordering of glyphs WITHIN a line is a later slice, so a
-       right-to-left script would still render in logical order here. -->
+  <!-- The box-mirroring demos below use LATIN text on purpose: mirroring a table's
+       column order is easier to SEE when the glyphs themselves are familiar. The
+       real-script demos at the end of the section exercise the other half — inline
+       reordering (UAX#9 L2) and Arabic contextual joining — through the bundled
+       Noto Sans Hebrew and Noto Naskh Arabic faces, which the shaper reaches by
+       per-rune script fallback. -->
   <section class="section break">
     <span class="kicker">15 / DIRECTION</span>
     <h2>RTL &amp; Bidirectional Layout</h2>
@@ -515,17 +515,43 @@ newline is kept.</p>
       <code>1fr&nbsp;2fr</code> ratio is preserved, but the single&#8209;width track
       is now on the right:</p>
     <div dir="rtl" style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin: 10px 0;">
-      <div style="background: #efe9d8; border: 1px solid #8a8272; padding: 8px;">1fr (right)</div>
-      <div style="background: #efe9d8; border: 1px solid #8a8272; padding: 8px;">2fr (left)</div>
+      <div style="background: #efe9d8; border: 1px solid #8a8272; padding: 8px;">1fr &mdash; right track</div>
+      <div style="background: #efe9d8; border: 1px solid #8a8272; padding: 8px;">2fr &mdash; left track</div>
     </div>
 
     <p>Finally, <code>text-align</code> takes the logical keywords. Both paragraphs
       below use <code>text-align: end</code>; only their <code>direction</code>
       differs, so <em>end</em> resolves to opposite edges:</p>
     <p style="direction: ltr; text-align: end; background: #f4f1e8; padding: 6px;">
-      LTR: <code>end</code> is the right edge.</p>
+      LTR &mdash; <code>end</code> resolves to the right edge</p>
     <p style="direction: rtl; text-align: end; background: #f4f1e8; padding: 6px;">
-      RTL: <code>end</code> is the left edge.</p>
+      RTL &mdash; <code>end</code> resolves to the left edge</p>
+
+  </section>
+
+  <!-- Real-script demos get their own page: the Arabic sample is set at 20px and the
+       preceding section already fills its page, so keeping them together pushed the
+       last line under the footer. -->
+  <section class="section break">
+    <span class="kicker">15 / DIRECTION</span>
+    <h3>Real script</h3>
+    <p>Everything above mirrors <em>boxes</em>. Text inside a line is reordered
+      separately, per UAX&#8239;#9: shaping and line&#8209;breaking run in logical
+      order, and each line is reordered to visual order once the break is chosen.
+      The Hebrew below is authored left&#8209;to&#8209;right in the source and reads
+      right&#8209;to&#8209;left on the page:</p>
+    <p dir="rtl" style="font-size: 18px; background: #f4f1e8; padding: 8px;">שלום עולם</p>
+
+    <p>A right&#8209;to&#8209;left phrase inside an otherwise left&#8209;to&#8209;right
+      paragraph reorders in place, and the Latin around it does not move &mdash; the
+      bracket pairs mirror too (rule&nbsp;L4):</p>
+    <p style="background: #f4f1e8; padding: 8px;">The greeting (שלום) sits inline.</p>
+
+    <p>Arabic additionally needs <em>contextual</em> shaping: a letter takes a
+      different form depending on whether it joins to its neighbours, and some pairs
+      fuse into one glyph. These are shaped through the font&#8217;s OpenType tables,
+      so the letters connect rather than standing as isolated forms:</p>
+    <p dir="rtl" style="font-size: 20px; background: #f4f1e8; padding: 8px;">مرحبا بالعالم</p>
 
   </section>
 

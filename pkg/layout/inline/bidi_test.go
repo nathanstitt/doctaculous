@@ -343,3 +343,107 @@ func TestScriptFallbackUsesTheCoveringFace(t *testing.T) {
 		t.Errorf("Hebrew glyph Runes = %q, want %q", string(hebrew.Runes), "א")
 	}
 }
+
+// TestArabicContextualShaping is the core slice-4 assertion: an Arabic letter takes a
+// different glyph depending on whether it joins to its neighbours, so the same
+// character shaped in context must NOT produce the isolated-form glyph.
+//
+// Rune-at-a-time shaping (the pre-harfbuzz path, still used for simple scripts) can
+// only ever emit isolated forms, which is what made Arabic render as disconnected
+// letters.
+func TestArabicContextualShaping(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+
+	// The same letter alone vs. inside a word.
+	alone := Shape(faces, []Run{{Text: "ح", Family: "serif", SizePt: 16}}, nil)
+	inWord := Shape(faces, []Run{{Text: "مرحبا", Family: "serif", SizePt: 16}}, nil)
+	if len(alone) != 1 {
+		t.Fatalf("isolated letter shaped to %d glyphs, want 1", len(alone))
+	}
+	var medial *Glyph
+	for i := range inWord {
+		if len(inWord[i].Runes) == 1 && inWord[i].Runes[0] == 'ح' {
+			medial = &inWord[i]
+			break
+		}
+	}
+	if medial == nil {
+		t.Fatal("could not find the ح glyph in the shaped word")
+	}
+	if medial.GID == alone[0].GID {
+		t.Errorf("ح has GID %d both alone and mid-word; contextual shaping is not being "+
+			"applied (the letter should take its medial form)", medial.GID)
+	}
+	if medial.Outline == nil {
+		t.Error("the contextual glyph has no outline; it would paint as nothing")
+	}
+}
+
+// TestArabicClusterAttribution: every source rune must be attributed to exactly one
+// glyph. Harfbuzz may map several runes to one glyph (a ligature) or one rune to
+// several (a base plus marks), so only the FIRST glyph of a cluster carries its runes
+// — otherwise a backend mapping glyphs back to text (the PDF writer's /ToUnicode)
+// would duplicate or drop characters.
+func TestArabicClusterAttribution(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+	for _, text := range []string{"مرحبا", "الله", "ب", "لا"} {
+		glyphs := Shape(faces, []Run{{Text: text, Family: "serif", SizePt: 16}}, nil)
+		var got []rune
+		carriers := 0
+		for _, g := range glyphs {
+			got = append(got, g.Runes...)
+			if len(g.Runes) > 0 {
+				carriers++
+			}
+		}
+		if string(got) != text {
+			t.Errorf("shaping %q attributed runes %q; every source rune must appear "+
+				"exactly once, in order", text, string(got))
+		}
+		// The runes must be SPREAD across glyphs, not all dumped on one. A single
+		// carrier for a multi-letter word means the cluster extents collapsed — which
+		// is exactly what happens if clusterRunes assumes an order the shaper is not
+		// actually producing. The concatenation check above cannot see that.
+		if n := len([]rune(text)); n > 1 && carriers < 2 {
+			t.Errorf("shaping %q put every rune on %d glyph(s); cluster attribution has "+
+				"collapsed (each cluster should carry its own runes)", text, carriers)
+		}
+	}
+}
+
+// TestArabicShapingKeepsLogicalOrder pins the direction decision. Harfbuzz emits
+// VISUAL order for RTL by default; the shaper forces LTR so the whole pipeline stays
+// logical up to the single L2 reorder in MakeVisualLine. Shaping in visual order here
+// would be reversed a second time and come out backwards.
+func TestArabicShapingKeepsLogicalOrder(t *testing.T) {
+	faces := layoutfont.NewFaceCache()
+	glyphs := Shape(faces, []Run{{Text: "مرحبا", Family: "serif", SizePt: 16}}, nil)
+	var got []rune
+	for _, g := range glyphs {
+		got = append(got, g.Runes...)
+	}
+	if string(got) != "مرحبا" {
+		t.Errorf("shaped runes = %q, want the LOGICAL source order %q — harfbuzz must be "+
+			"driven left-to-right so the L2 pass is the only reorder", string(got), "مرحبا")
+	}
+}
+
+// TestHebrewIsNotComplexShaped: Hebrew is non-joining, so it stays on the cheap
+// per-rune path. This keeps the complex path scoped to scripts that need it.
+func TestHebrewIsNotComplexShaped(t *testing.T) {
+	for _, r := range []rune{'א', 'ב', 'ג'} {
+		if needsComplexShaping(r) {
+			t.Errorf("%q should not need complex shaping (Hebrew is non-joining)", r)
+		}
+	}
+	for _, r := range []rune{'م', 'ر', 'ح'} {
+		if !needsComplexShaping(r) {
+			t.Errorf("%q should need complex shaping (Arabic joins)", r)
+		}
+	}
+	for _, r := range []rune{'a', 'Z', '1', ' '} {
+		if needsComplexShaping(r) {
+			t.Errorf("%q should not need complex shaping", r)
+		}
+	}
+}

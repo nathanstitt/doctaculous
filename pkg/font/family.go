@@ -2,6 +2,7 @@ package font
 
 import (
 	"github.com/benoitkugler/textlayout/fonts"
+	"github.com/benoitkugler/textlayout/fonts/truetype"
 
 	"github.com/nathanstitt/doctaculous/pkg/font/standard"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -172,6 +173,24 @@ func (f *Face) gidForRune(r rune) (fonts.GID, bool) {
 // program (the PDF writer then falls back to drawing outlines).
 func (f *Face) ProgramBytes() (data []byte, kind ProgramKind) {
 	return f.progData, f.progKind
+}
+
+// OpenTypeFont returns the parsed SFNT this face was built from, for callers that
+// need its OpenType layout tables (GSUB/GPOS) — complex-script shaping above all.
+// ok is false for a face whose program is not SFNT-based (a classic Type1 face such
+// as the bundled TeX Gyre substitutes), which carries no layout tables at all.
+//
+// The returned value satisfies harfbuzz.FaceOpentype directly, so a shaper can build
+// a harfbuzz font from it with no adapter. It is deliberately typed as the upstream
+// *truetype.Font rather than an interface of our own: this package already depends on
+// textlayout for parsing, so a wrapper would add a layer with no behavior. The font
+// is read-only after parsing and safe for concurrent use.
+func (f *Face) OpenTypeFont() (*truetype.Font, bool) {
+	tt, ok := f.prog.gp.(ttProgram)
+	if !ok {
+		return nil, false
+	}
+	return tt.f, true
 }
 
 // UnitsPerEm returns the face's units-per-em (always > 0).

@@ -136,11 +136,12 @@ each degrades gracefully and is documented in the relevant spec):
 - **RTL / `direction` / bidi** — in progress, sequenced FIRST as five slices (see backlog A1).
   Landed: slice 1 (cascade + plumbing), slice 2 (box-level mirroring — tables, flex, and grid honor
   `direction`, retiring all three "laying out LTR" logs), and slice 3 (inline bidi reordering — UAX#9
-  L2 per line + L4 bracket mirroring, so Hebrew reads right-to-left). Still open: **Arabic shaping**
-  (`Glyph.Runes` is one-rune-per-glyph, so there is no cluster model for contextual forms — Arabic
-  reorders correctly but renders as disconnected isolated forms; needs harfbuzz) and visual→logical
-  PDF extraction. Noto Sans Hebrew + Noto Naskh Arabic (OFL) now ship bundled, resolved by per-rune
-  script fallback, so RTL script renders and is exercised end-to-end.
+  L2 per line + L4 bracket mirroring, so Hebrew reads right-to-left), and slice 4 (Arabic contextual
+  shaping through harfbuzz, so letters connect). Noto Sans Hebrew + Noto Naskh Arabic (OFL) ship
+  bundled, resolved by per-rune script fallback. Still open: **visual→logical PDF extraction** (RTL
+  PDFs currently extract in visual order, i.e. reversed). Known shaping limits: GPOS vertical
+  offsets are not applied (marks sit on the baseline), and `font-feature-settings` is not plumbed
+  through.
 - **Multi-line flexbox** — `flex-wrap: wrap`/`wrap-reverse` + `align-content` (currently single-line
   `nowrap` with overflow). (Column `flex-basis: auto`/`content` no longer uses a width proxy — H4 is
   fixed; it measures the item's content height.)

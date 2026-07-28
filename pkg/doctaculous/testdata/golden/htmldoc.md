@@ -315,15 +315,31 @@ Three
 
 A grid mirrors its tracks the same way — the `1fr 2fr` ratio is preserved, but the single‑width track is now on the right:
 
-1fr (right)
+1fr — right track
 
-2fr (left)
+2fr — left track
 
 Finally, `text-align` takes the logical keywords. Both paragraphs below use `text-align: end`; only their `direction` differs, so _end_ resolves to opposite edges:
 
-LTR: `end` is the right edge.
+LTR — `end` resolves to the right edge
 
-RTL: `end` is the left edge.
+RTL — `end` resolves to the left edge
+
+**15 / DIRECTION**
+
+### Real script
+
+Everything above mirrors _boxes_. Text inside a line is reordered separately, per UAX #9: shaping and line‑breaking run in logical order, and each line is reordered to visual order once the break is chosen. The Hebrew below is authored left‑to‑right in the source and reads right‑to‑left on the page:
+
+שלום עולם
+
+A right‑to‑left phrase inside an otherwise left‑to‑right paragraph reorders in place, and the Latin around it does not move — the bracket pairs mirror too (rule L4):
+
+The greeting (שלום) sits inline.
+
+Arabic additionally needs _contextual_ shaping: a letter takes a different form depending on whether it joins to its neighbours, and some pairs fuse into one glyph. These are shaped through the font’s OpenType tables, so the letters connect rather than standing as isolated forms:
+
+مرحبا بالعالم
 
 **16 / LANDSCAPE**
 
