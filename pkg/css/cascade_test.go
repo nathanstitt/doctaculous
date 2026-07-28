@@ -22,8 +22,17 @@ func TestInitialComputedStyle(t *testing.T) {
 	if cs.LineHeight.Unit != UnitAuto {
 		t.Errorf("initial line-height unit = %v, want UnitAuto (normal)", cs.LineHeight.Unit)
 	}
-	if cs.TextAlign != "left" {
-		t.Errorf("initial text-align = %q, want left", cs.TextAlign)
+	// CSS Text: the initial value is the direction-relative "start", not physical
+	// "left". Every consumer resolves an unrecognized value to left, so this is
+	// byte-identical for LTR content (see TestTextAlignStartResolvesPhysical).
+	if cs.TextAlign != "start" {
+		t.Errorf("initial text-align = %q, want start", cs.TextAlign)
+	}
+	if cs.Direction != "ltr" {
+		t.Errorf("initial direction = %q, want ltr", cs.Direction)
+	}
+	if cs.UnicodeBidi != "normal" {
+		t.Errorf("initial unicode-bidi = %q, want normal", cs.UnicodeBidi)
 	}
 	if cs.Width.Unit != UnitAuto || cs.Height.Unit != UnitAuto {
 		t.Errorf("initial width/height = %v/%v, want auto/auto", cs.Width.Unit, cs.Height.Unit)
@@ -924,5 +933,68 @@ func TestWhiteSpaceFlags(t *testing.T) {
 			t.Errorf("WhiteSpaceFlags(%q) = (%v,%v,%v), want (%v,%v,%v)",
 				c.ws, cs, nl, w, c.cSpaces, c.preNL, c.wrap)
 		}
+	}
+}
+
+func TestTextAlignStartEndParse(t *testing.T) {
+	// CSS Text: start/end are direction-relative keywords; match-parent collapses
+	// to start (see the parser comment). Unknown values are dropped, leaving the
+	// inherited/initial value in place.
+	cases := []struct{ decl, want string }{
+		{"start", "start"},
+		{"end", "end"},
+		{"left", "left"},
+		{"right", "right"},
+		{"center", "center"},
+		{"justify", "justify"},
+		{"match-parent", "start"},
+		{"bogus", "start"}, // dropped => initial
+	}
+	for _, c := range cases {
+		sheet := Parse("p { text-align: " + c.decl + "; }")
+		r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+		cs := r.ComputeRoot(&fakeNode{tag: "p"})
+		if cs.TextAlign != c.want {
+			t.Errorf("text-align: %s => %q, want %q", c.decl, cs.TextAlign, c.want)
+		}
+	}
+}
+
+func TestUnicodeBidiParse(t *testing.T) {
+	for _, v := range []string{"normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext"} {
+		sheet := Parse("p { unicode-bidi: " + v + "; }")
+		r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+		if cs := r.ComputeRoot(&fakeNode{tag: "p"}); cs.UnicodeBidi != v {
+			t.Errorf("unicode-bidi: %s => %q, want %q", v, cs.UnicodeBidi, v)
+		}
+	}
+	sheet := Parse("p { unicode-bidi: bogus; }")
+	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+	if cs := r.ComputeRoot(&fakeNode{tag: "p"}); cs.UnicodeBidi != "normal" {
+		t.Errorf("unicode-bidi: bogus => %q, want normal (dropped)", cs.UnicodeBidi)
+	}
+}
+
+// TestDirectionInheritsUnicodeBidiDoesNot pins the one asymmetry that is easy to
+// get wrong by copy-paste: `direction` is inherited, `unicode-bidi` is NOT (CSS
+// Writing Modes). They are declared adjacently in ComputedStyle, so a stray
+// `cs.UnicodeBidi = parent.UnicodeBidi` in inheritFrom would go unnoticed.
+func TestDirectionInheritsUnicodeBidiDoesNot(t *testing.T) {
+	src := `div { direction: rtl; unicode-bidi: bidi-override; }`
+	r := NewResolver([]OriginSheet{{Sheet: Parse(src), Origin: OriginAuthor}}, nil)
+
+	parent := &fakeNode{tag: "div"}
+	child := &fakeNode{tag: "span", parent: parent}
+	ps := r.ComputeRoot(parent)
+	cs := r.Compute(child, ps)
+
+	if ps.Direction != "rtl" || ps.UnicodeBidi != "bidi-override" {
+		t.Fatalf("parent = (%q,%q), want (rtl,bidi-override)", ps.Direction, ps.UnicodeBidi)
+	}
+	if cs.Direction != "rtl" {
+		t.Errorf("child direction = %q, want inherited rtl", cs.Direction)
+	}
+	if cs.UnicodeBidi != "normal" {
+		t.Errorf("child unicode-bidi = %q, want normal (NOT inherited)", cs.UnicodeBidi)
 	}
 }

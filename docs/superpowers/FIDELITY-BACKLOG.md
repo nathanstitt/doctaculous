@@ -12,12 +12,29 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## A. Cross-cutting (highest leverage — unblocks several modes at once)
 
-- ☐ **A1. RTL / bidi (`direction`)** — *Large.* The engine has **no** `direction`/bidi support anywhere. It is
-  the **sole** deferral in tables, flexbox, AND grid (each logs "laying out LTR"), and also affects
-  inline/block text order. One sub-project unblocks all three modes + general inline. **Touches:** the inline
-  core (`pkg/layout/inline`), `pkg/layout/css` block/inline/table/flex/grid, `pkg/css` `direction`/`unicode-bidi`.
-  Sequence this either first (so the per-mode RTL items below become free) or last (after the cheaper per-mode
-  fixes). Decision needed.
+- ◐ **A1. RTL / bidi (`direction`)** — *Large.* **Sequencing DECIDED: first**, so the per-mode RTL items
+  (H2/I3 + the table deferral) become free rather than being written LTR-only and reopened. Split into five
+  independently shippable slices:
+  - ☑ **A1.1 cascade + plumbing** — *DONE.* `text-align: start|end|match-parent` (initial value moved from
+    physical `left` to `start` — verified byte-identical: all 8 `TextAlign` consumers default to left, and the
+    one that looks like a passthrough, `pptxwrite.alignOf`, is allowlist-guarded and now pinned by a test);
+    `unicode-bidi` parsed + stored (NOT inherited, unlike `direction`); the HTML `dir` attribute via
+    presentational hints (the selector engine has no attribute selectors, so `[dir=rtl]` UA rules are not
+    expressible — hint rank is equivalent: above UA, below author); `bdi`/`bdo` UA isolation rules;
+    `effectiveDirection` + direction-aware `mapTextAlign`; RTL text-indent edge. Zero golden churn (asserted by
+    running the full suite without `-update`). `dir=auto` degrades + logs (needs first-strong detection).
+    **The anonymous-box trap** — `BoxAnonBlock` has a zero-value Style so `Direction == ""`, not `"ltr"` — is
+    why `effectiveDirection` exists; never read `b.Style.Direction` directly. Mutation-verified regression test.
+    `2026-07-27-rtl-cascade-design.md`.
+  - ☐ **A1.2 box-level RTL** — table column mirroring (plus the collapsed-border index→side swap in
+    `buildCollapsedBorders`, which mixes grid-index logic with geometry and would otherwise break silently),
+    flex `reverseMain` + column cross-axis, grid inline axis + logical `start`/`end`. Retires all three
+    "laying out LTR" logs. Showcase entry lands here (Latin text — no bundled font has Hebrew/Arabic coverage).
+  - ☐ **A1.3 inline bidi reordering** — *the real "Large".* `golang.org/x/text/unicode/bidi` (already in the
+    module graph as indirect; full UAX#9 incl. bracket pairs) for level resolution, logical-vs-visual split in
+    `Line.Glyphs`, L2 per-line reorder, mirroring. Gets Hebrew fully correct.
+  - ☐ **A1.4 Arabic shaping** — needs a cluster model (`Glyph.Runes` is hardcoded 1:1 today) + harfbuzz.
+  - ☐ **A1.5 PDF extraction visual→logical** — independent; RTL PDFs currently extract in visual order.
 
 ---
 

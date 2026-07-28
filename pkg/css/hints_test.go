@@ -154,3 +154,68 @@ func TestNoHintsForPlainElement(t *testing.T) {
 		t.Errorf("plain div hints = %v, want none", ds)
 	}
 }
+
+func TestHintDir(t *testing.T) {
+	// dir is a GLOBAL attribute: it applies to any element, not a tag allowlist.
+	// Per HTML §15.3.3 it also establishes a bidi isolate.
+	for _, tag := range []string{"div", "p", "span", "td", "section"} {
+		cs := hintStyle(&fakeNode{tag: tag, attrs: map[string]string{"dir": "rtl"}}, "")
+		if cs.Direction != "rtl" {
+			t.Errorf("<%s dir=rtl> direction = %q, want rtl", tag, cs.Direction)
+		}
+		if cs.UnicodeBidi != "isolate" {
+			t.Errorf("<%s dir=rtl> unicode-bidi = %q, want isolate", tag, cs.UnicodeBidi)
+		}
+	}
+	// dir=ltr is equally a hint (it must override an inherited rtl).
+	if cs := hintStyle(&fakeNode{tag: "div", attrs: map[string]string{"dir": "ltr"}}, ""); cs.Direction != "ltr" {
+		t.Errorf("dir=ltr direction = %q, want ltr", cs.Direction)
+	}
+	// <bdo dir> overrides rather than isolates.
+	cs := hintStyle(&fakeNode{tag: "bdo", attrs: map[string]string{"dir": "rtl"}}, "")
+	if cs.UnicodeBidi != "isolate-override" {
+		t.Errorf("<bdo dir=rtl> unicode-bidi = %q, want isolate-override", cs.UnicodeBidi)
+	}
+	// A bogus value is dropped, leaving the initial direction.
+	if cs := hintStyle(&fakeNode{tag: "div", attrs: map[string]string{"dir": "sideways"}}, ""); cs.Direction != "ltr" {
+		t.Errorf("dir=sideways direction = %q, want ltr (dropped)", cs.Direction)
+	}
+}
+
+// TestHintDirLosesToAuthor pins the cascade rank that justifies routing dir through
+// presentational hints instead of the UA sheet (this engine has no attribute
+// selectors). A hint outranks UA and loses to any author rule.
+func TestHintDirLosesToAuthor(t *testing.T) {
+	div := &fakeNode{tag: "div", attrs: map[string]string{"dir": "rtl"}}
+	if cs := hintStyle(div, `div { direction: ltr; }`); cs.Direction != "ltr" {
+		t.Errorf("author direction:ltr vs dir=rtl => %q, want ltr (author wins)", cs.Direction)
+	}
+}
+
+// TestHintDirAutoDegrades: dir=auto needs first-strong-character detection, which is
+// not implemented. It must contribute no direction hint (leaving the inherited value)
+// and be reported, not silently ignored.
+func TestHintDirAutoDegrades(t *testing.T) {
+	n := &fakeNode{tag: "div", attrs: map[string]string{"dir": "auto"}}
+	for _, d := range presentationalHints(n) {
+		if d.Property == "direction" {
+			t.Errorf("dir=auto emitted a direction hint (%q); want none", d.Value)
+		}
+	}
+	if !dirAutoRequested(n) {
+		t.Error("dirAutoRequested(dir=auto) = false, want true (the log gate)")
+	}
+	var logged []string
+	r := NewResolver(nil, func(f string, a ...any) { logged = append(logged, f) })
+	r.ComputeRoot(n)
+	if len(logged) == 0 {
+		t.Error("dir=auto logged nothing; the degradation must be visible")
+	}
+	// A normal dir does not log.
+	logged = nil
+	r2 := NewResolver(nil, func(f string, a ...any) { logged = append(logged, f) })
+	r2.ComputeRoot(&fakeNode{tag: "div", attrs: map[string]string{"dir": "rtl"}})
+	if len(logged) != 0 {
+		t.Errorf("dir=rtl logged %v, want silence", logged)
+	}
+}

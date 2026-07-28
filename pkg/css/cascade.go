@@ -69,7 +69,11 @@ type ComputedStyle struct {
 	LineHeight    Length // UnitAuto = "normal"
 	LineHeightMin Length // "at least" line-height floor (DOCX lineRule=atLeast). Zero = no floor. Inherited.
 
-	TextAlign string // "left" | "right" | "center" | "justify"
+	// TextAlign is "start" (initial) | "end" | "left" | "right" | "center" |
+	// "justify". "start"/"end" are direction-relative and resolve against the used
+	// Direction at layout time (see effectiveTextAlign in pkg/layout/css); the
+	// physical keywords never flip. Inherited.
+	TextAlign string
 
 	TextIndent Length // first-line indent (signed; negative = hanging). Zero length = none. Inherited.
 
@@ -228,9 +232,20 @@ type ComputedStyle struct {
 	// EmptyCells: "show" (initial) | "hide". Inherited. In separate-borders mode, an
 	// empty cell with empty-cells:hide paints no border or background.
 	EmptyCells string
-	// Direction: "ltr" (initial) | "rtl". Inherited. Parsed but NOT acted on (RTL
-	// deferred); a non-ltr value on a table is logged by the layout engine.
+	// Direction: "ltr" (initial) | "rtl". Inherited. Resolves direction-relative
+	// text-align ("start"/"end") and the RTL text-indent edge. Box-level mirroring
+	// (table column order, flex main axis, grid inline axis) is logged as
+	// unsupported by the layout engine; reordering of text WITHIN a line is not
+	// implemented either, so a right-to-left script renders in logical glyph order.
 	Direction string
+	// UnicodeBidi: "normal" (initial) | "embed" | "isolate" | "bidi-override" |
+	// "isolate-override" | "plaintext". NOT inherited (per CSS Writing Modes) —
+	// unlike Direction directly above, so do not add it to inheritFrom.
+	//
+	// Stored only: the value is parsed and carried so authored documents keep it,
+	// but nothing acts on it until inline bidi reordering lands (the embedding
+	// levels it controls have no meaning without the reordering pass).
+	UnicodeBidi string
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -315,6 +330,12 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	for _, d := range presentationalHints(n) {
 		normal = append(normal, matched{decl: d, origin: OriginPresentationalHint, order: order})
 		order++
+	}
+	if dirAutoRequested(n) {
+		// Resolving dir=auto means finding the first strong-directional character in
+		// the element's text, which needs the bidi character database. Degrade to the
+		// inherited/initial direction and say so rather than guessing.
+		r.logf("css: dir=\"auto\" on <%s> not supported; using the inherited direction", n.Tag())
 	}
 
 	// normalRank/importantRank place each origin on the unified cascade ladder so
@@ -453,7 +474,7 @@ func initialStyle() ComputedStyle {
 		FontFamily:         "serif",
 		FontSizePt:         16,
 		LineHeight:         Length{Unit: UnitAuto},
-		TextAlign:          "left",
+		TextAlign:          "start",
 		TextDecorationLine: "none",
 		TextTransform:      "none",
 		WhiteSpace:         "normal",
@@ -508,6 +529,7 @@ func initialStyle() ComputedStyle {
 		CaptionSide:    "top",
 		EmptyCells:     "show",
 		Direction:      "ltr",
+		UnicodeBidi:    "normal",
 		// BorderSpacingH/V default to 0 (zero value).
 		Widows:  2, // CSS initial widows
 		Orphans: 2, // CSS initial orphans
@@ -583,8 +605,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		}
 	case "text-align":
 		switch d.Value {
-		case "left", "right", "center", "justify":
+		case "left", "right", "center", "justify", "start", "end":
 			cs.TextAlign = d.Value
+		case "match-parent":
+			// CSS Text: match-parent resolves against the PARENT's direction, which
+			// the cascade has already folded into the inherited value. Treating it as
+			// "start" (the initial) yields the same used value for every case the
+			// engine can express, since a child's direction equals its parent's
+			// unless the child itself sets `direction` — and then start/end are
+			// resolved against the child anyway.
+			cs.TextAlign = "start"
 		}
 	case "text-indent":
 		// A single length token (px/pt/em/%); may be signed (negative = hanging).
@@ -737,6 +767,11 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "ltr", "rtl":
 			cs.Direction = d.Value
+		}
+	case "unicode-bidi":
+		switch d.Value {
+		case "normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext":
+			cs.UnicodeBidi = d.Value
 		}
 	case "float":
 		switch d.Value {
