@@ -282,9 +282,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	_ = bandOriginY // reserved for future use (float interactions)
 	_ = fc          // reserved for future use (float interactions)
 	g := buildGrid(b)
-	if g.table.Style.Direction == "rtl" {
-		e.logf("css layout: RTL tables not supported; laying out LTR")
-	}
+	rtl := effectiveDirection(g.table) == "rtl"
 	if len(g.rows) == 0 || len(g.cols) == 0 {
 		return interior{contentHeight: 0}
 	}
@@ -302,6 +300,20 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		x += g.cols[ci].width + g.spacingH
 	}
 	tableContentW := x // span of the column grid: Σ column widths + (ncols+1) border-spacing gaps
+
+	// RTL: the inline-start edge is the RIGHT edge, so column 0 sits rightmost and
+	// the grid runs leftward. Mirroring the solved x-offsets about the grid span
+	// keeps every downstream consumer (cell placement, colsRect/backgroundLayers)
+	// geometry-driven and unchanged — they read cols[ci].x and never assume the
+	// column index and the x order agree.
+	//
+	// NOTE: the COLUMN order mirrors; text inside each cell does not (inline bidi
+	// reordering is a later slice).
+	if rtl {
+		for ci := range g.cols {
+			g.cols[ci].x = tableContentW - g.cols[ci].x - g.cols[ci].width
+		}
+	}
 
 	// Caption: a block laid out at the table content width, placed above (top) or below.
 	var captionFrag *Fragment
@@ -472,7 +484,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 	// collapsed grid lines (stored on the table fragment) don't double-paint.
 	var collapsedBorders []layout.BorderItem
 	if g.collapse {
-		collapsedBorders = g.buildCollapsedBorders(g.cellAt)
+		collapsedBorders = g.buildCollapsedBorders(g.cellAt, rtl)
 		// In collapse mode the resolved grid edges replace per-cell borders: clear each
 		// cell fragment's own border so it does not double-paint.
 		for i := 0; i < len(g.cells); i++ {

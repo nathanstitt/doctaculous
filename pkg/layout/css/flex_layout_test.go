@@ -2,6 +2,7 @@ package css
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
@@ -614,30 +615,80 @@ func TestFlexBaselineAlignmentCoincidesFirstBaseline(t *testing.T) {
 	}
 }
 
-func TestFlexRTLDegradesToLTR(t *testing.T) {
-	// direction:rtl on a flex row is a documented deferral: the engine lays out LTR
-	// (logged) rather than reversing the main axis. Two distinct-width items (w60, w40)
-	// with no grow/shrink must be placed LEFT-to-right: first item at x0, second to its
-	// right — NOT RTL-reversed (which would put the first item at the right edge).
-	mk := func(w float64) *cssbox.Box {
-		st := gcss.ComputedStyle{
-			Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
-			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
-			MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
-			FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
-		}
-		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+// rtlFlexItem builds a fixed-size, non-flexing flex item.
+func rtlFlexItem(w float64) *cssbox.Box {
+	st := gcss.ComputedStyle{
+		Width: gcss.Length{Value: w, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 40, Unit: gcss.UnitPx},
+		MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+		MinWidth: gcss.Length{Value: 0, Unit: gcss.UnitPx},
+		FlexGrow: 0, FlexShrink: 0, FlexBasis: gcss.Length{Unit: gcss.UnitAuto}, AlignSelf: "auto",
 	}
-	frags := flexFrags(t, flexRow(gcss.ComputedStyle{Direction: "rtl"}, mk(60), mk(40)), 300)
+	return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC, Style: st}
+}
+
+// TestFlexRTLRowReversesMainAxis: on a row container the main axis IS the inline axis,
+// so direction:rtl packs items from the right edge inward. Two distinct-width items
+// (60, 40) in a 300-wide container: item 0 occupies [240,300), item 1 [200,240).
+func TestFlexRTLRowReversesMainAxis(t *testing.T) {
+	frags := flexFrags(t, flexRow(gcss.ComputedStyle{Direction: "rtl"}, rtlFlexItem(60), rtlFlexItem(40)), 300)
 	if len(frags) != 2 {
 		t.Fatalf("want 2 frags, got %d", len(frags))
 	}
-	// LTR fallback: first item (w60) at x0, second (w40) at x60 — packed left, not reversed.
-	if frags[0].X != 0 || frags[0].W != 60 {
-		t.Errorf("RTL row should fall back to LTR: first item at x0 w60; got x%v w%v", frags[0].X, frags[0].W)
+	if frags[0].X != 240 || frags[0].W != 60 {
+		t.Errorf("RTL row: first item should sit flush right at x240 w60; got x%v w%v", frags[0].X, frags[0].W)
 	}
-	if frags[1].X != 60 || frags[1].W != 40 {
-		t.Errorf("RTL row should fall back to LTR: second item at x60 w40; got x%v w%v", frags[1].X, frags[1].W)
+	if frags[1].X != 200 || frags[1].W != 40 {
+		t.Errorf("RTL row: second item should sit at x200 w40 (leftward of the first); got x%v w%v", frags[1].X, frags[1].W)
+	}
+}
+
+// TestFlexRTLComposesWithRowReverse is the double-negative check. RTL flips the main
+// axis and so does row-reverse, so applying BOTH must cancel and reproduce plain LTR
+// row order. A sign error in axisFor (e.g. assigning rather than XOR-ing reverseMain)
+// passes the single-flip test above but fails here.
+func TestFlexRTLComposesWithRowReverse(t *testing.T) {
+	ltr := flexFrags(t, flexRow(gcss.ComputedStyle{}, rtlFlexItem(60), rtlFlexItem(40)), 300)
+	both := flexFrags(t, flexRow(gcss.ComputedStyle{Direction: "rtl", FlexDirection: "row-reverse"},
+		rtlFlexItem(60), rtlFlexItem(40)), 300)
+	if len(ltr) != 2 || len(both) != 2 {
+		t.Fatalf("want 2 frags each, got ltr=%d both=%d", len(ltr), len(both))
+	}
+	for i := range ltr {
+		if ltr[i].X != both[i].X || ltr[i].W != both[i].W {
+			t.Errorf("item %d: rtl+row-reverse = x%v w%v, want the LTR-row placement x%v w%v (two flips must cancel)",
+				i, both[i].X, both[i].W, ltr[i].X, ltr[i].W)
+		}
+	}
+}
+
+// TestFlexRTLRowReverseIsLTROrder: the single-flip counterpart — row-reverse alone
+// under LTR must NOT equal the same content under RTL+row-reverse (guards against a
+// change that drops the direction input entirely and makes both tests trivially pass).
+func TestFlexRTLRowReverseIsLTROrder(t *testing.T) {
+	rev := flexFrags(t, flexRow(gcss.ComputedStyle{FlexDirection: "row-reverse"}, rtlFlexItem(60), rtlFlexItem(40)), 300)
+	if len(rev) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(rev))
+	}
+	// row-reverse under LTR packs from the right: same as RTL plain row.
+	if rev[0].X != 240 {
+		t.Errorf("row-reverse under LTR: first item at x%v, want x240", rev[0].X)
+	}
+}
+
+// TestFlexRTLNoLongerLogs replaces the old degradation assertion.
+func TestFlexRTLNoLongerLogs(t *testing.T) {
+	var logged []string
+	logf := func(f string, _ ...any) { logged = append(logged, f) }
+	row := flexRow(gcss.ComputedStyle{Direction: "rtl"}, rtlFlexItem(60), rtlFlexItem(40))
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{row}}
+	if frag := New(nil, nil, logf).layoutTree(context.Background(), body, 300); frag == nil {
+		t.Fatal("RTL flex row should produce a fragment")
+	}
+	for _, m := range logged {
+		if strings.Contains(m, "RTL") {
+			t.Errorf("RTL flex row still logs a degradation: %q", m)
+		}
 	}
 }
 
@@ -828,5 +879,67 @@ func TestFlexAlignCenterUsesDefiniteHeight(t *testing.T) {
 	// (100-20)/2 = 40 within the container.
 	if small.Y < 35 || small.Y > 45 {
 		t.Errorf("20px item Y = %.1f, want ~40 (centered in the 100px row); the H3 bug gives ~10", small.Y)
+	}
+}
+
+// TestFlexRTLColumnMirrorsCrossAxis: on a COLUMN container the main axis is vertical
+// and direction-independent, but the CROSS axis is the inline one — so direction:rtl
+// swaps cross-start and cross-end. align-items:flex-start must pin items to the RIGHT
+// edge, and flex-end to the left. This is the case the old `&& !ax.vertical` log guard
+// skipped entirely, so it used to be silently wrong rather than logged.
+func TestFlexRTLColumnMirrorsCrossAxis(t *testing.T) {
+	// Narrow items in a wide container so the cross offset is visible.
+	mk := func(w float64) *cssbox.Box { return rtlFlexItem(w) }
+
+	col := func(dir, align string) []*Fragment {
+		return flexFrags(t, flexRow(gcss.ComputedStyle{
+			FlexDirection: "column", Direction: dir, AlignItems: align,
+		}, mk(60), mk(40)), 300)
+	}
+
+	// LTR baseline: flex-start pins to the left (x=0).
+	ltrStart := col("ltr", "flex-start")
+	if len(ltrStart) != 2 {
+		t.Fatalf("want 2 frags, got %d", len(ltrStart))
+	}
+	if ltrStart[0].X != 0 || ltrStart[1].X != 0 {
+		t.Fatalf("LTR column flex-start should pin left; got x%v and x%v", ltrStart[0].X, ltrStart[1].X)
+	}
+
+	// RTL: flex-start pins to the RIGHT — each item's right edge at the container's.
+	rtlStart := col("rtl", "flex-start")
+	if got, want := rtlStart[0].X+rtlStart[0].W, 300.0; got != want {
+		t.Errorf("RTL column flex-start: item 0 right edge = %v, want %v (pinned to cross-start = right)", got, want)
+	}
+	if got, want := rtlStart[1].X+rtlStart[1].W, 300.0; got != want {
+		t.Errorf("RTL column flex-start: item 1 right edge = %v, want %v", got, want)
+	}
+
+	// RTL flex-end pins to the LEFT.
+	rtlEnd := col("rtl", "flex-end")
+	if rtlEnd[0].X != 0 || rtlEnd[1].X != 0 {
+		t.Errorf("RTL column flex-end should pin left; got x%v and x%v", rtlEnd[0].X, rtlEnd[1].X)
+	}
+
+	// center is direction-invariant.
+	ltrC, rtlC := col("ltr", "center"), col("rtl", "center")
+	for i := range ltrC {
+		if ltrC[i].X != rtlC[i].X {
+			t.Errorf("item %d: center should be direction-invariant; ltr x%v vs rtl x%v", i, ltrC[i].X, rtlC[i].X)
+		}
+	}
+}
+
+// TestFlexCrossOffsetAcceptsBoxAlignmentSpellings: the cascade parses the CSS Box
+// Alignment keywords `start`/`end` for align-items/align-self, but crossOffset used to
+// switch only on the Flexbox `flex-start`/`flex-end` spellings — so `align-items:end`
+// silently fell through to flex-start. Pre-existing bug, fixed alongside RTL.
+func TestFlexCrossOffsetAcceptsBoxAlignmentSpellings(t *testing.T) {
+	ltr := flexAxis{}
+	if got, want := crossOffset("end", 100, 40, ltr), crossOffset("flex-end", 100, 40, ltr); got != want {
+		t.Errorf("crossOffset(\"end\") = %v, want %v (same as flex-end)", got, want)
+	}
+	if got, want := crossOffset("start", 100, 40, ltr), crossOffset("flex-start", 100, 40, ltr); got != want {
+		t.Errorf("crossOffset(\"start\") = %v, want %v (same as flex-start)", got, want)
 	}
 }

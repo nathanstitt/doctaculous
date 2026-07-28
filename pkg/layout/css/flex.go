@@ -198,18 +198,34 @@ func resolveFlexibleLengths(items []flexItemSizing, innerMain, totalGap float64)
 type flexAxis struct {
 	vertical    bool // true for column / column-reverse (main axis is vertical)
 	reverseMain bool // true for row-reverse / column-reverse
+	// reverseCross flips the cross axis. It is set only for an RTL COLUMN container,
+	// where the cross axis is horizontal and therefore direction-sensitive: cross-start
+	// is the right edge, so align-items/align-self start and end swap.
+	reverseCross bool
 }
 
-func axisFor(dir string) flexAxis {
+// axisFor resolves the flex axes from flex-direction and the used `direction`.
+//
+// For a ROW container the main axis is the inline axis, so RTL simply reverses it —
+// which is exactly what reverseMain already expresses. RTL therefore composes with
+// row-reverse by XOR: `direction:rtl` + `row-reverse` lays out in LTR-row order (two
+// flips cancel). justify-content needs no special handling because justifyOffsets
+// works in abstract main-axis terms and the placement loop applies the reverse
+// formula uniformly, so flex-start/flex-end/space-around/space-evenly all flip with it.
+//
+// For a COLUMN container the main axis is vertical and unaffected by direction; the
+// CROSS axis is the inline one, so RTL flips that instead (reverseCross).
+func axisFor(dir, direction string) flexAxis {
+	rtl := direction == "rtl"
 	switch dir {
 	case "column":
-		return flexAxis{vertical: true}
+		return flexAxis{vertical: true, reverseCross: rtl}
 	case "column-reverse":
-		return flexAxis{vertical: true, reverseMain: true}
+		return flexAxis{vertical: true, reverseMain: true, reverseCross: rtl}
 	case "row-reverse":
-		return flexAxis{reverseMain: true}
+		return flexAxis{reverseMain: !rtl}
 	default: // row
-		return flexAxis{}
+		return flexAxis{reverseMain: rtl}
 	}
 }
 
@@ -229,10 +245,7 @@ func (a flexAxis) rect(originMain, originCross, mainPos, crossPos, mainSize, cro
 func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
 	_ = bandOriginY
 	_ = fc
-	ax := axisFor(b.Style.FlexDirection)
-	if b.Style.Direction == "rtl" && !ax.vertical {
-		e.logf("css layout: RTL flex rows not supported; laying out LTR")
-	}
+	ax := axisFor(b.Style.FlexDirection, effectiveDirection(b))
 	if b.Style.FlexWrap == "wrap" || b.Style.FlexWrap == "wrap-reverse" {
 		e.logf("css layout: flex-wrap:%s not supported; laying out single-line (nowrap)", b.Style.FlexWrap)
 	}
@@ -336,7 +349,7 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 			frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, usedMain[i], lineCross)
 		}
 
-		crossPos := crossOffset(align, lineCross, itemCross)
+		crossPos := crossOffset(align, lineCross, itemCross, ax)
 		pos := mainPos
 		if ax.reverseMain {
 			pos = innerMain - mainPos - usedMain[i]
@@ -400,15 +413,28 @@ func resolvedAlign(container, item *cssbox.Box) string {
 // crossOffset returns the item's cross-axis position within a line of size lineCross for
 // an item of outer cross size itemCross under alignment a (stretch is handled separately
 // before this is called, by which point itemCross == lineCross).
-func crossOffset(a string, lineCross, itemCross float64) float64 {
+//
+// ax.reverseCross flips the cross-start edge, which happens for an RTL column container
+// (there the cross axis is the inline one). The abstract cross offset is measured from
+// cross-start, so flipping means measuring from the other end.
+//
+// The CSS Box Alignment spellings "start"/"end" are accepted alongside the Flexbox
+// "flex-start"/"flex-end": the cascade parses both for align-items/align-self, and
+// without these cases "align-items: end" would silently fall through to flex-start.
+func crossOffset(a string, lineCross, itemCross float64, ax flexAxis) float64 {
+	off := 0.0
 	switch a {
-	case "flex-end":
-		return lineCross - itemCross
+	case "flex-end", "end":
+		off = lineCross - itemCross
 	case "center":
-		return (lineCross - itemCross) / 2
-	default: // flex-start, stretch; baseline items start here (shifted by the post-pass for rows)
-		return 0
+		off = (lineCross - itemCross) / 2
+	default: // flex-start, start, stretch; baseline items start here (shifted by the row post-pass)
+		off = 0
 	}
+	if ax.reverseCross {
+		return lineCross - itemCross - off
+	}
+	return off
 }
 
 // itemHasDefiniteCross reports whether the item has a definite cross size (so stretch

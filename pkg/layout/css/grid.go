@@ -26,9 +26,7 @@ import (
 func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
 	_ = bandOriginY
 	_ = fc
-	if b.Style.Direction == "rtl" {
-		e.logf("css layout: RTL grids not supported; laying out LTR")
-	}
+	rtl := effectiveDirection(b) == "rtl"
 
 	items := gridItemBoxes(b) // in-flow children (fixup already wrapped inline runs)
 	if len(items) == 0 {
@@ -137,14 +135,37 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 	colPos := trackPositionsDist(colSizes, colGap, colLead, colBetween)
 	rowPos := trackPositionsDist(rowSizes, rowGap, rowLead, rowBetween)
 
+	// RTL: the inline axis runs right-to-left, so column track 0 is the RIGHTMOST.
+	// Mirroring the solved positions about the content width flips the track ORDER and
+	// carries the justify-content distribution with it (the leading/between offsets are
+	// already baked into colPos), so neither contentOffsets nor trackPositionsDist needs
+	// a direction-aware variant.
+	//
+	// Each position is the track's LEFT edge, so the mirror subtracts the track's own
+	// size as well — otherwise every track would land one track-width too far right.
+	// Item alignment within an area flips separately, in the justify switch below; both
+	// flips are required and mirroring only one produces subtly wrong offsets.
+	if rtl {
+		for i := range colPos {
+			colPos[i] = contentW - colPos[i] - colSizes[i]
+		}
+	}
+
 	// Phase 5b/6: resolve per-item alignment on both axes and emit fragments.
 	// Page-space origin: x is absolute (contentX); y is local content-top-0 frame
 	// (layoutBlock shifts the interior down afterward) — exactly like layoutFlex.
 	for i, it := range items {
-		areaLeft := colPos[areas[i].colStart] + contentX
 		areaTop := rowPos[areas[i].rowStart] // local frame
 		aw := spanSize(colSizes, areas[i].colStart, areas[i].colSpan(), colGap)
 		ah := spanSize(rowSizes, areas[i].rowStart, areas[i].rowSpan(), rowGap)
+
+		// The area's LEFT edge. Under RTL the start column of a span is its RIGHTMOST
+		// track, so colPos[colStart] is the area's right edge and the left edge is that
+		// track's right edge minus the full span width.
+		areaLeft := colPos[areas[i].colStart] + contentX
+		if rtl {
+			areaLeft = colPos[areas[i].colStart] + colSizes[areas[i].colStart] - aw + contentX
+		}
 
 		// Resolve per-item alignment on each axis.
 		ji := resolveGridAlign(b.Style.JustifyItems, it.Style.JustifySelf)
@@ -176,9 +197,21 @@ func (e *Engine) layoutGrid(ctx context.Context, b *cssbox.Box, contentW, conten
 			itemUsedW = frags[i].W
 		}
 
-		// inline axis offset within the area.
+		// Inline-axis offset within the area. justify-items/justify-self start and end
+		// are LOGICAL: under RTL, start is the area's right edge. This flip is separate
+		// from the track mirroring above — both are needed, and applying only one leaves
+		// items correctly placed in the wrong track or vice versa.
+		jiEff := ji
+		if rtl {
+			switch ji {
+			case "start":
+				jiEff = "end"
+			case "end":
+				jiEff = "start"
+			}
+		}
 		var itemX float64
-		switch ji {
+		switch jiEff {
 		case "end":
 			itemX = areaLeft + aw - itemUsedW
 		case "center":

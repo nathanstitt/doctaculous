@@ -3,6 +3,8 @@ package css
 import (
 	"context"
 	"image/color"
+	"sort"
+	"strings"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
@@ -665,24 +667,100 @@ func TestCaptionSideOnCaptionElementHonored(t *testing.T) {
 	}
 }
 
-func TestRTLTableDegradesGracefully(t *testing.T) {
-	var logged bool
-	logf := func(string, ...any) { logged = true }
+// rtlTableCellXs lays out a fixed table in the given direction and returns the cell
+// fragment Xs in DOCUMENT order (cell 0 first), so a caller can assert where each
+// logical column landed.
+func rtlTableCellXs(t *testing.T, dir string, widths ...float64) []float64 {
+	t.Helper()
+	cells := make([]*cssbox.Box, len(widths))
+	for i, w := range widths {
+		cells[i] = fixedCell(w, 20)
+	}
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: cells}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style:    gcss.ComputedStyle{TableLayout: "fixed", Direction: dir, Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	frag := New(nil, nil, nil).layoutTree(context.Background(), body, 300)
+	if frag == nil {
+		t.Fatal("nil fragment")
+	}
+	var found []*Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		if f.H == 20 && f.W > 0 && f.W < 300 {
+			found = append(found, f)
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	if len(found) != len(widths) {
+		t.Fatalf("want %d cell fragments, got %d", len(widths), len(found))
+	}
+	out := make([]float64, len(found))
+	for i, f := range found {
+		out[i] = f.X
+	}
+	return out
+}
+
+// TestRTLTableMirrorsColumns: under direction:rtl the inline-start edge is the RIGHT
+// edge, so the FIRST cell in document order lays out rightmost and the grid runs
+// leftward. Unequal widths make a true mirror distinguishable from a plain index
+// reversal (which would put the 40-wide cell 0 into the 80-wide slot's x).
+func TestRTLTableMirrorsColumns(t *testing.T) {
+	ltr := rtlTableCellXs(t, "ltr", 40, 60, 80)
+	rtl := rtlTableCellXs(t, "rtl", 40, 60, 80)
+
+	if !(ltr[0] < ltr[1] && ltr[1] < ltr[2]) {
+		t.Errorf("LTR cell Xs = %v, want ascending (cell 0 leftmost)", ltr)
+	}
+	if !(rtl[0] > rtl[1] && rtl[1] > rtl[2]) {
+		t.Errorf("RTL cell Xs = %v, want descending (cell 0 rightmost)", rtl)
+	}
+	// The mirror is exact: each cell's RTL right edge is the grid span minus its LTR
+	// left edge.
+	span := ltr[2] + 80
+	for i, w := range []float64{40, 60, 80} {
+		wantRight, gotRight := span-ltr[i], rtl[i]+w
+		if diff := gotRight - wantRight; diff > 0.01 || diff < -0.01 {
+			t.Errorf("cell %d RTL right edge = %v, want %v (mirror of LTR left %v about span %v)",
+				i, gotRight, wantRight, ltr[i], span)
+		}
+	}
+}
+
+// TestRTLTableNoLongerLogs: this replaces TestRTLTableDegradesGracefully, which
+// asserted the "laying out LTR" log. Kept as an explicit assertion so a regression
+// that reintroduces the LTR fallback fails loudly instead of silently passing.
+func TestRTLTableNoLongerLogs(t *testing.T) {
+	var logged []string
+	logf := func(f string, _ ...any) { logged = append(logged, f) }
 	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
 		Children: []*cssbox.Box{fixedCell(50, 20), fixedCell(50, 20)}}
 	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
 		Children: []*cssbox.Box{row}}
 	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
-		Style: gcss.ComputedStyle{TableLayout: "fixed", Direction: "rtl", Width: gcss.Length{Unit: gcss.UnitAuto}}, Children: []*cssbox.Box{rg}}
+		Style:    gcss.ComputedStyle{TableLayout: "fixed", Direction: "rtl", Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{rg}}
 	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
 		Children: []*cssbox.Box{tbl}}
-	e := New(nil, nil, logf)
-	frag := e.layoutTree(context.Background(), body, 200)
-	if frag == nil {
-		t.Fatal("RTL table should still produce a fragment")
+	if frag := New(nil, nil, logf).layoutTree(context.Background(), body, 200); frag == nil {
+		t.Fatal("RTL table should produce a fragment")
 	}
-	if !logged {
-		t.Error("RTL table should log a degradation message")
+	for _, m := range logged {
+		if strings.Contains(m, "RTL") {
+			t.Errorf("RTL table still logs a degradation: %q", m)
+		}
 	}
 }
 
@@ -981,5 +1059,112 @@ func TestFixedPercentColumnBasisExcludesSpacing(t *testing.T) {
 	// 50% of (200 - 30 spacing) = 85 (± a couple px for borders).
 	if first.W < 82 || first.W > 88 {
 		t.Errorf("fixed %% column W = %.1f, want ~85 (50%% of contentW-spacing); the F6 bug gives ~100", first.W)
+	}
+}
+
+// collapsedStripsFor lays out a 3-column collapse:collapse table with DISTINCT
+// per-column border widths in the given direction, and returns every resolved border
+// strip as (side, x, width) sorted by x.
+func collapsedStripsFor(t *testing.T, dir string) []struct {
+	side layout.EdgeSide
+	x, w float64
+} {
+	t.Helper()
+	mkCell := func(bw float64) *cssbox.Box {
+		lw := gcss.Length{Value: bw, Unit: gcss.UnitPx}
+		st := gcss.ComputedStyle{
+			Width: gcss.Length{Value: 40, Unit: gcss.UnitPx}, Height: gcss.Length{Value: 20, Unit: gcss.UnitPx},
+			MaxWidth: gcss.Length{Unit: gcss.UnitAuto}, MaxHeight: gcss.Length{Unit: gcss.UnitAuto},
+			BorderTopWidth: lw, BorderRightWidth: lw, BorderBottomWidth: lw, BorderLeftWidth: lw,
+			BorderTopStyle: "solid", BorderRightStyle: "solid", BorderBottomStyle: "solid", BorderLeftStyle: "solid",
+		}
+		return &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell, Formatting: cssbox.BlockFC, Style: st}
+	}
+	// Distinct widths so the conflict resolution at each grid line is identifiable:
+	// a wrong neighbor lookup picks a different winner.
+	row := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRow, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{mkCell(2), mkCell(6), mkCell(4)}}
+	rg := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableRowGroup, Formatting: cssbox.TableFC,
+		Children: []*cssbox.Box{row}}
+	tbl := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable, Formatting: cssbox.TableFC,
+		Style: gcss.ComputedStyle{TableLayout: "fixed", BorderCollapse: "collapse", Direction: dir,
+			Width: gcss.Length{Unit: gcss.UnitAuto}},
+		Children: []*cssbox.Box{rg}}
+	body := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock, Formatting: cssbox.BlockFC,
+		Children: []*cssbox.Box{tbl}}
+	frag := New(nil, nil, nil).layoutTree(context.Background(), body, 300)
+
+	var out []struct {
+		side layout.EdgeSide
+		x, w float64
+	}
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if f == nil {
+			return
+		}
+		for _, s := range f.Collapsed {
+			if s.Side == layout.EdgeLeft || s.Side == layout.EdgeRight {
+				out = append(out, struct {
+					side layout.EdgeSide
+					x, w float64
+				}{s.Side, s.XPt, s.WPt})
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(frag)
+	sort.Slice(out, func(i, j int) bool { return out[i].x < out[j].x })
+	return out
+}
+
+// TestRTLCollapsedBordersMirror is the regression test for the collapsed-border trap.
+//
+// buildCollapsedBorders mixes GRID-INDEX reasoning ("column 0 resolves against the
+// table's left edge", "the left neighbor is col-1") with PHYSICAL geometry (the strip
+// is drawn at the fragment's x). Those agree only under LTR. When the column grid is
+// mirrored, column 0 sits at the LARGEST x — so without the index→side flip, the
+// table's left border is resolved onto the rightmost cell and every interior grid
+// line picks the wrong neighbor to resolve against. Nothing logs; the borders are
+// just wrong.
+//
+// The oracle: a mirrored table's vertical strips must be the mirror image of the LTR
+// table's — same widths, mirrored positions.
+func TestRTLCollapsedBordersMirror(t *testing.T) {
+	ltr := collapsedStripsFor(t, "ltr")
+	rtl := collapsedStripsFor(t, "rtl")
+
+	if len(ltr) == 0 {
+		t.Fatal("no collapsed vertical strips produced; test is not exercising the path")
+	}
+	if len(ltr) != len(rtl) {
+		t.Fatalf("strip count differs: ltr=%d rtl=%d (the mirror must not add or drop edges)", len(ltr), len(rtl))
+	}
+
+	// Compare grid-line CENTERS, not strip left edges: each strip is drawn centered on
+	// its grid line (x = line - width/2), so a wider strip starts further left. The
+	// centers are the geometry that must mirror; the widths ride along.
+	center := func(s struct {
+		side layout.EdgeSide
+		x, w float64
+	}) float64 {
+		return s.x + s.w/2
+	}
+	lo, hi := center(ltr[0]), center(ltr[len(ltr)-1])
+	for i := range ltr {
+		// Walking LTR left-to-right and RTL right-to-left must see the same widths: a
+		// wrong neighbor lookup resolves a grid line against the wrong cell and picks a
+		// different winner (the widths here are distinct precisely to catch that).
+		j := len(rtl) - 1 - i
+		if diff := ltr[i].w - rtl[j].w; diff > 0.01 || diff < -0.01 {
+			t.Errorf("grid line %d: LTR width %v (center %v), mirrored RTL width %v (center %v) — conflict resolution picked a different winner",
+				i, ltr[i].w, center(ltr[i]), rtl[j].w, center(rtl[j]))
+		}
+		if want, got := lo+hi-center(ltr[i]), center(rtl[j]); want-got > 0.01 || got-want > 0.01 {
+			t.Errorf("grid line %d: RTL center = %v, want %v (mirror of LTR center %v about [%v,%v])",
+				i, got, want, center(ltr[i]), lo, hi)
+		}
 	}
 }
