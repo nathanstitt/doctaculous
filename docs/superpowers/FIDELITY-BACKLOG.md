@@ -34,8 +34,8 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
     cancel), and a column flips the CROSS axis, the case the old `&& !ax.vertical` guard skipped entirely.
     Grid needs TWO independent flips (track positions AND logical `justify-items`/`justify-self`);
     mutation-verified independently — removing either fails a different test. Also fixed `crossOffset`
-    ignoring the Box Alignment `start`/`end` spellings. Showcase §15 (Latin text: no bundled font has
-    Hebrew/Arabic coverage) + 4 WPT reftests, `rtl-flex-row` being the strongest oracle (rtl row ≡
+    ignoring the Box Alignment `start`/`end` spellings. Showcase §15 (Latin text — real script was added
+    later, in A1.4, once RTL faces were bundled) + 4 WPT reftests, `rtl-flex-row` being the strongest oracle (rtl row ≡
     row-reverse LTR through independent inputs). `2026-07-27-rtl-box-layout-design.md`.
   - ☑ **A1.3 inline bidi reordering** — *DONE.* Shaping and breaking stay LOGICAL; `MakeVisualLine` applies
     rule L2 per line AFTER the break is chosen (L2 reorders within a line, and line membership is only known
@@ -51,7 +51,16 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
     discarding the author's directional intent. They now survive as zero-width, face-less glyphs.
     Nested embeddings deeper than one level collapse (x/text exposes runs, not per-rune levels); the common
     cases are exact. `2026-07-27-rtl-inline-bidi-design.md`.
-  - ☐ **A1.4 Arabic shaping** — needs a cluster model (`Glyph.Runes` is hardcoded 1:1 today) + harfbuzz.
+  - ☑ **A1.4 Arabic shaping** — *DONE.* Joining scripts (Arabic/Syriac/Thaana; Hebrew is non-joining
+    and stays per-rune) shape as whole segments through harfbuzz, resolving GSUB for contextual forms
+    and ligatures. `Face.OpenTypeFont` exposes the SFNT, which satisfies `harfbuzz.FaceOpentype`
+    directly — no adapter. **Shaping is forced LTR**: harfbuzz emits VISUAL order for RTL by default,
+    which the L2 pass would then reverse a second time. Cluster attribution gives each cluster's runes
+    to exactly one glyph so `/ToUnicode` stays exact; the first version assumed ascending clusters
+    (true only because of the LTR force) and mutation testing caught both that AND the fact that the
+    test could not see it — it only checked the concatenation, which still matched.
+    Remaining: GPOS vertical offsets unapplied (marks sit on the baseline), one face per segment,
+    no `font-feature-settings`. `2026-07-28-rtl-arabic-shaping-design.md`.
   - ☐ **A1.5 PDF extraction visual→logical** — independent; RTL PDFs currently extract in visual order.
 
 ---
