@@ -24,7 +24,10 @@ inventory of what has shipped, and "Status & roadmap" at the bottom for what is 
 - **Pure Go. No CGo, no native bindings, no WASM engines.** No PDFium / MuPDF / Poppler.
 - **MIT licensed.** Every dependency must be MIT/BSD/Apache and pure Go. No GPL/AGPL.
 - Approved deps: `golang.org/x/image/*` (BSD), `github.com/srwiley/rasterx` (BSD),
-  `github.com/benoitkugler/textlayout` (font parsing), `golang.org/x/net/html` (HTML parse),
+  `github.com/benoitkugler/textlayout` (font parsing, plus its pure-Go harfbuzz port for Arabic
+  contextual shaping and `unicodedata` for bracket mirroring), `golang.org/x/net/html` (HTML parse),
+  `golang.org/x/text` (BSD — `unicode/bidi`, a complete UAX#9 incl. bracket pairs; promoted from
+  indirect when inline bidi reordering landed, no new module),
   `github.com/andybalholm/brotli` (MIT, pure-Go — WOFF2 Brotli decompression only),
   `github.com/beevik/etree` (BSD-2, pure-Go, zero deps — the raw-fidelity XML DOM the xlsx
   editor rewrites dirty parts through; prefixes/attr order/CDATA preserved, verified in source

@@ -170,8 +170,8 @@ bullet's design doc is in `docs/superpowers/specs/`:
   the case the old guard skipped silently); grid mirrors track positions AND resolves
   `justify-items`/`justify-self` `start`/`end` logically (both flips are required —
   mutation-verified independently). Also fixes `crossOffset` ignoring the Box Alignment
-  `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
-  reordered — RTL script renders in logical glyph order.**
+  `start`/`end` spellings. Showcase §15 + 4 WPT reftests. (Text WITHIN a line is reordered by the
+  next slice; at this point it still rendered in logical order.)
   `2026-07-27-rtl-box-layout-design.md`.
 - **Arabic contextual shaping** (`pkg/layout/inline/complex.go`) — RTL slice 4 of 5: a run of
   joining script (Arabic/Syriac/Thaana; Hebrew is non-joining and stays on the cheap per-rune
@@ -196,8 +196,9 @@ bullet's design doc is in `docs/superpowers/specs/`:
   text). `golang.org/x/text` promoted indirect→direct for UAX#9 — no new module. Line metrics are
   computed on the logical slice, because the space that ends the text reorders to an RTL line's visual
   START. Bidi control characters now survive shaping as zero-width glyphs (they were being dropped,
-  silently discarding directional intent). **Arabic reorders but renders as isolated forms** — contextual
-  shaping needs a cluster model (slice 4). `2026-07-27-rtl-inline-bidi-design.md`.
+  silently discarding directional intent). (Arabic reordered correctly at this point but still rendered
+  as isolated forms; the cluster model arrives in slice 4, below.)
+  `2026-07-27-rtl-inline-bidi-design.md`.
 - **Column flex vertical content sizing** (`pkg/layout/css/flex.go`): a column container's main axis is
   vertical, so `flex-basis: auto`/`content` (and the `min:auto` automatic minimum) now resolve to the
   item's content HEIGHT — measured by laying it out at its cross width and reading back the fragment
