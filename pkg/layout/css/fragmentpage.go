@@ -73,6 +73,31 @@ func clampClipToFragment(f *Fragment) {
 	}
 }
 
+// splitAtForcedBreak splits b at a forced break carried by a nested (non-edge)
+// descendant, returning ok=false when b has no such break or the split declines.
+//
+// It differs from the page-boundary path in WHERE it splits: a page break happens
+// where the content runs out of room, but a forced break happens where the author
+// said, which may be well above the boundary. Everything else — the recursive descent,
+// edge suppression, out-of-flow routing, shared-state detach — is the same machinery,
+// so this is a thin wrapper that supplies a different split Y.
+//
+// widows/orphans are deliberately NOT applied: they express a preference about how
+// many lines may be stranded, and a forced break is not a preference.
+func splitAtForcedBreak(b *Fragment) (splitResult, bool) {
+	y, ok := midBlockForcedBreakY(b)
+	if !ok {
+		return splitResult{}, false
+	}
+	// The split Y is the break position; a fragment ending exactly there belongs to the
+	// head, which is what the splitters' `<= splitY+0.5` tests already express.
+	res := splitAnyBlockForPage(b, y-0.5, 0, 0)
+	if res.head == nil || res.tail == nil {
+		return splitResult{}, false
+	}
+	return res, true
+}
+
 // splitOneBlockForPage is splitAnyBlockForPage's shape dispatch, without the
 // shared-state detach.
 func splitOneBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) splitResult {
@@ -86,6 +111,76 @@ func splitOneBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) 
 		return splitMixedBlock(b, pageBottom, widows, orphans)
 	}
 	return splitBlockForPage(b, pageBottom, widows, orphans)
+}
+
+// midBlockForcedBreakY returns the page-space Y at which a forced break INSIDE b
+// requires a split, and ok=false when b carries no such break.
+//
+// It looks for a `break-before`/`break-after` on a descendant that is neither at b's
+// leading nor trailing edge — an edge break is already propagated to b itself by
+// effectiveBreaks and handled by the bucketer. A break strictly inside b has nowhere
+// to go without splitting b, which is why it used to be dropped with a log.
+//
+// The FIRST such break in document order wins: splitting there leaves any later break
+// in the tail, which re-enters the bucketer and is honored on the next pass.
+func midBlockForcedBreakY(b *Fragment) (float64, bool) {
+	if b == nil {
+		return 0, false
+	}
+	best, found := 0.0, false
+	// consider records a candidate split Y, keeping the topmost.
+	consider := func(y float64) {
+		if !found || y < best {
+			best, found = y, true
+		}
+	}
+	var walk func(f *Fragment, depth int)
+	walk = func(f *Fragment, depth int) {
+		for _, c := range f.Children {
+			if c.IsFloat || c.IsPositioned {
+				continue // out-of-flow content does not force a break in the flow
+			}
+			// depth 0 children are b's own children: a break-before on the FIRST of
+			// them is b's leading edge, and a break-after on the LAST is its trailing
+			// edge. Both are already propagated to b, so only deeper or interior
+			// breaks are "mid-block".
+			if isForcedBreak(breakBefore(c)) && !isLeadingEdgeOf(b, c) {
+				consider(c.Y)
+			}
+			if isForcedBreak(breakAfter(c)) && !isTrailingEdgeOf(b, c) {
+				consider(c.Y + c.H)
+			}
+			walk(c, depth+1)
+		}
+	}
+	walk(b, 0)
+	// A split at b's own top or bottom edge is not a split at all.
+	if found && (best <= b.Y+0.5 || best >= b.Y+b.H-0.5) {
+		return 0, false
+	}
+	return best, found
+}
+
+// isLeadingEdgeOf reports whether c begins b — it is reachable by descending into the
+// first in-flow child at every level. A break-before there is b's own leading break.
+func isLeadingEdgeOf(b, c *Fragment) bool {
+	for node := b; node != nil; node = firstInFlowChild(node) {
+		if node == c {
+			return true
+		}
+	}
+	return false
+}
+
+// isTrailingEdgeOf reports whether c ends b — reachable by descending into the last
+// in-flow child at every level. A break-after there is b's own trailing break.
+func isTrailingEdgeOf(b, c *Fragment) bool {
+	for node := b; node != nil; node = lastInFlowChild(node) {
+		if node == c {
+			return true
+		}
+	}
+	return false
 }
 
 // isFlexOrGridFragment reports whether f is a flex or grid container fragment (its box is

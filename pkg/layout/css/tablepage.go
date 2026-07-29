@@ -16,9 +16,7 @@ import (
 // page from the top.
 func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	rows := tableRowBands(tbl)
-	if len(rows) <= 1 {
-		// A single row (or no rows) cannot be split between rows: it either fits or
-		// overflows whole.
+	if len(rows) == 0 {
 		if tbl.Y+tbl.H <= pageBottom+0.5 {
 			return splitResult{head: tbl}
 		}
@@ -35,8 +33,20 @@ func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	if k >= len(rows) {
 		return splitResult{head: tbl}
 	}
+	// The row at k straddles the boundary. Split THROUGH its cells so the part that
+	// fits stays on this page, rather than pushing the whole row down — which for a
+	// single over-tall row means the table overflows and is clipped instead.
+	//
+	// A cell's content is an ordinary fragment spine, not an opaque nested formatting
+	// context, so the recursive splitter handles it with no relayout: the cell's own
+	// height was resolved by the row, and its lines are already positioned in page
+	// space. Only a cell that declines to split (nothing to break on, or
+	// `break-inside: avoid`) forces the row to stay whole.
+	if res, ok := splitTableRowThroughCells(tbl, rows[k], pageBottom, k > 0); ok {
+		return res
+	}
 	if k == 0 {
-		return splitResult{tail: tbl} // first row taller than the page: move whole, overflow
+		return splitResult{tail: tbl} // first row unsplittable: move whole, overflow
 	}
 	splitY := rows[k].top
 	head := *tbl
@@ -52,6 +62,63 @@ func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	// the collapsed grid is computed table-wide and is not re-derived per page fragment).
 	head.Collapsed, tail.Collapsed = nil, nil
 	return splitResult{head: &head, tail: &tail}
+}
+
+// splitTableRowThroughCells splits the straddling row's cells at pageBottom, producing
+// a head table whose last row is partial and a tail table that resumes it.
+//
+// ok=false when the row cannot be split — no cell yields both a head and a tail — in
+// which case the caller falls back to breaking between whole rows.
+//
+// hasEarlierRows says whether rows above this one already fit on the page; when they
+// do, a row that refuses to split is not a failure (the caller can still break above
+// it), but when it is the FIRST row the alternative is overflowing the page, so the
+// attempt matters more.
+func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, hasEarlierRows bool) (splitResult, bool) {
+	var headCells, tailCells []*Fragment
+	split := false
+	for _, c := range tbl.Children {
+		if c.IsFloat || c.IsPositioned {
+			continue // routed below, with the rest of the out-of-flow content
+		}
+		switch {
+		case c.Y+c.H <= row.top+0.5:
+			headCells = append(headCells, c) // a row entirely above the straddler
+		case c.Y >= row.bottom-0.5:
+			tailCells = append(tailCells, c) // a row entirely below it
+		default:
+			// A cell of the straddling row.
+			if lineSplittable(c) {
+				if sub := splitAnyBlockForPage(c, pageBottom, 0, 0); sub.head != nil && sub.tail != nil {
+					headCells = append(headCells, sub.head)
+					tailCells = append(tailCells, sub.tail)
+					split = true
+					continue
+				}
+			}
+			// This cell cannot break: it rides the tail whole. Its row-mates may still
+			// have split, which is correct — a row's cells fragment independently, and
+			// the tail row simply starts with this cell's full content.
+			tailCells = append(tailCells, c)
+		}
+	}
+	if !split || len(headCells) == 0 {
+		return splitResult{}, false
+	}
+	head := *tbl
+	tail := *tbl
+	head.Children = headCells
+	tail.Children = tailCells
+	head.H = lastChildBottom(headCells) - tbl.Y
+	tail.Y = firstChildTop(tailCells)
+	tail.H = (tbl.Y + tbl.H) - tail.Y
+	head.Border[layout.EdgeBottom] = BorderEdge{}
+	tail.Border[layout.EdgeTop] = BorderEdge{}
+	// Collapsed border strips are table-wide and not re-derived per fragment (the same
+	// documented limitation as the between-rows path).
+	head.Collapsed, tail.Collapsed = nil, nil
+	distributeOutOfFlow(tbl, &head, &tail, pageBottom)
+	return splitResult{head: &head, tail: &tail}, true
 }
 
 // tableRow is one recovered table row: the vertical extent of a band of cells that share

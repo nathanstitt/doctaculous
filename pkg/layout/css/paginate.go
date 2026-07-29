@@ -66,14 +66,6 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 		return &layout.Pages{Pages: []layout.Page{root.Page(viewportW, pageH)}}
 	}
 
-	// This bounded slice breaks only BETWEEN top-level body blocks. A forced
-	// break-before/after on a NESTED (non-top-level) block cannot drive a mid-block
-	// split here, but a break on content at the START / END of a top-level block is
-	// propagated to that block (see effectiveBreaks); a genuinely mid-block forced
-	// break is still dropped — warned once rather than silently (handling it properly
-	// needs mid-box fragmentation, a follow-up).
-	warnMidBlockForcedBreaks(body.Children, e.logf)
-
 	// The containing-block width the top-level blocks' own margins resolve against is
 	// the body content width (border box minus the body's own border + padding). It is
 	// needed to recover a block's used top margin when retaining it at an unforced break.
@@ -430,6 +422,21 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		// splitBlockForPage honors widows/orphans and may decline (move whole), in which
 		// case we fall through to the normal page-close + whole-block placement. A forced
 		// break is not line-split.
+		// A forced break carried by a NESTED (non-edge) descendant: split b at the break
+		// position rather than at the page boundary. This runs before the overflow logic
+		// because the author's break can sit well ABOVE the boundary — the page is not
+		// full, it is simply ending here. An edge break needs no split; effectiveBreaks
+		// has already propagated it to b itself.
+		if !forcedBefore && lineSplittable(b) {
+			if res, ok := splitAtForcedBreak(b); ok {
+				cur.blocks = append(cur.blocks, res.head)
+				buckets = append(buckets, cur)
+				cur = pageBucket{top: res.tail.Y}
+				queueTail(&work, i, res.tail)
+				prevBlock = res.head
+				continue
+			}
+		}
 		if overflow && !forcedBefore && len(cur.blocks) > 0 && lineSplittable(b) {
 			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
@@ -595,9 +602,8 @@ func keptInsideAvoid(f *Fragment) bool {
 //     rightmost in-flow descendant spine), yields forcedAfter.
 //
 // A forced break in the MIDDLE of the block (neither the leading nor trailing edge) is NOT
-// reflected here — honoring it needs splitting the block (mid-box fragmentation, out of
-// scope); warnMidBlockForcedBreaks logs that dropped case. This keeps the bounded
-// between-top-level-blocks model while honoring the common edge-break authoring pattern.
+// reflected here, because it cannot be expressed as a break BETWEEN top-level blocks: the
+// bucketer instead splits the block at the break position (see splitAtForcedBreak).
 func effectiveBreaks(b *Fragment) (forcedBefore, forcedAfter bool) {
 	forcedBefore = isForcedBreak(breakBefore(b)) || leadingEdgeForcedBreakBefore(b)
 	forcedAfter = isForcedBreak(breakAfter(b)) || trailingEdgeForcedBreakAfter(b)
@@ -663,48 +669,6 @@ func lastInFlowChild(f *Fragment) *Fragment {
 		return c
 	}
 	return nil
-}
-
-// warnMidBlockForcedBreaks logs once if any descendant of a top-level block carries a forced
-// break-before/after that is NOT at the block's leading/trailing edge (so effectiveBreaks
-// did not propagate it) — a genuinely mid-block forced break this bounded pass cannot honor
-// without splitting the block. Edge breaks ARE honored (propagated), so they must not warn;
-// only the dropped mid-block case is logged, once, to keep the remaining omission visible
-// rather than silent.
-func warnMidBlockForcedBreaks(topLevel []*Fragment, logf func(string, ...any)) {
-	// anyForcedBreak reports whether the subtree rooted at f (f and its descendants)
-	// carries any forced break-before/after.
-	var anyForcedBreak func(f *Fragment) bool
-	anyForcedBreak = func(f *Fragment) bool {
-		if isForcedBreak(breakBefore(f)) || isForcedBreak(breakAfter(f)) {
-			return true
-		}
-		for _, c := range f.Children {
-			if anyForcedBreak(c) {
-				return true
-			}
-		}
-		return false
-	}
-	for _, b := range topLevel {
-		// A forced break exists somewhere strictly inside b (a descendant), but neither
-		// edge propagated it ⇒ it is mid-block and dropped.
-		descendantBreak := false
-		for _, c := range b.Children {
-			if anyForcedBreak(c) {
-				descendantBreak = true
-				break
-			}
-		}
-		if !descendantBreak {
-			continue
-		}
-		if leadingEdgeForcedBreakBefore(b) || trailingEdgeForcedBreakAfter(b) {
-			continue // an edge break — propagated by effectiveBreaks, not dropped
-		}
-		logf("css pagination: a mid-block forced break on a nested (non-top-level) block is not honored in this slice; break ignored")
-		return
-	}
 }
 
 // contentWidth returns f's content-box width (its border-box W minus its own left/right
