@@ -203,3 +203,130 @@ func TestSplitTableUnsplittableRowMovesWhole(t *testing.T) {
 		t.Error("expected the original table as the tail")
 	}
 }
+
+// pagedTableText renders a long table and returns each page's text.
+func pagedTableText(t *testing.T, tableHTML string, pageH float64) []string {
+	t.Helper()
+	src := `<!DOCTYPE html><html><head><style>
+	  body { margin: 0; font-family: serif; font-size: 16px; }
+	  table { width: 300px; } td, th { padding: 0; }
+	</style></head><body>` + tableHTML + `</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, 400, pageH)
+	if err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	out := make([]string, len(pages.Pages))
+	for i, p := range pages.Pages {
+		var sb strings.Builder
+		for _, it := range p.Items {
+			for _, r := range it.Glyph.Runes {
+				sb.WriteRune(r)
+			}
+		}
+		out[i] = sb.String()
+	}
+	return out
+}
+
+// longTable builds a table of n body rows, optionally with a <thead>.
+func longTable(n int, withHead bool) string {
+	var b strings.Builder
+	b.WriteString("<table>")
+	if withHead {
+		b.WriteString("<thead><tr><th>HEADER</th></tr></thead>")
+	}
+	b.WriteString("<tbody>")
+	for i := 0; i < n; i++ {
+		b.WriteString("<tr><td>body</td></tr>")
+	}
+	b.WriteString("</tbody></table>")
+	return b.String()
+}
+
+// TestTableHeaderRepeatsOnEveryPage: a table split across pages repeats its <thead> on
+// each continuation, which is what makes a long table readable.
+//
+// The re-anchoring matters and is easy to get wrong: the tail carries a CLONE of the
+// header at its own top, so its HeaderBottom must point at that clone. Leaving the
+// original table's value there makes the repeat stop after the second page.
+func TestTableHeaderRepeatsOnEveryPage(t *testing.T) {
+	pages := pagedTableText(t, longTable(40, true), 300)
+	if len(pages) < 3 {
+		t.Fatalf("want at least 3 pages to exercise re-splitting, got %d", len(pages))
+	}
+	for i, txt := range pages {
+		if !strings.Contains(txt, "HEADER") {
+			t.Errorf("page %d is missing the repeated header", i)
+		}
+	}
+}
+
+// TestTableWithoutHeaderRepeatsNothing pins the no-op path: a table with no <thead>
+// gains nothing on its continuation pages.
+func TestTableWithoutHeaderRepeatsNothing(t *testing.T) {
+	pages := pagedTableText(t, longTable(40, false), 300)
+	if len(pages) < 2 {
+		t.Fatalf("want at least 2 pages, got %d", len(pages))
+	}
+	for i, txt := range pages {
+		if strings.Contains(txt, "HEADER") {
+			t.Errorf("page %d gained a header from a table that has none", i)
+		}
+	}
+}
+
+// TestTableHeaderNotDuplicatedOnFirstPage: the header appears ONCE on page 1 — it is
+// repeated onto continuations, not re-emitted above itself.
+func TestTableHeaderNotDuplicatedOnFirstPage(t *testing.T) {
+	pages := pagedTableText(t, longTable(40, true), 300)
+	if n := strings.Count(pages[0], "HEADER"); n != 1 {
+		t.Errorf("page 0 contains %d copies of the header, want exactly 1", n)
+	}
+}
+
+// TestRepeatHeaderNoOpWhenSplitInsideHeader: when the break falls inside the header
+// itself, no repeat happens — there is no completed header to carry forward.
+func TestRepeatHeaderNoOpWhenSplitInsideHeader(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable}
+	cellBox := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell}
+	// A real header cell must exist, or the loop finds nothing and returns early for a
+	// reason unrelated to the guard under test.
+	mk := func() (*Fragment, *Fragment) {
+		tbl := &Fragment{Y: 0, H: 100, W: 100, Box: box, HeaderBottom: 60,
+			Children: []*Fragment{
+				{Y: 0, H: 60, W: 100, Box: cellBox},  // the header cell
+				{Y: 60, H: 40, W: 100, Box: cellBox}, // a body cell
+			}}
+		tail := &Fragment{Y: 30, H: 70, W: 100, Box: box,
+			Children: []*Fragment{{Y: 30, H: 70, W: 100, Box: cellBox}}}
+		return tbl, tail
+	}
+
+	// Split at y=30 — INSIDE the header band [0,60): nothing to carry forward.
+	tbl, tail := mk()
+	before := len(tail.Children)
+	repeatHeaderOnTail(tbl, tail, 30)
+	if len(tail.Children) != before {
+		t.Errorf("a split inside the header should repeat nothing; tail gained %d children",
+			len(tail.Children)-before)
+	}
+
+	// Split at y=80 — BELOW the header: the header is complete and must be repeated.
+	// This half is what proves the guard above is doing real work rather than the loop
+	// happening to find nothing.
+	tbl, tail = mk()
+	before = len(tail.Children)
+	repeatHeaderOnTail(tbl, tail, 80)
+	if len(tail.Children) != before+1 {
+		t.Errorf("a split below the header should repeat it; tail has %d children, want %d",
+			len(tail.Children), before+1)
+	}
+}

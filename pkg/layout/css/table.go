@@ -34,6 +34,12 @@ type tableGrid struct {
 	// unconditionally and filtered at paint time.
 	colGroups []gridSpan
 	rowGroups []gridSpan
+	// headerRows is the number of LEADING visual rows that came from a <thead>
+	// (DisplayTableHeaderGroup). Header rows sort to the front of visualRows, so they
+	// are always rows [0, headerRows). Recorded here because the head/body/footer
+	// distinction is otherwise flattened away by grid construction, and pagination
+	// needs it to repeat the header on continuation pages.
+	headerRows int
 }
 
 // cellAt returns the cell occupying slot (r,c) — its origin or a span it covers — or nil
@@ -145,6 +151,7 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 	visualRows = append(visualRows, headRows...)
 	visualRows = append(visualRows, bodyRows...)
 	visualRows = append(visualRows, footRows...)
+	g.headerRows = len(headRows)
 
 	// Row-group spans: contiguous runs of visual rows sharing a row-group box (for the
 	// row-group background layer). visualRows keeps each group's rows contiguous.
@@ -506,6 +513,14 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		children = append(bg, children...)
 	}
 
+	// Repeatable-header extent: the bottom of the last <thead> row, so pagination can
+	// clone those cells onto continuation pages. Header rows sort to the front of the
+	// visual row order, so they are rows [0, headerRows).
+	headerBottom := 0.0
+	if n := g.headerRows; n > 0 && n <= len(g.rows) {
+		headerBottom = g.rows[n-1].y + g.rows[n-1].height
+	}
+
 	return interior{
 		children:         children,
 		contentHeight:    gridBottom,
@@ -513,6 +528,7 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 		trailingMargin:   0,
 		collapsedBorders: collapsedBorders,
 		intrinsicWidth:   tableContentW,
+		headerBottom:     headerBottom,
 	}
 }
 

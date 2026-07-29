@@ -61,6 +61,7 @@ func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	// Collapsed border strips, if any, are dropped on the split (a documented limitation —
 	// the collapsed grid is computed table-wide and is not re-derived per page fragment).
 	head.Collapsed, tail.Collapsed = nil, nil
+	repeatHeaderOnTail(tbl, &tail, splitY)
 	return splitResult{head: &head, tail: &tail}
 }
 
@@ -118,7 +119,53 @@ func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, 
 	// documented limitation as the between-rows path).
 	head.Collapsed, tail.Collapsed = nil, nil
 	distributeOutOfFlow(tbl, &head, &tail, pageBottom)
+	repeatHeaderOnTail(tbl, &tail, pageBottom)
 	return splitResult{head: &head, tail: &tail}, true
+}
+
+// repeatHeaderOnTail prepends a copy of the table's <thead> cells to the tail fragment,
+// translated to sit at the tail's top, so a table continued onto another page keeps its
+// column headings.
+//
+// It is a no-op when the table has no header, or when the split falls INSIDE the header
+// itself — repeating a header above its own remainder would duplicate it.
+//
+// The cells are deep-cloned rather than shared: the same header appears on every
+// continuation page, and each page shifts its fragments into a local frame in place, so
+// sharing one cell across pages would have each shift corrupt the others.
+func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) {
+	if tbl.HeaderBottom <= tbl.Y || splitY <= tbl.HeaderBottom+0.5 {
+		return
+	}
+	var repeated []*Fragment
+	for _, c := range tbl.Children {
+		if c.IsFloat || c.IsPositioned || c.Y+c.H > tbl.HeaderBottom+0.5 {
+			continue // not a header cell
+		}
+		// cloneFloatForPageMap is a general alias-preserving deep clone (its name is
+		// historical — it is not float-specific); the seen map is per-cell because
+		// header cells share no descendants.
+		clone := cloneFloatForPageMap(c, map[*Fragment]*Fragment{})
+		translateFragment(clone, 0, tail.Y-tbl.Y)
+		repeated = append(repeated, clone)
+	}
+	if len(repeated) == 0 {
+		return
+	}
+	// The repeated header occupies space at the top of the tail, so the body cells that
+	// follow it move down by its height and the tail grows to match.
+	headerH := tbl.HeaderBottom - tbl.Y
+	for _, c := range tail.Children {
+		translateFragment(c, 0, headerH)
+	}
+	tail.Children = append(repeated, tail.Children...)
+	tail.H += headerH
+	// The tail now carries its own copy of the header at its top. Re-anchor
+	// HeaderBottom to THAT copy, so if the tail is split again — a table spanning three
+	// or more pages — the next continuation repeats the header too. Leaving the
+	// original table's value here would point at coordinates the tail no longer has,
+	// and the repeat would silently stop after the second page.
+	tail.HeaderBottom = tail.Y + headerH
 }
 
 // tableRow is one recovered table row: the vertical extent of a band of cells that share
