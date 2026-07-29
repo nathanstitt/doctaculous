@@ -16,8 +16,8 @@ inventory of what has shipped, and "Status & roadmap" at the bottom for what is 
   goldens) so it is visually exercised end to end.
 - **Each engine feature/sub-project is its own branch → PR off `main`**, merged when CI is green.
   Keep changes additive and byte-identical for untouched callers (DOCX/PDF, pages not using the
-  feature). Design docs for each sub-project live in `docs/superpowers/specs/` — read the relevant
-  one before extending an area; that is where the detailed history and rationale live.
+  feature). Design rationale lives in the commit and PR history — read `git log` for the area you
+  are extending; each sub-project's PR body carries the reasoning and the alternatives rejected.
 
 ## Non-negotiable constraints
 
@@ -104,9 +104,8 @@ backend-agnostic so a new backend can be added without touching parsing, interpr
 ## Status & roadmap
 
 The full inventory of shipped features lives in **[FEATURES.md](FEATURES.md)** — keep it current:
-every feature that lands gets a bullet there in the same PR (a one-line pointer; the detailed
-design/rationale stays in the sub-project's `docs/superpowers/specs/` doc). This section keeps only
-what is NOT done yet.
+every feature that lands gets a bullet there in the same PR. This section keeps only what is NOT
+done yet.
 
 ### TODO (roughly priority order)
 
