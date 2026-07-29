@@ -12,6 +12,32 @@ removed, so the detailed rationale for each is in the commit and PR history.
 
 Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE.md "Done" when ☑).
 
+## Where it stands (2026-07-29)
+
+**48 done · 2 in progress · 30 open.** The engine is feature-complete across its stated scope; what
+remains is a long tail of approximations, each degrading gracefully.
+
+Closed recently: **A1** (RTL/bidi, all five slices — cascade, box mirroring, inline reordering, Arabic
+shaping, PDF extraction), **H1/H5** (multi-line flexbox), and most of **N1** (pagination now splits a
+nested spine, a table row through its cells, and at a mid-block forced break; `<thead>` repeats on
+continuation pages).
+
+The open items cluster into four groups:
+
+1. **Genuinely blocked** — K1's JPX/JPEG2000 (no viable pure-Go decoder exists) and **N1d**
+   (mid-flex/grid-item splitting, which needs the fragmentainer inside flex line and grid track sizing;
+   owner-signed deferral, recommend permanent).
+2. **Structural, needs plumbing the engine deliberately lacks** — C4/C5/D3 (a definite containing-block
+   HEIGHT), C6 (a fragment for a text-only inline box), E3 (margin-collapse state at a split point).
+3. **Feature slices, each its own project** — G4 variable fonts, I1 named-line placement, I7 subgrid,
+   K4 soft masks/transparency groups.
+4. **Small and independent** — E2 `margin:auto` centering, G3 `font-display`, G6 a content-addressed
+   font cache, N4 per-page float distribution. These are the good next candidates.
+
+**Verify before trusting a ☐.** Five entries in this file were found stale during the RTL/pagination
+work (I4, F1, N2, N6, and the whole M section): an item goes stale when the work lands via a *different*
+entry, so nobody revisits the original. Grep the code for the claimed symptom first.
+
 ---
 
 ## A. Cross-cutting (highest leverage — unblocks several modes at once)
@@ -137,10 +163,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
   containing-block HEIGHT threaded through the layout chain; the engine is fundamentally width/single-axis
   (a percentage height resolves against a 0 basis → treated as auto today, logged). A broad plumbing change;
   low frequency. Documented in `replaced.go`.
-- ☐ **D4. CSS `background-image` decode** — *Deferred (feature slice).* A whole new path: parse
-  `background-image: url()`, decode via the resource loader, carry on the fragment, and paint with
-  `background-repeat`/`-position`/`-size`. Medium–large; its own slice. (Today `background` keeps color only;
-  `url()` is dropped.)
+- ☑ **D4. CSS `background-image` decode** — *DONE.* `url(...)` parses, decodes through the resource
+  loader, rides the fragment as `BgImage`, and paints with `background-repeat`/`-position`/`-size`/
+  `-origin`/`-clip` (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint). See FEATURES.md.
 
 ## E. HTML/CSS — general inline / flow
 
@@ -304,7 +329,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## K. PDF — feature gaps (TODO 1–4; "unsupported" → real output)
 
-- ☐ **K1. JBIG2 + JPX/JPEG2000 scan filters** (`pkg/pdf/filter/filter.go`, today `ErrUnsupported`). *Large.*
+- ◐ **K1. Scan filters** — JBIG2 **DONE** (vendored pure-Go Apache-2.0 decoder in
+  `pkg/pdf/filter/jbig2/`, wired at `decodeImageXObject`). **JPX/JPEG2000 remains** and is likely
+  permanent: no viable pure-Go decoder exists, and writing one is its own project. Today `ErrUnsupported`.
 - ☐ **K2. Tiling patterns (PatternType 1)** (today skipped+logged). *Medium.*
 - ☐ **K3. Higher-fidelity Coons/tensor patches (Types 6/7)** — bicubic boundary vs the current bilinear-corner
   approximation. *Medium.*
@@ -323,14 +350,18 @@ Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE
 
 ## M. DOCX features (reflow frontend — TODO 5)
 
-These are missing *features* (graceful skips today), arguably "fidelity" of DOCX rendering. Confirm with user
-whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a separate track.
+This section was written when the DOCX frontend was young. **M1–M4 have since shipped** — verified by the
+committed render goldens (`docx-list`, `docx-table`, `docx-table-spans`, `docx-image`,
+`docx-header-footer`), not by inspection alone.
 
-- ☐ **M1. lists/numbering** (`numbering.xml`, counters, marker glyphs). *Large.*
-- ☐ **M2. tables** (`w:tbl`, grid + col-width solve, spans, cell recursion). *Large.*
-- ☐ **M3. images** (`w:drawing`→`a:blip`, decode, EMU placement). *Medium.*
-- ☐ **M4. headers/footers + multi-section.** *Medium.*
-- ☐ **M5. embedded fonts** (de-obfuscate `word/fonts/*` — also fixes bold/italic). *Medium.*
+- ☑ **M1. lists/numbering** — *DONE.* Parsed from `numbering.xml` and lowered to cssbox; golden `docx-list`.
+- ☑ **M2. tables** — *DONE.* `w:tbl` through the shared table engine incl. spans; goldens `docx-table`,
+  `docx-table-spans`.
+- ☑ **M3. images** — *DONE.* `w:drawing`→`a:blip` decode + EMU placement; golden `docx-image`.
+- ☑ **M4. headers/footers + multi-section** — *DONE.* Golden `docx-header-footer`.
+- ☐ **M5. embedded fonts** (de-obfuscate `word/fonts/*` — also fixes bold/italic). *Medium.* Still open;
+  DOCX also resolves bundled-only today (the `OSFontProvider` seam exists but is not installed in
+  `docxDocument`). Tracked as CLAUDE.md TODO 5.
 
 ## N. Pagination — structural deferrals (need real fragmentation; larger)
 
