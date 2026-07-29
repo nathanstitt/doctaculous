@@ -7,6 +7,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+
+	"github.com/nathanstitt/doctaculous/pkg/crop"
 )
 
 // ImageOptions controls image-encoded output (WriteImage, and Convert to
@@ -26,6 +28,12 @@ type ImageOptions struct {
 	// Raster controls the rasterization that produces the image (DPI, background,
 	// fonts, ...).
 	Raster RasterOptions
+	// Crop, when non-nil, crops and resizes the rasterized image to exactly
+	// crop.Options.Width×Height before encoding. This is how a caller gets an
+	// exact-size image: RasterOptions.MaxWidthPx/MaxHeightPx fit within a box
+	// with aspect preserved, which cannot fill a square from a 4:3 source.
+	// nil (the default) encodes the image as rasterized.
+	Crop *crop.Options
 }
 
 // format resolves the target encoding, defaulting to PNG.
@@ -61,6 +69,13 @@ func (d *Document) WriteImage(ctx context.Context, out io.Writer, index int, opt
 // encode half of WriteImage, exported so batch callers (e.g. a RasterizePages
 // fan-out writing one file per page) reuse the library's encoding.
 func EncodeImage(out io.Writer, img image.Image, opts ImageOptions) error {
+	if opts.Crop != nil {
+		cropped, err := crop.Scale(img, *opts.Crop)
+		if err != nil {
+			return fmt.Errorf("doctaculous: crop image: %w", err)
+		}
+		img = cropped
+	}
 	switch f := opts.format(); f {
 	case FormatPNG:
 		if err := png.Encode(out, img); err != nil {
