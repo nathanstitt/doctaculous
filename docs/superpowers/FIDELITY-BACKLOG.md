@@ -389,7 +389,14 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
   preference. `warnMidBlockForcedBreaks` and its two call sites are deleted, since the case it warned about is
   handled. `2026-07-28-pagination-midblock-break-design.md`.
 - ☐ **N4. Per-page float distribution.** *Medium.*
-- ☐ **N5. Per-page bottom-anchored `fixed`** (per-page `resolveAbsolute` height). *Medium.*
+- ☑ **N5. Per-page bottom-anchored `fixed`** — *DONE.* Pass 2 resolves abs/fixed against the SINGLE TALL
+  document (`block.go` sets the CB height from the whole fragment tree), so a `position: fixed; bottom: 0`
+  box landed at the document bottom — off-page and invisible on every page (measured: y=980 on a 500pt
+  page). `splitPositionedByPage` now re-derives a page-local Y for that shape and clones per page, since
+  each page needs its own Y. Only bottom-anchored boxes are touched: a top-anchored fixed box's Y is
+  already the page-local offset and must not move. A percentage `bottom` is declined (it would need
+  re-resolving per page rather than a fixed shift). A per-page height function is threaded so the `@page`
+  path, where pages can differ in height, is handled too.
 - ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16
   margin boxes, running headers/footers with page counters, `marks`/`bleed`, and `string-set`/`string()` are
   all in (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and

@@ -1173,3 +1173,88 @@ func TestPaginateSplitsNestedSpine(t *testing.T) {
 		t.Error("page 2 has no text; the split lost the paragraph's remainder")
 	}
 }
+
+// fixedBoxYPerPage lays out a paginating document with one position:fixed box styled
+// by fixedCSS, and returns the box's painted Y on each page (or NaN where absent).
+func fixedBoxYPerPage(t *testing.T, fixedCSS string, pageH float64) []float64 {
+	t.Helper()
+	src := `<!DOCTYPE html><html><head><style>
+	  body { margin: 0; font-family: serif; font-size: 16px; }
+	  p { margin: 0; }
+	  .fx { position: fixed; left: 0; height: 20px; width: 100px; ` + fixedCSS + ` }
+	</style></head><body>
+	  <div class="fx">FOOT</div>
+	  <p>` + strings.Repeat("word ", 400) + `</p>
+	</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, 400, pageH)
+	if err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	out := make([]float64, len(pages.Pages))
+	for i, p := range pages.Pages {
+		out[i] = math.NaN()
+		for _, it := range p.Items {
+			if len(it.Glyph.Runes) > 0 && it.Glyph.Runes[0] == 'F' {
+				out[i] = it.Glyph.YPt
+				break
+			}
+		}
+	}
+	return out
+}
+
+// TestFixedBottomAnchorsToEachPage: a bottom-anchored position:fixed box sits at the
+// bottom of EVERY page.
+//
+// Pass 2 resolves absolute/fixed boxes against the single tall document, so a
+// `bottom: 0` box landed at the document bottom — far below every page and therefore
+// invisible on all of them. It is now re-anchored per page.
+func TestFixedBottomAnchorsToEachPage(t *testing.T) {
+	const pageH = 500
+	ys := fixedBoxYPerPage(t, "bottom: 0;", pageH)
+	if len(ys) < 2 {
+		t.Fatalf("want at least 2 pages, got %d", len(ys))
+	}
+	for i, y := range ys {
+		if math.IsNaN(y) {
+			t.Errorf("page %d has no fixed box", i)
+			continue
+		}
+		if y > pageH || y < pageH-40 {
+			t.Errorf("page %d: fixed box at y=%v, want near the page bottom (%v)", i, y, pageH)
+		}
+	}
+	// Every page places it identically — that is what "fixed" means.
+	for i := 1; i < len(ys); i++ {
+		if math.Abs(ys[i]-ys[0]) > 0.01 {
+			t.Errorf("page %d places the fixed box at %v but page 0 at %v; a fixed box must "+
+				"sit identically on every page", i, ys[i], ys[0])
+		}
+	}
+}
+
+// TestFixedTopAnchorUnchanged pins that the top-anchored case is untouched: its Y was
+// already the page-local offset, so it must not be re-anchored.
+func TestFixedTopAnchorUnchanged(t *testing.T) {
+	ys := fixedBoxYPerPage(t, "top: 10px;", 500)
+	if len(ys) < 2 {
+		t.Fatalf("want at least 2 pages, got %d", len(ys))
+	}
+	for i, y := range ys {
+		if math.IsNaN(y) {
+			t.Errorf("page %d has no fixed box", i)
+			continue
+		}
+		if y > 40 {
+			t.Errorf("page %d: top-anchored fixed box at y=%v, want near the page top", i, y)
+		}
+	}
+}
