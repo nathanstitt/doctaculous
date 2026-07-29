@@ -360,6 +360,11 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 			frag.Collapsed[i].YPt += contentTopY + leadingGap
 		}
 	}
+	if in.headerBottom > 0 {
+		// Same local-to-page-space Y shift as the collapsed strips above: the header
+		// bottom was measured in the interior's content-top-0 frame.
+		frag.HeaderBottom = in.headerBottom + contentTopY + leadingGap
+	}
 	frag.Border[layout.EdgeTop] = BorderEdge{Width: ed.bT, Color: b.Style.BorderTopColor, Style: mapBorderStyle(b.Style.BorderTopStyle)}
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
@@ -507,6 +512,10 @@ type interior struct {
 	// table interior, to be copied onto the table fragment. Nil for every non-table
 	// interior so non-collapse pages are byte-identical.
 	collapsedBorders []layout.BorderItem
+	// headerBottom is the bottom Y (in the interior's local frame) of a table's
+	// repeatable <thead> rows, or 0 when the box is not a table or has no header.
+	// layoutBlock copies it onto the fragment so pagination can repeat the header.
+	headerBottom float64
 	// intrinsicWidth is a table's grid-content width (Σ column widths + border-spacing),
 	// reported by layoutTable so layoutBlock can shrink a width:auto table box to wrap
 	// its grid (CSS tables are shrink-to-fit, §17.5.2). Zero for non-table interiors

@@ -102,6 +102,17 @@ bullet's design doc is in `docs/superpowers/specs/`:
   break cascade, between-block + forced breaks, per-page distribution of relative/abs/fixed/float +
   html/body border. `2026-06-28-html-pagination-design.md`,
   `2026-06-28-html-pagination-fidelity-bundle-design.md`.
+- **Per-page bottom-anchored `position: fixed`** (`pkg/layout/css/paginate.go`): a `bottom`-anchored
+  fixed box sits at the bottom of every page. It was previously resolved against the full single-tall
+  document height, putting it below every page and making it invisible. Top-anchored boxes are
+  untouched (their Y is already the page-local offset), and a percentage `bottom` is declined rather
+  than mis-shifted.
+- **Repeated `<thead>` on continuation pages** (`pkg/layout/css/tablepage.go`, `table.go`): a table
+  split across pages repeats its header rows on every continuation, so a long table keeps its column
+  headings. The head/body/footer distinction is flattened away by grid construction, so the header's
+  bottom Y is recorded on the table fragment (`HeaderBottom`) and the cells above it are deep-cloned
+  onto each tail — and the tail's own `HeaderBottom` is re-anchored to its copy, so a table spanning
+  three or more pages keeps repeating. `2026-07-28-table-repeat-header-design.md`.
 - **Mid-cell table splitting** (`pkg/layout/css/tablepage.go`): a table row taller than the page —
   including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
   A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no

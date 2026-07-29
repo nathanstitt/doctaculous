@@ -214,7 +214,9 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 		buckets[0].top = top
 	}
 
-	perPagePos := splitPositionedByPage(root, buckets)
+	perPagePos := splitPositionedByPage(root, buckets, func(i int) float64 {
+		return cfg.resolvePageGeom(i, "", false).contentH
+	})
 	perPageFloats := splitFloatsByPage(root, buckets)
 
 	// Per-page geometry: page i's size + content inset, resolved from @page (named

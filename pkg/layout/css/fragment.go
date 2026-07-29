@@ -61,6 +61,14 @@ type Fragment struct {
 	// tree order is untouched.
 	Floats []*Fragment
 
+	// HeaderBottom is the page-space bottom Y of a table's repeatable <thead> rows, or
+	// 0 for a non-table or a table with no header. Pagination clones the cells above
+	// this line onto each continuation page so a long table keeps its column headings.
+	//
+	// It is a Y rather than a row count because the head/body/footer distinction is
+	// flattened away by grid construction — by the time a fragment exists, a header
+	// cell is indistinguishable from a body cell except by position.
+	HeaderBottom float64
 	// IsPositioned marks a fragment produced by a positioned box (relative,
 	// absolute, or fixed). The stacking pass lifts such a fragment out of the
 	// in-flow decoration/content passes and paints it in the positioned layer

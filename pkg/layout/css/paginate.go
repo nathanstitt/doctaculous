@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 
+	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
@@ -101,7 +102,7 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// contains its top and shifted into that page's local frame here; a position:fixed box
 	// is cloned onto every page (each clone shifted), so it repeats. (An abs box whose CB
 	// is a positioned ancestor is not in root.Positioned — it follows that ancestor.)
-	perPagePos := splitPositionedByPage(root, buckets)
+	perPagePos := splitPositionedByPage(root, buckets, func(int) float64 { return pageH })
 	// Distribute the out-of-flow float layer per page by each float's Y band (mirroring
 	// the page-CB-absolute distribution above), so a float inside a section forced onto a
 	// later page paints on that page rather than riding page 0.
@@ -241,7 +242,12 @@ type pagePositioned struct {
 // (An abs box whose CB is a positioned ancestor is in that ancestor's .Positioned, not
 // root.Positioned, so it is not seen here — it follows the ancestor.) The result has one
 // entry per bucket; each page's parallel info slice stays aligned with its frags.
-func splitPositionedByPage(root *Fragment, buckets []pageBucket) []pagePositioned {
+// pageHeightFn returns page i's content height, for re-anchoring a bottom-anchored
+// position:fixed box. The uniform path passes a constant; the @page path can vary it
+// per page.
+type pageHeightFn func(i int) float64
+
+func splitPositionedByPage(root *Fragment, buckets []pageBucket, pageHeightOf pageHeightFn) []pagePositioned {
 	out := make([]pagePositioned, len(buckets))
 	if root == nil || len(root.Positioned) == 0 || len(buckets) == 0 {
 		return out
@@ -288,9 +294,23 @@ func splitPositionedByPage(root *Fragment, buckets []pageBucket) []pagePositione
 			// which is the correct page-LOCAL Y on EVERY page. So it is assigned to every
 			// page WITHOUT a per-page shift — the same read-only fragment is shared (the
 			// flatten only reads it; no page mutates it, since the abs shift below touches a
-			// different pointer and the block shift touches bucket blocks). (A bottom-anchored
-			// fixed box is positioned against the full single-tall height — a known
-			// limitation; per-page bottom anchoring is a follow-up.)
+			// different pointer and the block shift touches bucket blocks).
+			//
+			// A BOTTOM-anchored fixed box is the exception: pass 2 resolved it against the
+			// full single-tall document height, so its Y sits at the document bottom and it
+			// is off-page on every page. Those are re-anchored per page below.
+			if bottom, h, ok := fixedBottomAnchor(frag); ok && pageHeightOf != nil {
+				// Bottom-anchored: pass 2 resolved it against the single tall
+				// document, so its Y is at the DOCUMENT bottom and off-page
+				// everywhere. Re-derive a page-local Y per page. Each page needs its
+				// own Y, so the fragment is cloned rather than shared.
+				for pi := range buckets {
+					clone := cloneFloatForPageMap(frag, map[*Fragment]*Fragment{})
+					translateFragment(clone, 0, pageHeightOf(pi)-bottom-h-clone.Y)
+					assign(pi, clone, info)
+				}
+				continue
+			}
 			for pi := range buckets {
 				assign(pi, frag, info)
 			}
@@ -304,6 +324,32 @@ func splitPositionedByPage(root *Fragment, buckets []pageBucket) []pagePositione
 		assign(page, frag, info)
 	}
 	return out
+}
+
+// fixedBottomAnchor reports whether f is a BOTTOM-anchored position:fixed box —
+// a definite `bottom` with an auto `top` — returning the resolved bottom offset and
+// the fragment's border-box height.
+//
+// Only this shape needs re-anchoring. A top-anchored fixed box's Y is already its
+// offset from the page top (pass 2 resolved it against the page rect), which is the
+// correct page-local Y on every page; a box with BOTH offsets definite is sized by
+// them and likewise resolved from the top.
+func fixedBottomAnchor(f *Fragment) (bottom, height float64, ok bool) {
+	if f == nil || f.Box == nil {
+		return 0, 0, false
+	}
+	st := f.Box.Style
+	if st.Top.Unit != gcss.UnitAuto || st.Bottom.Unit == gcss.UnitAuto {
+		return 0, 0, false
+	}
+	// A percentage bottom resolves against the page height, which varies per page; the
+	// caller would need to re-resolve it per page rather than shift by a fixed amount.
+	// Only absolute units are handled here.
+	v, pct := resolveLen(st.Bottom, st.FontSizePt, 0)
+	if pct {
+		return 0, 0, false
+	}
+	return v, f.H, true
 }
 
 // pageForY returns the index of the bucket whose vertical band contains page-space Y y:
