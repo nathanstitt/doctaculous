@@ -356,9 +356,17 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
     end-to-end through `LayoutPaged`, not just the splitter unit. **Margin-collapse state at the split point
     is still not threaded** (it is consumed during layout and never recorded on the fragment); it did not block
     this slice. `2026-07-28-pagination-recursive-split-design.md`.
-  - ☐ **N1c. Mid-cell table splitting** — *Large.* Needs a height-budgeted relayout of a cell's BFC.
-    `paginateRuns` is the precedent that relayout-during-pagination is architecturally acceptable here (it
-    already re-runs `layoutTree` per width). Also needs repeated `<thead>` to be genuinely useful.
+  - ☑ **N1c. Mid-cell table splitting** — *DONE, and far cheaper than the "Large" estimate.* The premise that
+    it "needs a height-budgeted relayout of a cell's BFC" was WRONG for the common case: probing showed a
+    cell's content is an ordinary fragment spine with `Lines`, not an opaque nested formatting context, and
+    `splitAnyBlockForPage` already splits a cell directly (verified: 11 lines head / 27 tail, no relayout).
+    `splitTableForPage` simply never asked. It now recurses into the straddling row's cells via
+    `splitTableRowThroughCells`. Measured end-to-end: a single-row table with an over-tall cell went from 1
+    clipped page to 4 paginated ones. Cells fragment INDEPENDENTLY — a cell that cannot break rides the tail
+    whole while its row-mates split, which is correct. Between-rows splitting is still preferred when a row
+    boundary is available; through-cells is the fallback for a straddling row. Remaining: repeated `<thead>` on
+    continuation pages, and collapsed border strips are still dropped on a split (the same table-wide
+    limitation as the between-rows path). `2026-07-28-pagination-midcell-split-design.md`.
   - ☐ **N1d. Mid-flex-item / mid-grid-item splitting** — *Very large; recommend permanent deferral.* Requires
     the fragmentainer to reach into flex line sizing and grid track sizing, since `flex-grow`/`stretch`/`fr`
     size items collectively and must be re-solved per fragmentainer. Already an owner-signed deferral (see

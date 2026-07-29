@@ -1,9 +1,12 @@
 package css
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/doctaculous/pkg/html"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 )
 
@@ -107,5 +110,96 @@ func TestLineSplittableTable(t *testing.T) {
 	tbl.Box.Style = gcss.ComputedStyle{BreakInside: "avoid"}
 	if lineSplittable(tbl) {
 		t.Errorf("break-inside:avoid table must not be splittable")
+	}
+}
+
+// TestSplitTableThroughOverTallCell is the N1c case: a table with a SINGLE row whose
+// cell is taller than the page.
+//
+// There is no row boundary to break at, so the table previously moved whole and
+// overflowed — the content past the page bottom was simply clipped. A cell's content
+// is an ordinary fragment spine rather than an opaque nested formatting context, so the
+// recursive splitter breaks it with no relayout.
+func TestSplitTableThroughOverTallCell(t *testing.T) {
+	src := `<!DOCTYPE html><html><head><style>
+	  body { margin: 0; font-family: serif; font-size: 16px; }
+	  table { border-collapse: collapse; width: 300px; }
+	  td { padding: 0; vertical-align: top; }
+	</style></head><body>
+	  <table><tr><td><p>` + strings.Repeat("word ", 300) + `</p></td></tr></table>
+	</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, 400, 300)
+	if err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	if len(pages.Pages) < 2 {
+		t.Fatalf("an over-tall cell should paginate: got %d page(s), want >= 2", len(pages.Pages))
+	}
+	// Every page carries text, and nothing is lost.
+	total := 0
+	for i, p := range pages.Pages {
+		n := 0
+		for _, it := range p.Items {
+			if len(it.Glyph.Runes) > 0 {
+				n++
+			}
+		}
+		if n == 0 {
+			t.Errorf("page %d has no glyphs", i)
+		}
+		total += n
+	}
+	if total < 1000 {
+		t.Errorf("pages carry %d glyphs in total; content appears to have been lost", total)
+	}
+}
+
+// TestSplitTableBetweenRowsStillPreferred pins that a multi-row table still breaks at a
+// ROW boundary when one is available — splitting through cells is the fallback for a
+// row that straddles, not the primary strategy.
+func TestSplitTableBetweenRowsStillPreferred(t *testing.T) {
+	tbl := &Fragment{Y: 0, H: 120, W: 100,
+		Box: &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable}}
+	cellBox := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell}
+	for r := 0; r < 3; r++ { // rows at y=0,40,80 — no lines, so no cell can split
+		tbl.Children = append(tbl.Children,
+			&Fragment{Y: float64(r) * 40, H: 40, W: 100, Box: cellBox})
+	}
+	res := splitTableForPage(tbl, 80)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	// The break lands on the row boundary at y=80, not inside a row.
+	if res.tail.Y != 80 {
+		t.Errorf("tail starts at y=%v, want 80 (the row boundary)", res.tail.Y)
+	}
+	if len(res.head.Children) != 2 || len(res.tail.Children) != 1 {
+		t.Errorf("head=%d tail=%d cells, want 2 and 1",
+			len(res.head.Children), len(res.tail.Children))
+	}
+}
+
+// TestSplitTableUnsplittableRowMovesWhole: a straddling first row whose cells cannot
+// break still moves whole rather than being clipped mid-cell.
+func TestSplitTableUnsplittableRowMovesWhole(t *testing.T) {
+	tbl := &Fragment{Y: 0, H: 200, W: 100,
+		Box: &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTable}}
+	cellBox := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayTableCell}
+	// One row, one cell, no lines and no children: nothing to split on.
+	tbl.Children = append(tbl.Children, &Fragment{Y: 0, H: 200, W: 100, Box: cellBox})
+	res := splitTableForPage(tbl, 100)
+	if res.head != nil {
+		t.Errorf("an unsplittable single row should move whole; got a head of h=%v", res.head.H)
+	}
+	if res.tail != tbl {
+		t.Error("expected the original table as the tail")
 	}
 }

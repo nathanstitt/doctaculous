@@ -102,6 +102,12 @@ bullet's design doc is in `docs/superpowers/specs/`:
   break cascade, between-block + forced breaks, per-page distribution of relative/abs/fixed/float +
   html/body border. `2026-06-28-html-pagination-design.md`,
   `2026-06-28-html-pagination-fidelity-bundle-design.md`.
+- **Mid-cell table splitting** (`pkg/layout/css/tablepage.go`): a table row taller than the page —
+  including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
+  A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no
+  relayout. Cells fragment independently: one that cannot break rides the tail whole while its
+  row-mates split. Breaking between whole rows is still preferred when a row boundary is available.
+  `2026-07-28-pagination-midcell-split-design.md`.
 - **Mid-block forced breaks** (`pkg/layout/css/fragmentpage.go`, `paginate.go`): a `break-before`/
   `break-after` on a nested block that is neither at its ancestor's leading nor trailing edge now
   splits that ancestor at the break position instead of being dropped with a warning. Reuses the
