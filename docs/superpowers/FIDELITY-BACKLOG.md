@@ -345,12 +345,17 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
     split `overflow:hidden` block clipped to the full pre-split height on both pages. Detaching and clamping
     happen once at the `splitAnyBlockForPage` dispatch point so a future splitter cannot forget.
     `2026-07-28-pagination-split-fixes-design.md`.
-  - ☐ **N1a. Recursive spine splitting** — *Medium.* Make `splitMixedBlock` recurse into the straddling child
-    via `splitAnyBlockForPage` (no signature change needed — `pageBottom` is absolute page space, valid at any
-    depth), with per-level edge suppression. Delivers what users perceive as mid-box splitting
-    (`section > div > p` splitting at a line boundary). Stays inside the ~1,250-line splitter layer; the
-    external API surface is 2 lines. One genuinely new piece of state: margin-collapse state at the split
-    point is consumed during layout and never recorded on the fragment.
+  - ☑ **N1a. Recursive spine splitting** — *DONE.* `splitMixedBlock` now recurses into the straddling child via
+    `splitAnyBlockForPage`. No signature change was needed: `pageBottom` is absolute page space and the whole
+    fragment tree shares one coordinate system, so the dispatcher is already valid at any depth. `lineSplittable`
+    gates the recursion — it is a shape predicate with no top-level assumption and already refuses a
+    `break-inside: avoid` box, which is exactly the stop condition CSS requires. Head/tail geometry is now
+    derived from the resulting child lists (`lastChildBottom`/`firstChildTop`, in-flow only) rather than the
+    k-th child. Measured on a `section > div > p` spine: a 50pt gap on the head page became 0.
+    Mutation-verified — removing the recursion and removing its guard fail different tests. Verified
+    end-to-end through `LayoutPaged`, not just the splitter unit. **Margin-collapse state at the split point
+    is still not threaded** (it is consumed during layout and never recorded on the fragment); it did not block
+    this slice. `2026-07-28-pagination-recursive-split-design.md`.
   - ☐ **N1c. Mid-cell table splitting** — *Large.* Needs a height-budgeted relayout of a cell's BFC.
     `paginateRuns` is the precedent that relayout-during-pagination is architecturally acceptable here (it
     already re-runs `layoutTree` per width). Also needs repeated `<thead>` to be genuinely useful.

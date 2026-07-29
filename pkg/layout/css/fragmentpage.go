@@ -129,15 +129,39 @@ func splitMixedBlock(parent *Fragment, pageBottom float64, widows, orphans int) 
 	if k >= len(inflow) {
 		return splitResult{head: parent}
 	}
-	if k == 0 {
+
+	// The child at k straddles the boundary. Split it too, so the part that fits stays
+	// on this page instead of the whole child riding the tail and leaving a gap the
+	// height of its above-boundary portion.
+	//
+	// This is the recursive step: splitAnyBlockForPage works at any tree depth because
+	// pageBottom is in absolute page space, and the whole fragment tree shares one
+	// coordinate system. lineSplittable gates it — it is a shape predicate with no
+	// top-level assumption, and it already refuses a `break-inside: avoid` box, which is
+	// exactly the stop condition CSS requires.
+	var childHead, childTail *Fragment
+	if straddler := inflow[k]; lineSplittable(straddler) {
+		if sub := splitAnyBlockForPage(straddler, pageBottom, widows, orphans); sub.head != nil && sub.tail != nil {
+			childHead, childTail = sub.head, sub.tail
+		}
+	}
+
+	if k == 0 && childHead == nil {
 		return splitResult{tail: parent}
 	}
+
 	head := *parent
 	tail := *parent
 	head.Children = append([]*Fragment(nil), inflow[:k]...)
 	tail.Children = append([]*Fragment(nil), inflow[k:]...)
-	head.H = inflow[k-1].Y + inflow[k-1].H - parent.Y
-	tail.Y = inflow[k].Y
+	if childHead != nil {
+		// The straddler's head joins this page; its tail replaces it at the front of the
+		// next page's children.
+		head.Children = append(head.Children, childHead)
+		tail.Children[0] = childTail
+	}
+	head.H = lastChildBottom(head.Children) - parent.Y
+	tail.Y = firstChildTop(tail.Children)
 	tail.H = (parent.Y + parent.H) - tail.Y
 	head.Border[layout.EdgeBottom] = BorderEdge{}
 	tail.Border[layout.EdgeTop] = BorderEdge{}
@@ -148,6 +172,42 @@ func splitMixedBlock(parent *Fragment, pageBottom float64, widows, orphans int) 
 	// that gap belongs to the next page rather than overflowing the current one.
 	distributeOutOfFlow(parent, &head, &tail, pageBottom)
 	return splitResult{head: &head, tail: &tail}
+}
+
+// lastChildBottom returns the largest bottom edge among the IN-FLOW children in list,
+// or 0 when there are none. It sizes a split head: the head ends at its last in-flow
+// child's bottom, not at the page boundary, so a box that ended early does not gain
+// phantom height.
+//
+// Out-of-flow children are excluded deliberately — a float or positioned box does not
+// contribute to its parent's block-axis extent.
+func lastChildBottom(list []*Fragment) float64 {
+	bottom := 0.0
+	for _, c := range list {
+		if c.IsFloat || c.IsPositioned {
+			continue
+		}
+		if b := c.Y + c.H; b > bottom {
+			bottom = b
+		}
+	}
+	return bottom
+}
+
+// firstChildTop returns the smallest top edge among the IN-FLOW children in list, or 0
+// when there are none. It positions a split tail at its first in-flow child.
+func firstChildTop(list []*Fragment) float64 {
+	top := 0.0
+	found := false
+	for _, c := range list {
+		if c.IsFloat || c.IsPositioned {
+			continue
+		}
+		if !found || c.Y < top {
+			top, found = c.Y, true
+		}
+	}
+	return top
 }
 
 // inFlowChildren returns f's in-flow (non-float, non-positioned) child fragments.

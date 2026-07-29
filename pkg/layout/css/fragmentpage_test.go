@@ -313,3 +313,146 @@ func TestSplitClampsClipRect(t *testing.T) {
 		t.Errorf("head clip width = %v, want 100 (unchanged)", res.head.ClipRect.w)
 	}
 }
+
+// linedBlock builds a block fragment of n lines at lineH each, starting at y.
+func linedBlock(y, lineH float64, n int) *Fragment {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	f := &Fragment{Y: y, H: lineH * float64(n), W: 100, Box: box}
+	for i := 0; i < n; i++ {
+		f.Lines = append(f.Lines, LineFragment{BaselineY: y + lineH*float64(i) + lineH*0.8})
+	}
+	return f
+}
+
+// TestSplitRecursesIntoStraddlingChild is the headline N1a case: a section > div > p
+// spine where the page boundary falls mid-paragraph.
+//
+// Before recursion, a child straddling the boundary rode the tail WHOLE, leaving a gap
+// on the head page the height of its above-boundary portion — here 50pt of blank page
+// even though five of the paragraph's eight lines would have fit.
+func TestSplitRecursesIntoStraddlingChild(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	p := linedBlock(50, 10, 8) // y=50..130
+	div := &Fragment{Y: 50, H: 80, W: 100, Box: box, Children: []*Fragment{p}}
+	section := &Fragment{Y: 0, H: 130, W: 100, Box: box,
+		Children: []*Fragment{{Y: 0, H: 50, W: 100, Box: box}, div}}
+
+	res := splitAnyBlockForPage(section, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	// The head must reach the boundary, not stop at the last whole child.
+	if gap := 100 - (res.head.Y + res.head.H); gap > 1 {
+		t.Errorf("head ends at %v, leaving a %vpt gap before the boundary at 100; "+
+			"the straddling child should have been split", res.head.Y+res.head.H, gap)
+	}
+	// Both halves of the spine survive: head has the first block plus the div's head.
+	if len(res.head.Children) != 2 {
+		t.Errorf("head has %d children, want 2 (the fitting block + the split div's head)",
+			len(res.head.Children))
+	}
+	if len(res.tail.Children) != 1 {
+		t.Errorf("tail has %d children, want 1 (the split div's tail)", len(res.tail.Children))
+	}
+	// No line is lost or duplicated across the two halves of the paragraph.
+	headLines := countLines(res.head)
+	tailLines := countLines(res.tail)
+	if headLines+tailLines != 8 {
+		t.Errorf("lines head=%d tail=%d, total %d, want 8 (no line dropped or duplicated)",
+			headLines, tailLines, headLines+tailLines)
+	}
+	if headLines == 0 || tailLines == 0 {
+		t.Errorf("expected the paragraph to split; got head=%d tail=%d lines", headLines, tailLines)
+	}
+}
+
+// TestSplitDoesNotRecurseIntoAvoidChild: `break-inside: avoid` on the straddling child
+// stops the recursion — the child rides the tail whole, as the author asked.
+func TestSplitDoesNotRecurseIntoAvoidChild(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	avoidBox := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock,
+		Style: gcss.ComputedStyle{BreakInside: "avoid"}}
+	p := linedBlock(50, 10, 8)
+	p.Box = avoidBox
+	section := &Fragment{Y: 0, H: 130, W: 100, Box: box,
+		Children: []*Fragment{{Y: 0, H: 50, W: 100, Box: box}, p}}
+
+	res := splitAnyBlockForPage(section, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	if countLines(res.head) != 0 {
+		t.Errorf("break-inside:avoid child was split (%d lines on the head); it must ride "+
+			"the tail whole", countLines(res.head))
+	}
+	if countLines(res.tail) != 8 {
+		t.Errorf("tail has %d lines, want all 8", countLines(res.tail))
+	}
+}
+
+// TestSplitStraddlerNotSplittableRidesTail: a straddling child with nothing to split on
+// (a single line, no block children) still moves whole rather than being clipped.
+func TestSplitStraddlerNotSplittableRidesTail(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	single := linedBlock(50, 80, 1) // one tall line: nothing to split between
+	section := &Fragment{Y: 0, H: 130, W: 100, Box: box,
+		Children: []*Fragment{{Y: 0, H: 50, W: 100, Box: box}, single}}
+
+	res := splitAnyBlockForPage(section, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	if countLines(res.head) != 0 {
+		t.Errorf("an unsplittable straddler should ride the tail; head has %d lines",
+			countLines(res.head))
+	}
+}
+
+// TestSplitRecursionKeepsNestedOutOfFlow: an out-of-flow child of the STRADDLING box
+// survives the recursive split (N1b's fix must hold at depth, not just at the top).
+func TestSplitRecursionKeepsNestedOutOfFlow(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	inner1 := &Fragment{Y: 50, H: 30, W: 100, Box: box}
+	inner2 := &Fragment{Y: 100, H: 30, W: 100, Box: box}
+	floatChild := &Fragment{Y: 55, H: 10, W: 20, Box: box, IsFloat: true}
+	div := &Fragment{Y: 50, H: 80, W: 100, Box: box,
+		Children: []*Fragment{inner1, floatChild, inner2}}
+	section := &Fragment{Y: 0, H: 130, W: 100, Box: box,
+		Children: []*Fragment{{Y: 0, H: 50, W: 100, Box: box}, div}}
+
+	res := splitAnyBlockForPage(section, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	if !fragTreeContains(res.head, floatChild) && !fragTreeContains(res.tail, floatChild) {
+		t.Error("the float nested inside the straddling child was dropped by the recursive split")
+	}
+}
+
+// countLines totals the line count over a fragment subtree.
+func countLines(f *Fragment) int {
+	if f == nil {
+		return 0
+	}
+	n := len(f.Lines)
+	for _, c := range f.Children {
+		n += countLines(c)
+	}
+	return n
+}
+
+// fragTreeContains reports whether want appears anywhere in f's subtree.
+func fragTreeContains(f, want *Fragment) bool {
+	if f == nil {
+		return false
+	}
+	if f == want {
+		return true
+	}
+	for _, c := range f.Children {
+		if fragTreeContains(c, want) {
+			return true
+		}
+	}
+	return false
+}

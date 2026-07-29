@@ -1101,3 +1101,52 @@ func TestPaginateRetainedMarginPaintsBlockDown(t *testing.T) {
 		t.Errorf("margined block painted at Y=%.1f on page 1, want ~40 (retained top margin)", ys[0])
 	}
 }
+
+// TestPaginateSplitsNestedSpine is the end-to-end N1a assertion, through the real
+// LayoutPaged API rather than the splitter unit.
+//
+// A tall spacer pushes the page boundary into a paragraph nested two levels deep
+// (section > div > p). Before recursive splitting the whole div moved to page 2,
+// leaving the rest of page 1 blank; now the paragraph splits and both pages carry text.
+func TestPaginateSplitsNestedSpine(t *testing.T) {
+	src := `<!DOCTYPE html><html><head><style>
+	  body { margin: 0; font-family: serif; font-size: 16px; }
+	  .spacer { height: 300px; }
+	</style></head><body>
+	  <section><div class="spacer"></div>
+	    <div><p>` + strings.Repeat("word ", 200) + `</p></div>
+	  </section>
+	</body></html>`
+	doc, err := html.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	root, err := Build(context.Background(), doc, nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, 400, 500)
+	if err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	if len(pages.Pages) < 2 {
+		t.Fatalf("want at least 2 pages, got %d", len(pages.Pages))
+	}
+	countGlyphs := func(i int) int {
+		n := 0
+		for _, it := range pages.Pages[i].Items {
+			if it.Glyph.Outline != nil || len(it.Glyph.Runes) > 0 {
+				n++
+			}
+		}
+		return n
+	}
+	first, second := countGlyphs(0), countGlyphs(1)
+	if first == 0 {
+		t.Error("page 1 has no text: the nested paragraph did not split, so the whole " +
+			"block moved to page 2 and left page 1 blank below the spacer")
+	}
+	if second == 0 {
+		t.Error("page 2 has no text; the split lost the paragraph's remainder")
+	}
+}
