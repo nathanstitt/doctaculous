@@ -586,11 +586,11 @@ newline is kept.</p>
     <p><code>--max-width</code>/<code>--max-height</code> fit a render inside a box with
       aspect preserved, so a 3:2 source can never fill a square target &mdash; it comes
       back 300&times;200, not 200&times;200. <code>ImageOptions.Crop</code> fills the
-      target instead, discarding what falls outside. The source below is 480&times;322:</p>
+      target instead, discarding what falls outside. The source below is 480&times;360:</p>
 
     <div class="figure">
       <img src="img/crop-source.jpg" alt="source photograph, hippo left of centre">
-      <div class="cap">img/crop-source.jpg &middot; 480&times;322 source</div>
+      <div class="cap">img/crop-source.jpg &middot; 480&times;360 source</div>
     </div>
 
     <p>The same square target, placed three ways. <em>Saliency</em> scores candidate
@@ -612,9 +612,10 @@ newline is kept.</p>
         <figcaption>west</figcaption>
       </figure>
     </div>
-    <p class="caption">The subject sits left of centre, so the saliency window shifts
-      toward it &mdash; <code>(20,0)&ndash;(342,322)</code> against the centre crop&#8217;s
-      <code>(79,0)&ndash;(401,322)</code>. <code>EncodeImageRect</code> returns that
+    <p class="caption">The hippo&#8217;s head &mdash; the most textured part of the frame
+      &mdash; sits right of centre, so the saliency window shifts toward it:
+      <code>(110,0)&ndash;(470,360)</code> against the centre crop&#8217;s
+      <code>(60,0)&ndash;(420,360)</code>. <code>EncodeImageRect</code> returns that
       rectangle, so a caller can record where a smart crop landed and replay it later
       with <code>StrategyRect</code>.</p>
   </section>

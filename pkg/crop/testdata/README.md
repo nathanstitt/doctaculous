@@ -5,15 +5,14 @@
 A real photograph, used by `golden_test.go` to pin the saliency scorer's
 behaviour on natural image statistics.
 
-- **Dimensions:** 480×322, JPEG quality 85 (37 KB). Downscaled from a 3900×2613
+- **Dimensions:** 480×360, JPEG quality 85 (54 KB). Downscaled from a 1024×768
   original and re-encoded to keep the fixture small, per the repository's
   "keep committed real images small" rule.
-- **Author:** Andrew McMillan.
-- **Source:** <https://pixnio.com/fauna-animals/hippopotamus-animal>
-- **License:** **CC0 1.0 Universal** (public domain dedication). CC0 places no
-  restriction on redistribution, so shipping the file inside this MIT-licensed
-  repository is permitted, and no attribution is required. The credit above is
-  recorded as good practice, not obligation.
+- **Author:** Nathan Stitt — an original photograph by the project maintainer.
+- **License:** **CC0 1.0 Universal** (public domain dedication), dedicated by
+  the author. CC0 places no restriction on redistribution, so shipping the file
+  inside this MIT-licensed repository is permitted and no attribution is
+  required; the credit above is recorded as good practice, not obligation.
 
 ### Licensing note — why not just any free stock photo
 
@@ -37,16 +36,22 @@ uniform blocks, no noise. They pin the *direction* of the scorer's preference
 quality on real images, where gradients are smooth, edges are soft, and the
 subject is not a rectangle.
 
-This photograph has a clearly off-centre subject — a hippo in the upper right —
-with large flat regions of water that the scorer should reject. Its mean Sobel
-edge energy is ~0.079, roughly eight times that of the smooth gradient at
-`testdata/htmldoc/img/photo.jpg` (~0.010), which carries no subject at all and
-is therefore useless for this purpose.
+This photograph has a clearly off-centre subject — a hippo lying across the
+lower half with its head, the most textured region, at centre-right — plus large
+flat stretches of water and a busy vegetated bank along the top competing for
+the scorer's attention. Its mean Sobel edge energy is ~0.092, roughly nine times
+that of the smooth gradient at `testdata/htmldoc/img/photo.jpg` (~0.010), which
+carries no subject at all and is therefore useless for this purpose.
 
 `TestSaliencyBeatsCenterOnPhoto` asserts the property the goldens alone cannot:
-that the saliency window sits left of the centre window, tracking the subject. A
-scorer that regressed to "always centre" would still satisfy a regenerated
-golden, but not that test.
+that the chosen window is off-centre *and* scores strictly better than the
+centred one under the same scorer. A scorer that regressed to "always centre"
+would still satisfy a regenerated golden, but not that test.
+
+Note the check is deliberately direction-agnostic. Which way the window shifts
+is a property of the fixture, not the algorithm — this photo pulls right, the
+one it replaced pulled left — so asserting a direction would overfit the test to
+one image and break the next time the fixture changes.
 
 ## `golden-*.txt`
 

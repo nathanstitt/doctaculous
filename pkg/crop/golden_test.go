@@ -71,10 +71,15 @@ func TestGoldenSaliencyOnPhoto(t *testing.T) {
 }
 
 // TestSaliencyBeatsCenterOnPhoto is the assertion that actually justifies the
-// scorer: on a photograph whose subject sits left of centre, the saliency crop
-// must move toward the subject rather than sit where a centre crop would. A
-// scorer that regressed to "always centre" would still satisfy the goldens above
-// after an -update, but not this.
+// scorer: on a real photograph it must place the window on content rather than
+// where a plain centre crop would land. A scorer that regressed to "always
+// centre" would still satisfy the goldens above after an -update, but not this.
+//
+// The check is deliberately direction-agnostic. Which way the window moves is a
+// property of the fixture, not of the algorithm, so asserting "shifts left"
+// would silently overfit the test to one photograph and break the moment the
+// fixture is swapped. What must hold for any subject-bearing photo is that the
+// window moves off centre and that the region it lands on scores better.
 func TestSaliencyBeatsCenterOnPhoto(t *testing.T) {
 	img := loadPhoto(t)
 
@@ -84,9 +89,11 @@ func TestSaliencyBeatsCenterOnPhoto(t *testing.T) {
 	}{
 		{"square", 1, 1},
 		{"portrait-4x5", 4, 5},
+		{"wide-16x9", 16, 9},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sal, err := Rect(img, Options{Strategy: StrategySaliency, Width: tc.w, Height: tc.h})
+			opts := Options{Strategy: StrategySaliency, Width: tc.w, Height: tc.h}
+			sal, err := Rect(img, opts)
 			if err != nil {
 				t.Fatalf("Rect(saliency): %v", err)
 			}
@@ -95,16 +102,20 @@ func TestSaliencyBeatsCenterOnPhoto(t *testing.T) {
 				t.Fatalf("Rect(center): %v", err)
 			}
 			if sal == cen {
-				t.Fatalf("saliency chose the centre window %v; the subject is left of centre, "+
-					"so a content-aware crop should shift toward it", sal)
+				t.Fatalf("saliency chose the centre window %v; on a photograph with an "+
+					"off-centre subject a content-aware crop should shift toward it", sal)
 			}
-			// The subject (a hippo) sits above and left of the frame centre,
-			// with flat water filling the lower and right thirds. Require the
-			// saliency window to sit left of the centre window, not merely
-			// differ from it.
-			if sal.Min.X >= cen.Min.X {
-				t.Errorf("saliency rect %v is not left of the centre rect %v; "+
-					"the subject is in the left half", sal, cen)
+
+			// The chosen window must actually score better than the centred one
+			// under the same scorer — this is what "content-aware" means, and it
+			// holds whichever direction the subject lies in.
+			b := img.Bounds()
+			sum := newIntegral(scoreMap(img, opts), b.Dx(), b.Dy())
+			salScore := sum.mean(sal.Sub(b.Min))
+			cenScore := sum.mean(cen.Sub(b.Min))
+			if salScore <= cenScore {
+				t.Errorf("saliency rect %v scores %.5f, centre rect %v scores %.5f; "+
+					"the chosen window must score strictly better", sal, salScore, cen, cenScore)
 			}
 		})
 	}
