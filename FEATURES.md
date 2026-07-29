@@ -102,6 +102,11 @@ bullet's design doc is in `docs/superpowers/specs/`:
   break cascade, between-block + forced breaks, per-page distribution of relative/abs/fixed/float +
   html/body border. `2026-06-28-html-pagination-design.md`,
   `2026-06-28-html-pagination-fidelity-bundle-design.md`.
+- **Mid-block forced breaks** (`pkg/layout/css/fragmentpage.go`, `paginate.go`): a `break-before`/
+  `break-after` on a nested block that is neither at its ancestor's leading nor trailing edge now
+  splits that ancestor at the break position instead of being dropped with a warning. Reuses the
+  recursive splitter; the split Y comes from the author's break rather than the page boundary, so it
+  applies even when the page is not full. `2026-07-28-pagination-midblock-break-design.md`.
 - **Recursive spine splitting** (`pkg/layout/css/fragmentpage.go`): a child straddling a page boundary
   is itself split rather than riding the tail whole, so a `section > div > p` spine breaks at a line
   boundary inside the paragraph instead of leaving the head page blank below the last whole child.

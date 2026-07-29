@@ -198,8 +198,6 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 		return &layout.Pages{Pages: []layout.Page{page}}
 	}
 
-	warnMidBlockForcedBreaks(body.Children, e.logf)
-
 	cbWidth := contentWidth(body, g0.contentW)
 	buckets := bucketBlocks(body.Children, g0.contentH, cbWidth, e.logf)
 

@@ -366,9 +366,14 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
 - ☑ **N2. Widows/orphans + `break-inside: avoid` + `break-*: avoid`** — *ALREADY SHIPPED (the "depends on N1"
   note was stale).* `widowsOf`/`orphansOf` feed `splitBlockForPage`, `keptInsideAvoid` gates `lineSplittable`,
   and `break-*: avoid` chain-keeping is in `bucketBlocks`. All tested. No code change.
-- ☐ **N3. Honoring a genuinely MID-BLOCK forced break on a nested block** (edge breaks now propagate). *Medium*
-  — depends on **N1a only**, not all of N1. `warnMidBlockForcedBreaks` already DETECTS the case; a recursive
-  splitter taking an explicit split-Y instead of `pageBottom` closes it.
+- ☑ **N3. Mid-block forced break on a nested block** — *DONE.* A `break-before`/`break-after` on a descendant
+  that is neither at the top-level block's leading nor trailing edge is now honored by splitting that block AT
+  THE BREAK POSITION, rather than being detected, logged, and dropped. It reuses N1a's recursive splitter
+  wholesale — the only new idea is that the split Y comes from the author's break instead of the page boundary,
+  so the split runs BEFORE the overflow logic (the page is not full; it is simply ending here). widows/orphans
+  are deliberately not applied: they express a preference about stranded lines, and a forced break is not a
+  preference. `warnMidBlockForcedBreaks` and its two call sites are deleted, since the case it warned about is
+  handled. `2026-07-28-pagination-midblock-break-design.md`.
 - ☐ **N4. Per-page float distribution.** *Medium.*
 - ☐ **N5. Per-page bottom-anchored `fixed`** (per-page `resolveAbsolute` height). *Medium.*
 - ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16

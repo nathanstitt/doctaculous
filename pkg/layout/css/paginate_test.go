@@ -698,7 +698,13 @@ func TestPaginateNestedForcedBreakAfterPropagates(t *testing.T) {
 // fragmentation, out of scope). It must NOT split AND must log a one-time mid-block
 // warning. Here a wrapper holds two children; the SECOND has break-before:page (not the
 // leading edge), so it is mid-block.
-func TestPaginateMidBlockForcedBreakStillWarns(t *testing.T) {
+// TestPaginateMidBlockForcedBreakSplits: a forced break on a NESTED (non-edge) block
+// is honored by splitting its ancestor at the break position.
+//
+// This replaces TestPaginateMidBlockForcedBreakStillWarns, which asserted the
+// deferred behavior — the break was detected, logged, and dropped, so the two halves
+// stayed on one page.
+func TestPaginateMidBlockForcedBreakSplits(t *testing.T) {
 	const w = 400
 	var logs []string
 	logf := func(format string, args ...any) { logs = append(logs, format) }
@@ -710,21 +716,38 @@ func TestPaginateMidBlockForcedBreakStillWarns(t *testing.T) {
 		`</div></body></html>`
 
 	root := buildRoot(t, src, logf)
+	// The page is 1000pt tall and the content is 40pt, so nothing OVERFLOWS: the split
+	// happens purely because the author asked for a break there.
 	pages, err := New(nil, nil, logf).LayoutPaged(context.Background(), root, w, 1000)
 	if err != nil {
 		t.Fatalf("LayoutPaged: %v", err)
 	}
-	if len(pages.Pages) != 1 {
-		t.Errorf("a mid-block forced break must NOT split (bounded scope): got %d pages, want 1", len(pages.Pages))
+	if len(pages.Pages) != 2 {
+		t.Fatalf("a mid-block forced break should split: got %d pages, want 2", len(pages.Pages))
 	}
-	found := false
 	for _, l := range logs {
 		if strings.Contains(l, "mid-block") && strings.Contains(l, "not honored") {
-			found = true
+			t.Errorf("the mid-block deferral warning still fires after the break was honored: %q", l)
 		}
 	}
-	if !found {
-		t.Errorf("expected a one-time mid-block forced-break warning, got logs %v", logs)
+}
+
+// TestPaginateEdgeForcedBreakUnchanged pins that a break at a block's LEADING edge is
+// still handled by propagation (effectiveBreaks) rather than by splitting — the two
+// paths must not both fire.
+func TestPaginateEdgeForcedBreakUnchanged(t *testing.T) {
+	const w = 400
+	src := `<html><body style="margin:0">` +
+		`<div style="height:20px;margin:0">first</div>` +
+		`<div style="margin:0"><div style="height:20px;margin:0;break-before:page">second</div></div>` +
+		`</body></html>`
+	root := buildRoot(t, src, nil)
+	pages, err := New(nil, nil, nil).LayoutPaged(context.Background(), root, w, 1000)
+	if err != nil {
+		t.Fatalf("LayoutPaged: %v", err)
+	}
+	if len(pages.Pages) != 2 {
+		t.Errorf("a leading-edge forced break should still page-break: got %d, want 2", len(pages.Pages))
 	}
 }
 
