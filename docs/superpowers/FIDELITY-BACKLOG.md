@@ -331,10 +331,39 @@ whether DOCX feature-completeness is in the "ALL fidelity issues" scope or a sep
 
 ## N. Pagination — structural deferrals (need real fragmentation; larger)
 
-- ☐ **N1. Mid-box / mid-line / mid-table-row / mid-flex-or-grid-item splitting.** *Large* (the big one; threads
-  the split into the block stacker or a fragmentation-aware relayout — breaks the post-pass model).
-- ☐ **N2. Widows/orphans + `break-inside: avoid` + `break-*: avoid`.** *Medium–large* (depends on N1).
-- ☐ **N3. Honoring a genuinely MID-BLOCK forced break on a nested block** (edge breaks now propagate). *Medium* (depends on N1).
+- ◐ **N1. Mid-box splitting** — RE-SCOPED after exploration; it is not one item but four with very different
+  costs. The "breaks the post-pass model" framing was imprecise: heights, borders, and glyph positions are all
+  cheaply re-derivable (the existing splitters prove it, and the whole tree lives in one page-space coordinate
+  system). The real blocker is that **all four splitters are non-recursive** — none calls back into
+  `splitAnyBlockForPage` — so splitting a nested spine needs a different algorithm shape, not more state.
+  - ☑ **N1b. Correctness debt in the existing splitters** — *DONE.* Three live bugs, each reproduced before
+    fixing and each mutation-verified to fail exactly one test: (1) `splitMixedBlock` rebuilt its child lists
+    from `inFlowChildren`, so floats and positioned children were dropped from BOTH fragments — content
+    silently vanished (measured: 2 of 4 children lost); (2) the shallow clone shared the `BgImage` POINTER and
+    the `ClipChain` backing array, which `shiftFragmentExtras` mutates in place, so shifting the head moved the
+    tail's background origin too (measured: origin 7 → 1007); (3) `ClipRect` was struct-copied whole, so a
+    split `overflow:hidden` block clipped to the full pre-split height on both pages. Detaching and clamping
+    happen once at the `splitAnyBlockForPage` dispatch point so a future splitter cannot forget.
+    `2026-07-28-pagination-split-fixes-design.md`.
+  - ☐ **N1a. Recursive spine splitting** — *Medium.* Make `splitMixedBlock` recurse into the straddling child
+    via `splitAnyBlockForPage` (no signature change needed — `pageBottom` is absolute page space, valid at any
+    depth), with per-level edge suppression. Delivers what users perceive as mid-box splitting
+    (`section > div > p` splitting at a line boundary). Stays inside the ~1,250-line splitter layer; the
+    external API surface is 2 lines. One genuinely new piece of state: margin-collapse state at the split
+    point is consumed during layout and never recorded on the fragment.
+  - ☐ **N1c. Mid-cell table splitting** — *Large.* Needs a height-budgeted relayout of a cell's BFC.
+    `paginateRuns` is the precedent that relayout-during-pagination is architecturally acceptable here (it
+    already re-runs `layoutTree` per width). Also needs repeated `<thead>` to be genuinely useful.
+  - ☐ **N1d. Mid-flex-item / mid-grid-item splitting** — *Very large; recommend permanent deferral.* Requires
+    the fragmentainer to reach into flex line sizing and grid track sizing, since `flex-grow`/`stretch`/`fr`
+    size items collectively and must be re-solved per fragmentainer. Already an owner-signed deferral (see
+    `docs/paged-media-deferral-signoffs.md` row 2) and the case with the least real-world demand.
+- ☑ **N2. Widows/orphans + `break-inside: avoid` + `break-*: avoid`** — *ALREADY SHIPPED (the "depends on N1"
+  note was stale).* `widowsOf`/`orphansOf` feed `splitBlockForPage`, `keptInsideAvoid` gates `lineSplittable`,
+  and `break-*: avoid` chain-keeping is in `bucketBlocks`. All tested. No code change.
+- ☐ **N3. Honoring a genuinely MID-BLOCK forced break on a nested block** (edge breaks now propagate). *Medium*
+  — depends on **N1a only**, not all of N1. `warnMidBlockForcedBreaks` already DETECTS the case; a recursive
+  splitter taking an explicit split-Y instead of `pageBottom` closes it.
 - ☐ **N4. Per-page float distribution.** *Medium.*
 - ☐ **N5. Per-page bottom-anchored `fixed`** (per-page `resolveAbsolute` height). *Medium.*
 - ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16

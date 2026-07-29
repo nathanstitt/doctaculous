@@ -29,7 +29,53 @@ func isTableFragment(f *Fragment) bool {
 // splitAnyBlockForPage splits b for the page, choosing the splitter by b's content shape:
 // a table breaks between rows, a column-flex/grid breaks between item rows, a block with
 // in-flow block children breaks at child boundaries, and a pure-inline block line-splits.
+//
+// Whichever splitter runs, the two fragments are detached from each other's shared
+// mutable state before returning — see detachSharedExtras. Doing it here, at the single
+// dispatch point, rather than in each splitter means a future splitter cannot forget.
 func splitAnyBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) splitResult {
+	res := splitOneBlockForPage(b, pageBottom, widows, orphans)
+	// Only a genuine split (both sides present) aliases anything: a "moved whole" or
+	// "fits whole" result hands back the original pointer, which must not be touched.
+	if res.head != nil && res.tail != nil {
+		detachSharedExtras(res.head)
+		detachSharedExtras(res.tail)
+		clampClipToFragment(res.head)
+		clampClipToFragment(res.tail)
+	}
+	return res
+}
+
+// clampClipToFragment narrows a clipping fragment's clip rect to its own vertical
+// extent after a split.
+//
+// ClipRect is a value, so the two halves do not alias — but each inherits the WHOLE
+// original box's rect. A split `overflow: hidden` block would then clip to the full
+// pre-split height on both pages, letting content that belongs to the other fragment
+// paint through on whichever page it lands.
+//
+// Only the vertical extent is narrowed: a page break divides a box along the block
+// axis, so the horizontal clip is unchanged.
+func clampClipToFragment(f *Fragment) {
+	if !f.Clips {
+		return
+	}
+	top, bottom := f.Y, f.Y+f.H
+	if f.ClipRect.y < top {
+		f.ClipRect.h -= top - f.ClipRect.y
+		f.ClipRect.y = top
+	}
+	if end := f.ClipRect.y + f.ClipRect.h; end > bottom {
+		f.ClipRect.h -= end - bottom
+	}
+	if f.ClipRect.h < 0 {
+		f.ClipRect.h = 0
+	}
+}
+
+// splitOneBlockForPage is splitAnyBlockForPage's shape dispatch, without the
+// shared-state detach.
+func splitOneBlockForPage(b *Fragment, pageBottom float64, widows, orphans int) splitResult {
 	if isTableFragment(b) {
 		return splitTableForPage(b, pageBottom)
 	}
@@ -95,6 +141,12 @@ func splitMixedBlock(parent *Fragment, pageBottom float64, widows, orphans int) 
 	tail.H = (parent.Y + parent.H) - tail.Y
 	head.Border[layout.EdgeBottom] = BorderEdge{}
 	tail.Border[layout.EdgeTop] = BorderEdge{}
+	// The child lists above were rebuilt from the IN-FLOW children only, so the
+	// out-of-flow ones must be put back or they vanish from the document entirely.
+	// They are routed by the PAGE BOUNDARY, not by tail.Y: the tail starts at its first
+	// in-flow child, which can be well below the boundary, and an out-of-flow box in
+	// that gap belongs to the next page rather than overflowing the current one.
+	distributeOutOfFlow(parent, &head, &tail, pageBottom)
 	return splitResult{head: &head, tail: &tail}
 }
 
@@ -107,6 +159,63 @@ func inFlowChildren(f *Fragment) []*Fragment {
 		}
 	}
 	return out
+}
+
+// detachSharedExtras deep-copies the per-fragment state that a shallow clone would
+// otherwise SHARE between a split's head and tail.
+//
+// Splitting is `head := *b; tail := *b`, which copies pointers and slice headers. Two
+// fragments then reference one BgImage struct and one ClipChain backing array — and
+// shiftFragmentExtras (block.go) moves a fragment to its page's local frame by mutating
+// exactly those IN PLACE. So shifting the head also moves the tail's background origin,
+// by the head page's offset, on top of the tail's own shift. The continuation page
+// paints its background in the wrong place.
+//
+// Called on both fragments after every split. A fragment with neither a background
+// image nor a clip chain (the common case) allocates nothing.
+func detachSharedExtras(f *Fragment) {
+	if f.BgImage != nil {
+		bg := *f.BgImage
+		f.BgImage = &bg
+	}
+	if len(f.PositionedInfo) > 0 {
+		pi := append([]PositionedInfo(nil), f.PositionedInfo...)
+		for i := range pi {
+			if len(pi[i].ClipChain) > 0 {
+				pi[i].ClipChain = append([]rect(nil), pi[i].ClipChain...)
+			}
+		}
+		f.PositionedInfo = pi
+	}
+	if len(f.Collapsed) > 0 {
+		f.Collapsed = append([]layout.BorderItem(nil), f.Collapsed...)
+	}
+}
+
+// distributeOutOfFlow assigns each of parent's out-of-flow children (floats and
+// positioned boxes) to the head or tail fragment by which side of the split they sit
+// on, appending to the respective child lists.
+//
+// This exists because a split that rebuilds its child lists from inFlowChildren would
+// otherwise DROP every out-of-flow child from both fragments — the content simply
+// disappears from the document. A float or absolutely-positioned box is still painted
+// content; it belongs on whichever page its geometry puts it.
+//
+// A child straddling the boundary rides the TAIL whole, matching how a straddling
+// in-flow child is handled: better to push it down intact than to clip it.
+func distributeOutOfFlow(parent, head, tail *Fragment, splitY float64) {
+	for _, c := range parent.Children {
+		if !c.IsFloat && !c.IsPositioned {
+			continue // in-flow children are partitioned by the caller
+		}
+		if head != nil && c.Y+c.H <= splitY+0.5 {
+			head.Children = append(head.Children, c)
+			continue
+		}
+		if tail != nil {
+			tail.Children = append(tail.Children, c)
+		}
+	}
 }
 
 // splitResult is the outcome of attempting to split a block across a page boundary.
