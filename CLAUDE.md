@@ -105,7 +105,8 @@ backend-agnostic so a new backend can be added without touching parsing, interpr
 
 The full inventory of shipped features lives in **[FEATURES.md](FEATURES.md)** — keep it current:
 every feature that lands gets a bullet there in the same PR. This section keeps only what is NOT
-done yet.
+done yet. The detailed per-item working checklist (with the rationale for each deferral) lives in
+**[docs/FIDELITY-BACKLOG.md](docs/FIDELITY-BACKLOG.md)**.
 
 ### TODO (roughly priority order)
 
