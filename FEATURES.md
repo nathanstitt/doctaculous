@@ -102,6 +102,12 @@ bullet's design doc is in `docs/superpowers/specs/`:
   break cascade, between-block + forced breaks, per-page distribution of relative/abs/fixed/float +
   html/body border. `2026-06-28-html-pagination-design.md`,
   `2026-06-28-html-pagination-fidelity-bundle-design.md`.
+- **Page-split correctness** (`pkg/layout/css/fragmentpage.go`): a split routes out-of-flow children
+  (floats, positioned boxes) to the fragment whose band contains them instead of dropping them from
+  both; detaches the `BgImage`/`ClipChain`/`Collapsed` state the shallow clone would otherwise share
+  between two pages (the per-page shift mutates those in place, so one fragment's shift moved the
+  other's background); and clamps a clipping fragment's `ClipRect` to its own extent. Applied at the
+  single `splitAnyBlockForPage` dispatch point. `2026-07-28-pagination-split-fixes-design.md`.
 - **CSS Paged Media** (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+
   `fragmentpage.go`+`marginbox.go`, `WithDefaultPaged`): `@page` size/margins/named/pseudo + 16
   margin boxes, `break-inside`, widows/orphans via mid-block line fragmentation, running

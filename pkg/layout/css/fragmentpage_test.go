@@ -166,3 +166,150 @@ func TestSplitMixedBlock(t *testing.T) {
 		t.Errorf("tail should hold the block child only")
 	}
 }
+
+// outOfFlowFrag builds a child fragment at the given band, optionally out-of-flow.
+func outOfFlowFrag(y, h float64, isFloat, isPos bool) *Fragment {
+	return &Fragment{Y: y, H: h, W: 100, IsFloat: isFloat, IsPositioned: isPos,
+		Box: &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}}
+}
+
+// TestSplitMixedKeepsOutOfFlowChildren is a content-loss regression test.
+//
+// splitMixedBlock rebuilds head/tail child lists from inFlowChildren, which filters
+// out floats and positioned boxes. Without redistributing them afterwards they are in
+// NEITHER fragment — the float and the absolutely-positioned box simply disappear from
+// the rendered document, silently and with no log.
+func TestSplitMixedKeepsOutOfFlowChildren(t *testing.T) {
+	parent := &Fragment{Y: 0, H: 200, W: 100,
+		Box: &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}}
+	inflowTop := outOfFlowFrag(0, 50, false, false)
+	floatTop := outOfFlowFrag(50, 20, true, false)
+	posBottom := outOfFlowFrag(120, 20, false, true)
+	inflowBottom := outOfFlowFrag(150, 50, false, false)
+	parent.Children = []*Fragment{inflowTop, floatTop, posBottom, inflowBottom}
+
+	res := splitMixedBlock(parent, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	total := len(res.head.Children) + len(res.tail.Children)
+	if total != 4 {
+		t.Errorf("split kept %d of 4 children; out-of-flow children must not be dropped", total)
+	}
+	// Each out-of-flow child goes to the fragment whose band contains it.
+	if !containsFrag(res.head.Children, floatTop) {
+		t.Error("the float at y=50 should ride the HEAD (it sits above the split)")
+	}
+	if !containsFrag(res.tail.Children, posBottom) {
+		t.Error("the positioned box at y=120 should ride the TAIL (it sits below the split)")
+	}
+}
+
+// TestSplitMixedNoOutOfFlowUnchanged pins that a block with only in-flow children is
+// unaffected — the common case must stay byte-identical.
+func TestSplitMixedNoOutOfFlowUnchanged(t *testing.T) {
+	parent := &Fragment{Y: 0, H: 200, W: 100,
+		Box: &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}}
+	parent.Children = []*Fragment{
+		outOfFlowFrag(0, 50, false, false),
+		outOfFlowFrag(150, 50, false, false),
+	}
+	res := splitMixedBlock(parent, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	if len(res.head.Children) != 1 || len(res.tail.Children) != 1 {
+		t.Errorf("in-flow only: head=%d tail=%d children, want 1 and 1",
+			len(res.head.Children), len(res.tail.Children))
+	}
+}
+
+func containsFrag(list []*Fragment, want *Fragment) bool {
+	for _, f := range list {
+		if f == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSplitDetachesSharedExtras is a paint-correctness regression test.
+//
+// A split is `head := *b; tail := *b`, which copies the BgImage POINTER and the
+// ClipChain slice header. shiftFragmentExtras moves a fragment into its page's local
+// frame by mutating exactly those in place — so without detaching, shifting the head
+// also moves the tail's background origin by the head page's offset, and the
+// continuation page paints its background in the wrong place.
+func TestSplitDetachesSharedExtras(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	parent := &Fragment{Y: 0, H: 200, W: 100, Box: box,
+		BgImage: &BackgroundImageContent{OriginX: 5, OriginY: 7},
+	}
+	parent.Children = []*Fragment{
+		{Y: 0, H: 50, W: 100, Box: box},
+		{Y: 150, H: 50, W: 100, Box: box},
+	}
+	res := splitAnyBlockForPage(parent, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	if res.head.BgImage == res.tail.BgImage {
+		t.Fatal("head and tail share one BgImage struct; a per-page shift of either " +
+			"would move the other's background too")
+	}
+	// Shifting one must not disturb the other.
+	res.head.BgImage.OriginY += 1000
+	if res.tail.BgImage.OriginY != 7 {
+		t.Errorf("shifting the head moved the tail's background origin to %v, want 7",
+			res.tail.BgImage.OriginY)
+	}
+}
+
+// TestSplitWholeDoesNotCopy pins that a "fits whole" / "moves whole" result hands back
+// the ORIGINAL pointer — the bucketer relies on that identity, and copying there would
+// silently detach a fragment from the tree it belongs to.
+func TestSplitWholeDoesNotCopy(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	parent := &Fragment{Y: 0, H: 50, W: 100, Box: box,
+		BgImage: &BackgroundImageContent{OriginX: 5, OriginY: 7},
+	}
+	parent.Children = []*Fragment{{Y: 0, H: 50, W: 100, Box: box}}
+	res := splitAnyBlockForPage(parent, 1000, 0, 0) // fits entirely
+	if res.head != parent {
+		t.Errorf("a whole-fit must return the original fragment pointer, got %p want %p",
+			res.head, parent)
+	}
+}
+
+// TestSplitClampsClipRect: a split overflow:hidden block must clip to each fragment's
+// own extent. Both halves inherit the whole original box's clip rect from the struct
+// copy, so without clamping each page clips to the full pre-split height and content
+// belonging to the other fragment can paint through.
+func TestSplitClampsClipRect(t *testing.T) {
+	box := &cssbox.Box{Kind: cssbox.BoxBlock, Display: cssbox.DisplayBlock}
+	parent := &Fragment{Y: 0, H: 200, W: 100, Box: box,
+		Clips: true, ClipRect: rect{x: 0, y: 0, w: 100, h: 200},
+	}
+	parent.Children = []*Fragment{
+		{Y: 0, H: 50, W: 100, Box: box},
+		{Y: 150, H: 50, W: 100, Box: box},
+	}
+	res := splitAnyBlockForPage(parent, 100, 0, 0)
+	if res.head == nil || res.tail == nil {
+		t.Fatalf("expected a split; got head=%v tail=%v", res.head, res.tail)
+	}
+	for _, c := range []struct {
+		name string
+		f    *Fragment
+	}{{"head", res.head}, {"tail", res.tail}} {
+		top, bottom := c.f.Y, c.f.Y+c.f.H
+		if c.f.ClipRect.y < top-0.01 || c.f.ClipRect.y+c.f.ClipRect.h > bottom+0.01 {
+			t.Errorf("%s clip rect [%v,%v] escapes its own extent [%v,%v]",
+				c.name, c.f.ClipRect.y, c.f.ClipRect.y+c.f.ClipRect.h, top, bottom)
+		}
+	}
+	// The horizontal extent is untouched — a page break divides the block axis only.
+	if res.head.ClipRect.w != 100 {
+		t.Errorf("head clip width = %v, want 100 (unchanged)", res.head.ClipRect.w)
+	}
+}
