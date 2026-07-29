@@ -66,6 +66,8 @@ func convertCmd(args []string) error {
 		dpi       = fs.Float64("dpi", 150, "render resolution in DPI (image output; with --max-width/--max-height: a resolution ceiling)")
 		maxWidth  = fs.Int("max-width", 0, "fit the render within this many pixels wide, aspect preserved (image output; 0 = off)")
 		maxHeight = fs.Int("max-height", 0, "fit the render within this many pixels tall, aspect preserved (image output; 0 = off)")
+		cropMode  = fs.String("crop", "", "crop to --crop-size: center, north, south, east, west, saliency (image output; empty = off)")
+		cropSize  = fs.String("crop-size", "", "exact output size as WxH, e.g. 720x720 (required with --crop)")
 		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg output)")
 		page      = fs.Int("page", 1, "1-based page to render (image output)")
 		pages     = fs.String("pages", "", "page range for image output, e.g. 1-3,5 or \"all\" (overrides --page; needs %d in the output name)")
@@ -123,6 +125,10 @@ func convertCmd(args []string) error {
 		if *maxWidth < 0 || *maxHeight < 0 {
 			return fmt.Errorf("--max-width/--max-height must be non-negative, got %d/%d", *maxWidth, *maxHeight)
 		}
+		cropOpts, err := cropOptions(*cropMode, *cropSize)
+		if err != nil {
+			return err
+		}
 		indices, err := resolvePages(*pages, *page, doc.PageCount())
 		if err != nil {
 			return err
@@ -130,6 +136,7 @@ func convertCmd(args []string) error {
 		imgOpts := doctaculous.ImageOptions{
 			Format:  toFormat,
 			Quality: *quality,
+			Crop:    cropOpts,
 			Raster: doctaculous.RasterOptions{
 				DPI:         fitDPI(fs, *dpi, *maxWidth, *maxHeight),
 				MaxWidthPx:  *maxWidth,
@@ -331,6 +338,8 @@ var convertValueFlags = map[string]bool{
 	"-dpi": true, "--dpi": true,
 	"-max-width": true, "--max-width": true,
 	"-max-height": true, "--max-height": true,
+	"-crop": true, "--crop": true,
+	"-crop-size": true, "--crop-size": true,
 	"-quality": true, "--quality": true,
 	"-page": true, "--page": true,
 	"-pages": true, "--pages": true,

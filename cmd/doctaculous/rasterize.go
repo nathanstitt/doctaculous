@@ -24,6 +24,8 @@ func rasterizeCmd(args []string) error {
 		dpi       = fs.Float64("dpi", 150, "render resolution in DPI (with --max-width/--max-height: a resolution ceiling)")
 		maxWidth  = fs.Int("max-width", 0, "fit the render within this many pixels wide, aspect preserved (0 = off)")
 		maxHeight = fs.Int("max-height", 0, "fit the render within this many pixels tall, aspect preserved (0 = off)")
+		cropMode  = fs.String("crop", "", "crop to --crop-size: center, north, south, east, west, saliency (empty = off)")
+		cropSize  = fs.String("crop-size", "", "exact output size as WxH, e.g. 720x720 (required with --crop)")
 		format    = fs.String("format", "png", "output image format: png or jpg")
 		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg only)")
 		workers   = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
@@ -83,9 +85,14 @@ func rasterizeCmd(args []string) error {
 	if *format == "jpg" || *format == "jpeg" {
 		imgFormat = doctaculous.FormatJPEG
 	}
+	cropOpts, err := cropOptions(*cropMode, *cropSize)
+	if err != nil {
+		return err
+	}
 	imgOpts := doctaculous.ImageOptions{
 		Format:  imgFormat,
 		Quality: *quality,
+		Crop:    cropOpts,
 		Raster: doctaculous.RasterOptions{
 			DPI:         fitDPI(fs, *dpi, *maxWidth, *maxHeight),
 			MaxWidthPx:  *maxWidth,
@@ -238,6 +245,8 @@ var rasterizeValueFlags = map[string]bool{
 	"-dpi": true, "--dpi": true,
 	"-max-width": true, "--max-width": true,
 	"-max-height": true, "--max-height": true,
+	"-crop": true, "--crop": true,
+	"-crop-size": true, "--crop-size": true,
 	"-format": true, "--format": true,
 	"-quality": true, "--quality": true,
 	"-workers": true, "--workers": true,

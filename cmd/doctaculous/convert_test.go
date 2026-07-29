@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nathanstitt/doctaculous/pkg/crop"
 	"github.com/nathanstitt/doctaculous/pkg/doctaculous"
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
@@ -367,5 +368,89 @@ func TestRasterizeCmdSniffsExtensionless(t *testing.T) {
 	err = rasterizeCmd([]string{noext, "--out", out})
 	if err == nil || !strings.Contains(err.Error(), "format") {
 		t.Errorf("garbage input: want a format-detection error, got %v", err)
+	}
+}
+
+func TestParseCropSize(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		w, h    int
+		wantErr bool
+	}{
+		{in: "720x720", w: 720, h: 720},
+		{in: "1920x1080", w: 1920, h: 1080},
+		{in: "720X720", w: 720, h: 720},
+		{in: "720", wantErr: true},
+		{in: "0x720", wantErr: true},
+		{in: "-1x720", wantErr: true},
+		{in: "axb", wantErr: true},
+		{in: "", wantErr: true},
+	} {
+		w, h, err := parseCropSize(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseCropSize(%q): expected an error, got %dx%d", tc.in, w, h)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseCropSize(%q): %v", tc.in, err)
+			continue
+		}
+		if w != tc.w || h != tc.h {
+			t.Errorf("parseCropSize(%q) = %dx%d, want %dx%d", tc.in, w, h, tc.w, tc.h)
+		}
+	}
+}
+
+func TestParseCropStrategy(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    crop.Strategy
+		wantErr bool
+	}{
+		{in: "center", want: crop.StrategyCenter},
+		{in: "centre", want: crop.StrategyCenter},
+		{in: "north", want: crop.StrategyNorth},
+		{in: "south", want: crop.StrategySouth},
+		{in: "east", want: crop.StrategyEast},
+		{in: "west", want: crop.StrategyWest},
+		{in: "saliency", want: crop.StrategySaliency},
+		{in: "smart", want: crop.StrategySaliency},
+		{in: "sideways", wantErr: true},
+		{in: "", wantErr: true},
+	} {
+		got, err := parseCropStrategy(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseCropStrategy(%q): expected an error, got %v", tc.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseCropStrategy(%q): %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("parseCropStrategy(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCropFlagsAreReorderable(t *testing.T) {
+	// reorderArgs must treat --crop/--crop-size as value-taking in BOTH
+	// subcommands, or the value is mistaken for the positional input.
+	for _, tc := range []struct {
+		name  string
+		table map[string]bool
+	}{
+		{"convert", convertValueFlags},
+		{"rasterize", rasterizeValueFlags},
+	} {
+		for _, flag := range []string{"-crop", "--crop", "-crop-size", "--crop-size"} {
+			if !tc.table[flag] {
+				t.Errorf("%s: %s missing from the value-flag table", tc.name, flag)
+			}
+		}
 	}
 }
