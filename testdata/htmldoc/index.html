@@ -577,9 +577,51 @@ newline is kept.</p>
 
   </section>
 
-  <!-- ===================== 16 · LANDSCAPE (named page) ===================== -->
+  <!-- ===================== 16 · CROP ===================== -->
+  <section class="section break">
+    <span class="kicker">16 / CROP</span>
+    <h2>Exact-size Cropping</h2>
+    <p class="lede">Filling an exact pixel box, rather than fitting within one.</p>
+
+    <p><code>--max-width</code>/<code>--max-height</code> fit a render inside a box with
+      aspect preserved, so a 3:2 source can never fill a square target &mdash; it comes
+      back 300&times;200, not 200&times;200. <code>ImageOptions.Crop</code> fills the
+      target instead, discarding what falls outside. The source below is 480&times;322:</p>
+
+    <div class="figure">
+      <img src="img/crop-source.jpg" alt="source photograph, hippo left of centre">
+      <div class="cap">img/crop-source.jpg &middot; 480&times;322 source</div>
+    </div>
+
+    <p>The same square target, placed three ways. <em>Saliency</em> scores candidate
+      windows on edge energy, saturation, skin likelihood and a centre prior &mdash; no
+      model, no training data &mdash; and picks the highest; the gravities place the
+      window deterministically:</p>
+
+    <div class="gallery">
+      <figure>
+        <img class="cropdemo" src="img/crop-saliency.jpg" alt="saliency crop">
+        <figcaption>saliency</figcaption>
+      </figure>
+      <figure>
+        <img class="cropdemo" src="img/crop-center.jpg" alt="centre crop">
+        <figcaption>center</figcaption>
+      </figure>
+      <figure>
+        <img class="cropdemo" src="img/crop-west.jpg" alt="west crop">
+        <figcaption>west</figcaption>
+      </figure>
+    </div>
+    <p class="caption">The subject sits left of centre, so the saliency window shifts
+      toward it &mdash; <code>(20,0)&ndash;(342,322)</code> against the centre crop&#8217;s
+      <code>(79,0)&ndash;(401,322)</code>. <code>EncodeImageRect</code> returns that
+      rectangle, so a caller can record where a smart crop landed and replay it later
+      with <code>StrategyRect</code>.</p>
+  </section>
+
+  <!-- ===================== 17 · LANDSCAPE (named page) ===================== -->
   <section class="section break land">
-    <span class="kicker">16 / LANDSCAPE</span>
+    <span class="kicker">17 / LANDSCAPE</span>
     <h2>Landscape Reflow</h2>
     <p class="lede">This section selects a wider <code>@page landscape</code> via
       <code>page: landscape</code>; its content reflows to the wider measure of a

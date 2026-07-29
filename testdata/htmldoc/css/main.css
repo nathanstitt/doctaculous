@@ -480,6 +480,14 @@ body {
   height: 92px;
   background: #ece6d6;
 }
+/* Square crop demos (section 16): the source is cropped to an exact square by
+   the library, so the element only needs to scale it down to the figure width. */
+.gallery .cropdemo {
+  display: block;
+  width: 138px;
+  height: 138px;
+  background: #ece6d6;
+}
 .gallery .contain { object-fit: contain; }
 .gallery .cover   { object-fit: cover; }
 .gallery .none    { object-fit: none; object-position: right bottom; }

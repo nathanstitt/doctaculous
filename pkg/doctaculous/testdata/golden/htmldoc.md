@@ -349,7 +349,27 @@ Arabic additionally needs _contextual_ shaping: a letter takes a different form 
 
 مرحبا بالعالم
 
-**16 / LANDSCAPE**
+**16 / CROP**
+
+## Exact-size Cropping
+
+Filling an exact pixel box, rather than fitting within one.
+
+`--max-width`/`--max-height` fit a render inside a box with aspect preserved, so a 3:2 source can never fill a square target — it comes back 300×200, not 200×200. `ImageOptions.Crop` fills the target instead, discarding what falls outside. The source below is 480×322:
+
+img/crop-source.jpg · 480×322 source
+
+The same square target, placed three ways. _Saliency_ scores candidate windows on edge energy, saturation, skin likelihood and a centre prior — no model, no training data — and picks the highest; the gravities place the window deterministically:
+
+saliency
+
+center
+
+west
+
+The subject sits left of centre, so the saliency window shifts toward it — `(20,0)–(342,322)` against the centre crop’s `(79,0)–(401,322)`. `EncodeImageRect` returns that rectangle, so a caller can record where a smart crop landed and replay it later with `StrategyRect`.
+
+**17 / LANDSCAPE**
 
 ## Landscape Reflow
 
