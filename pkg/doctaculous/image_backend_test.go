@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"testing"
@@ -128,5 +129,93 @@ func TestEncodeImageCropErrorPropagates(t *testing.T) {
 	})
 	if !errors.Is(err, crop.ErrInvalidSize) {
 		t.Errorf("err = %v, want crop.ErrInvalidSize", err)
+	}
+}
+
+func TestEncodeImageRectReportsSaliencyCrop(t *testing.T) {
+	// The caller needs the coordinates the saliency scorer chose — to store
+	// them, show them, or re-apply the same crop later with StrategyRect.
+	src := image.NewRGBA(image.Rect(0, 0, 400, 200))
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 400; x++ {
+			src.Set(x, y, color.RGBA{128, 128, 128, 255})
+		}
+	}
+	// Detail in the left third, so saliency should not pick the centre.
+	for y := 10; y < 190; y++ {
+		for x := 10; x < 190; x++ {
+			c := color.RGBA{0, 0, 0, 255}
+			if (x/2+y/2)%2 == 0 {
+				c = color.RGBA{255, 255, 255, 255}
+			}
+			src.Set(x, y, c)
+		}
+	}
+
+	var buf bytes.Buffer
+	got, err := EncodeImageRect(&buf, src, ImageOptions{
+		Format: FormatPNG,
+		Crop:   &crop.Options{Strategy: crop.StrategySaliency, Width: 100, Height: 100},
+	})
+	if err != nil {
+		t.Fatalf("EncodeImageRect: %v", err)
+	}
+	if !got.In(src.Bounds()) {
+		t.Errorf("reported rect %v escapes source bounds %v", got, src.Bounds())
+	}
+	if got.Dx() != 200 || got.Dy() != 200 {
+		t.Errorf("rect = %v (%dx%d), want the 200x200 window a 1:1 target takes from 400x200",
+			got, got.Dx(), got.Dy())
+	}
+	if mid := (got.Min.X + got.Max.X) / 2; mid > 150 {
+		t.Errorf("rect centre x = %d, want <=150 (over the detailed left third); rect=%v", mid, got)
+	}
+
+	// The reported rect must be exactly what StrategyRect reproduces, so a
+	// caller can persist it and re-apply the identical crop later.
+	var replay bytes.Buffer
+	replayed, err := EncodeImageRect(&replay, src, ImageOptions{
+		Format: FormatPNG,
+		Crop:   &crop.Options{Strategy: crop.StrategyRect, Rect: got, Width: 100, Height: 100},
+	})
+	if err != nil {
+		t.Fatalf("EncodeImageRect(replay): %v", err)
+	}
+	if replayed != got {
+		t.Errorf("replayed rect = %v, want %v", replayed, got)
+	}
+	if !bytes.Equal(replay.Bytes(), buf.Bytes()) {
+		t.Error("replaying the reported rect produced different bytes")
+	}
+}
+
+func TestEncodeImageRectWithoutCropReportsFullBounds(t *testing.T) {
+	src := image.NewRGBA(image.Rect(20, 10, 60, 40))
+	var buf bytes.Buffer
+	got, err := EncodeImageRect(&buf, src, ImageOptions{Format: FormatPNG})
+	if err != nil {
+		t.Fatalf("EncodeImageRect: %v", err)
+	}
+	if got != src.Bounds() {
+		t.Errorf("rect = %v, want the full source bounds %v", got, src.Bounds())
+	}
+}
+
+func TestEncodeImageRectMatchesEncodeImageBytes(t *testing.T) {
+	// EncodeImage must stay a thin wrapper: same bytes, both paths.
+	src := image.NewRGBA(image.Rect(0, 0, 80, 60))
+	opts := ImageOptions{
+		Format: FormatPNG,
+		Crop:   &crop.Options{Strategy: crop.StrategyCenter, Width: 40, Height: 40},
+	}
+	var viaRect, viaPlain bytes.Buffer
+	if _, err := EncodeImageRect(&viaRect, src, opts); err != nil {
+		t.Fatalf("EncodeImageRect: %v", err)
+	}
+	if err := EncodeImage(&viaPlain, src, opts); err != nil {
+		t.Fatalf("EncodeImage: %v", err)
+	}
+	if !bytes.Equal(viaRect.Bytes(), viaPlain.Bytes()) {
+		t.Error("EncodeImage and EncodeImageRect produced different bytes")
 	}
 }

@@ -100,3 +100,48 @@ func TestScaleExactSizeAcrossAspectRatios(t *testing.T) {
 		}
 	}
 }
+
+func TestScaleRectReportsTheRectangleUsed(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 400, 300))
+	fillRect(img, img.Bounds(), color.RGBA{120, 120, 120, 255})
+
+	out, got, err := ScaleRect(img, Options{Strategy: StrategyCenter, Width: 100, Height: 100})
+	if err != nil {
+		t.Fatalf("ScaleRect: %v", err)
+	}
+	// A 1:1 target against 400x300 takes the full height, centred on x.
+	if want := image.Rect(50, 0, 350, 300); got != want {
+		t.Errorf("rect = %v, want %v", got, want)
+	}
+	if out.Bounds().Dx() != 100 || out.Bounds().Dy() != 100 {
+		t.Errorf("bounds = %v, want 100x100", out.Bounds())
+	}
+	// Scale must agree with ScaleRect on the image itself.
+	plain, err := Scale(img, Options{Strategy: StrategyCenter, Width: 100, Height: 100})
+	if err != nil {
+		t.Fatalf("Scale: %v", err)
+	}
+	if plain.Bounds() != out.Bounds() {
+		t.Errorf("Scale bounds %v != ScaleRect bounds %v", plain.Bounds(), out.Bounds())
+	}
+}
+
+func TestScaleRectRoundTripsThroughStrategyRect(t *testing.T) {
+	// A reported saliency rectangle, fed back as Options.Rect, must reproduce
+	// the same crop — this is what lets a caller persist a smart crop.
+	img := image.NewRGBA(image.Rect(0, 0, 400, 200))
+	fillRect(img, img.Bounds(), color.RGBA{128, 128, 128, 255})
+	checkerRect(img, image.Rect(10, 10, 190, 190))
+
+	_, first, err := ScaleRect(img, Options{Strategy: StrategySaliency, Width: 100, Height: 100})
+	if err != nil {
+		t.Fatalf("ScaleRect(saliency): %v", err)
+	}
+	_, again, err := ScaleRect(img, Options{Strategy: StrategyRect, Rect: first, Width: 100, Height: 100})
+	if err != nil {
+		t.Fatalf("ScaleRect(rect): %v", err)
+	}
+	if again != first {
+		t.Errorf("replayed rect = %v, want %v", again, first)
+	}
+}
