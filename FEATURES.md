@@ -102,6 +102,12 @@ bullet's design doc is in `docs/superpowers/specs/`:
   break cascade, between-block + forced breaks, per-page distribution of relative/abs/fixed/float +
   html/body border. `2026-06-28-html-pagination-design.md`,
   `2026-06-28-html-pagination-fidelity-bundle-design.md`.
+- **Recursive spine splitting** (`pkg/layout/css/fragmentpage.go`): a child straddling a page boundary
+  is itself split rather than riding the tail whole, so a `section > div > p` spine breaks at a line
+  boundary inside the paragraph instead of leaving the head page blank below the last whole child.
+  The dispatcher needed no signature change — `pageBottom` is absolute page space and the fragment
+  tree shares one coordinate system, so it was already valid at any depth. `break-inside: avoid` stops
+  the recursion. `2026-07-28-pagination-recursive-split-design.md`.
 - **Page-split correctness** (`pkg/layout/css/fragmentpage.go`): a split routes out-of-flow children
   (floats, positioned boxes) to the fragment whose band contains them instead of dropping them from
   both; detaches the `BgImage`/`ClipChain`/`Collapsed` state the shallow clone would otherwise share
