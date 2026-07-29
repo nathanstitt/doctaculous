@@ -7,6 +7,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+
+	"github.com/nathanstitt/doctaculous/pkg/crop"
 )
 
 // ImageOptions controls image-encoded output (WriteImage, and Convert to
@@ -26,6 +28,12 @@ type ImageOptions struct {
 	// Raster controls the rasterization that produces the image (DPI, background,
 	// fonts, ...).
 	Raster RasterOptions
+	// Crop, when non-nil, crops and resizes the rasterized image to exactly
+	// crop.Options.Width×Height before encoding. This is how a caller gets an
+	// exact-size image: RasterOptions.MaxWidthPx/MaxHeightPx fit within a box
+	// with aspect preserved, which cannot fill a square from a 4:3 source.
+	// nil (the default) encodes the image as rasterized.
+	Crop *crop.Options
 }
 
 // format resolves the target encoding, defaulting to PNG.
@@ -50,17 +58,59 @@ func (o ImageOptions) quality() int {
 // WriteImage rasterizes page index (zero-based) and encodes it to out in
 // opts.Format. It works on every document format.
 func (d *Document) WriteImage(ctx context.Context, out io.Writer, index int, opts ImageOptions) error {
+	_, err := d.WriteImageRect(ctx, out, index, opts)
+	return err
+}
+
+// WriteImageRect is WriteImage, and additionally reports the rectangle of the
+// rasterized page that was cropped, in the rasterized image's pixel
+// coordinates. With opts.Crop nil it reports the full rasterized bounds.
+//
+// Use this when opts.Crop selects a content-aware crop (crop.StrategySaliency)
+// and the caller needs to know which region was chosen — the coordinates are
+// scorer output, not a function of the options.
+func (d *Document) WriteImageRect(ctx context.Context, out io.Writer, index int, opts ImageOptions) (image.Rectangle, error) {
 	img, err := d.RasterizePage(ctx, index, opts.Raster)
 	if err != nil {
-		return err
+		return image.Rectangle{}, err
 	}
-	return EncodeImage(out, img, opts)
+	return EncodeImageRect(out, img, opts)
 }
 
 // EncodeImage encodes an already-rasterized image to out in opts.Format — the
 // encode half of WriteImage, exported so batch callers (e.g. a RasterizePages
 // fan-out writing one file per page) reuse the library's encoding.
 func EncodeImage(out io.Writer, img image.Image, opts ImageOptions) error {
+	_, err := EncodeImageRect(out, img, opts)
+	return err
+}
+
+// EncodeImageRect is EncodeImage, and additionally reports the source rectangle
+// it cropped, in img's coordinate space. With opts.Crop nil it reports
+// img.Bounds() and crops nothing.
+//
+// The rectangle matters when Crop.Strategy is crop.StrategySaliency: the scorer
+// chooses it from image content, so it cannot be derived from the options. A
+// caller that needs to know where a smart crop landed — to record it, show it,
+// or reproduce the identical crop later by passing it back as Crop.Rect with
+// crop.StrategyRect — takes it from here.
+func EncodeImageRect(out io.Writer, img image.Image, opts ImageOptions) (image.Rectangle, error) {
+	used := img.Bounds()
+	if opts.Crop != nil {
+		cropped, r, err := crop.ScaleRect(img, *opts.Crop)
+		if err != nil {
+			return image.Rectangle{}, fmt.Errorf("doctaculous: crop image: %w", err)
+		}
+		img, used = cropped, r
+	}
+	if err := encodeImageTo(out, img, opts); err != nil {
+		return image.Rectangle{}, err
+	}
+	return used, nil
+}
+
+// encodeImageTo writes img to out in opts.Format, without cropping.
+func encodeImageTo(out io.Writer, img image.Image, opts ImageOptions) error {
 	switch f := opts.format(); f {
 	case FormatPNG:
 		if err := png.Encode(out, img); err != nil {

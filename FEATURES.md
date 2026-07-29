@@ -573,3 +573,27 @@ read+write vocabulary for the tinycld text adoption path):
   ceil-safe exact fits). DPI becomes a resolution CEILING alongside the box (zero = fill the
   box, upscaling vector-sharp; positive = downscale-only thumbnails). CLI flags on `rasterize` +
   `convert` image output (unset `--dpi` = pure fit via flag.Visit).
+
+**Exact-size cropping incl. classical saliency** (`pkg/crop`, `ImageOptions.Crop`, CLI
+`--crop/--crop-size`):
+
+- Fit-within sizing preserves aspect, so it can never fill a non-matching target (a 4:3 source into
+  720×720 comes back 720×540). `crop.Rect`/`crop.Scale` fill the box instead: center + N/S/E/W
+  gravities, an explicit caller-supplied rectangle (`StrategyRect`), and a content-aware
+  `StrategySaliency`. `ImageOptions.Crop` is a nil-able pointer applied inside `EncodeImage`, so
+  every existing caller stays byte-identical; `WriteImage` and `Convert` both honour it.
+- Saliency is classical — no model, no training data, pure Go: Sobel edge energy, HSV-style
+  saturation, a deliberately wide luma-independent YCbCr skin box, and a radial centre prior,
+  summed into a per-pixel score map and evaluated over candidate windows through a summed-area
+  table (O(1) per candidate), fanned out across `GOMAXPROCS`. Ties resolve to the centred window
+  and every worker seeds from one immutable candidate, so results are deterministic and race-free.
+  Scoring weights are pointers (`crop.Weights`) so an explicit zero disables a term — a plain
+  float64 cannot distinguish "off" from "unset". Skin weight defaults *below* edge weight
+  deliberately: published YCbCr skin ranges underweight darker skin tones, so skin nudges the crop
+  rather than deciding it.
+- `crop.ScaleRect`, `EncodeImageRect` and `Document.WriteImageRect` report the source rectangle
+  that was cropped. For saliency the window is chosen from image content, so it cannot be derived
+  from the options; feeding the reported rect back as `Options.Rect` with `StrategyRect` replays a
+  byte-identical crop, which is what lets a caller persist a smart crop.
+- Golden crop rectangles over a committed CC0 photograph back the synthetic direction tests, which
+  cannot catch a quality regression on real image statistics.

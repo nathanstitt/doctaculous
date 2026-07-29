@@ -38,12 +38,15 @@ the output extension. `--from`/`--to` override both. HTML input can also be an
 Image output writes one page by default, or many with
 `--pages all` and a `%d` in the output name (`page-%d.png`);
 `--max-width`/`--max-height` produce fit-within thumbnails without knowing page
-sizes up front.
+sizes up front, and `--crop <gravity|saliency> --crop-size WxH` fills an exact
+pixel box rather than fitting within one — the difference between a 720×720
+square and a 720×540 fit. `--crop saliency` picks the window from image content
+(edge energy, saturation, skin likelihood, centre bias; no model, pure Go).
 
 **Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
 rendering specimen, one document exercising every implemented HTML/CSS/image
 slice. [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
-is the PDF `doctaculous convert` typesets from it: 17 Letter pages with running
+is the PDF `doctaculous convert` typesets from it: 18 Letter pages with running
 headers, page counters, a WOFF2 script wordmark, floats, flexbox, grid, and
 tables, all as selectable text.
 
