@@ -43,7 +43,7 @@ sizes up front.
 **Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
 rendering specimen, one document exercising every implemented HTML/CSS/image
 slice. [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
-is the PDF `doctaculous convert` typesets from it: 15 Letter pages with running
+is the PDF `doctaculous convert` typesets from it: 17 Letter pages with running
 headers, page counters, a WOFF2 script wordmark, floats, flexbox, grid, and
 tables, all as selectable text.
 
@@ -109,9 +109,10 @@ format-neutral CSS box tree and a single backend-agnostic paint interface.
   inline images.
 - **The reflow engine** is a from-scratch CSS 2.1+ layout engine: cascade,
   floats, absolute positioning, Appendix E stacking, both table border models,
-  flexbox, grid, web fonts (WOFF1/WOFF2), CSS counters, and CSS Paged Media
-  (`@page`, margin boxes, named pages, running headers/footers). DOCX lowers into
-  this same engine rather than getting a bespoke renderer.
+  multi-line flexbox, grid, web fonts (WOFF1/WOFF2), CSS counters, bidirectional
+  text (UAX#9) with Arabic shaping, and CSS Paged Media (`@page`, margin boxes,
+  named pages, running headers/footers). DOCX lowers into this same engine rather
+  than getting a bespoke renderer.
 - **The structure writers** convert by walking the box tree, so a PDF's
   recovered headings and tables come out as real Markdown headings and pipe
   tables, and `pdf → xlsx` extracts spreadsheet-ready tables.
@@ -154,13 +155,20 @@ Unsupported constructs degrade gracefully. You get a skip and a debug log, or a
 typed error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …), never a
 panic, and one bad page can't kill a batch. The notable gaps today:
 
-- **No bidi/RTL.** The largest cross-cutting gap; everything lays out LTR.
+- **Bidi/RTL is implemented but not complete.** `direction: rtl` mirrors tables,
+  flex, and grid; text reorders per UAX#9 (with bracket mirroring); Arabic shapes
+  with connected letterforms through the bundled Noto faces; and RTL PDFs extract
+  in reading order. Remaining: OpenType mark positioning (Arabic diacritics sit on
+  the baseline), nested bidi embeddings deeper than one level, and `dir="auto"`.
 - **CJK text extraction from PDFs.** ToUnicode CMap parsing is pending, so
   Type0/CID text can extract as unknown runes (it still *renders* correctly).
 - **No OCR.** Scanned PDFs rasterize fine but extract no text.
-- Flexbox is single-line (`flex-wrap` pending); grid lacks named-line placement
-  and subgrid; JPEG2000 images and PDF tiling patterns are skipped;
-  password-protected PDFs open only with an empty user password.
+- Grid lacks named-line placement and subgrid; JPEG2000 images and PDF tiling
+  patterns are skipped; password-protected PDFs open only with an empty user
+  password.
+- **Pagination splits blocks, tables, and lines, but not flex or grid items.** A
+  flex or grid item taller than a page moves whole rather than fragmenting, because
+  those size their items collectively and would need re-solving per page.
 - **HEIC is stills-only and read-only.** HEIF image *sequences* (`msf1`) and
   AVIF are refused with a typed error, and nothing writes HEIC. Decoding is
   intra-only 4:2:0 at 8/10-bit (Main/Main 10/Main Still); P/B slices, range
@@ -175,7 +183,7 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 | PDF | `pkg/pdf`, `pkg/pdf/filter`, `pkg/pdf/content`, `pkg/pdf/extract` | Parse, decode streams, interpret content, recover structure |
 | Frontends | `pkg/html` + `pkg/css`, `pkg/docx`, `pkg/xlsx`, `pkg/pptx`, `pkg/epub`, `pkg/rtf`, `pkg/markdown` | Parse each format, lower to the shared box tree |
 | Layout | `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/layout/inline` | The box model, the CSS engine, shaping & line breaking |
-| Fonts | `pkg/font`, `pkg/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled font resolution |
+| Fonts | `pkg/font`, `pkg/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled resolution, per-rune script fallback |
 | Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, and structure output |
 | API / CLI | `pkg/doctaculous`, `cmd/doctaculous` | Public entry points, format detection, the conversion matrix |
 
@@ -209,8 +217,18 @@ make lint    # go vet + golangci-lint
 
 MIT — see [LICENSE](LICENSE).
 
-Everything compiled into the module is MIT-compatible. Two carve-outs, both
-isolated and never shipped with the library:
+Everything compiled into the module is MIT-compatible.
+
+**Bundled fonts are embedded in the binary** (`go:embed`) and ship with anything
+built from it. All are permissively licensed and may be redistributed:
+
+- TeX Gyre Heros and TeX Gyre Termes — GUST Font License (an LPPL instance).
+- Inconsolata, Noto Sans Hebrew, and Noto Naskh Arabic — SIL Open Font License
+  1.1. None declares a Reserved Font Name, so they ship under their original
+  names. See the `LICENSE-*.txt` files in
+  [`pkg/font/standard/fonts/`](pkg/font/standard/fonts/).
+
+Two further carve-outs, both isolated and NOT shipped with the library:
 
 - [`pkg/pdf/filter/jbig2/`](pkg/pdf/filter/jbig2/) vendors
   [xiaoqidun/jbig2](https://github.com/xiaoqidun/jbig2) (pure-Go JBIG2 decoding,

@@ -3,7 +3,7 @@
 The complete inventory of shipped features, validated against a real-world corpus
 (`testdata/external/`). Keep this list current as features land: every feature that ships gets a
 bullet here in the same PR. Each bullet is a one-line pointer; the detailed design/rationale for a
-sub-project is in its `docs/superpowers/specs/` doc (and in git history). What's *next* — the TODO
+sub-project is in the commit and PR history. What's *next* — the TODO
 list and known approximations — lives in [CLAUDE.md → Status & roadmap](CLAUDE.md#status--roadmap).
 
 **PDF pipeline** (covered by `gen.Core` fixtures + golden images):
@@ -16,7 +16,7 @@ list and known approximations — lives in [CLAUDE.md → Status & roadmap](CLAU
 - **Filters**: Flate, LZW, ASCIIHex, ASCII85, RunLength (+ PNG/TIFF predictors), CCITTFax
   (Group 4 / Group 3 1D+2D), DCTDecode (JPEG), JBIG2 (vendored pure-Go Apache-2.0 decoder,
   `pkg/pdf/filter/jbig2`; wired at `decodeImageXObject`). JPX/JPEG2000 pending (`ErrUnsupported`; no
-  viable pure-Go decoder). `2026-07-09-jbig2-image-decoding-design.md`.
+  viable pure-Go decoder).
 - **Content interpreter** (`pkg/pdf/content`): path construction/painting, graphics state, device
   color + Separation/DeviceN spot color (tint-transform `/Function`), clipping, text operators
   (incl. text render modes), `Do` XObjects.
@@ -35,7 +35,6 @@ list and known approximations — lives in [CLAUDE.md → Status & roadmap](CLAU
   `--bundled-fonts` (CLI), `RasterOptions.BundledFonts` / `PDFOptions.BundledFonts` /
   `WithBundledFonts()` (library); the golden tests pin it. An explicit
   `RasterOptions.FontProvider` (or reflow `WithSystemFontProvider`) still overrides both.
-  `2026-07-08-weighted-base14-fonts-design.md`, `2026-07-08-system-font-loading-design.md`.
 - **Transparency**: ExtGState alpha `/ca`/`/CA` + all PDF blend modes (separable + non-separable)
   via `/BM` (`pkg/render/raster/blend.go`).
 - **Shadings** (`pkg/render/raster/shading.go`, `render.Shader`): axial/radial/function-based via
@@ -51,38 +50,35 @@ list and known approximations — lives in [CLAUDE.md → Status & roadmap](CLAU
 
 **Reflow engine (HTML + DOCX)** — shared CSS layout engine (`pkg/layout/css`), covered by
 `html-*` / `docx-*` / `htmldoc-*` goldens, WPT-style reftests, and per-algorithm unit suites. Each
-bullet's design doc is in `docs/superpowers/specs/`:
+bullet's design rationale is in its PR:
 
 - **CSS parse + cascade** (`pkg/css`): dependency-free tokenizer/parser, selector matching +
   specificity, full cascade (specificity + source order + inheritance + `!important` + inline
-  `style` + origins), shorthand expansion. `2026-06-23-html-rendering-design.md`.
+  `style` + origins), shorthand expansion.
 - **HTML frontend — box generation** (`pkg/html`, `pkg/layout/cssbox`): owned DOM, UA stylesheet,
   anonymous-box fixups, whitespace collapsing, `display:none` pruning; `<link>` via
-  `pkg/resource.ResourceLoader`. `2026-06-23-html-box-generation-design.md`.
+  `pkg/resource.ResourceLoader`.
 - **Block + inline normal flow** (`pkg/layout/inline`, `pkg/layout/css/block.go`+`inline.go`,
   `pkg/layout/paint`, `OpenHTML`/`OpenHTMLBytes`): box model (width/`auto`/%, `box-sizing`,
   min/max, margins incl. vertical collapsing, padding, borders, backgrounds), IFC (shaping/breaking,
-  `text-align`, `line-height`), fragment tree. `2026-06-23-html-block-inline-flow-design.md`.
+  `text-align`, `line-height`), fragment tree.
 - **Replaced content + images** (`pkg/layout/css/image.go`+`replaced.go`): `<img>` decode (PNG/JPEG/
   GIF stdlib, HEIC via `pkg/heif`) → CSS replaced-sizing → paint via `DrawImage`, with
-  `object-fit`/`object-position`. `2026-06-24-html-replaced-images-design.md`.
+  `object-fit`/`object-position`.
 - **Floats + clear** (`pkg/layout/css/floats.go`): per-BFC float context, narrowing/wrapping,
-  `clear`, own paint layer. `2026-06-24-html-floats-design.md`.
+  `clear`, own paint layer.
 - **Positioning** (`pkg/layout/css/positioning.go`): relative (paint-time offset) + absolute/fixed
   (out-of-flow, two-pass against containing block), stacking contexts.
-  `2026-06-24-html-positioning-design.md`.
 - **Overflow clipping** (`pkg/css` `overflow`, `layout.ClipPush/PopKind`): clip to padding box +
-  BFC establishment + deferred float interactions. `2026-06-24-html-overflow-design.md`.
+  BFC establishment + deferred float interactions.
 - **Full z-index stacking** (`pkg/layout/css/fragment.go`): Appendix E bands (negative-z behind
   in-flow, then auto/0 doc order, then positive), relative clip-escape (sub-project 6b).
-  `2026-06-25-html-zindex-design.md`.
 - **CSS 2.1 §17 tables** (`pkg/layout/css/table.go`+`tableborder.go`+`tablefix.go`+`measure.go`):
   anonymous-table fixup, grid model, fixed + auto column-width solve, colspan/rowspan,
   `vertical-align`, captions, `<col>`/`<colgroup>`, both `border-collapse` models.
-  `2026-06-25-html-tables-design.md`.
 - **Web fonts** (`pkg/css/fontface.go`, `pkg/font/sfnt.go`/`woff1.go`/`woff2*.go`,
   `pkg/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode (incl. glyf/loca transform), `local()`
-  via `DiskFontProvider`, family-fallback-list resolution. `2026-06-26-html-webfonts-design.md`.
+  via `DiskFontProvider`, family-fallback-list resolution.
 - **Flexbox** (`pkg/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout, §9.7
   flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`, and
   **multi-line wrapping** — `flex-wrap: wrap`/`wrap-reverse`, §9.3 line collection,
@@ -90,18 +86,16 @@ bullet's design doc is in `docs/superpowers/specs/`:
   the cross-axis gap between lines, and the `flex-flow` shorthand. justify-content and baseline
   groups resolve per LINE; the §9.4 step-8 cross clamp is gated to single-line containers.
   wrap-reverse XORs with the RTL cross flip. Wrapped rows paginate between lines for free
-  (`splitFlexGridForPage` is geometry-driven). `2026-06-26-html-flexbox-design.md`,
-  `2026-07-28-flex-wrap-design.md`.
+  (`splitFlexGridForPage` is geometry-driven).
 - **CSS Grid** (explicit grid; `pkg/layout/css/grid.go`+`grid_track.go`+`grid_place.go`+`gridfix.go`
   +`baseline.go`): §11 track-sizing + §8 placement (spans, named areas, auto-placement sparse/dense),
   item + content-distribution alignment, `inline-grid`, cross-cutting baseline backport (grid + flex
-  + table cells). `2026-06-26-html-grid-design.md`.
+  + table cells).
 - **`OpenURL` + HTTP loader** (`pkg/resource/http.go`): fetch HTML over HTTP(S), resolve relative
-  refs, `data:` URIs, URL-userinfo Basic auth (redacted from logs). `2026-06-28-html-openurl-design.md`.
+  refs, `data:` URIs, URL-userinfo Basic auth (redacted from logs).
 - **Pagination** (`pkg/layout/css/paginate.go`, `WithPageSize`): fixed-height page fragmentation,
   break cascade, between-block + forced breaks, per-page distribution of relative/abs/fixed/float +
-  html/body border. `2026-06-28-html-pagination-design.md`,
-  `2026-06-28-html-pagination-fidelity-bundle-design.md`.
+  html/body border.
 - **Per-page bottom-anchored `position: fixed`** (`pkg/layout/css/paginate.go`): a `bottom`-anchored
   fixed box sits at the bottom of every page. It was previously resolved against the full single-tall
   document height, putting it below every page and making it invisible. Top-anchored boxes are
@@ -112,48 +106,46 @@ bullet's design doc is in `docs/superpowers/specs/`:
   headings. The head/body/footer distinction is flattened away by grid construction, so the header's
   bottom Y is recorded on the table fragment (`HeaderBottom`) and the cells above it are deep-cloned
   onto each tail — and the tail's own `HeaderBottom` is re-anchored to its copy, so a table spanning
-  three or more pages keeps repeating. `2026-07-28-table-repeat-header-design.md`.
+  three or more pages keeps repeating.
 - **Mid-cell table splitting** (`pkg/layout/css/tablepage.go`): a table row taller than the page —
   including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
   A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no
   relayout. Cells fragment independently: one that cannot break rides the tail whole while its
   row-mates split. Breaking between whole rows is still preferred when a row boundary is available.
-  `2026-07-28-pagination-midcell-split-design.md`.
 - **Mid-block forced breaks** (`pkg/layout/css/fragmentpage.go`, `paginate.go`): a `break-before`/
   `break-after` on a nested block that is neither at its ancestor's leading nor trailing edge now
   splits that ancestor at the break position instead of being dropped with a warning. Reuses the
   recursive splitter; the split Y comes from the author's break rather than the page boundary, so it
-  applies even when the page is not full. `2026-07-28-pagination-midblock-break-design.md`.
+  applies even when the page is not full.
 - **Recursive spine splitting** (`pkg/layout/css/fragmentpage.go`): a child straddling a page boundary
   is itself split rather than riding the tail whole, so a `section > div > p` spine breaks at a line
   boundary inside the paragraph instead of leaving the head page blank below the last whole child.
   The dispatcher needed no signature change — `pageBottom` is absolute page space and the fragment
   tree shares one coordinate system, so it was already valid at any depth. `break-inside: avoid` stops
-  the recursion. `2026-07-28-pagination-recursive-split-design.md`.
+  the recursion.
 - **Page-split correctness** (`pkg/layout/css/fragmentpage.go`): a split routes out-of-flow children
   (floats, positioned boxes) to the fragment whose band contains them instead of dropping them from
   both; detaches the `BgImage`/`ClipChain`/`Collapsed` state the shallow clone would otherwise share
   between two pages (the per-page shift mutates those in place, so one fragment's shift moved the
   other's background); and clamps a clipping fragment's `ClipRect` to its own extent. Applied at the
-  single `splitAnyBlockForPage` dispatch point. `2026-07-28-pagination-split-fixes-design.md`.
+  single `splitAnyBlockForPage` dispatch point.
 - **CSS Paged Media** (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+
   `fragmentpage.go`+`marginbox.go`, `WithDefaultPaged`): `@page` size/margins/named/pseudo + 16
   margin boxes, `break-inside`, widows/orphans via mid-block line fragmentation, running
   headers/footers with page counters, `@page marks`/`bleed`, `string-set`/`string()`,
   `position: running()`/`content: element()`, named-page multi-width reflow.
-  `2026-06-30-html-paged-media-design.md` (+ sub-plans under `docs/superpowers/plans/2026-06-30-*`).
 - **`white-space`** (`pkg/css` + `pkg/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line + tab
-  stops. `2026-06-29-html-white-space-design.md`.
+  stops.
 - **List markers + CSS counters** (`pkg/css/counter_format.go`, `pkg/layout/css/counters.go`,
   `pkg/font/bullet.go`): `list-style-*`, `counter-reset`/`-increment`/`-set`, `content: counter()`;
-  synthetic bullet outlines. `2026-06-29-html-lists-counters-design.md`.
+  synthetic bullet outlines.
 - **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
-  `url(...)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`. `2026-06-30-html-background-image-design.md`.
+  `url(..)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
-  `:link`/`:visited` + general pseudo-class parsing. `2026-06-30-html-link-pseudo-classes-design.md`.
+  `:link`/`:visited` + general pseudo-class parsing.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
   `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… mapped to
-  CSS below author rules (HN renders with its bgcolor). `2026-06-30-html-presentational-attributes-design.md`.
+  CSS below author rules (HN renders with its bgcolor).
 - **Direction-relative alignment + bidi plumbing** (`pkg/css/cascade.go`, `pkg/css/hints.go`,
   `pkg/layout/css/inline.go`) — RTL slice 1 of 5: `text-align: start|end|match-parent` (the initial
   value is now `start`, byte-identical for LTR since every consumer defaults to left);
@@ -161,7 +153,7 @@ bullet's design doc is in `docs/superpowers/specs/`:
   selector engine has no attribute selectors, so the spec's `[dir=rtl]` UA rules are not
   expressible — hint rank is equivalent); `bdi`/`bdo` isolation; `effectiveDirection` (an anonymous
   box's Style is zero-valued, so `Direction` is `""` not `"ltr"` — never read the field directly);
-  RTL text-indent edge. `dir=auto` degrades + logs. `2026-07-27-rtl-cascade-design.md`.
+  RTL text-indent edge. `dir=auto` degrades + logs.
 - **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
   slice 2 of 5, retiring **all three** "laying out LTR" logs: tables mirror their solved column
   x-offsets (and `buildCollapsedBorders` flips its index→physical-side mapping, or collapsed
@@ -170,9 +162,8 @@ bullet's design doc is in `docs/superpowers/specs/`:
   the case the old guard skipped silently); grid mirrors track positions AND resolves
   `justify-items`/`justify-self` `start`/`end` logically (both flips are required —
   mutation-verified independently). Also fixes `crossOffset` ignoring the Box Alignment
-  `start`/`end` spellings. Showcase §15 + 4 WPT reftests. **Text within a line is still not
-  reordered — RTL script renders in logical glyph order.**
-  `2026-07-27-rtl-box-layout-design.md`.
+  `start`/`end` spellings. Showcase §15 + 4 WPT reftests. (Text WITHIN a line is reordered by the
+  next slice; at this point it still rendered in logical order.).
 - **Arabic contextual shaping** (`pkg/layout/inline/complex.go`) — RTL slice 4 of 5: a run of
   joining script (Arabic/Syriac/Thaana; Hebrew is non-joining and stays on the cheap per-rune
   path) is shaped as a whole segment through harfbuzz, resolving the font's GSUB tables so
@@ -181,7 +172,6 @@ bullet's design doc is in `docs/superpowers/specs/`:
   LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder — harfbuzz would
   otherwise emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly
   once, so `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
-  `2026-07-28-rtl-arabic-shaping-design.md`.
 - **Bundled RTL faces + per-rune script fallback** (`pkg/font/standard`, `pkg/layout/font/cache.go`,
   `pkg/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
   Font Name) ship alongside the Latin substitutes. Because each bundled face covers exactly ONE
@@ -196,8 +186,8 @@ bullet's design doc is in `docs/superpowers/specs/`:
   text). `golang.org/x/text` promoted indirect→direct for UAX#9 — no new module. Line metrics are
   computed on the logical slice, because the space that ends the text reorders to an RTL line's visual
   START. Bidi control characters now survive shaping as zero-width glyphs (they were being dropped,
-  silently discarding directional intent). **Arabic reorders but renders as isolated forms** — contextual
-  shaping needs a cluster model (slice 4). `2026-07-27-rtl-inline-bidi-design.md`.
+  silently discarding directional intent). (Arabic reordered correctly at this point but still rendered
+  as isolated forms; the cluster model arrives in slice 4, below.).
 - **Column flex vertical content sizing** (`pkg/layout/css/flex.go`): a column container's main axis is
   vertical, so `flex-basis: auto`/`content` (and the `min:auto` automatic minimum) now resolve to the
   item's content HEIGHT — measured by laying it out at its cross width and reading back the fragment
@@ -206,7 +196,6 @@ bullet's design doc is in `docs/superpowers/specs/`:
   also clamped to the container, fixing a ~2.5x overflow for prose. Backlog H4.
 - **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` as static native widgets (classic chrome, non-interactive).
-  `2026-06-29-html-forms-design.md`.
 - **End-to-end "specimen" showcase** (`testdata/htmldoc/`, `htmldoc-*` goldens): one multi-file doc
   exercising every HTML/CSS/image slice, served over loopback HTTP via `OpenURL` + `WithPageSize`.
 
@@ -217,9 +206,9 @@ bullet's design doc is in `docs/superpowers/specs/`:
   (`w:sectPr`), the full `docDefaults → basedOn → direct` cascade.
 - **CSS-engine convergence** (`pkg/docx/cssbox`): DOCX lowers directly to `cssbox` + `ComputedStyle`
   and runs through the shared CSS engine (page geometry as a synthesized `@page` stylesheet); the old
-  flat model/engine are deleted. `2026-07-02-docx-cssbox-convergence-design.md`.
+  flat model/engine are deleted.
 - **DOCX fidelity** (lists/numbering, tables, images, headers/footers + multi-section — most reuse
-  the CSS engine's existing vocabulary via lowering). `2026-07-02-docx-fidelity-design.md`.
+  the CSS engine's existing vocabulary via lowering).
 
 **HTML/DOCX → PDF writer** (`pkg/render/pdfwrite`, `WritePDF`):
 
@@ -227,7 +216,7 @@ bullet's design doc is in `docs/superpowers/specs/`:
   Identity-H CIDFontType2 with glyf-subsetted `/FontFile2` for TrueType, simple `/Type1` with
   `/FontFile` for the bundled substitutes; `/ToUnicode` on every face). Concurrent per-band assembly,
   deterministic output, `@media print` capture (`pkg/css/media.go`). Byte-identical for the raster
-  corpus (the new `DrawGlyph` seam rasterizes via the outline). `2026-06-26-html-to-pdf-writer-design.md`.
+  corpus (the new `DrawGlyph` seam rasterizes via the outline).
 
 **HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `WriteMarkdown`
 + `WriteText`, CLI `tomd`):
@@ -238,7 +227,7 @@ bullet's design doc is in `docs/superpowers/specs/`:
   (heading level, link URLs, DOCX style identity); layout/raster/PDF ignore them (byte-identical).
   Emits GFM: headings, bold/italic/strikethrough/code, links, images, blockquotes, fenced code,
   nested + task lists, thematic breaks, and **high-fidelity pipe tables** (colspan/rowspan expanded by
-  content duplication, alignment, caption). `2026-07-07-html-docx-markdown-design.md`.
+  content duplication, alignment, caption).
 
 **PDF → Markdown & HTML** (`pkg/pdf/extract`, `pkg/render/htmlwrite`, `WriteHTML`,
 CLI `tomd <pdf>` / `tohtml`):
@@ -250,13 +239,12 @@ CLI `tomd <pdf>` / `tohtml`):
   auto-selected), lowering to a synthetic `cssbox` tree the Markdown writer reuses. A new
   `pkg/render/htmlwrite` serializes `cssbox`→HTML (native `colspan`/`rowspan`). PDF `Document`
   satisfies `reflowTree` via lazy extraction. ToUnicode CMaps (Type0/CID text), font weight/slant, and
-  scanned-PDF OCR are follow-ups. `2026-07-08-pdf-to-html-markdown-design.md`.
+  scanned-PDF OCR are follow-ups.
 - **Right-to-left text extracts in LOGICAL order** (`pkg/pdf/extract/bidi.go`). A PDF stores glyphs by
   POSITION, so sorting a line left-to-right yielded RTL script reversed. Each maximal RTL run is
   reversed back, at BOTH levels the PDF mirrors: the characters within a word and the order of
   consecutive RTL words. Runs after word grouping (which splits on x-gaps and would break on reordered
   glyphs), so each word keeps the geometry table/block detection needs. No-op for Latin.
-  `2026-07-28-rtl-pdf-extraction-design.md`.
 
 **Unified conversion core** (`pkg/doctaculous/format.go`+`detect.go`+`open.go`+`convert.go`+
 `image_backend.go`, CLI `convert`):
@@ -272,26 +260,24 @@ CLI `tomd <pdf>` / `tohtml`):
   `%d` fan-out). CLI: `convert <in> <out>` with `--from`/`--to`; all subcommands share one
   detection-based opener (rasterize no longer assumes unknown extensions are PDF; topdf `--print`
   actually applies print media now). A new format lands by flipping its capability bit + one switch
-  case in `openDetected`/`Write` — see the sibling contract in
-  `2026-07-09-unified-conversion-core-design.md`.
+  case in `openDetected`/`Write` — see the sibling contract in.
 
 **Markdown + plain-text input** (`pkg/markdown` via goldmark (MIT, pure Go, zero transitive
 deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
 
 - `.md` (CommonMark + GFM: tables, strikethrough, task lists, autolinks, raw-HTML
   passthrough) and `.txt` (escaped `<pre>` + `pre-wrap`; hard line breaks preserved, long
-  lines soft-wrap, .txt→.md is a lossless fenced block) open through the HTML pipeline —
+  lines soft-wrap,.txt→.md is a lossless fenced block) open through the HTML pipeline —
   `OpenMarkdown*`/`OpenText*`, every `HTMLOption` applies, md→md round-trips are a fixed
   point. Detection is extension-only (no content magic; the hint step outranks HTML
   sniffing by design). Landed with a cross-cutting inline-core fix: empty forced lines
   (blank lines in pre/pre-wrap/pre-line) now get a CSS strut height instead of collapsing
   (`pkg/layout/inline` shape/break; all prior goldens byte-identical).
-  `2026-07-09-markdown-text-input-design.md`.
 
 **DOCX writer** (`pkg/render/docxwrite`, `WriteDOCX`, CLI `todocx` +
-`convert ... out.docx`):
+`convert.. out.docx`):
 
-- Everything → .docx (HTML/Markdown/text, and PDF via extraction) — a cssbox STRUCTURE writer
+- Everything →.docx (HTML/Markdown/text, and PDF via extraction) — a cssbox STRUCTURE writer
   (boxwalk-based, like the Markdown one; not layout-faithful) emitting native Word constructs
   chosen so our own reader round-trips them: HeadingN pStyles (+ rPr scale), direct-rPr emphasis,
   `w:hyperlink` + External rels, Quote/CodeBlock/HorizontalRule styles (reader maps the latter two
@@ -306,7 +292,6 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   embed as deduped media parts + `wp:inline` drawings fetched through a new `reflowResources`
   loader seam (no loader → alt text + log). Round-trip parity matrix incl. tables,
   `docxout-basic`/`docxout-htmldoc-p1` goldens + the `htmldoc.docx.md` showcase round-trip golden.
-  `2026-07-09-docx-writer-design.md`.
 
 **CSV/TSV input + output** (`pkg/doctaculous/csv_frontend.go`, `pkg/render/csvwrite`,
 `OpenCSV*`/`OpenTSV*`, `WriteCSV`/`WriteTSV`):
@@ -317,7 +302,7 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   boxwalk occupancy grid (spans duplicated — the GFM strategy; multiple tables blank-line
   separated; prose dropped + logged, table-less documents produce empty output + a loud log) —
   which makes **PDF → CSV table extraction** work via the existing lattice/stream recognizer
-  (pinned by test). `csv-specimen` golden. `2026-07-09-csv-tsv-io-design.md`.
+  (pinned by test). `csv-specimen` golden.
 
 **XLSX input** (`pkg/xlsx` hand-rolled reader + `pkg/doctaculous/xlsx_frontend.go`,
 `OpenXLSX*`, `testdata/gen/xlsx` fixture builder):
@@ -329,15 +314,15 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   spans, hidden sheets skipped (hidden rows/cols render — view state, not data). Visible sheets →
   `<h2>`-headed ruled tables through the HTML pipeline; a bold first row becomes the header row
   via the writers' existing detector. ZIP detection generalized to an OPC classifier
-  (`word/`→DOCX, `xl/`→XLSX). `xlsx-specimen` golden. `2026-07-09-xlsx-input-design.md`.
-- **Sheet selection** (`WithSheets(names...)` open option, `convert --sheet` CLI flag,
+  (`word/`→DOCX, `xl/`→XLSX). `xlsx-specimen` golden.
+- **Sheet selection** (`WithSheets(names..)` open option, `convert --sheet` CLI flag,
   repeatable/comma-separated): render only named worksheets, in the given order, instead of every
   visible sheet; a single selected sheet drops its heading, an explicitly named hidden sheet
   renders, and an unknown name fails with `ErrSheetNotFound`. `WithSheets` is a universal
   `OpenOption` (inert for non-XLSX inputs); the option type is now `OpenOption` with `HTMLOption`
   a back-compat alias.
 
-**XLSX output** (`pkg/render/xlsxwrite`, `WriteXLSX`, `convert ... out.xlsx`):
+**XLSX output** (`pkg/render/xlsxwrite`, `WriteXLSX`, `convert.. out.xlsx`):
 
 - Tables-only writer (shared `boxwalk.CollectTables`/`CellPlainText` with csvwrite): one worksheet
   per table (caption-derived names, sanitized/unique/31-char), native `mergeCells` spans, bold
@@ -345,19 +330,17 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   numbers stay numbers, so csv→xlsx→csv is byte-identical; `007` stays text), deterministic OPC;
   table-less documents write one empty sheet + a loud log. Round-trip parity via the `pkg/xlsx`
   reader; pdf→xlsx extraction pinned. v1 punts: alignment/fill write-back, typed date cells.
-  `2026-07-09-xlsx-output-design.md`.
 
 **Stream + MIME input surface** (`pkg/doctaculous` format.go/open.go, first tinycld-adoption PR):
 
 - `FormatFromMIME`/`Format.MIME()` (params stripped/case-folded; explicit-Unknown pins for
   legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream; unlisted `text/*` →
   FormatText with `text/rtf` excepted; rows flip to PPTX/EPUB/RTF when those frontends land);
-  `OpenReader`/`OpenReaderAs(ctx, ...)` stream entry points (fully buffered) threading a real
+  `OpenReader`/`OpenReaderAs(ctx,..)` stream entry points (fully buffered) threading a real
   open-time context through layout — a cancelled open ERRORS rather than returning a silently
   truncated document (boundary check; the engine itself degrades); `Convert`/`ConvertFile` now
   pass their ctx to open; `MarkdownOptions.MaxBytes` rune-safe text-output cap (search-index
   extraction). Capability gate for hosts = `FormatFromMIME(mt).ValidInput()`.
-  `2026-07-10-mime-reader-open-design.md`.
 
 **DOCX reader fidelity — the public-model PR 1/3** (`pkg/docx`, toward a supported read+write
 document model consumed externally by tinycld/text):
@@ -372,7 +355,6 @@ document model consumed externally by tinycld/text):
   preserved verbatim). Rendering pins: revisions render FINAL state ("No Markup"), comments
   invisible, drop cap degrades; upgrades: endnote markers, run shading, list start/override
   seeding, anchored square-wrap images → CSS floats. `fidelity` core fixture + golden.
-  `2026-07-10-docx-model-fidelity-design.md`.
 
 **DOCX model writer — the public-model PR 2/3** (`pkg/docx` `Write`/`Bytes`):
 
@@ -384,7 +366,7 @@ document model consumed externally by tinycld/text):
   Round-trip contract Parse∘Write ≡ id pinned by: 15-fixture modelCore corpus, 200-doc seeded
   randomized sweep, per-fixture determinism, and a byte-level second-write fixed point over
   the gen corpus; `model-specimen` core fixture renders the construct→Write→reopen path into
-  a golden. `2026-07-10-docx-model-writer-design.md`.
+  a golden.
 
 **XLSX reader enrichment — calc-adoption PR 1/5** (`pkg/xlsx`):
 
@@ -396,7 +378,6 @@ document model consumed externally by tinycld/text):
   color, frozen panes, sparse row heights/row styles/col widths, defaults), workbook
   `Date1904` + `DefinedNames`, 1-based coordinate helpers, complete builtin numFmt id table.
   Display path byte-identical (Text untouched; formatter keeps its subset).
-  `2026-07-10-xlsx-reader-enrichment-design.md`.
 
 **XLSX preservation-first editor core — calc-adoption PR 2/5** (`pkg/xlsx` `Edit`/`New`/`Save`):
 
@@ -410,7 +391,6 @@ document model consumed externally by tinycld/text):
   SetFormula(src, cached)), ClearCell keeps style, Cells iteration, merges/frozen panes/
   dimension/row heights/col widths (range-splitting), stale calcChain dropped on first value
   edit (part + CT + rel). Deterministic saves; single-goroutine editor, 1-based coordinates.
-  `2026-07-10-xlsx-editor-core-design.md`.
 
 **XLSX style read-modify-write — calc-adoption PR 3/5** (`pkg/xlsx` `PatchCellStyle`):
 
@@ -422,9 +402,8 @@ document model consumed externally by tinycld/text):
   builtin ids deterministically, reuse custom codes, else allocate ≥164. Whole-style
   `SetCellStyle` + row-style variants + memoized `CellStyle` reads. Per-leaf canary audit
   (editor read AND save/reopen), mirroring calc's style_attribute_registry.
-  `2026-07-10-xlsx-styles-rmw-design.md`.
 
-**RTF input** (`pkg/rtf`, `OpenRTF*`, `convert in.rtf ...`):
+**RTF input** (`pkg/rtf`, `OpenRTF*`, `convert in.rtf..`):
 
 - Dependency-free tokenizer + converter → HTML through the reflow pipeline: paragraph/char
   formatting with 0-toggles, font/color tables, alignment/indents, cp1252 + `\uN`/`\ucN`
@@ -434,11 +413,11 @@ document model consumed externally by tinycld/text):
   `{\rtf` magic, `.rtf`, MIME rows flipped, input capability bit. Landed with a
   cross-cutting engine fix: **data: image URIs decode without a resource loader**
   (`resource.LoadDataURL` short-circuits the image cache — the browser rule). `rtf-specimen`
-  golden. `2026-07-10-rtf-input-design.md`.
+  golden.
 
-**RTF output** (`pkg/render/rtfwrite`, `WriteRTF`, `convert ... out.rtf`):
+**RTF output** (`pkg/render/rtfwrite`, `WriteRTF`, `convert.. out.rtf`):
 
-- Everything → .rtf — a cssbox STRUCTURE writer (boxwalk-based, the Markdown/DOCX shape) whose
+- Everything →.rtf — a cssbox STRUCTURE writer (boxwalk-based, the Markdown/DOCX shape) whose
   mappings our own reader round-trips: block semantics on stylesheet names (`\sN` "heading N"
   + `\outlinelevel`, Quote/CodeBlock/HorizontalRule — the reader now parses the stylesheet and
   maps the names back, which also upgrades real Word files), lists on `\ls`/`\ilvl` + a literal
@@ -449,11 +428,10 @@ document model consumed externally by tinycld/text):
   png/jpeg (data: URIs embed loaderless and round-trip byte-identically), `\uN?` escapes incl.
   surrogate pairs. Deterministic. 17-case html→rtf→md ≡ html→md parity matrix + md/pdf loops +
   `rtfout-basic` golden; RTF is in the convert matrix as input AND output.
-  `2026-07-10-rtf-output-design.md`.
 
-**PPTX output** (`pkg/render/pptxwrite`, `WritePPTX`, `convert ... out.pptx`):
+**PPTX output** (`pkg/render/pptxwrite`, `WritePPTX`, `convert.. out.pptx`):
 
-- Everything → .pptx — a cssbox STRUCTURE writer: every `<h1>`/`<h2>` starts a new slide with
+- Everything →.pptx — a cssbox STRUCTURE writer: every `<h1>`/`<h2>` starts a new slide with
   that heading as the title placeholder; following blocks become the body (text box paragraphs,
   `buChar`/`buAutoNum`+`lvl` lists, native `a:tbl` with `gridSpan`/`rowSpan` + `hMerge`/`vMerge`
   continuations, `p:pic` media parts with loaderless data:-URI embedding). Logged degrades:
@@ -462,9 +440,8 @@ document model consumed externally by tinycld/text):
   pkg/pptx + slide-count pin + `pptxout-basic` golden; PPTX joins the convert matrix as input
   AND output. Landed with a D1 frontend fix the round trip exposed: nested-list `<ul>` now
   opens INSIDE its parent `<li>` (structure writers previously dropped nested items).
-  `2026-07-10-pptx-output-design.md`.
 
-**EPUB output** (`pkg/render/epubwrite`, `WriteEPUB`, `convert ... out.epub`)
+**EPUB output** (`pkg/render/epubwrite`, `WriteEPUB`, `convert.. out.epub`)
 — **completes the any⇄any table: all 13 formats are both inputs AND outputs**:
 
 - Deterministic EPUB 3 built ON htmlwrite (content documents ARE XHTML — a new byte-identical
@@ -475,7 +452,7 @@ document model consumed externally by tinycld/text):
   inline and round-trip verbatim). Pinned by the STRICT parity bar — 17-case
   html→epub→md ≡ html→md exact equality — plus package-shape pins (stored-mimetype-first,
   nav links, chapters ⇒ pages), md→epub→md loop, `epubout-basic` golden; EPUB joins the
-  convert matrix as input AND output. `2026-07-10-epub-output-design.md`.
+  convert matrix as input AND output.
 
 **DOCX writer unification** (`pkg/render/docxwrite` → `docx.Write`) — the public-model
 PR 3/3:
@@ -489,9 +466,9 @@ PR 3/3:
   `NumLevel.IndentLeft/Hanging` (per-level list indents), `TableProps.LayoutFixed`.
   Semantically 1:1 (parity matrix + reopen units unchanged; PNG goldens byte-identical);
   a linked image now survives the round trip BESIDE its link group (the reader dropped
-  drawings inside w:hyperlink), pinned by test. `2026-07-10-docxwrite-unification-design.md`.
+  drawings inside w:hyperlink), pinned by test.
 
-**PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx ...`):
+**PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx..`):
 
 - Hand-rolled PresentationML reader: visible slides' shape trees (text frames with
   level/bullet/alignment + run b/i/sz/color, pictures, spanned tables), frames resolved
@@ -501,9 +478,8 @@ PR 3/3:
   bullets → nested ul/ol with kind-switch handling), shapes ordered title-first/top-down
   for the structure writers. `classifyOPC` gains ppt/; `.pptx`/`.pptm`; presentationml MIME
   row flipped; input capability bit (output = D2). `pptx-specimen` golden.
-  `2026-07-10-pptx-input-design.md`.
 
-**EPUB input** (`pkg/epub`, `OpenEPUB*`, `convert book.epub ...` — reverses the old
+**EPUB input** (`pkg/epub`, `OpenEPUB*`, `convert book.epub..` — reverses the old
 out-of-scope note):
 
 - Container reader: container.xml → OPF (title, manifest, spine; `linear="no"` skipped;
@@ -513,7 +489,7 @@ out-of-scope note):
   (the OPF-directory layout every real-world book uses; the dir-loader default is skipped so
   the container loader wins). DRM (META-INF/encryption.xml) → typed `epub.ErrEncrypted`.
   Detection: the OCF `mimetype` zip entry in classifyOPC; `.epub`; MIME row flipped; input
-  capability bit (output = E2). `epub-specimen` golden. `2026-07-10-epub-input-design.md`.
+  capability bit (output = E2). `epub-specimen` golden.
 
 **PNG/JPEG input — images as documents** (`OpenImage*`):
 
@@ -522,7 +498,7 @@ out-of-scope note):
   through the reflow pipeline). image→PDF fills the page edge to edge (pinned), image→JPEG
   transcodes, markdown carries a data: URI, plain-text/tables-only outputs are empty by
   design; png→png stays ErrSameFormat. Input capability bits flipped; conversion matrix
-  extended. `2026-07-10-image-input-design.md`.
+  extended.
 
 **HEIF/HEIC input — pure-Go HEVC intra decoder** (`pkg/heif`, `pkg/heif/hevc`):
 
@@ -534,7 +510,6 @@ out-of-scope note):
   byte-identical output. Registered with `image.RegisterFormat`; `.heic` lights up as a
   document input, inside HTML/EPUB `<img>`, and transcodes to PNG inside DOCX/PPTX/RTF/EPUB
   outputs (`pkg/render/imageconv`). Image *sequences* (msf1) and AVIF stay refused.
-  `2026-07-27-heif-hevc-decoder.md`.
 
 **XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):
 
@@ -545,7 +520,7 @@ out-of-scope note):
   both views; `SetComment`/`RemoveComment` regenerate the comments part + legacy VML
   wholesale, wiring rels/content-types/legacyDrawing on first use. Editor-core fixes:
   `sheetRelTarget` reads current bytes; `File.setPart` lets an original part be regenerated
-  through the dirty machinery. `2026-07-10-xlsx-cf-comments-design.md`.
+  through the dirty machinery.
 
 **XLSX pivots + defined-names write — calc-adoption PR 5/5** (`pkg/xlsx`):
 
@@ -555,7 +530,7 @@ out-of-scope note):
   wiring in one call; axis/value fields by source header name, hard error on unknowns).
   `SetDefinedNames`/`DefinedNames()` replace/read the workbook names (sheet-local + hidden).
   Editor-core fix: `setPart` resurrects a deleted part (remove-then-add in one session — calc's
-  save shape). `2026-07-10-xlsx-pivots-names-design.md`.
+  save shape).
 
 **External office corpus — real-world DOCX/XLSX preservation fixtures**
 (`testdata/external/{docx,xlsx}`):
@@ -587,7 +562,7 @@ read+write vocabulary for the tinycld text adoption path):
 - **`Run.NoteSep`** — the reserved footnote/endnote separator notes (ids -1/0) round-trip:
   `<w:separator/>` / `<w:continuationSeparator/>` write AND parse back, so a content-less
   separator run is a Parse∘Write fixed point rather than being culled.
-- **val-less `<w:u>` fix** — a bare `<w:u w:color=.../>` (Word's shorthand for single underline)
+- **val-less `<w:u>` fix** — a bare `<w:u w:color=../>` (Word's shorthand for single underline)
   now reads as underline-ON; it was previously read as underline-off.
 
 **Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
@@ -598,4 +573,3 @@ read+write vocabulary for the tinycld text adoption path):
   ceil-safe exact fits). DPI becomes a resolution CEILING alongside the box (zero = fill the
   box, upscaling vector-sharp; positive = downscale-only thumbnails). CLI flags on `rasterize` +
   `convert` image output (unset `--dpi` = pure fit via flag.Visit).
-  `2026-07-10-fit-raster-sizing-design.md`.
