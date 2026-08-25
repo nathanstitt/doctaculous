@@ -45,13 +45,17 @@ func shapePath(el *element, logf func(string, ...any)) *render.Path {
 
 	switch el.local {
 	case "rect":
-		return rectPath(el, length)
+		return rectPath(el, length, logf)
 	case "circle":
 		r := length("r")
 		if !finitePositive(r) {
 			return nil
 		}
 		cx, cy := length("cx"), length("cy")
+		if !finite(cx) || !finite(cy) {
+			logf("svg: non-finite cx/cy on <circle>, dropping shape")
+			return nil
+		}
 		return ellipsePath(cx, cy, r, r)
 	case "ellipse":
 		rx, ry := length("rx"), length("ry")
@@ -59,18 +63,26 @@ func shapePath(el *element, logf func(string, ...any)) *render.Path {
 			return nil
 		}
 		cx, cy := length("cx"), length("cy")
+		if !finite(cx) || !finite(cy) {
+			logf("svg: non-finite cx/cy on <ellipse>, dropping shape")
+			return nil
+		}
 		return ellipsePath(cx, cy, rx, ry)
 	case "line":
 		x1, y1 := length("x1"), length("y1")
 		x2, y2 := length("x2"), length("y2")
+		if !finite(x1) || !finite(y1) || !finite(x2) || !finite(y2) {
+			logf("svg: non-finite coordinate on <line>, dropping shape")
+			return nil
+		}
 		p := &render.Path{}
 		p.MoveTo(x1, y1)
 		p.LineTo(x2, y2)
 		return p
 	case "polyline":
-		return pointsPath(el.attrs["points"], false)
+		return pointsPath(el.attrs["points"], false, logf)
 	case "polygon":
-		return pointsPath(el.attrs["points"], true)
+		return pointsPath(el.attrs["points"], true, logf)
 	case "path":
 		return parsePathData(el.attrs["d"])
 	default:
@@ -100,10 +112,14 @@ func finitePositive(v float64) bool {
 // missing radius takes the other's value, both clamp to half the
 // corresponding side, and a plain (non-rounded) rect is emitted when both end
 // up zero.
-func rectPath(el *element, length func(string) float64) *render.Path {
+func rectPath(el *element, length func(string) float64, logf func(string, ...any)) *render.Path {
 	x, y := length("x"), length("y")
 	w, h := length("width"), length("height")
 	if !finitePositive(w) || !finitePositive(h) {
+		return nil
+	}
+	if !finite(x) || !finite(y) {
+		logf("svg: non-finite x/y on <rect>, dropping shape")
 		return nil
 	}
 
@@ -181,12 +197,26 @@ func ellipsePath(cx, cy, rx, ry float64) *render.Path {
 
 // pointsPath builds a polyline/polygon path from a "points" attribute. An odd
 // number of coordinates drops the trailing unpaired number and renders the
-// valid prefix, per SVG's list error-handling rule. Empty or wholly-invalid
-// input yields nil.
-func pointsPath(points string, closed bool) *render.Path {
+// valid prefix, per SVG's list error-handling rule. A non-finite coordinate
+// (NaN/±Inf, reachable via parseNumber's acceptance of strconv's "nan"/"inf"
+// literals) is treated the same way: truncate at the first bad coordinate
+// pair and render the valid prefix, rather than dropping the whole shape —
+// consistent with the odd-trailing-number rule above and with how
+// parsePathData keeps whatever prefix parsed cleanly on the first error.
+// Empty or wholly-invalid input (nothing usable in the prefix) yields nil.
+func pointsPath(points string, closed bool, logf func(string, ...any)) *render.Path {
 	nums := parseNumberList(points)
 	if len(nums)%2 != 0 {
 		nums = nums[:len(nums)-1]
+	}
+	for i, v := range nums {
+		if !finite(v) {
+			// Truncate to the last complete, finite coordinate pair
+			// before this one.
+			nums = nums[:i-i%2]
+			logf("svg: non-finite coordinate in points list, rendering valid prefix")
+			break
+		}
 	}
 	if len(nums) < 2 {
 		return nil
