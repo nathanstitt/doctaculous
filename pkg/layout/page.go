@@ -130,6 +130,9 @@ const (
 	// ClipPopKind pops the most recent clip pushed by ClipPushKind (the painter
 	// restores the prior clip state). Carries no geometry.
 	ClipPopKind
+	// VectorKind is a vector scene (SVG) drawn into a content box (Item.Vector is
+	// set).
+	VectorKind
 )
 
 // Item is one drawing primitive on a page. It is a small tagged union rather than
@@ -141,6 +144,9 @@ type Item struct {
 	Border  BorderItem
 	Image   ImageItem
 	BgImage BackgroundImageItem
+	// Vector is set when Kind is VectorKind: a vector scene (SVG) drawn into a
+	// content box.
+	Vector VectorItem
 }
 
 // GlyphItem is a glyph to fill. The outline is kept in raw em units (Y up, as the
@@ -237,4 +243,21 @@ type BackgroundImageItem struct {
 	PosXIsPct, PosYIsPct bool
 
 	RepeatX, RepeatY bool
+}
+
+// VectorScene is a resolution-independent drawing (an SVG scene) that paints
+// itself onto a Device. Implemented by pkg/svg/draw.Renderer; layout stays
+// decoupled from the SVG packages.
+type VectorScene interface {
+	// DrawVector renders the scene with ctm mapping its viewport coordinates
+	// (points, origin at the viewport's top-left) into device space.
+	DrawVector(dev render.Device, ctm render.Matrix)
+}
+
+// VectorItem is a vector scene drawn into a box on the page. The rectangle is
+// the viewport in page space (points, Y-down); the painter clips to it (the
+// SVG viewport is overflow:hidden) and hands the scene a viewport->device ctm.
+type VectorItem struct {
+	Scene              VectorScene
+	XPt, YPt, WPt, HPt float64
 }
