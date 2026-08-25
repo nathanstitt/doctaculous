@@ -31,11 +31,17 @@ func OpenSVGFile(path string, opts ...OpenOption) (*Document, error) {
 // this is not a real-world document).
 const svgzMaxSize = 64 << 20
 
-// OpenSVGBytes opens an in-memory SVG document, applying any options. Options
-// are accepted for uniformity with the other frontends; none affect SVG yet
-// (the resource loader starts applying when <image> support lands).
+// OpenSVGBytes opens an in-memory SVG document, applying any options. Of the
+// options, only WithLogf currently applies (it receives svg.Parse's
+// degradation diagnostics — unsupported elements, ignored group opacity,
+// invalid viewBox fallbacks, non-finite coordinates); the rest (viewport,
+// resource loader, media, ctx, ...) remain inert for SVG — the resource
+// loader starts applying when <image> support lands.
 func OpenSVGBytes(data []byte, opts ...OpenOption) (*Document, error) {
-	_ = opts
+	cfg := defaultOpenConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
 		zr, err := gzip.NewReader(bytes.NewReader(data))
 		if err != nil {
@@ -56,13 +62,7 @@ func OpenSVGBytes(data []byte, opts ...OpenOption) (*Document, error) {
 			return nil, fmt.Errorf("doctaculous: svgz decompresses to more than %d bytes", svgzMaxSize)
 		}
 	}
-	// logf is nil: OpenOption's WithLogf/openConfig plumbing belongs to the
-	// HTML-family reflow frontends (openReflowFrontend / openConfig.logf) and
-	// isn't threaded into this entry point, so svg.Parse's degradation
-	// diagnostics (unsupported elements, ignored group opacity, invalid
-	// viewBox fallbacks, non-finite coordinates) are currently dropped rather
-	// than silently misdirected to the wrong channel.
-	sd, err := svg.Parse(data, nil)
+	sd, err := svg.Parse(data, cfg.logf)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: parse svg: %w", err)
 	}
