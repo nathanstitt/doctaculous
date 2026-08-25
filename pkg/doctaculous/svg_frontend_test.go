@@ -183,3 +183,65 @@ func TestOpenSVGBytesLogf(t *testing.T) {
 		t.Fatalf("open with no options (nil logf): %v", err)
 	}
 }
+
+func TestSVGDetectAndFormat(t *testing.T) {
+	plain := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
+	prolog := []byte("\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+		"<!-- generator -->\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"x\">\n" +
+		"<svg xmlns=\"http://www.w3.org/2000/svg\"/>")
+	if f := DetectFormat(plain, ""); f != FormatSVG {
+		t.Errorf("plain = %v", f)
+	}
+	// THE BUG FIX: an XML-prologed SVG used to sniff as HTML.
+	if f := DetectFormat(prolog, ""); f != FormatSVG {
+		t.Errorf("prolog = %v", f)
+	}
+	// Non-SVG XML still sniffs HTML (XHTML behavior preserved).
+	if f := DetectFormat([]byte(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"/>`), ""); f != FormatHTML {
+		t.Errorf("xhtml = %v", f)
+	}
+	// HTML containing an inline <svg> is still HTML (sniff only looks at the first tag).
+	if f := DetectFormat([]byte(`<!DOCTYPE html><html><body><svg/></body></html>`), ""); f != FormatHTML {
+		t.Errorf("html-with-svg = %v", f)
+	}
+	// Extension hint.
+	if f := DetectFormat([]byte("garbage"), "icon.svg"); f != FormatSVG {
+		t.Errorf("ext = %v", f)
+	}
+	// svgz magic.
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Write(plain)
+	zw.Close()
+	if f := DetectFormat(buf.Bytes(), ""); f != FormatSVG {
+		t.Errorf("svgz = %v", f)
+	}
+	// Gzip of something else stays unknown.
+	buf.Reset()
+	zw = gzip.NewWriter(&buf)
+	zw.Write([]byte("just text"))
+	zw.Close()
+	if f := DetectFormat(buf.Bytes(), ""); f != FormatUnknown {
+		t.Errorf("gz-text = %v", f)
+	}
+
+	// Format table entries.
+	if f, err := ParseFormat("svg"); err != nil || f != FormatSVG {
+		t.Errorf("ParseFormat = %v %v", f, err)
+	}
+	if FormatFromMIME("image/svg+xml") != FormatSVG || FormatSVG.MIME() != "image/svg+xml" {
+		t.Error("MIME mapping")
+	}
+	if FormatFromPath("a.svgz") != FormatSVG {
+		t.Error("svgz ext")
+	}
+	if !FormatSVG.ValidInput() || FormatSVG.ValidOutput() {
+		t.Error("caps: want input-only")
+	}
+
+	// End-to-end dispatch.
+	doc, err := OpenBytes(prolog)
+	if err != nil || doc.PageCount() != 1 {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+}

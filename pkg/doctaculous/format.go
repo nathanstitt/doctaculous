@@ -47,10 +47,8 @@ const (
 	// FormatHEIC is a HEIF/HEIC still image (HEVC-coded), decoded by the
 	// pure-Go pkg/heif decoder. Input only: the toolkit does not encode HEVC.
 	FormatHEIC Format = "heic"
-	// FormatSVG is a standalone Scalable Vector Graphics document (or its
-	// gzip-compressed .svgz form). Capability-table registration, MIME/path
-	// detection, and generic-open dispatch land separately; this constant only
-	// names the format so OpenSVG* can stamp it on the Document it returns.
+	// FormatSVG is a Scalable Vector Graphics document (input only; a single
+	// page exactly the SVG's viewport), or its gzip-compressed .svgz form.
 	FormatSVG Format = "svg"
 )
 
@@ -88,6 +86,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatPNG:      {input: true, output: true},
 	FormatJPEG:     {input: true, output: true},
 	FormatHEIC:     {input: true, output: false},
+	FormatSVG:      {input: true, output: false},
 }
 
 // ValidInput reports whether f is a supported conversion input (a format the
@@ -126,7 +125,7 @@ func CanConvert(from, to Format) error {
 // ParseFormat maps a user-facing format name to a Format. It accepts the
 // canonical names plus common aliases (case-insensitive, with or without a
 // leading dot): pdf; docx; html, htm, xhtml; markdown, md; text, txt, plain;
-// png; jpeg, jpg. Unrecognized names return ErrUnknownFormat.
+// png; jpeg, jpg; svg, svgz. Unrecognized names return ErrUnknownFormat.
 func ParseFormat(s string) (Format, error) {
 	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), ".")) {
 	case "pdf":
@@ -157,6 +156,8 @@ func ParseFormat(s string) (Format, error) {
 		return FormatJPEG, nil
 	case "heic", "heif":
 		return FormatHEIC, nil
+	case "svg", "svgz":
+		return FormatSVG, nil
 	default:
 		return FormatUnknown, fmt.Errorf("doctaculous: format %q: %w", s, ErrUnknownFormat)
 	}
@@ -189,6 +190,7 @@ var mimeFormats = map[string]Format{
 	"image/jpg":            FormatJPEG,
 	"image/heic":           FormatHEIC,
 	"image/heif":           FormatHEIC,
+	"image/svg+xml":        FormatSVG,
 
 	// Deliberate refusals. Legacy binary Office formats have no pure-Go reader
 	// and are not the OOXML formats their names resemble.
@@ -266,6 +268,8 @@ func (f Format) MIME() string {
 		return "image/jpeg"
 	case FormatHEIC:
 		return "image/heic"
+	case FormatSVG:
+		return "image/svg+xml"
 	default:
 		return ""
 	}
@@ -305,6 +309,8 @@ func FormatFromPath(path string) Format {
 		return FormatJPEG
 	case ".heic", ".heif":
 		return FormatHEIC
+	case ".svg", ".svgz":
+		return FormatSVG
 	default:
 		return FormatUnknown
 	}
