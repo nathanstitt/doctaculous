@@ -244,4 +244,21 @@ func TestSVGDetectAndFormat(t *testing.T) {
 	if err != nil || doc.PageCount() != 1 {
 		t.Fatalf("OpenBytes: %v", err)
 	}
+
+	// Namespace-prefixed root: the "svg:" convention is recognized, but the
+	// colon terminator must not over-match an arbitrary "svg:"-prefixed local
+	// name that merely starts with "svg" as a string.
+	if f := DetectFormat([]byte(`<svg:svg xmlns:svg="http://www.w3.org/2000/svg"/>`), ""); f != FormatSVG {
+		t.Errorf("svg:svg = %v", f)
+	}
+	if f := DetectFormat([]byte(`<svg:zzz/>`), ""); f == FormatSVG {
+		t.Errorf("svg:zzz = %v, want not FormatSVG (over-match)", f)
+	}
+	// Truncated prefix forms must not panic and must not match.
+	if f := DetectFormat([]byte(`<svg:`), ""); f == FormatSVG {
+		t.Errorf("truncated svg: = %v, want not FormatSVG", f)
+	}
+	if f := DetectFormat([]byte(`<svg:sv`), ""); f == FormatSVG {
+		t.Errorf("truncated svg:sv = %v, want not FormatSVG", f)
+	}
 }

@@ -245,8 +245,29 @@ func sniffSVG(data []byte) bool {
 				return false
 			}
 			switch data[4] {
-			case ' ', '\t', '\n', '\f', '\r', '>', '/', ':':
+			case ' ', '\t', '\n', '\f', '\r', '>', '/':
 				return true
+			case ':':
+				// A namespace-prefixed root, e.g. <svg:svg xmlns:svg="...">,
+				// is genuinely valid SVG and worth recognizing since "svg" is
+				// the near-universal prefix convention for that namespace.
+				// But byte-level sniffing can't resolve an arbitrary prefix
+				// bound to the SVG namespace (<s:svg>, <foo:svg>) without
+				// real namespace processing, so don't treat ':' alone as a
+				// terminator — that would match ANY element merely starting
+				// "svg:" (e.g. <svg:zzz>). Require the local name after the
+				// colon to actually be "svg" too.
+				rest := data[5:]
+				if len(rest) < 3 || !bytes.EqualFold(rest[:3], []byte("svg")) {
+					return false
+				}
+				if len(rest) == 3 {
+					return false
+				}
+				switch rest[3] {
+				case ' ', '\t', '\n', '\f', '\r', '>', '/':
+					return true
+				}
 			}
 			return false
 		}
