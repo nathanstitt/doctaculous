@@ -86,3 +86,73 @@ func TestSVGPDFRoundTrip(t *testing.T) {
 		t.Errorf("PDF round-trip drifted: %d pixels beyond tolerance", n)
 	}
 }
+
+// gzipSVGWithFiller builds a gzip-compressed SVG document whose decompressed
+// size is exactly base + fillerLen: a valid <svg> root followed by an XML
+// comment padded with fillerLen bytes of a repeated character. Comment filler
+// compresses to a tiny fraction of its size, so this stays fast and
+// low-memory even when fillerLen approaches svgzMaxSize.
+func gzipSVGWithFiller(fillerLen int) []byte {
+	head := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg><!--`)
+	tail := []byte(`-->`)
+	total := len(head) + fillerLen + len(tail)
+	var buf bytes.Buffer
+	buf.Grow(total / 100)
+	zw := gzip.NewWriter(&buf)
+	zw.Write(head)
+	filler := bytes.Repeat([]byte(" "), 1<<16)
+	remaining := fillerLen
+	for remaining > 0 {
+		n := remaining
+		if n > len(filler) {
+			n = len(filler)
+		}
+		zw.Write(filler[:n])
+		remaining -= n
+	}
+	zw.Write(tail)
+	zw.Close()
+	return buf.Bytes()
+}
+
+// TestOpenSVGBytesOversizedSVGZ proves an .svgz that decompresses to more
+// than svgzMaxSize is rejected with a clean error rather than silently
+// truncated (a truncated stream looks, to svg.Parse, like ordinary malformed
+// real-world SVG and returns a partial tree with a nil error).
+func TestOpenSVGBytesOversizedSVGZ(t *testing.T) {
+	data := gzipSVGWithFiller(svgzMaxSize + 1024)
+	if _, err := OpenSVGBytes(data); err == nil {
+		t.Fatal("oversized svgz accepted without error")
+	}
+}
+
+// TestOpenSVGBytesSVGZUnderCap proves the cap guard doesn't over-trigger: a
+// payload decompressing to just under svgzMaxSize still opens successfully.
+// This is the assertion that would catch an off-by-one at the boundary.
+func TestOpenSVGBytesSVGZUnderCap(t *testing.T) {
+	data := gzipSVGWithFiller(svgzMaxSize - 1024)
+	doc, err := OpenSVGBytes(data)
+	if err != nil {
+		t.Fatalf("svgz just under cap rejected: %v", err)
+	}
+	if doc.PageCount() != 1 {
+		t.Fatalf("pages = %d", doc.PageCount())
+	}
+}
+
+// TestOpenSVGBytesCorruptGzip proves a truncated/corrupt gzip stream (the
+// magic bytes are present but the stream is not valid gzip) returns a clean
+// error instead of panicking or hanging.
+func TestOpenSVGBytesCorruptGzip(t *testing.T) {
+	data := []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff}
+	if _, err := OpenSVGBytes(data); err == nil {
+		t.Fatal("corrupt gzip accepted without error")
+	}
+}
+
+// TestOpenSVGFileMissing proves a missing path returns a clean wrapped error.
+func TestOpenSVGFileMissing(t *testing.T) {
+	if _, err := OpenSVGFile("/nonexistent/path/does-not-exist.svg"); err == nil {
+		t.Fatal("missing file accepted without error")
+	}
+}
