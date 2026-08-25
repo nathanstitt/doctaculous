@@ -47,6 +47,11 @@ const (
 	// FormatHEIC is a HEIF/HEIC still image (HEVC-coded), decoded by the
 	// pure-Go pkg/heif decoder. Input only: the toolkit does not encode HEVC.
 	FormatHEIC Format = "heic"
+	// FormatSVG is a standalone Scalable Vector Graphics document (or its
+	// gzip-compressed .svgz form). Capability-table registration, MIME/path
+	// detection, and generic-open dispatch land separately; this constant only
+	// names the format so OpenSVG* can stamp it on the Document it returns.
+	FormatSVG Format = "svg"
 )
 
 // Sentinel errors for format handling, for callers to branch on via errors.Is.
