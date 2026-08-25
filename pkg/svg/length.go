@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -10,9 +11,21 @@ import (
 const pxPerIn = 96.0
 
 // parseNumber parses one SVG number (int/decimal/scientific, optional sign).
+// SVG's <number> grammar has no NaN/Infinity literals, so a result that
+// parses but is non-finite is rejected: strconv.ParseFloat accepts Go's own
+// spellings ("nan", "inf", "+Inf", "infinity", case-insensitively) which are
+// not valid SVG numbers, and an overflowing literal like "1e400" also comes
+// back as ±Inf (ParseFloat returns it alongside a range error, but nothing
+// here should depend on checking err for that — the finite check catches it
+// directly). Every caller in this package (parseNumberList, and transitively
+// every attribute parser built on it) relies on this to keep a non-finite
+// value from ever reaching downstream matrix/geometry math.
 func parseNumber(s string) (float64, bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	return v, err == nil
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false
+	}
+	return v, true
 }
 
 // parseNumberList splits s on commas and whitespace and parses each token as a
@@ -54,7 +67,7 @@ func parseLength(s string, ref float64) (float64, bool) {
 		}
 	}
 	v, err := strconv.ParseFloat(num, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0, false
 	}
 	switch unit {

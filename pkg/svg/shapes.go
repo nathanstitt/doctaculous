@@ -25,9 +25,17 @@ func shapePath(el *element, logf func(string, ...any)) *render.Path {
 	}
 
 	// length resolves an attribute as a length, defaulting to 0 (SVG's
-	// lacuna value for every attribute used below) and logging when a
-	// percentage was used, since it resolves against 0 rather than the
-	// real viewport here.
+	// lacuna value for every attribute used below) when the attribute is
+	// absent, and logging when a percentage was used, since it resolves
+	// against 0 rather than the real viewport here.
+	//
+	// A present-but-unparseable value (bad syntax, or a non-finite result —
+	// parseLength itself now rejects NaN/±Inf, since SVG's <number> grammar
+	// has no such literals) reports NaN rather than silently falling back to
+	// 0: the finite()/finitePositive() guards below must still see and
+	// reject it, exactly as they do for any other non-finite coordinate,
+	// rather than have a garbled attribute quietly render as if it were
+	// absent.
 	length := func(name string) float64 {
 		v, ok := el.attrs[name]
 		if !ok {
@@ -38,7 +46,7 @@ func shapePath(el *element, logf func(string, ...any)) *render.Path {
 		}
 		n, ok := parseLength(v, 0)
 		if !ok {
-			return 0
+			return math.NaN()
 		}
 		return n
 	}
@@ -90,10 +98,12 @@ func shapePath(el *element, logf func(string, ...any)) *render.Path {
 	}
 }
 
-// finite reports whether v is neither NaN nor ±Inf. Non-finite lengths are
-// reachable today only via parseNumber's acceptance of strconv's "nan"/"inf"
-// literals (a known upstream wart, not fixed here); they must never reach the
-// arc math below, which would either silently fail every comparison (NaN) or
+// finite reports whether v is neither NaN nor ±Inf. parseNumber/parseLength
+// reject non-finite results outright, but shapePath's length() helper still
+// surfaces a NaN sentinel for a present-but-unparseable attribute (see its
+// doc comment) so that guard, not a silent fallback to 0, is what decides
+// whether the shape renders; a non-finite value must never reach the arc
+// math below, which would either silently fail every comparison (NaN) or
 // produce an infinite path that poisons downstream layout/rasterization.
 func finite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
@@ -138,8 +148,8 @@ func rectPath(el *element, length func(string) float64, logf func(string, ...any
 	case hasRY && !hasRX:
 		rx = ry
 	}
-	// A non-finite radius (NaN, or ±Inf via parseNumber's acceptance of
-	// strconv's "inf"/"nan" literals) can't be clamped or used in the arc
+	// A non-finite radius (the NaN sentinel length() returns for a
+	// present-but-unparseable rx/ry) can't be clamped or used in the arc
 	// math sanely; treat it as no rounding rather than emit an arc to/from
 	// a non-finite point.
 	if !finite(rx) || !finite(ry) {
@@ -197,26 +207,31 @@ func ellipsePath(cx, cy, rx, ry float64) *render.Path {
 
 // pointsPath builds a polyline/polygon path from a "points" attribute. An odd
 // number of coordinates drops the trailing unpaired number and renders the
-// valid prefix, per SVG's list error-handling rule. A non-finite coordinate
-// (NaN/±Inf, reachable via parseNumber's acceptance of strconv's "nan"/"inf"
-// literals) is treated the same way: truncate at the first bad coordinate
-// pair and render the valid prefix, rather than dropping the whole shape —
-// consistent with the odd-trailing-number rule above and with how
-// parsePathData keeps whatever prefix parsed cleanly on the first error.
-// Empty or wholly-invalid input (nothing usable in the prefix) yields nil.
+// valid prefix, per SVG's list error-handling rule. A bad token — including a
+// non-finite one (NaN/±Inf; parseNumber itself now rejects these as
+// unparseable, since SVG's <number> grammar has no such literals) — is
+// treated the same way: the scan stops at the first bad token and the valid
+// prefix (truncated to a whole coordinate pair) still renders, rather than
+// dropping the whole shape. This mirrors how parsePathData keeps whatever
+// prefix parsed cleanly on the first error, and is why this function scans
+// tokens itself instead of using parseNumberList's all-or-nothing list
+// parse. Empty or wholly-invalid input (nothing usable in the prefix) yields
+// nil.
 func pointsPath(points string, closed bool, logf func(string, ...any)) *render.Path {
-	nums := parseNumberList(points)
-	if len(nums)%2 != 0 {
-		nums = nums[:len(nums)-1]
-	}
-	for i, v := range nums {
-		if !finite(v) {
-			// Truncate to the last complete, finite coordinate pair
-			// before this one.
-			nums = nums[:i-i%2]
-			logf("svg: non-finite coordinate in points list, rendering valid prefix")
+	fields := strings.FieldsFunc(points, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+	})
+	nums := make([]float64, 0, len(fields))
+	for _, f := range fields {
+		v, ok := parseNumber(f)
+		if !ok {
+			logf("svg: bad coordinate %q in points list, rendering valid prefix", f)
 			break
 		}
+		nums = append(nums, v)
+	}
+	if len(nums)%2 != 0 {
+		nums = nums[:len(nums)-1]
 	}
 	if len(nums) < 2 {
 		return nil

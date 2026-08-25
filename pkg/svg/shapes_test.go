@@ -92,14 +92,16 @@ func assertFinitePath(t *testing.T, p *render.Path) {
 }
 
 // TestShapePathNonFiniteGuards covers the position/center/point coordinates
-// that reach a path through parseNumber's acceptance of strconv's
-// "nan"/"inf" literals (a known upstream wart in parseNumber itself, not
-// fixed here). Every coordinate that can reach a path — rect x/y (in
-// addition to the already-guarded width/height/rx/ry), circle/ellipse cx/cy
-// (in addition to r/rx/ry), line x1/y1/x2/y2, and polygon/polyline points —
-// must never let a non-finite value through: a non-finite center or point
-// poisons downstream bounding-box, transform, and rasterization math exactly
-// like a non-finite dimension does.
+// that a "nan"/"inf" attribute value can reach. parseNumber/parseLength
+// reject those literals outright (SVG's <number> grammar has no NaN/Infinity
+// spelling), so shapePath's length() helper surfaces a NaN sentinel for a
+// present-but-unparseable attribute instead of silently defaulting to 0;
+// every coordinate that can reach a path — rect x/y (in addition to the
+// already-guarded width/height/rx/ry), circle/ellipse cx/cy (in addition to
+// r/rx/ry), line x1/y1/x2/y2, and polygon/polyline points — must still
+// reject that sentinel rather than let it through: a non-finite center or
+// point poisons downstream bounding-box, transform, and rasterization math
+// exactly like a non-finite dimension does.
 func TestShapePathNonFiniteGuards(t *testing.T) {
 	el := func(name string, attrs map[string]string) *element {
 		return &element{space: svgNS, local: name, attrs: attrs}

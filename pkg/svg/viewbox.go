@@ -17,9 +17,23 @@ type viewBox struct {
 // must not pass a viewBox to viewBoxMatrix unless parseViewBox accepted it:
 // viewBoxMatrix divides by W and H, so a non-positive extent would divide by
 // zero or produce a nonsensical (negative/inverted) scale.
+//
+// The four fields are also checked for finiteness directly, even though
+// parseNumberList's underlying parseNumber already rejects non-finite
+// tokens: this is a deliberate belt-and-braces duplication so that
+// parseViewBox's own accepted-extent invariant does not rely solely on a
+// distant helper's behavior staying correct.
 func parseViewBox(s string) (viewBox, bool) {
 	n := parseNumberList(s)
-	if len(n) != 4 || n[2] <= 0 || n[3] <= 0 {
+	if len(n) != 4 {
+		return viewBox{}, false
+	}
+	for _, v := range n {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return viewBox{}, false
+		}
+	}
+	if n[2] <= 0 || n[3] <= 0 {
 		return viewBox{}, false
 	}
 	return viewBox{n[0], n[1], n[2], n[3]}, true
