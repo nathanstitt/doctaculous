@@ -8,11 +8,8 @@ import (
 
 // arcSegments appends the elliptical arc from (x1,y1) to (x2,y2) as cubic
 // Bézier segments (SVG 1.1 F.6: endpoint to center parameterization, radii
-// scaled up if too small, split into slices of at most 45° each approximated
-// by one cubic with the 4/3·tan(δ/4) control distance). 45° keeps the cubic's
-// control-point deviation from the true ellipse small (a single 90° cubic
-// overshoots by ~14% of the radius; 45° cuts that to ~3.5%), for a more
-// browser-faithful curve.
+// scaled up if too small, split into slices of at most 90° each approximated
+// by one cubic with the 4/3·tan(δ/4) control distance).
 func arcSegments(p *render.Path, x1, y1, rx, ry, phiDeg float64, largeArc, sweep bool, x2, y2 float64) {
 	if x1 == x2 && y1 == y2 {
 		return // F.6.2: zero-length arc draws nothing
@@ -85,7 +82,7 @@ func arcSegments(p *render.Path, x1, y1, rx, ry, phiDeg float64, largeArc, sweep
 		return cosP*ex - sinP*ey, sinP*ex + cosP*ey
 	}
 
-	n := int(math.Ceil(math.Abs(dTheta) / (math.Pi / 4)))
+	n := int(math.Ceil(math.Abs(dTheta) / (math.Pi / 2)))
 	if n < 1 {
 		n = 1
 	}
