@@ -42,4 +42,12 @@ func TestDrawVector(t *testing.T) {
 	if got := img2.RGBAAt(40, 40); got != (color.RGBA{255, 0, 0, 255}) {
 		t.Errorf("scaled center = %+v", got)
 	}
+	// Proves stroke Width is scaled by sm.ScaleFactor(), not left in user
+	// units: the bottom edge (user y=5) sits at device y=10 under Scale(2,2),
+	// with a correctly-scaled 4px-wide band covering device y in [8,12). If
+	// Width were left unscaled (2px), the band would be [9,11) instead and
+	// (40,8) would be white, not blue.
+	if got := img2.RGBAAt(40, 8); got.B < 200 || got.R > 100 {
+		t.Errorf("scaled stroke at y=8 = %+v, want blue-ish (stroke width must scale with ctm)", got)
+	}
 }

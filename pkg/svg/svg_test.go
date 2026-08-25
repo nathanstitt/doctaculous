@@ -178,3 +178,53 @@ func TestUnknownElementRecursesAsContainer(t *testing.T) {
 		t.Errorf("expected a log line naming <someWeirdWrapper>, got %v", logs)
 	}
 }
+
+// TestGroupOpacityLoggedOnce covers the group-opacity observability fix: a
+// <g opacity="..."> below 1 has no representation in the scene graph (Group
+// carries only a transform, not a Style), so per-paint alpha through its
+// children would be a plausible-but-wrong render rather than an honestly
+// flat one. Since true compositing is deferred, the scene builder must at
+// least say so — once per document, no matter how many such groups appear —
+// while a group with opacity=1 (or no opacity attribute at all) is fully
+// supported today and must NOT be logged.
+func TestGroupOpacityLoggedOnce(t *testing.T) {
+	const hdr = `xmlns="http://www.w3.org/2000/svg"`
+
+	opacityLogCount := func(logs []string) int {
+		n := 0
+		for _, l := range logs {
+			if strings.Contains(l, "<g opacity>") {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("below 1 logs once regardless of occurrence count", func(t *testing.T) {
+		src := `<svg ` + hdr + ` width="100" height="100">
+		  <g opacity="0.5"><rect width="10" height="10"/></g>
+		  <g opacity="0.25"><rect width="10" height="10"/></g>
+		</svg>`
+		var logs []string
+		if _, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }); err != nil {
+			t.Fatal(err)
+		}
+		if n := opacityLogCount(logs); n != 1 {
+			t.Errorf("group-opacity log count = %d, want 1 (once per document, not once per group)", n)
+		}
+	})
+
+	t.Run("opacity=1 and absent opacity are not logged", func(t *testing.T) {
+		src := `<svg ` + hdr + ` width="100" height="100">
+		  <g opacity="1"><rect width="10" height="10"/></g>
+		  <g><rect width="10" height="10"/></g>
+		</svg>`
+		var logs []string
+		if _, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }); err != nil {
+			t.Fatal(err)
+		}
+		if n := opacityLogCount(logs); n != 0 {
+			t.Errorf("group-opacity log count = %d, want 0 (guard is on <1, not on mere presence)", n)
+		}
+	})
+}

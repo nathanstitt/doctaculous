@@ -1,6 +1,8 @@
 package svg
 
 import (
+	"fmt"
+
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -299,11 +301,27 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style) Node {
 
 // buildGroupElement converts a <g> element into a Group carrying its own
 // parsed transform.
+//
+// Group has no field to carry st.opacity forward (see the doc comment on
+// groupOpacityWarnKey): a <g opacity="..."> below 1 is therefore silently
+// dropped by the scene graph today. Per-paint alpha through a group's
+// children would produce a plausible-but-wrong render (overlapping children
+// would each dim independently, causing seams/double-darkening) rather than
+// an honestly-flat one, so true compositing is deferred to a later PR. This
+// still must not fail silently: warn once per document instead.
 func (b *sceneBuilder) buildGroupElement(el *element, st Style) Node {
+	if st.opacity < 1 {
+		b.warnOnceMsg(groupOpacityWarnKey, "svg: <g opacity> not yet composited; group opacity ignored")
+	}
 	g := b.buildGroup(el, st)
 	g.M = elementTransform(el, b.logf)
 	return g
 }
+
+// groupOpacityWarnKey is the warnOnce key for the group-opacity degradation
+// notice, distinct from any element's local name (warnOnce's usual key) so
+// it can never collide with an actual element name logged elsewhere.
+const groupOpacityWarnKey = " group-opacity"
 
 // buildShape converts a basic-shape element into a Shape, or nil when
 // shapePath reports the shape degenerate (zero/negative extent) or
@@ -347,9 +365,18 @@ func elementTransform(el *element, logf func(string, ...any)) render.Matrix {
 // seen in this document, and is a no-op on subsequent calls for the same
 // name.
 func (b *sceneBuilder) warnOnce(name string) {
-	if b.warned[name] {
+	b.warnOnceMsg(name, fmt.Sprintf("svg: <%s> not yet supported (skipped)", name))
+}
+
+// warnOnceMsg logs msg the first time it is requested under key in this
+// document, and is a no-op on subsequent calls for the same key. It
+// generalizes warnOnce's per-element-name dedup to any other per-document
+// degradation notice (e.g. group opacity) that needs the same "once, not
+// once per occurrence" bookkeeping but a different message shape.
+func (b *sceneBuilder) warnOnceMsg(key, msg string) {
+	if b.warned[key] {
 		return
 	}
-	b.warned[name] = true
-	b.logf("svg: <%s> not yet supported (skipped)", name)
+	b.warned[key] = true
+	b.logf("%s", msg)
 }
