@@ -8,13 +8,17 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
-// style is the resolved presentation state for one element, inherited
+// Style is the resolved presentation state for one element, inherited
 // parent→child per SVG/CSS cascade rules. fill/stroke hold the un-multiplied
 // paint color; fillOpacity/strokeOpacity are the (also inherited) opacity
 // properties. The two compose only in the fillRGBA/strokeRGBA readers, since
 // fill-opacity is an ordinary inherited property (a child's own value
 // replaces the parent's) rather than a multiplicative product down the tree.
-type style struct {
+//
+// Style is exported so pkg/svg/draw (a separate package) can read a shape's
+// resolved paint via FillPaint/StrokePaint/Opacity; its fields stay
+// unexported since only those three accessors are part of the contract.
+type Style struct {
 	hasFill     bool // false: fill="none" (or an unsupported url() ref)
 	fill        color.RGBA
 	fillOpacity float64
@@ -40,8 +44,8 @@ type style struct {
 // stroke, 1-unit stroke width, butt caps, miter joins with a 4 miter limit,
 // nonzero fill rule, solid dashes, full opacity, black 'color', and a
 // displayed/visible element.
-func defaultStyle() style {
-	return style{
+func defaultStyle() Style {
+	return Style{
 		hasFill:       true,
 		fill:          color.RGBA{0, 0, 0, 255},
 		fillOpacity:   1,
@@ -68,7 +72,7 @@ func defaultStyle() style {
 // is then ignored, per SVG's error-handling model, and the inherited value
 // is kept. opacity is not inherited: it resets to el's own value (default 1)
 // on every call. Every other listed property is inherited.
-func (parent style) apply(el *element, logf func(string, ...any)) style {
+func (parent Style) apply(el *element, logf func(string, ...any)) Style {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -108,12 +112,12 @@ func (parent style) apply(el *element, logf func(string, ...any)) style {
 }
 
 // fillRGBA composes the fill color with fill-opacity into the alpha channel.
-func (s style) fillRGBA() color.RGBA {
+func (s Style) fillRGBA() color.RGBA {
 	return composeAlpha(s.fill, s.fillOpacity)
 }
 
 // strokeRGBA composes the stroke color with stroke-opacity into the alpha channel.
-func (s style) strokeRGBA() color.RGBA {
+func (s Style) strokeRGBA() color.RGBA {
 	return composeAlpha(s.stroke, s.strokeOpacity)
 }
 
@@ -126,7 +130,7 @@ func composeAlpha(c color.RGBA, opacity float64) color.RGBA {
 
 // applyColorProp resolves the 'color' property, which backs currentColor.
 // It is an ordinary inherited color property with no special keywords.
-func applyColorProp(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyColorProp(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("color")
 	if !ok || val == "inherit" {
 		return
@@ -193,7 +197,7 @@ func applyOpacityProp(name string, dst *float64, attr func(string) (string, bool
 }
 
 // applyFillRule resolves fill-rule (nonzero|evenodd).
-func applyFillRule(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyFillRule(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("fill-rule")
 	if !ok || val == "inherit" {
 		return
@@ -209,7 +213,7 @@ func applyFillRule(s *style, attr func(string) (string, bool), logf func(string,
 }
 
 // applyStrokeWidth resolves stroke-width as a length in user units.
-func applyStrokeWidth(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyStrokeWidth(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("stroke-width")
 	if !ok || val == "inherit" {
 		return
@@ -223,7 +227,7 @@ func applyStrokeWidth(s *style, attr func(string) (string, bool), logf func(stri
 }
 
 // applyLineCap resolves stroke-linecap (butt|round|square).
-func applyLineCap(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyLineCap(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("stroke-linecap")
 	if !ok || val == "inherit" {
 		return
@@ -243,7 +247,7 @@ func applyLineCap(s *style, attr func(string) (string, bool), logf func(string, 
 // applyLineJoin resolves stroke-linejoin (miter|round|bevel); the SVG2
 // "arcs" and "miter-clip" values map to miter (with a log line) since the
 // renderer does not implement those join geometries.
-func applyLineJoin(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyLineJoin(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("stroke-linejoin")
 	if !ok || val == "inherit" {
 		return
@@ -264,7 +268,7 @@ func applyLineJoin(s *style, attr func(string) (string, bool), logf func(string,
 }
 
 // applyMiterLimit resolves stroke-miterlimit, a bare number >= 1.
-func applyMiterLimit(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyMiterLimit(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("stroke-miterlimit")
 	if !ok || val == "inherit" {
 		return
@@ -282,7 +286,7 @@ func applyMiterLimit(s *style, attr func(string) (string, bool), logf func(strin
 // zero, is treated as solid per the SVG spec's error-handling rule for this
 // property. Odd-length lists are kept as-is; consumers (rasterx) repeat them
 // to even length.
-func applyDashArray(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyDashArray(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("stroke-dasharray")
 	if !ok || val == "inherit" {
 		return
@@ -313,7 +317,7 @@ func applyDashArray(s *style, attr func(string) (string, bool), logf func(string
 }
 
 // applyDashOffset resolves stroke-dashoffset as a length in user units.
-func applyDashOffset(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyDashOffset(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("stroke-dashoffset")
 	if !ok || val == "inherit" {
 		return
@@ -332,7 +336,7 @@ func applyDashOffset(s *style, attr func(string) (string, bool), logf func(strin
 // tracking beyond "shown", so resetting isn't necessary: a parent's
 // display:none is enforced by the tree walker skipping the subtree, not by
 // child inheritance.
-func applyDisplay(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyDisplay(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("display")
 	if !ok || val == "inherit" {
 		return
@@ -342,7 +346,7 @@ func applyDisplay(s *style, attr func(string) (string, bool), logf func(string, 
 
 // applyVisibility resolves visibility (visible|hidden|collapse), which is
 // an inherited property.
-func applyVisibility(s *style, attr func(string) (string, bool), logf func(string, ...any)) {
+func applyVisibility(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("visibility")
 	if !ok || val == "inherit" {
 		return
@@ -355,4 +359,44 @@ func applyVisibility(s *style, attr func(string) (string, bool), logf func(strin
 	default:
 		logf("svg: ignoring %s=%q: unparseable", "visibility", val)
 	}
+}
+
+// FillPaint returns the element's composed fill paint (color with
+// fill-opacity folded into alpha, plus the fill rule). ok is false when
+// there is no fill to paint: fill="none", an unsupported url() paint-server
+// reference (which applyPaint already degrades to hasFill=false), or the
+// element is invisible (visibility:hidden). display:none is not checked
+// here — the scene builder never reaches this far for a display:none
+// subtree; see the tree-walker's subtree skip.
+func (s Style) FillPaint() (render.FillPaint, bool) {
+	if !s.hasFill || !s.visible {
+		return render.FillPaint{}, false
+	}
+	return render.FillPaint{Color: s.fillRGBA(), Rule: s.fillRule}, true
+}
+
+// StrokePaint returns the element's stroke paint in USER UNITS: Width,
+// DashArray, and DashPhase are not yet scaled into device space, since only
+// the caller (pkg/svg/draw) knows the local→device transform in effect for
+// this shape. ok is false when there is no stroke to paint: stroke="none",
+// an unsupported url() reference, the element is invisible, or the resolved
+// stroke-width is <= 0 (a zero-width stroke paints nothing, per SVG).
+func (s Style) StrokePaint() (render.StrokePaint, bool) {
+	if !s.hasStroke || !s.visible || s.strokeWidth <= 0 {
+		return render.StrokePaint{}, false
+	}
+	return render.StrokePaint{
+		Color:      s.strokeRGBA(),
+		Width:      s.strokeWidth,
+		Cap:        s.cap,
+		Join:       s.join,
+		MiterLimit: s.miterLimit,
+		DashArray:  s.dashes,
+		DashPhase:  s.dashOffset,
+	}, true
+}
+
+// Opacity returns the element's own (non-inherited) opacity in [0,1].
+func (s Style) Opacity() float64 {
+	return s.opacity
 }
