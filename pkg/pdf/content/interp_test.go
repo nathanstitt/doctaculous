@@ -41,6 +41,8 @@ func (d *recDevice) FillShading(shader render.Shader, ctm render.Matrix, blendMo
 	d.shadings++
 }
 func (d *recDevice) PushClip(p *render.Path, r render.FillRule) { d.clips++ }
+func (d *recDevice) BeginGroup()                                {}
+func (d *recDevice) EndGroup(float64, string, render.GroupMask) {}
 func (d *recDevice) Save()                                      { d.saves++ }
 func (d *recDevice) Restore()                                   { d.restores++ }
 

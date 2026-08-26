@@ -34,6 +34,7 @@ type pageDevice struct {
 	clipStack []*clipBounds
 
 	shadingLogged bool // true once a fidelity note has been logged for this device
+	groupLogged   bool // true once a fidelity note has been logged for group pass-through
 }
 
 // clipBounds is an axis-aligned device-space rectangle in PDF points.
@@ -392,6 +393,27 @@ func intersectClipBounds(a, b *clipBounds) *clipBounds {
 	}
 	return r
 }
+
+// BeginGroup is a STUB: this writer does not yet emit transparency Form
+// XObjects (a later PR — see the SVG groups/clip/mask design), so it treats a
+// group as transparent pass-through. Children between BeginGroup and EndGroup
+// paint directly onto the page exactly as if the group were absent; nothing
+// is dropped, but group opacity/blend/mask has no effect (each child keeps
+// painting as its own separate operation, so overlapping children under a
+// group's opacity will double-darken at the overlap until real transparency
+// groups land). Logs once per device so callers using WithLogf see the
+// fidelity gap.
+func (d *pageDevice) BeginGroup() {
+	if d.logf != nil && !d.groupLogged {
+		d.groupLogged = true
+		d.logf("pdfwrite: groups not yet composited as PDF transparency groups; painting children directly (opacity/mask ignored)")
+	}
+}
+
+// EndGroup is the pass-through counterpart to BeginGroup: see its doc for the
+// current fidelity limitation. alpha, blendMode, and mask are accepted for
+// interface conformance but not yet applied.
+func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {}
 
 func (d *pageDevice) Save() {
 	d.buf.WriteString("q\n")

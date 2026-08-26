@@ -53,11 +53,79 @@ type Device interface {
 	// PushClip intersects the current clip with path using rule.
 	PushClip(path *Path, rule FillRule)
 
+	// BeginGroup starts an isolated offscreen group: subsequent paint calls
+	// (until the matching EndGroup) composite against a fully transparent
+	// black backdrop of their own, not against whatever was already painted.
+	// This is what lets a group's overall opacity, clip, or mask apply once to
+	// the group's flattened result instead of separately to each paint call
+	// inside it — the latter double-darkens every overlap between children,
+	// which is the artifact groups exist to prevent.
+	//
+	// BeginGroup/EndGroup calls must nest (like parentheses) and must nest
+	// consistently with Save/Restore: a Restore may not pop past the Save
+	// depth captured by an enclosing, still-open BeginGroup. Concretely, a
+	// backend must track the Save/Restore stack depth at each BeginGroup and
+	// refuse (clamp, not panic) any Restore that would cross it before the
+	// matching EndGroup runs.
+	//
+	// A backend that cannot composite offscreen groups (e.g. a not-yet-built
+	// vector writer path) must degrade gracefully: treat BeginGroup/EndGroup
+	// as transparent pass-through so children still paint directly, just
+	// without the isolation, opacity, or mask applied. It must never panic
+	// and never drop the children's content.
+	BeginGroup()
+
+	// EndGroup closes the most recently opened BeginGroup, compositing the
+	// group's offscreen result onto the surface that was active before the
+	// matching BeginGroup.
+	//
+	// alpha in [0,1] scales the group's coverage uniformly (SVG/CSS group
+	// opacity; PDF ExtGState /ca applied to the group as a whole). blendMode
+	// is the /BM blend mode name ("" or "Normal" = source-over) used when
+	// compositing the group onto its backdrop.
+	//
+	// mask, if non-nil, additionally scales the group's coverage per pixel by
+	// the mask's own alpha channel (see GroupMask) — this is how both a
+	// clipPath union and a luminance mask apply to a group. A nil mask means
+	// a plain opacity/blend group with no extra per-pixel restriction.
+	//
+	// An EndGroup with no matching BeginGroup (unbalanced) must be a no-op,
+	// mirroring Restore's forgiving behavior on an empty stack — never panic.
+	EndGroup(alpha float64, blendMode string, mask GroupMask)
+
 	// Save and Restore manage the clip/state stack so the interpreter's q/Q
 	// operators can be mirrored by the backend where clip state lives.
 	Save()
 	Restore()
 }
+
+// GroupMask expresses a per-pixel alpha multiplier applied when EndGroup
+// composites a group, restricted to some region of the device. It is the
+// backend-neutral carrier for both a flattened clipPath union (opaque
+// coverage: in the union or not) and a rendered luminance mask (graduated
+// coverage: the mask content's luminance, times its own alpha) — EndGroup
+// does not need to know which one it was given.
+//
+// A nil GroupMask means "no extra per-pixel restriction" (a plain
+// opacity/blend group). AlphaAt(x, y).A of 255 means full coverage, 0 means
+// fully masked out. Coordinates are in the same device-space pixel grid
+// every other Device method uses. A pixel outside the mask's own bounds is
+// treated as zero coverage (masked out entirely), matching how the raster
+// backend already treats a clip mask's bounds as an implicit "outside =
+// clipped away" — the SVG spec's "transparent outside the mask/clip region"
+// requirement falls out of that for free rather than needing a separate
+// default-coverage rule.
+//
+// *image.Alpha is the concrete type every backend can produce and consume
+// without new dependencies: the raster backend already builds one for clip
+// masks (see pkg/render/raster's rasterizeMask), and a vector backend can
+// still accept it (e.g. to derive a luminosity soft mask's sample data)
+// without importing pkg/render/raster. GroupMask is a defined pointer type,
+// not a bare *image.Alpha, so the Device interface can document its
+// composite semantics (this comment) independently of the pixel format, and
+// so a future backend-neutral representation could replace the underlying
+// type without changing every call site.
+type GroupMask = *image.Alpha
 
 // FillColor is the solid color used for glyph fills (kept separate from
 // FillPaint so glyph rendering need not carry a fill rule).

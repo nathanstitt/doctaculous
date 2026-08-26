@@ -274,6 +274,8 @@ func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string)      {}
 func (d *nullDevice) DrawGlyph(render.GlyphRef)                             {}
 func (d *nullDevice) FillShading(render.Shader, render.Matrix, string)      {}
 func (d *nullDevice) PushClip(*render.Path, render.FillRule)                {}
+func (d *nullDevice) BeginGroup()                                           {}
+func (d *nullDevice) EndGroup(float64, string, render.GroupMask)            {}
 func (d *nullDevice) Save()                                                 {}
 func (d *nullDevice) Restore()                                              {}
 

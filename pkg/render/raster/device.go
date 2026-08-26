@@ -24,6 +24,22 @@ type Device struct {
 	img  *image.RGBA
 	clip []*image.Alpha // clip stack; top is the active mask (nil = unclipped)
 	logf func(string, ...any)
+
+	// groups is the offscreen-group stack. Each entry records the surface
+	// BeginGroup swapped out (to restore on EndGroup) and the clip-stack depth
+	// at the time of the call, so a Save/Restore pair inside the group can
+	// never pop past the state the group started with (see Restore).
+	groups []groupState
+}
+
+// groupState is one entry on the group stack: the surface that was active
+// before BeginGroup, the clip that was active at that point (applied once at
+// composite time in EndGroup, not while painting into the scratch — see
+// BeginGroup), and the clip-stack depth to guard on Restore.
+type groupState struct {
+	img       *image.RGBA
+	outerClip *image.Alpha
+	clipBase  int
 }
 
 // New returns a Device drawing onto img. The caller owns img and reads the
@@ -197,10 +213,138 @@ func (d *Device) Save() {
 	d.clip = append(d.clip, d.activeClip())
 }
 
-// Restore pops the clip stack.
+// Restore pops the clip stack. It never pops past the clip-stack depth an
+// enclosing, still-open BeginGroup left behind (clipBase + 1, accounting for
+// the sentinel entry BeginGroup itself pushes) — an interpreter bug (an extra
+// Q) inside a group must not corrupt the clip state BeginGroup will restore
+// on EndGroup, so this guard is what keeps that promise.
 func (d *Device) Restore() {
-	if len(d.clip) > 0 {
+	base := 0
+	if n := len(d.groups); n > 0 {
+		base = d.groups[n-1].clipBase + 1
+	}
+	if len(d.clip) > base {
 		d.clip = d.clip[:len(d.clip)-1]
+	}
+}
+
+// BeginGroup starts an isolated offscreen group. See render.Device for the
+// full contract. The scratch surface starts fully transparent black (the
+// isolated-group backdrop SVG requires) and is the same size as the current
+// surface so every paint method's existing bounds logic keeps working
+// unchanged.
+//
+// The clip that was active when the group opened (e.g. from a clip-path
+// applied to the <g> itself) is captured as the group's "outer clip" and then
+// suspended (pushed as unclipped) for the duration of the group: children
+// paint into the scratch WITHOUT that clip restricting them, and it is
+// applied exactly once, at composite time, in EndGroup. Applying it while
+// painting AND again at composite would double-count its antialiased edges
+// (an edge pixel dimmed once while painting, then dimmed again when the
+// already-dimmed scratch pixel is clipped a second time), darkening the clip
+// boundary — the seam this primitive exists to avoid.
+//
+// A clip pushed by a child WITHIN the group (its own PushClip calls) is
+// unaffected: those still land on the (suspended-at-the-base) clip stack
+// exactly as before and restrict children normally.
+func (d *Device) BeginGroup() {
+	b := d.img.Bounds()
+	outer := d.activeClip()
+	d.groups = append(d.groups, groupState{img: d.img, outerClip: outer, clipBase: len(d.clip)})
+	// Suspend the outer clip for the scratch's lifetime: push "unclipped" so
+	// children painting into the scratch aren't restricted by it twice (see
+	// above). Save/Restore inside the group operate on top of this entry and
+	// are guarded from popping past it by Restore's clipBase check.
+	d.clip = append(d.clip, nil)
+	d.img = image.NewRGBA(b) // transparent black: zero value is {0,0,0,0}
+}
+
+// EndGroup closes the most recently opened BeginGroup and composites the
+// scratch surface onto the restored surface. See render.Device for the full
+// contract. An unbalanced call (no matching BeginGroup) is a no-op.
+//
+// The group's own clip (whatever was active when BeginGroup ran) is applied
+// here, once, at composite time — not while painting into the scratch. The
+// scratch's per-pixel coverage already reflects each child shape's own
+// antialiasing; multiplying by the clip's coverage a second time while
+// painting children would double-count the clip's own antialiased edges
+// (each child's edge pixels would be dimmed by the clip, then dimmed again
+// when the already-dimmed scratch pixel is clipped a second time here),
+// darkening the clip boundary. Applying it exactly once, on the flattened
+// result, is correct regardless of how many children touched that pixel.
+func (d *Device) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {
+	n := len(d.groups)
+	if n == 0 {
+		return // unbalanced EndGroup: degrade to a no-op, never panic
+	}
+	scratch := d.img
+	g := d.groups[n-1]
+	d.groups = d.groups[:n-1]
+	d.img = g.img
+	// Pop the "unclipped" sentinel BeginGroup pushed, restoring the clip stack
+	// to exactly what it was before BeginGroup (clipBase entries), regardless
+	// of how many balanced Save/Restore pairs ran inside the group.
+	d.clip = d.clip[:g.clipBase]
+
+	if alpha <= 0 {
+		return // fully transparent: nothing to composite
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+	// The clip in effect when BeginGroup ran is the group's own clip; apply it
+	// once here (composite time), alongside the caller-supplied mask.
+	clip := g.outerClip
+
+	sep, isSep := separableBlends[blendMode]
+	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	b := scratch.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			src := scratch.RGBAAt(x, y)
+			if src.A == 0 {
+				continue
+			}
+			a := uint32(src.A) * uint32(alpha*255+0.5) / 255
+			if clip != nil {
+				a = a * uint32(clip.AlphaAt(x, y).A) / 255
+			}
+			if mask != nil {
+				a = a * uint32(mask.AlphaAt(x, y).A) / 255
+			}
+			if a == 0 {
+				continue
+			}
+			// scratch pixels are premultiplied (image.RGBA convention); over()
+			// wants straight-alpha, so un-premultiply before blending/compositing.
+			straight := unpremultiplyRGBA(src)
+			out := straight
+			if isSep || isNonsep {
+				dst := d.img.RGBAAt(x, y)
+				out = blendSource(dst, straight, sep, nonsep, isSep)
+			}
+			over(d.img, x, y, out, uint8(a))
+		}
+	}
+}
+
+// unpremultiplyRGBA converts an *image.RGBA pixel (premultiplied alpha, the
+// Go image/draw convention) to straight alpha, matching straightRGBA's
+// contract for the general color.Color case but avoiding its 16-bit
+// round-trip through Color() for the common already-8-bit case.
+func unpremultiplyRGBA(c color.RGBA) color.RGBA {
+	if c.A == 0 {
+		return color.RGBA{}
+	}
+	if c.A == 255 {
+		return c
+	}
+	a := uint32(c.A)
+	return color.RGBA{
+		R: uint8(uint32(c.R) * 255 / a),
+		G: uint8(uint32(c.G) * 255 / a),
+		B: uint8(uint32(c.B) * 255 / a),
+		A: c.A,
 	}
 }
 

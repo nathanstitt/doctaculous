@@ -51,6 +51,8 @@ func (d *recordDevice) DrawGlyph(g render.GlyphRef) {
 }
 func (d *recordDevice) FillShading(render.Shader, render.Matrix, string) {}
 func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)       { d.clips = append(d.clips, p) }
+func (d *recordDevice) BeginGroup()                                      {}
+func (d *recordDevice) EndGroup(float64, string, render.GroupMask)       {}
 func (d *recordDevice) Save()                                            { d.saves++ }
 func (d *recordDevice) Restore()                                         { d.restores++ }
 
