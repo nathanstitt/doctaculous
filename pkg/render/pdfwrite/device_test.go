@@ -9,6 +9,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/doctaculous/pkg/render/raster"
 )
 
 // TestDeviceEmitsFillAndGlyphOps feeds a fill and a glyph, then asserts the content
@@ -135,6 +136,77 @@ func TestDeviceStrokeDefaultMiterLimit(t *testing.T) {
 type stubFace struct{ o *render.Path }
 
 func (s stubFace) Outline(uint16) *render.Path { return s.o }
+
+// rampFunc is a minimal function.Func implementing a straight-line red (t=0) to
+// blue (t=1) ramp, fully opaque, so tests can build a render.Shader without
+// depending on PDF function-dictionary parsing.
+type rampFunc struct{}
+
+func (rampFunc) NumOutputs() int { return 4 }
+
+func (rampFunc) Eval(in []float64) []float64 {
+	t := 0.0
+	if len(in) > 0 {
+		t = in[0]
+	}
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return []float64{1 - t, 0, t, 1} // R,G,B,A straight alpha
+}
+
+// TestDeviceFillShadingRasterizesIntoImageXObject proves FillShading (once
+// implemented) samples the shader into an RGBA image and draws it via
+// DrawImage, so the page records an image XObject where today it records none.
+func TestDeviceFillShadingRasterizesIntoImageXObject(t *testing.T) {
+	dev := newPageDevice(100, 50)
+
+	clip := &render.Path{}
+	clip.MoveTo(0, 0)
+	clip.LineTo(100, 0)
+	clip.LineTo(100, 50)
+	clip.LineTo(0, 50)
+	clip.Close()
+	dev.Save()
+	dev.PushClip(clip, render.NonZero)
+
+	shader := raster.NewAxialShader(0, 0, 100, 0, rampFunc{}, raster.SpreadPad)
+	dev.FillShading(shader, render.Matrix{A: 1, D: 1}, "")
+	dev.Restore()
+
+	if len(dev.images) == 0 {
+		t.Fatal("FillShading did not record an image XObject")
+	}
+	content := decompress(t, dev.contentStream())
+	if !bytes.Contains(content, []byte(" Do\n")) {
+		t.Errorf("content stream missing image Do operator:\n%s", content)
+	}
+}
+
+// TestDeviceSolidFillHasNoImageXObject proves a solid fill (no shading involved)
+// never records an image, so documents that don't use gradients stay
+// byte-identical to before this feature existed.
+func TestDeviceSolidFillHasNoImageXObject(t *testing.T) {
+	dev := newPageDevice(100, 50)
+	p := &render.Path{}
+	p.MoveTo(0, 0)
+	p.LineTo(100, 0)
+	p.LineTo(100, 50)
+	p.LineTo(0, 50)
+	p.Close()
+	dev.Fill(p, render.FillPaint{Color: color.RGBA{R: 255, A: 255}})
+
+	if len(dev.images) != 0 {
+		t.Fatalf("solid fill recorded %d image(s), want 0", len(dev.images))
+	}
+	content := decompress(t, dev.contentStream())
+	if bytes.Contains(content, []byte(" Do\n")) {
+		t.Errorf("solid fill content stream should not contain an image Do operator:\n%s", content)
+	}
+}
 
 func decompress(t *testing.T, data []byte) []byte {
 	t.Helper()
