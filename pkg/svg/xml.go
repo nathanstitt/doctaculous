@@ -52,9 +52,10 @@ type element struct {
 	// classes is attrs["class"] split on runs of whitespace, precomputed for
 	// the same reason as id: class-selector matching is repeated per
 	// candidate element per selector, so splitting once here is cheaper than
-	// re-splitting on every match. nil when the class attribute is absent
-	// (not an empty non-nil slice), so callers can distinguish "no class
-	// attribute" from "class attribute present but empty".
+	// re-splitting on every match. nil (not an empty non-nil slice) whenever
+	// there are no usable class tokens — the attribute is absent, empty, or
+	// whitespace-only — so callers can distinguish "no classes" from having
+	// to compare a slice length.
 	classes []string
 }
 
@@ -217,10 +218,12 @@ func attach(parent, child *element) {
 }
 
 // splitClasses splits a class attribute value on runs of whitespace,
-// returning nil when v is empty so callers can distinguish "no class
-// attribute" from "class attribute present but empty".
+// returning nil when v has no usable tokens (empty or whitespace-only) so
+// callers can distinguish "no class attribute" from "class attribute
+// present but empty" — a whitespace-only value is the same case as an empty
+// one and must yield the same nil-ness.
 func splitClasses(v string) []string {
-	if v == "" {
+	if strings.TrimSpace(v) == "" {
 		return nil
 	}
 	return strings.Fields(v)
