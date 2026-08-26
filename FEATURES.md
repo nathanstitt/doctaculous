@@ -627,11 +627,32 @@ read+write vocabulary for the tinycld text adoption path):
   stroke's inner edge overlaps the fill) — routed through a group only when both a fill and a stroke
   are present and opacity < 1, so the common opaque/single-paint shape stays on the cheap per-paint
   path with no offscreen allocation.
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text,
-  `clip-path`/`mask`, filters, `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked
-  as the PR 4–8 slices in `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- `clip-path`/`<clipPath>`: a clipPath's children form a UNION (not an intersection), flattened via a
+  new `render.Device.BuildClipMask(paths []MaskPath) GroupMask` primitive that rasterizes EACH child
+  under its OWN `clip-rule` and combines coverage with `max()` — the correctness-critical design
+  point, since two non-overlapping children pushed as separate `PushClip` calls would intersect to
+  empty. `clipPathUnits` (`userSpaceOnUse` default, `objectBoundingBox` reusing the same
+  pre-transform-`Path.Bounds()` mapping gradients use), `clip-rule` (new inherited property, per-child,
+  mixed nonzero/evenodd within one clipPath), a `clip-path` on the `<clipPath>` element itself
+  (intersects the whole union) or on one of its children (intersects that child before it joins the
+  union), and an explicit shape/`<text>`/`<use>` allowlist for valid children (a `<g>`/`<image>`/
+  `<switch>` child is dropped, not recursed into as a forgiving container) all ship. An empty
+  `<clipPath>` (no valid children) clips its target to NOTHING, distinct from `clip-path="none"`/an
+  unresolved reference (no clipping at all). `display:none` removes a clip child from the union;
+  `visibility:hidden` does not (clip children have no rendering pass of their own for visibility to
+  gate). fill/stroke/opacity/filter/mask on a clip child have no effect — only geometry, transform,
+  clip-rule, and clip-path matter. Resolved during `Parse` (like paint servers), with a
+  `buildingClip`-style recursion guard so a self-referencing or mutually-cyclic clipPath terminates.
+  raster implements `BuildClipMask` exactly (per-child rasterize + max union); pdfwrite — which has no
+  offscreen surface to rasterize into and whose group compositing is still a pass-through stub —
+  returns a documented rectangular bounding-box approximation instead of an empty/nil mask, ready for
+  when transparency-group compositing lands there.
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, `mask`,
+  filters, `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices
+  in `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
 - 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
-  with committed goldens.
+  with committed goldens; clip-path is covered by hand-authored fixtures/tests in `pkg/svg`,
+  `pkg/svg/draw`, and `pkg/render/raster` (no resvg `masking/clipPath` tranche is vendored yet).
 
 **SVG input — CSS styling** (`pkg/svg`, `pkg/css`):
 

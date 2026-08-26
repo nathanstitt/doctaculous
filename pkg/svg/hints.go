@@ -7,7 +7,7 @@ import (
 // svgPresentationAttrs is the set of SVG presentation attributes that can
 // become CSS declarations in the cascade. This list must be kept in sync with
 // the properties handled in Style.apply() in pkg/svg/style.go — every
-// applyXxx call at lines 92–109 must have its corresponding attribute here.
+// applyXxx call in apply() must have its corresponding attribute here.
 // If a future task adds a property to the appliers but not here, that property
 // would silently stop being settable from a presentation attribute. The order
 // here matches the order in apply() for deterministic output.
@@ -17,6 +17,16 @@ import (
 // the same presentation-hint mechanism so a <stop stop-color="..."> attribute
 // and a `stop { stop-color: ... }` sheet rule rank the same as every other
 // presentation property.
+//
+// clip-path is likewise not consumed by Style.apply (it is resolved during
+// Parse against the document index — see resolveClipPath — because Style
+// values are cascade-only and never see docIndex), but it goes through this
+// same hint mechanism so a clip-path="url(#...)" attribute and a `{
+// clip-path: url(#...) }` sheet rule rank identically; the scene builder
+// reads the cascaded value straight off ctx.resolve, exactly like a
+// fill/stroke url() reference. clip-rule IS consumed by Style.apply
+// (applyClipRule), since — unlike clip-path itself — it is an ordinary
+// inherited enum property with no document-index dependency.
 var svgPresentationAttrs = []string{
 	"color",
 	"fill",
@@ -35,6 +45,8 @@ var svgPresentationAttrs = []string{
 	"visibility",
 	"stop-color",
 	"stop-opacity",
+	"clip-path",
+	"clip-rule",
 }
 
 // svgPresentationHints maps an element's SVG presentation attributes to CSS

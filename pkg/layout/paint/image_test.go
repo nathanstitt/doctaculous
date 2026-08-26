@@ -32,6 +32,9 @@ func (d *imageRecordDevice) BeginGroup()                                      {}
 func (d *imageRecordDevice) EndGroup(float64, string, render.GroupMask)       {}
 func (d *imageRecordDevice) Save()                                            {}
 func (d *imageRecordDevice) Restore()                                         {}
+func (d *imageRecordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 // fourCorner returns a 2x2 image with distinct corner colors so orientation is
 // observable: TL=red TR=green BL=blue BR=white.

@@ -55,6 +55,9 @@ func (d *recordDevice) BeginGroup()                                      {}
 func (d *recordDevice) EndGroup(float64, string, render.GroupMask)       {}
 func (d *recordDevice) Save()                                            { d.saves++ }
 func (d *recordDevice) Restore()                                         { d.restores++ }
+func (d *recordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 // triangle returns a small closed outline in em units so a glyph is non-empty.
 func triangle() *render.Path {

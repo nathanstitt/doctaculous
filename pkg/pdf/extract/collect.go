@@ -278,6 +278,9 @@ func (d *nullDevice) BeginGroup()                                           {}
 func (d *nullDevice) EndGroup(float64, string, render.GroupMask)            {}
 func (d *nullDevice) Save()                                                 {}
 func (d *nullDevice) Restore()                                              {}
+func (d *nullDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 // Collect runs the content interpreter over one page with the capture sinks and
 // returns the recovered glyphs, ruling lines, and page size. It recovers at the

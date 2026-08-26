@@ -97,6 +97,42 @@ type Device interface {
 	// operators can be mirrored by the backend where clip state lives.
 	Save()
 	Restore()
+
+	// BuildClipMask rasterizes the UNION of paths (each already in device
+	// space, with its own fill rule) into a single GroupMask suitable for
+	// EndGroup: pixel (x,y) has full coverage iff at least one path covers it
+	// under its own rule. An empty paths slice (a <clipPath> with no valid
+	// children) returns a non-nil, zero-sized/all-zero mask — "covers
+	// nothing" — never nil, since nil would mean "no restriction" to
+	// EndGroup (see GroupMask), which is the opposite of what an empty
+	// clipPath must do (SVG: it clips its target to nothing).
+	//
+	// This exists because a <clipPath>'s children form a UNION, but
+	// PushClip only INTERSECTS: pushing each child as its own clip would
+	// render two non-overlapping children as empty. Flattening the union
+	// into one mask requires rasterizing — a capability pkg/svg/draw (which
+	// holds only a Device, by design; see that package's doc comment)
+	// cannot perform itself without importing a concrete backend and
+	// inverting the layer dependency. Putting the rasterization here keeps
+	// every backend's own coverage rasterizer as the single source of truth
+	// for "what pixels does this path with this rule cover" — the raster
+	// backend reuses its existing rasterizeMask/max machinery; a backend
+	// that cannot build an offscreen mask (a not-yet-built vector writer
+	// path) may degrade gracefully, e.g. by unioning device-space bounding
+	// boxes into a rectangular approximation, or returning a mask that
+	// covers its overall bounds — but must never panic and never return nil.
+	BuildClipMask(paths []MaskPath) GroupMask
+}
+
+// MaskPath is one child shape contributing to a clip-path union: a path
+// already in device space, paired with the fill rule (clip-rule) that
+// applies to IT ALONE. BuildClipMask combines many of these with max()
+// coverage, which is what makes a mixed-clip-rule union (one child nonzero,
+// another evenodd) and an overlapping-opposite-winding union both come out
+// correct — the two cases naive path concatenation + a single rule breaks.
+type MaskPath struct {
+	Path *Path
+	Rule FillRule
 }
 
 // GroupMask expresses a per-pixel alpha multiplier applied when EndGroup

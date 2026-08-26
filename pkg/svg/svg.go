@@ -37,6 +37,12 @@ type Group struct {
 	M       render.Matrix // local transform, applied to Kids
 	Opacity float64       // element opacity [0,1]; 1 = fully opaque, no group needed
 	Kids    []Node
+
+	// ClipPath is the resolved clip-path="url(#...)" reference on the <g>
+	// element itself (or the root), or nil when absent/invalid/"none". See
+	// the ClipPath type (clippath.go) for how pkg/svg/draw turns this into a
+	// render.Device.BuildClipMask call.
+	ClipPath *ClipPath
 }
 
 func (*Group) isNode() {}
@@ -63,6 +69,10 @@ type Shape struct {
 	StrokeGradient *paintServer  // resolved stroke="url(#...)" gradient, or nil
 	FillPattern    *patternPaint // resolved fill="url(#...)" pattern, or nil
 	StrokePattern  *patternPaint // resolved stroke="url(#...)" pattern, or nil
+
+	// ClipPath is the resolved clip-path="url(#...)" reference on this
+	// shape, or nil when absent/invalid/"none". See Group.ClipPath.
+	ClipPath *ClipPath
 }
 
 func (*Shape) isNode() {}
@@ -110,7 +120,14 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		doc.rootM = render.Identity
 	}
 
-	b := &sceneBuilder{logf: logf, warned: map[string]bool{}, vp: viewport{w: doc.WidthPt, h: doc.HeightPt}, buildingPattern: map[string]bool{}}
+	b := &sceneBuilder{
+		logf:            logf,
+		warned:          map[string]bool{},
+		vp:              viewport{w: doc.WidthPt, h: doc.HeightPt},
+		buildingPattern: map[string]bool{},
+		clipMemo:        map[string]*ClipPath{},
+		buildingClip:    map[string]bool{},
+	}
 	if hasVB {
 		// Gradient userSpaceOnUse coordinates live in the same user-unit
 		// space as the element geometry they paint — i.e. viewBox space when
@@ -252,7 +269,6 @@ var unsupportedElements = map[string]bool{
 	"symbol":           true,
 	"text":             true,
 	"image":            true,
-	"clipPath":         true,
 	"mask":             true,
 	"filter":           true,
 	"marker":           true,
@@ -294,6 +310,15 @@ var unsupportedElements = map[string]bool{
 // "unknown element" default and get painted directly into the visible
 // scene at document coordinates, since Go map membership provides no
 // transitive "skip my children too" behavior.
+//
+// clipPath is resolved entirely out-of-band, like the paint servers above:
+// a shape/group referencing one via clip-path="url(#...)" carries the
+// resolved *ClipPath directly (see resolveClipPath in clippath.go), so the
+// <clipPath> element itself must contribute NO scene nodes and must NOT be
+// recursed into by the ordinary scene walk (its children are walked
+// separately, through the clip-only allowlist in clippath.go, which is
+// deliberately stricter than buildGroup's forgiving default — see that
+// file's buildClipChild).
 var skippedElements = map[string]bool{
 	"defs":           true,
 	"style":          true,
@@ -304,6 +329,7 @@ var skippedElements = map[string]bool{
 	"radialGradient": true,
 	"pattern":        true,
 	"stop":           true,
+	"clipPath":       true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -330,6 +356,31 @@ type sceneBuilder struct {
 	idx     *docIndex
 	servers *paintServerResolver // gradient/pattern href-chain resolver, built once from idx
 	vp      viewport             // current viewport size, for userSpaceOnUse percentage resolution
+
+	// clipMemo memoizes resolveClipPath by id: several shapes/groups can
+	// reference the same <clipPath>, and each reference resolves the
+	// identical *ClipPath value (idempotent, no per-referencer state), so
+	// memoizing avoids re-walking a possibly-large clipPath subtree once per
+	// referencing element. A memoized ok=false result is recorded via a
+	// separate presence check on clipMemo combined with buildingClip's
+	// membership (see resolveClipPath) rather than a second map, since a
+	// failed resolution has no value worth caching beyond "don't recurse
+	// into it again" — buildingClip already provides that during the walk
+	// that discovers the failure, and a document referencing an invalid
+	// clip-path from many elements is not a realistic perf concern the way
+	// gradient/pattern reuse is.
+	clipMemo map[string]*ClipPath
+
+	// buildingClip guards against a <clipPath> whose own clip-path
+	// attribute, or one of its children's, refers back to a <clipPath>
+	// already being resolved somewhere up the current call stack — directly
+	// (self-reference) or through a cycle of several clipPaths. Mirrors
+	// buildingPattern's shape exactly (see that field's doc comment): an id
+	// present here is "in progress" further up the stack, and resolving it
+	// again is treated as SVG's own cycle-must-be-an-error rule, degrading
+	// to "no clip-path" for the self-referencing property instead of
+	// recursing forever.
+	buildingClip map[string]bool
 
 	// buildingPattern guards against a pattern tile's content referencing
 	// (directly, or via its own href chain, or indirectly through a chain of
@@ -444,6 +495,9 @@ func (b *sceneBuilder) buildGroupElement(el *element, st Style, ctx *cascadeCtx)
 	g := b.buildGroup(el, st, ctx)
 	g.M = elementTransform(el, b.logf)
 	g.Opacity = st.opacity // already clamped to [0,1] by applyOpacityProp
+	if ref, ok := st.ClipPathRef(); ok {
+		g.ClipPath = b.resolveClipPathRef(ref)
+	}
 	return g
 }
 
@@ -480,6 +534,9 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 		if id, ok := fragmentID(ref); ok {
 			b.resolvePaint(id, path, &s.StrokeGradient, &s.StrokePattern)
 		}
+	}
+	if ref, ok := st.ClipPathRef(); ok {
+		s.ClipPath = b.resolveClipPathRef(ref)
 	}
 	return s
 }

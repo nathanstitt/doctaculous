@@ -128,13 +128,13 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			return
 		}
 		gm := node.M.Mul(m)
-		if node.Opacity >= 1 {
-			// The common case (a plain <g> with no opacity, or opacity="1"):
+		if node.Opacity >= 1 && node.ClipPath == nil {
+			// The common case (a plain <g> with no opacity and no clip-path):
 			// skip BeginGroup/EndGroup entirely. Opening a group allocates a
 			// full-page offscreen scratch buffer (see raster.Device.BeginGroup),
 			// so paying that cost for every plain <g> in a document would be a
 			// serious, needless performance regression — there is nothing for
-			// a group with no opacity to composite that per-paint alpha
+			// a group with no opacity or clip to composite that per-paint alpha
 			// (unchanged, alpha=alpha) doesn't already produce correctly.
 			for _, kid := range node.Kids {
 				r.paint(dev, kid, gm, alpha, warned)
@@ -145,11 +145,14 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			return // fully transparent: nothing to paint at all
 		}
 		// True compositing: children paint at full (alpha=1) opacity into an
-		// isolated offscreen group, and the group's OWN opacity is applied
-		// exactly once, to the flattened result, in EndGroup. This is what
-		// makes two overlapping opaque children under <g opacity="0.5"> come
-		// out identical at the overlap and elsewhere, instead of the overlap
-		// double-darkening the way per-paint alpha would produce.
+		// isolated offscreen group, and the group's OWN opacity (and/or
+		// clip-path mask) is applied exactly once, to the flattened result,
+		// in EndGroup. This is what makes two overlapping opaque children
+		// under <g opacity="0.5"> come out identical at the overlap and
+		// elsewhere, instead of the overlap double-darkening the way
+		// per-paint alpha would produce; the same isolation is what lets a
+		// clip-path's union apply to the group as a unit rather than to each
+		// child's own paint calls separately.
 		//
 		// The incoming alpha (e.g. from an enclosing <pattern> tile's own
 		// fill alpha — see fillPattern) is folded into EndGroup's factor
@@ -164,7 +167,24 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 		for _, kid := range node.Kids {
 			r.paint(dev, kid, gm, 1.0, warned)
 		}
-		dev.EndGroup(alpha*node.Opacity, "", nil)
+		var mask render.GroupMask
+		if node.ClipPath != nil {
+			// gm (not m): clip-path applies in the clipped element's OWN
+			// user space, i.e. AFTER its own transform has been established
+			// (SVG's clip-path is defined relative to the referencing
+			// element's user coordinate system at the point of reference) —
+			// the same reason paintShapeGrouped below uses sm (post-M), not
+			// the pre-M matrix, for a Shape target.
+			//
+			// A Group has no single Path of its own, so an objectBoundingBox
+			// clipPathUnits target has no PRE-transform geometry to measure
+			// (unlike a Shape's Path — see paintShape below): degrade to
+			// userSpaceOnUse (Identity mapping) for a Group target, a
+			// documented, narrow approximation until a group-subtree bbox
+			// helper exists.
+			mask = r.buildClipMask(dev, node.ClipPath, gm, nil)
+		}
+		dev.EndGroup(alpha*node.Opacity, "", mask)
 		dev.Restore()
 	case *svg.Shape:
 		r.paintShape(dev, node, m, alpha, warned)
@@ -211,7 +231,7 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 	hasFill := s.FillGradient != nil || s.FillPattern != nil || hasFillPaint
 	_, hasStroke := s.Style.StrokePaint()
 
-	if opacity < 1 && hasFill && hasStroke {
+	if s.ClipPath != nil || (opacity < 1 && hasFill && hasStroke) {
 		// alpha (the caller's incoming, e.g. from an enclosing pattern
 		// tile's own fill alpha) and opacity (this shape's own element
 		// opacity) both need to reach the final composite, but only ONE of
@@ -221,6 +241,12 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		// overlap risk (it is uniform across this whole shape, fill and
 		// stroke alike), so folding it into the paints INSIDE the group is
 		// equally correct and avoids a second nested group.
+		//
+		// A clip-path forces this same grouped path even when opacity is 1
+		// or the shape has only a fill or only a stroke: EndGroup is the
+		// only place a GroupMask can be applied, so clipping a shape at all
+		// requires opening a group regardless of whether opacity itself
+		// would have needed one.
 		r.paintShapeGrouped(dev, s, dp, sm, alpha, opacity, warned)
 		return
 	}
@@ -232,16 +258,24 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 // paintShapeGrouped paints s's fill and stroke at innerAlpha (the caller's
 // incoming alpha, e.g. from an enclosing pattern tile — see paintShape) into
 // an isolated offscreen group, then applies opacity — s's own element
-// opacity alone — once to the flattened result. See paintShape's doc comment
-// for why the fill/stroke overlap requires this split. dp/sm are s's
-// already-device-space path and accumulated matrix, computed once by the
-// caller.
+// opacity alone — and s's resolved clip-path mask (if any), once, to the
+// flattened result. See paintShape's doc comment for why the fill/stroke
+// overlap requires this split. dp/sm are s's already-device-space path and
+// accumulated matrix, computed once by the caller.
 func (r *Renderer) paintShapeGrouped(dev render.Device, s *svg.Shape, dp *render.Path, sm render.Matrix, innerAlpha, opacity float64, warned *warnFlags) {
 	dev.Save()
 	dev.BeginGroup()
 	r.paintFill(dev, s, dp, sm, innerAlpha, warned)
 	r.paintStroke(dev, s, dp, sm, innerAlpha, warned)
-	dev.EndGroup(opacity, "", nil)
+	var mask render.GroupMask
+	if s.ClipPath != nil {
+		// objectBoundingBox target: s.Path is the shape's own PRE-transform
+		// geometry, matching resolveGradient's identical use of it for a
+		// gradient's objectBoundingBox mapping (see gradient.go) — the exact
+		// reuse the design calls for.
+		mask = r.buildClipMask(dev, s.ClipPath, sm, s.Path.Bounds)
+	}
+	dev.EndGroup(opacity, "", mask)
 	dev.Restore()
 }
 

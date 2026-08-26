@@ -442,6 +442,66 @@ func (d *pageDevice) BeginGroup() {
 // interface conformance but not yet applied.
 func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {}
 
+// BuildClipMask is a documented APPROXIMATION: this writer has no offscreen
+// raster surface to build an exact per-pixel union mask into (see
+// render.Device.BuildClipMask's doc comment on why the exact union requires
+// rasterizing), and EndGroup does not yet apply a GroupMask at all (see
+// BeginGroup's doc comment) — so the mask this returns is currently inert
+// regardless of its shape. It still computes a faithful rectangular
+// approximation (the union of each child path's device-space bounding box,
+// as a fully-opaque mask over that combined rectangle) rather than an empty
+// or nil mask, so that once transparency-group compositing lands here,
+// clip-path gets a reasonable non-exact result for free instead of clipping
+// to nothing. This is exactly decision (c) from the design doc — geometry
+// concatenation with a rectangular stand-in for the rule — used ONLY here,
+// where no exact backend exists yet; the raster backend never takes this
+// shortcut. Logs once per device.
+func (d *pageDevice) BuildClipMask(paths []render.MaskPath) render.GroupMask {
+	if d.logf != nil && !d.groupLogged {
+		d.groupLogged = true
+		d.logf("pdfwrite: groups not yet composited as PDF transparency groups; painting children directly (opacity/mask ignored)")
+	}
+	var union *clipBounds
+	for _, mp := range paths {
+		if mp.Path == nil || mp.Path.Empty() {
+			continue
+		}
+		minX, minY, maxX, maxY, ok := mp.Path.Bounds()
+		if !ok {
+			continue
+		}
+		union = unionClipBounds(union, &clipBounds{minX, minY, maxX, maxY})
+	}
+	if union == nil {
+		return image.NewAlpha(image.Rectangle{})
+	}
+	r := image.Rect(int(math.Floor(union.minX)), int(math.Floor(union.minY)), int(math.Ceil(union.maxX)), int(math.Ceil(union.maxY)))
+	mask := image.NewAlpha(r)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			mask.SetAlpha(x, y, color.Alpha{A: 255})
+		}
+	}
+	return mask
+}
+
+// unionClipBounds returns the smallest rectangle enclosing both a and b; a
+// nil operand is treated as "no contribution yet" (returns the other).
+func unionClipBounds(a, b *clipBounds) *clipBounds {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &clipBounds{
+		minX: min(a.minX, b.minX),
+		minY: min(a.minY, b.minY),
+		maxX: max(a.maxX, b.maxX),
+		maxY: max(a.maxY, b.maxY),
+	}
+}
+
 func (d *pageDevice) Save() {
 	d.buf.WriteString("q\n")
 	d.clipStack = append(d.clipStack, d.clipRect)

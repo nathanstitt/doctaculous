@@ -45,6 +45,9 @@ func (d *recDevice) BeginGroup()                                {}
 func (d *recDevice) EndGroup(float64, string, render.GroupMask) {}
 func (d *recDevice) Save()                                      { d.saves++ }
 func (d *recDevice) Restore()                                   { d.restores++ }
+func (d *recDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 func runContent(t *testing.T, src string, res Resources) *recDevice {
 	t.Helper()

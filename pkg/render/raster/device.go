@@ -328,6 +328,66 @@ func (d *Device) EndGroup(alpha float64, blendMode string, mask render.GroupMask
 	}
 }
 
+// BuildClipMask rasterizes the union of paths into a single coverage mask:
+// each path is rasterized separately under ITS OWN rule (via the same
+// rasterizeMask every Fill/PushClip call uses), and the masks are combined
+// with per-pixel max(), which is exactly set union for coverage values. This
+// is what lets a <clipPath> with two non-overlapping children clip to BOTH
+// (repeated PushClip would INTERSECT them to nothing — see render.Device's
+// doc comment) and what keeps a mixed clip-rule union (one child nonzero,
+// another evenodd) and an overlapping-opposite-winding union correct: each
+// child is rasterized under its own rule before any combining happens, so
+// there is never a single shared rule applied across geometry that
+// disagrees about winding.
+//
+// An empty paths slice, or a slice whose every path is empty/off-canvas,
+// returns a non-nil zero-sized mask (bounds Rectangle{}) rather than nil:
+// AlphaAt is zero everywhere outside a mask's own bounds, so this correctly
+// reads as "covers nothing" to EndGroup, distinct from a nil GroupMask
+// ("no restriction") — see GroupMask's doc comment. This is the mechanism
+// behind SVG's "an empty clipPath clips its target to nothing" rule.
+func (d *Device) BuildClipMask(paths []render.MaskPath) render.GroupMask {
+	union := image.NewAlpha(image.Rectangle{})
+	for _, mp := range paths {
+		if mp.Path == nil || mp.Path.Empty() {
+			continue
+		}
+		child := d.rasterizeMask(mp.Path, mp.Rule)
+		if child == nil {
+			continue
+		}
+		union = unionAlphaMax(union, child)
+	}
+	return union
+}
+
+// unionAlphaMax returns a new alpha mask covering the union of a and b's
+// bounding rectangles, with each pixel's coverage the MAX of a's and b's
+// (each treated as zero outside its own bounds). max() is the correct
+// combine for "does at least one of these shapes cover this pixel" — a sum
+// or product would either overflow/saturate incorrectly or produce an
+// intersection instead of a union.
+func unionAlphaMax(a, b *image.Alpha) *image.Alpha {
+	r := a.Bounds().Union(b.Bounds())
+	if r.Empty() {
+		return image.NewAlpha(image.Rectangle{})
+	}
+	out := image.NewAlpha(r)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			av := a.AlphaAt(x, y).A
+			bv := b.AlphaAt(x, y).A
+			if bv > av {
+				av = bv
+			}
+			if av != 0 {
+				out.SetAlpha(x, y, color.Alpha{A: av})
+			}
+		}
+	}
+	return out
+}
+
 // unpremultiplyRGBA converts an *image.RGBA pixel (premultiplied alpha, the
 // Go image/draw convention) to straight alpha, matching straightRGBA's
 // contract for the general color.Color case but avoiding its 16-bit
