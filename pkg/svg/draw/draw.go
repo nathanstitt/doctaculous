@@ -19,9 +19,9 @@ type Renderer struct {
 	// Doc is the parsed document this Renderer paints.
 	Doc *svg.Document
 	// Logf receives one debug line for degraded fidelity encountered while
-	// painting (currently: the group-opacity approximation, and the
-	// gradient-stroke fallback, each logged at most once per DrawVector
-	// call). nil means silent.
+	// painting (currently: the gradient-stroke fallback, the pattern
+	// nesting/cell-count/draw-call-budget caps, each logged at most once per
+	// DrawVector call). nil means silent.
 	Logf func(string, ...any)
 }
 
@@ -38,7 +38,6 @@ func New(doc *svg.Document) *Renderer {
 // it — the same reason the guard counters live here rather than on Renderer,
 // which must stay stateless for concurrent use.
 type warnFlags struct {
-	opacity        bool
 	strokeGradient bool
 	patternCap     bool
 	depthCap       bool
@@ -119,10 +118,9 @@ func (r *Renderer) DrawVector(dev render.Device, ctm render.Matrix) {
 
 // paint recurses through the scene graph rooted at n, painting each Shape
 // found. m is the accumulated user-space-to-device matrix in effect at n;
-// alpha is the accumulated group-opacity factor (the PR-1 approximation:
-// multiplied directly into each paint's color alpha rather than composited
-// via an offscreen group). warned tracks which one-per-document degradation
-// notices have already been emitted for this DrawVector call.
+// alpha is the accumulated group/element-opacity factor still handled by the
+// cheap per-paint path (see paintShape). warned tracks which one-per-document
+// degradation notices have already been emitted for this DrawVector call.
 func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha float64, warned *warnFlags) {
 	switch node := n.(type) {
 	case *svg.Group:
@@ -130,9 +128,44 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			return
 		}
 		gm := node.M.Mul(m)
-		for _, kid := range node.Kids {
-			r.paint(dev, kid, gm, alpha, warned)
+		if node.Opacity >= 1 {
+			// The common case (a plain <g> with no opacity, or opacity="1"):
+			// skip BeginGroup/EndGroup entirely. Opening a group allocates a
+			// full-page offscreen scratch buffer (see raster.Device.BeginGroup),
+			// so paying that cost for every plain <g> in a document would be a
+			// serious, needless performance regression — there is nothing for
+			// a group with no opacity to composite that per-paint alpha
+			// (unchanged, alpha=alpha) doesn't already produce correctly.
+			for _, kid := range node.Kids {
+				r.paint(dev, kid, gm, alpha, warned)
+			}
+			return
 		}
+		if node.Opacity <= 0 {
+			return // fully transparent: nothing to paint at all
+		}
+		// True compositing: children paint at full (alpha=1) opacity into an
+		// isolated offscreen group, and the group's OWN opacity is applied
+		// exactly once, to the flattened result, in EndGroup. This is what
+		// makes two overlapping opaque children under <g opacity="0.5"> come
+		// out identical at the overlap and elsewhere, instead of the overlap
+		// double-darkening the way per-paint alpha would produce.
+		//
+		// The incoming alpha (e.g. from an enclosing <pattern> tile's own
+		// fill alpha — see fillPattern) is folded into EndGroup's factor
+		// alongside node.Opacity, rather than threaded into the children as
+		// alpha=alpha: alpha is uniform across the whole group with no
+		// internal overlap to protect against (unlike node.Opacity, which is
+		// exactly what creates the overlap risk), so multiplying it in at
+		// composite time is equally correct and avoids yet another nested
+		// group just to carry it.
+		dev.Save()
+		dev.BeginGroup()
+		for _, kid := range node.Kids {
+			r.paint(dev, kid, gm, 1.0, warned)
+		}
+		dev.EndGroup(alpha*node.Opacity, "", nil)
+		dev.Restore()
 	case *svg.Shape:
 		r.paintShape(dev, node, m, alpha, warned)
 	}
@@ -140,6 +173,18 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 
 // paintShape paints one Shape: fill first, then stroke (SVG's default paint
 // order), each with the accumulated group opacity folded into its alpha.
+//
+// A shape with BOTH a fill and a stroke, at element opacity < 1, is routed
+// through an offscreen group (paintShapeGrouped) instead of the cheap
+// per-paint path below: the stroke overlaps the fill along the stroke's
+// inner edge, and folding opacity into each paint independently would dim
+// that overlap twice, producing a visible darker ring exactly like the
+// per-child-group-opacity artifact this feature exists to fix, just one
+// level down (a single element's own fill/stroke rather than a group's
+// children). A fill-only or stroke-only shape has no such overlap, so it
+// keeps the cheap path — routing every opaque shape through a group would
+// pay an offscreen-buffer allocation for the overwhelmingly common case that
+// doesn't need it.
 func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, alpha float64, warned *warnFlags) {
 	if s == nil || s.Path == nil {
 		return
@@ -154,10 +199,7 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 	}
 	warned.drawCalls++
 
-	alpha *= clamp01(s.Style.Opacity())
-	if alpha < 1 {
-		r.logOpacityOnce(warned)
-	}
+	opacity := clamp01(s.Style.Opacity())
 
 	sm := s.M.Mul(m)
 	dp := render.TransformPath(s.Path, sm)
@@ -165,6 +207,47 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		return
 	}
 
+	_, hasFillPaint := s.Style.FillPaint()
+	hasFill := s.FillGradient != nil || s.FillPattern != nil || hasFillPaint
+	_, hasStroke := s.Style.StrokePaint()
+
+	if opacity < 1 && hasFill && hasStroke {
+		// alpha (the caller's incoming, e.g. from an enclosing pattern
+		// tile's own fill alpha) and opacity (this shape's own element
+		// opacity) both need to reach the final composite, but only ONE of
+		// them may be applied per-paint without reintroducing the seam:
+		// opacity is what creates the fill/stroke overlap in the first
+		// place, so it must apply once, to the group. alpha carries no such
+		// overlap risk (it is uniform across this whole shape, fill and
+		// stroke alike), so folding it into the paints INSIDE the group is
+		// equally correct and avoids a second nested group.
+		r.paintShapeGrouped(dev, s, dp, sm, alpha, opacity, warned)
+		return
+	}
+	alpha *= opacity
+	r.paintFill(dev, s, dp, sm, alpha, warned)
+	r.paintStroke(dev, s, dp, sm, alpha, warned)
+}
+
+// paintShapeGrouped paints s's fill and stroke at innerAlpha (the caller's
+// incoming alpha, e.g. from an enclosing pattern tile — see paintShape) into
+// an isolated offscreen group, then applies opacity — s's own element
+// opacity alone — once to the flattened result. See paintShape's doc comment
+// for why the fill/stroke overlap requires this split. dp/sm are s's
+// already-device-space path and accumulated matrix, computed once by the
+// caller.
+func (r *Renderer) paintShapeGrouped(dev render.Device, s *svg.Shape, dp *render.Path, sm render.Matrix, innerAlpha, opacity float64, warned *warnFlags) {
+	dev.Save()
+	dev.BeginGroup()
+	r.paintFill(dev, s, dp, sm, innerAlpha, warned)
+	r.paintStroke(dev, s, dp, sm, innerAlpha, warned)
+	dev.EndGroup(opacity, "", nil)
+	dev.Restore()
+}
+
+// paintFill paints s's fill alone (gradient, pattern, or solid color) with
+// alpha already fully resolved by the caller.
+func (r *Renderer) paintFill(dev render.Device, s *svg.Shape, dp *render.Path, sm render.Matrix, alpha float64, warned *warnFlags) {
 	if s.FillGradient != nil {
 		r.fillGradient(dev, dp, s.Style, s.FillGradient, sm, alpha)
 	} else if s.FillPattern != nil {
@@ -173,7 +256,12 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		fp.Color.A = scaleAlpha(fp.Color.A, alpha)
 		dev.Fill(dp, fp)
 	}
+}
 
+// paintStroke paints s's stroke alone, with alpha already fully resolved by
+// the caller. A gradient/pattern stroke has no outline-conversion path (see
+// the inline comment below) and degrades to StrokePaint's fallback color.
+func (r *Renderer) paintStroke(dev render.Device, s *svg.Shape, dp *render.Path, sm render.Matrix, alpha float64, warned *warnFlags) {
 	if s.StrokeGradient != nil || s.StrokePattern != nil {
 		// No stroke-to-outline conversion exists in pkg/render/raster (see
 		// stroke.go) to clip a shading/tile against, so a gradient or
@@ -185,23 +273,25 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		// are unaffected.
 		r.logStrokeGradientOnce(warned)
 	}
-	if sp, ok := s.Style.StrokePaint(); ok {
-		sf := sm.ScaleFactor()
-		if sf == 0 {
-			return
-		}
-		sp.Color.A = scaleAlpha(sp.Color.A, alpha)
-		sp.Width *= sf
-		sp.DashPhase *= sf
-		if sp.DashArray != nil {
-			scaled := make([]float64, len(sp.DashArray))
-			for i, d := range sp.DashArray {
-				scaled[i] = d * sf
-			}
-			sp.DashArray = scaled
-		}
-		dev.Stroke(dp, sp)
+	sp, ok := s.Style.StrokePaint()
+	if !ok {
+		return
 	}
+	sf := sm.ScaleFactor()
+	if sf == 0 {
+		return
+	}
+	sp.Color.A = scaleAlpha(sp.Color.A, alpha)
+	sp.Width *= sf
+	sp.DashPhase *= sf
+	if sp.DashArray != nil {
+		scaled := make([]float64, len(sp.DashArray))
+		for i, d := range sp.DashArray {
+			scaled[i] = d * sf
+		}
+		sp.DashArray = scaled
+	}
+	dev.Stroke(dp, sp)
 }
 
 // gradient is the accessor surface pkg/draw needs from a resolved paint
@@ -269,6 +359,17 @@ type pattern interface {
 // Group has no single alpha sink, so this multiplies alpha into the
 // recursive paint call instead, matching how group opacity already
 // propagates through r.paint).
+//
+// The recursive r.paint(dev, tile, ..., alpha, ...) call below does NOT
+// double-apply opacity now that r.paint's Group case can open a real
+// compositing group: p.Tile() is always built via buildKidsGroup (see
+// pkg/svg's resolvePattern), which sets Opacity: 1 unconditionally — a
+// <pattern> element has no opacity property of its own to apply to its tile
+// as a whole, only the shape that REFERENCES it has fill/stroke-opacity,
+// already folded into alpha here. So the tile Group always takes r.paint's
+// Opacity>=1 fast path (no BeginGroup) and alpha reaches the tile's shapes
+// exactly once, via the per-paint multiplication in paintShape — unaffected
+// by the grouping added for real <g opacity> elements.
 func (r *Renderer) fillPattern(dev render.Device, dp *render.Path, st svg.Style, p pattern, sm render.Matrix, alpha float64, warned *warnFlags) {
 	if warned.patternDepth >= maxPatternNestingDepth {
 		// A chain of DISTINCT patterns (p0's tile fills with p1, p1's with
@@ -493,17 +594,6 @@ func (r *Renderer) logStrokeGradientOnce(warned *warnFlags) {
 	}
 	warned.strokeGradient = true
 	r.Logf("svg: gradient strokes not yet supported; using the fallback color (or no stroke)")
-}
-
-// logOpacityOnce emits the group-opacity approximation notice the first
-// time it is needed for the current DrawVector call, and is a no-op on
-// subsequent calls.
-func (r *Renderer) logOpacityOnce(warned *warnFlags) {
-	if warned.opacity || r.Logf == nil {
-		return
-	}
-	warned.opacity = true
-	r.Logf("svg: group opacity approximated per-paint until compositing lands")
 }
 
 // scaleAlpha scales an 8-bit alpha channel by factor (expected in [0,1]).

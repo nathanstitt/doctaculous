@@ -618,6 +618,15 @@ read+write vocabulary for the tinycld text adoption path):
   `layout.VectorKind` item rather than rasterizing to an embedded image (an SVG circle → PDF has no
   image XObject). Landed with a cross-cutting fix in the shared rasterizer: an unclosed subpath used
   to fill incorrectly (also affecting the PDF content interpreter's `f` operator on unclosed paths).
+- Group opacity (`<g opacity>`, including on the root `<svg>` element, and nested groups multiplying)
+  composites correctly via a new `render.Device.BeginGroup`/`EndGroup` offscreen-compositing
+  primitive (raster backend only; pdfwrite is a logged pass-through pending Form XObject support):
+  overlapping children inside an opacity group blend once, at the flattened result, instead of each
+  child's own paint alpha double-darkening the overlap. The same primitive fixes the analogous
+  double-paint case on a single shape carrying both a fill AND a stroke at element `opacity` < 1 (the
+  stroke's inner edge overlaps the fill) — routed through a group only when both a fill and a stroke
+  are present and opacity < 1, so the common opaque/single-paint shape stays on the cheap per-paint
+  path with no offscreen allocation.
 - Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text,
   `clip-path`/`mask`, filters, `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked
   as the PR 4–8 slices in `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
