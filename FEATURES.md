@@ -613,9 +613,33 @@ read+write vocabulary for the tinycld text adoption path):
   `layout.VectorKind` item rather than rasterizing to an embedded image (an SVG circle → PDF has no
   image XObject). Landed with a cross-cutting fix in the shared rasterizer: an unclosed subpath used
   to fill incorrectly (also affecting the PDF content interpreter's `f` operator on unclosed paths).
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: CSS styling and paint
-  servers (gradients/patterns), `<use>`, text, `clip-path`/`mask`, filters, `<image>`, and inline
-  `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 2–8 slices in
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: paint servers
+  (gradients/patterns), `<use>`, text, `clip-path`/`mask`, filters, `<image>`, and inline `<svg>`
+  inside HTML/`<img src=*.svg>` — tracked as the PR 3–8 slices in
   `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
 - 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
   with committed goldens.
+
+**SVG input — CSS styling** (`pkg/svg`, `pkg/css`):
+
+- An SVG-local cascade (`pkg/svg/cascade.go`) mirroring `pkg/css/cascade.go`'s ladder minus the UA
+  origin: `<style>` sheets (including CDATA-wrapped rule bodies and a non-CSS `type=` correctly
+  skipped), the `style=""` inline attribute, `class`, and presentation attributes folded in as the
+  lowest-priority cascade origin. Selectors: type (case-insensitive match, authored case preserved
+  so `linearGradient`/`clipPath` etc. stay addressable), class, id, universal, descendant, and
+  grouping, with full specificity comparison and `!important`. `element` gained parent/id/class
+  tracking and a `css.Node` adapter so the shared selector matcher runs unmodified over the SVG
+  tree; a document index pre-pass collects stylesheets (and an id/defs table used by later slices)
+  once per document rather than per element. `Style.apply` resolves every presentation property
+  (fill/stroke variants, opacity, fill-rule, linecap/linejoin/miterlimit, dasharray/dashoffset,
+  display, visibility, color) through the cascade; `transform` and shape geometry stay XML-attribute-
+  only, matching SVG 1's separation of presentation from geometry.
+- Known gaps that fail safe rather than mismatch: attribute selectors (`[foo]`) and the
+  combinators (`>`, `+`, `~`) parse without erroring but never match (the selector engine has no
+  handling for either, so they parse into an inert simple selector); `@import` is recognized and
+  skipped with a debug log rather than fetched.
+- Landed two shared `pkg/css` fixes that also apply to HTML: `!important` is now recognized with no
+  preceding whitespace (`red!important`), and `/* */` comments inside a `style=""` attribute value
+  are stripped before parsing, matching what a `<style>` sheet's rule body already did.
+- 13 curated fixtures from the same resvg test suite covering selector kinds, specificity,
+  `!important`, cascade order, and CDATA — with committed goldens.
