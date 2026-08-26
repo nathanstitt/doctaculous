@@ -120,14 +120,16 @@ func resolveGradient(id string, resolver *paintServerResolver, path *render.Path
 
 	spread := parseSpreadMethod(ps.attrs["spreadMethod"])
 
+	shadingStops := ps.stops.shadingStops()
+
 	var shader render.Shader
 	switch ps.kind {
 	case "linearGradient":
 		x1, y1, x2, y2 := linearGradientCoords(ps.attrs, userSpace, vp)
-		shader = raster.NewAxialShader(x1, y1, x2, y2, ps.stops, spread)
+		shader = raster.NewAxialShader(x1, y1, x2, y2, ps.stops, shadingStops, spread)
 	case "radialGradient":
 		cx, cy, r, fx, fy := radialGradientCoords(ps.attrs, userSpace, vp)
-		shader = raster.NewRadialShader(fx, fy, 0, cx, cy, r, ps.stops, spread)
+		shader = raster.NewRadialShader(fx, fy, 0, cx, cy, r, ps.stops, shadingStops, spread)
 	default:
 		return paintServer{}, false
 	}

@@ -173,7 +173,7 @@ func TestDeviceFillShadingRasterizesIntoImageXObject(t *testing.T) {
 	dev.Save()
 	dev.PushClip(clip, render.NonZero)
 
-	shader := raster.NewAxialShader(0, 0, 100, 0, rampFunc{}, raster.SpreadPad)
+	shader := raster.NewAxialShader(0, 0, 100, 0, rampFunc{}, nil, raster.SpreadPad)
 	dev.FillShading(shader, render.Matrix{A: 1, D: 1}, "")
 	dev.Restore()
 
@@ -208,7 +208,7 @@ func TestDeviceFillShadingPlacesImageAtClipOrigin(t *testing.T) {
 	dev.Save()
 	dev.PushClip(clip, render.NonZero)
 
-	shader := raster.NewAxialShader(20, 30, 70, 30, rampFunc{}, raster.SpreadPad)
+	shader := raster.NewAxialShader(20, 30, 70, 30, rampFunc{}, nil, raster.SpreadPad)
 	dev.FillShading(shader, render.Matrix{A: 1, D: 1}, "")
 	dev.Restore()
 
