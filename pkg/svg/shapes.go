@@ -66,7 +66,7 @@ func shapePath(el *element, logf func(string, ...any)) *render.Path {
 		}
 		return ellipsePath(cx, cy, r, r)
 	case "ellipse":
-		rx, ry := length("rx"), length("ry")
+		rx, ry := ellipseRadii(el, length)
 		if !finitePositive(rx) || !finitePositive(ry) {
 			return nil
 		}
@@ -189,6 +189,30 @@ func rectPath(el *element, length func(string) float64, logf func(string, ...any
 	arcSegments(p, x, y+ry, rx, ry, 0, false, true, x+rx, y)
 	p.Close()
 	return p
+}
+
+// ellipseRadii resolves an <ellipse>'s rx/ry per SVG 2 §10.4: when exactly one
+// of rx/ry is present, the missing one takes the other's (already-resolved)
+// value — the same "auto" defaulting rectPath already applies to <rect>'s
+// rx/ry, but without rect's half-side clamp (an ellipse's radii have no
+// enclosing box to clamp against). When both are absent, both resolve to 0,
+// which finitePositive's degenerate-shape guard then rejects (SVG 1
+// behavior: "Error in SVG 1, but not in SVG 2" per this rule only kicking in
+// for the single-missing-attribute case). Presence is checked on el.attrs
+// directly, not by comparing the resolved value to 0, since length() already
+// defaults an absent attribute to 0 — indistinguishable from an explicit
+// "0" — and only an absent attribute should trigger the substitution.
+func ellipseRadii(el *element, length func(string) float64) (rx, ry float64) {
+	_, hasRX := el.attrs["rx"]
+	_, hasRY := el.attrs["ry"]
+	rx, ry = length("rx"), length("ry")
+	switch {
+	case hasRX && !hasRY:
+		ry = rx
+	case hasRY && !hasRX:
+		rx = ry
+	}
+	return rx, ry
 }
 
 // ellipsePath builds a closed ellipse (circle when rx == ry) as four 90° arcs

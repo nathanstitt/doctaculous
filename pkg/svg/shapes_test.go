@@ -65,6 +65,44 @@ func TestShapePath(t *testing.T) {
 	}
 }
 
+// TestShapePathEllipseAutoRadius covers SVG 2 §10.4's <ellipse> rx/ry
+// auto-defaulting: when exactly one of rx/ry is present, the missing one
+// takes the other's value (an ellipse degenerates to what a circle would be
+// for that radius). Missing both is still degenerate (SVG 1 behavior): with
+// no radius to default from, both resolve to 0 and the shape drops. rectPath
+// already implements the equivalent rule for <rect>'s rx/ry (see its own
+// test above); this exercises the same rule on ellipseRadii.
+func TestShapePathEllipseAutoRadius(t *testing.T) {
+	el := func(name string, attrs map[string]string) *element {
+		return &element{space: svgNS, local: name, attrs: attrs}
+	}
+	// rx present, ry absent: ry defaults to rx.
+	p := shapePath(el("ellipse", map[string]string{"cx": "100", "cy": "100", "rx": "60"}), nil)
+	if p == nil || p.Segments[0].P0 != (render.Point{X: 160, Y: 100}) {
+		t.Fatalf("ellipse missing ry = %+v", p)
+	}
+	for _, s := range p.Segments {
+		if s.Kind == render.CubeTo {
+			if r := math.Hypot(s.P2.X-100, s.P2.Y-100); math.Abs(r-60) > 1e-9 {
+				t.Errorf("ellipse missing ry: endpoint off circle of r=60: %+v", s.P2)
+			}
+		}
+	}
+	// ry present, rx absent: rx defaults to ry.
+	p = shapePath(el("ellipse", map[string]string{"cx": "100", "cy": "100", "ry": "60"}), nil)
+	if p == nil || p.Segments[0].P0 != (render.Point{X: 160, Y: 100}) {
+		t.Fatalf("ellipse missing rx = %+v", p)
+	}
+	// Both absent: 0/0, degenerate, dropped (SVG 1 behavior for this case).
+	if p := shapePath(el("ellipse", map[string]string{"cx": "100", "cy": "100"}), nil); p != nil {
+		t.Errorf("ellipse with neither rx nor ry should be nil, got %+v", p)
+	}
+	// Explicit rx="0" is NOT "absent": it must not trigger the ry substitution.
+	if p := shapePath(el("ellipse", map[string]string{"cx": "100", "cy": "100", "rx": "0", "ry": "60"}), nil); p != nil {
+		t.Errorf("ellipse with explicit rx=0 should stay degenerate, got %+v", p)
+	}
+}
+
 // assertFinitePath fails t if any coordinate in p's segments is NaN or ±Inf.
 // A non-finite coordinate would poison downstream bounding-box, transform,
 // and rasterization math just as badly as a non-finite radius, so every

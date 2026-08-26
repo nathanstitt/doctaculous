@@ -10,13 +10,36 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
-// replay feeds a device-space path into a vector.Rasterizer, offsetting by the
-// image origin (ox, oy) so non-zero-origin bounds work.
+// replay feeds a device-space path into a vector.Rasterizer for FILLING,
+// offsetting by the image origin (ox, oy) so non-zero-origin bounds work.
+//
+// Every subpath is force-closed (an implicit LineTo back to that subpath's
+// own start point) before the next MoveTo and after the last segment, even
+// when the path data never emitted a render.Close. This is required by the
+// fill semantics themselves (SVG's painting model: "if a subpath is open,
+// it's implicitly closed before filling"; e.g. an unclosed <path> or a
+// <polyline> both still fill as if closed) — not merely a nicety.
+// vector.Rasterizer's scanline algorithm accumulates signed coverage deltas
+// per edge; an edge span left unclosed contributes an uncancelled vertical
+// delta that then reads as "inside" for every pixel to one side of it out to
+// the rasterizer's bound, producing a bounding-box-shaped fill artifact
+// instead of the intended shape (rather than merely dropping the closing
+// edge's contribution, which is what one might naively expect "forgetting
+// to close" to do). replayStroke (stroke.go) is unaffected: strokes must
+// honor an actually-open subpath by not painting a closing segment, so it
+// does its own, separate open/closed bookkeeping.
 func replay(r *vector.Rasterizer, path *render.Path, ox, oy float32) {
 	var started bool
+	closeIfOpen := func() {
+		if started {
+			r.ClosePath()
+			started = false
+		}
+	}
 	for _, s := range path.Segments {
 		switch s.Kind {
 		case render.MoveTo:
+			closeIfOpen()
 			r.MoveTo(float32(s.P0.X)-ox, float32(s.P0.Y)-oy)
 			started = true
 		case render.LineTo:
@@ -37,9 +60,10 @@ func replay(r *vector.Rasterizer, path *render.Path, ox, oy float32) {
 				float32(s.P2.X)-ox, float32(s.P2.Y)-oy,
 			)
 		case render.Close:
-			r.ClosePath()
+			closeIfOpen()
 		}
 	}
+	closeIfOpen()
 }
 
 // flattenCubic subdivides a cubic Bézier from (x0,y0) through control points to
