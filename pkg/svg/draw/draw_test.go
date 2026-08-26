@@ -469,3 +469,79 @@ func TestNestedDistinctPatternsShallowChainStillPaints(t *testing.T) {
 		t.Errorf("center = %+v, want red from the innermost tile (a shallow, non-cyclic chain must still paint)", got)
 	}
 }
+
+// describableShader is a minimal render.ShadingDescriber fake, used to prove
+// alphaShader delegates DescribeShading rather than hiding it (the "wrapper
+// trap" render.ShadingDescriber's doc comment warns about). Its ColorAt is
+// unused by these tests; only DescribeShading matters.
+type describableShader struct {
+	desc render.ShadingDesc
+}
+
+func (d describableShader) ColorAt(float64, float64) (color.RGBA, bool) {
+	return color.RGBA{}, false
+}
+
+func (d describableShader) DescribeShading() (render.ShadingDesc, bool) {
+	return d.desc, true
+}
+
+// TestAlphaShaderDelegatesDescribeShading is the regression guard for the
+// wrapper trap render.ShadingDescriber's doc comment calls out: alphaShader
+// wraps a gradient shader on the common path (any gradient under a <g
+// opacity> or carrying its own opacity), so if it only forwarded ColorAt, a
+// PDF writer's type-assertion for render.ShadingDescriber would see the
+// alphaShader value (which wouldn't implement it), miss the describable
+// shader underneath, and silently fall back to rasterizing exactly the
+// documents most likely to have gradients. This asserts the description
+// still comes through AND that every stop's alpha is scaled by the wrapper's
+// factor, via the same scaleAlpha helper ColorAt uses.
+func TestAlphaShaderDelegatesDescribeShading(t *testing.T) {
+	inner := describableShader{desc: render.ShadingDesc{
+		Kind:   render.ShadingAxial,
+		Coords: [6]float64{0, 0, 10, 0, 0, 0},
+		Stops: []render.ShadingStop{
+			{Offset: 0, Color: color.RGBA{255, 0, 0, 200}},
+			{Offset: 1, Color: color.RGBA{0, 0, 255, 100}},
+		},
+		Spread: render.SpreadPad,
+	}}
+	wrapped := alphaShader{inner: inner, alpha: 0.5}
+
+	describer, ok := render.Shader(wrapped).(render.ShadingDescriber)
+	if !ok {
+		t.Fatalf("alphaShader does not implement render.ShadingDescriber")
+	}
+	desc, ok := describer.DescribeShading()
+	if !ok {
+		t.Fatalf("DescribeShading reported !ok; delegation to a describable inner shader must succeed")
+	}
+
+	if desc.Kind != render.ShadingAxial {
+		t.Errorf("Kind = %v, want ShadingAxial (geometry must pass through unchanged)", desc.Kind)
+	}
+	if desc.Coords != inner.desc.Coords {
+		t.Errorf("Coords = %v, want %v (geometry must pass through unchanged)", desc.Coords, inner.desc.Coords)
+	}
+	if desc.Spread != render.SpreadPad {
+		t.Errorf("Spread = %v, want SpreadPad (spread must pass through unchanged)", desc.Spread)
+	}
+
+	if len(desc.Stops) != len(inner.desc.Stops) {
+		t.Fatalf("Stops = %v, want %d entries", desc.Stops, len(inner.desc.Stops))
+	}
+	wantAlphas := []uint8{scaleAlpha(200, 0.5), scaleAlpha(100, 0.5)}
+	for i, want := range wantAlphas {
+		got := desc.Stops[i]
+		src := inner.desc.Stops[i]
+		if got.Offset != src.Offset {
+			t.Errorf("Stops[%d].Offset = %v, want %v", i, got.Offset, src.Offset)
+		}
+		if got.Color.R != src.Color.R || got.Color.G != src.Color.G || got.Color.B != src.Color.B {
+			t.Errorf("Stops[%d] RGB = %+v, want RGB from %+v unchanged", i, got.Color, src.Color)
+		}
+		if got.Color.A != want {
+			t.Errorf("Stops[%d].Color.A = %d, want %d (scaleAlpha(%d, 0.5))", i, got.Color.A, want, src.Color.A)
+		}
+	}
+}
