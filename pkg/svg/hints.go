@@ -11,6 +11,12 @@ import (
 // If a future task adds a property to the appliers but not here, that property
 // would silently stop being settable from a presentation attribute. The order
 // here matches the order in apply() for deterministic output.
+//
+// stop-color/stop-opacity are not consumed by Style.apply (they only apply to
+// <stop> elements, resolved by parseStops in stops.go), but they go through
+// the same presentation-hint mechanism so a <stop stop-color="..."> attribute
+// and a `stop { stop-color: ... }` sheet rule rank the same as every other
+// presentation property.
 var svgPresentationAttrs = []string{
 	"color",
 	"fill",
@@ -27,6 +33,8 @@ var svgPresentationAttrs = []string{
 	"opacity",
 	"display",
 	"visibility",
+	"stop-color",
+	"stop-opacity",
 }
 
 // svgPresentationHints maps an element's SVG presentation attributes to CSS
