@@ -1,6 +1,9 @@
 package svg
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseXML(t *testing.T) {
 	src := []byte(`<?xml version="1.0"?>
@@ -49,5 +52,42 @@ func TestParseXML(t *testing.T) {
 	root, _ = parseXML([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 1 1"/>`), nil)
 	if _, ok := root.attrs["viewBox"]; ok {
 		t.Error("case-insensitive attr match")
+	}
+}
+
+func TestElementParentAndClasses(t *testing.T) {
+	root, err := parseXML([]byte(`<svg xmlns="http://www.w3.org/2000/svg" id="root">
+	  <g class="a  b"><rect id="r" class="c"/></g>
+	</svg>`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.parent != nil {
+		t.Error("root parent should be nil")
+	}
+	if root.id != "root" {
+		t.Errorf("root id = %q", root.id)
+	}
+	g := root.kids[0]
+	if g.parent != root {
+		t.Error("g.parent != root")
+	}
+	if !reflect.DeepEqual(g.classes, []string{"a", "b"}) {
+		t.Errorf("g classes = %v, want [a b] (split on runs of whitespace)", g.classes)
+	}
+	rect := g.kids[0]
+	if rect.parent != g || rect.parent.parent != root {
+		t.Error("rect parent chain broken")
+	}
+	if rect.id != "r" || !reflect.DeepEqual(rect.classes, []string{"c"}) {
+		t.Errorf("rect id=%q classes=%v", rect.id, rect.classes)
+	}
+	// No id/class attributes: zero values, not empty non-nil slices.
+	if len(root.kids) > 0 && root.kids[0].kids[0].id == "" && root.kids[0].kids[0].classes == nil {
+		_ = 0 // structure asserted above; this documents the nil-vs-empty contract
+	}
+	plain, _ := parseXML([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`), nil)
+	if r := plain.kids[0]; r.id != "" || r.classes != nil {
+		t.Errorf("attribute-less element: id=%q classes=%v, want \"\" and nil", r.id, r.classes)
 	}
 }
