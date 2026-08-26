@@ -158,9 +158,27 @@ func (r *reflowRenderer) renderPage(_ context.Context, index int, opts RasterOpt
 	}
 	pg := &r.pages.Pages[index]
 
+	// Validate before casting to int, so an attacker-controlled page size (SVG's
+	// width/height are unclamped document attributes, unlike CSS-derived sizes
+	// elsewhere in the reflow pipeline) cannot overflow int, trigger a
+	// multi-gigabyte allocation, or reach image.NewRGBA with a huge/negative
+	// rectangle (which panics). Mirrors pkg/render/raster/page.go's RenderPage
+	// guard (isFinitePositive-style finiteness check + maxPixels cap), except a
+	// non-positive-but-finite size (e.g. an empty HTML/DOCX document laying out
+	// to zero height) is a legitimate degenerate document, not an attack, so it
+	// clamps to a 1x1 page exactly as before this guard existed; only non-finite
+	// (NaN/Inf, impossible from any real layout) is rejected outright.
 	scale := opts.dpi() / 72
-	pxW := int(math.Ceil(pg.WidthPt * scale))
-	pxH := int(math.Ceil(pg.HeightPt * scale))
+	fW := math.Ceil(pg.WidthPt * scale)
+	fH := math.Ceil(pg.HeightPt * scale)
+	if math.IsNaN(fW) || math.IsInf(fW, 0) || math.IsNaN(fH) || math.IsInf(fH, 0) {
+		return nil, fmt.Errorf("doctaculous: degenerate scaled page size %gx%g", fW, fH)
+	}
+	if fW*fH > float64(maxRasterPixels) {
+		return nil, fmt.Errorf("doctaculous: page too large (%.0fx%.0f px exceeds %d-pixel cap; lower DPI)", fW, fH, maxRasterPixels)
+	}
+	pxW := int(fW)
+	pxH := int(fH)
 	if pxW <= 0 || pxH <= 0 {
 		pxW, pxH = 1, 1
 	}

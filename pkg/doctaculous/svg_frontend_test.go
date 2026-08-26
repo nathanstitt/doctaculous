@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"testing"
+	"time"
 )
 
 func TestOpenSVGBytes(t *testing.T) {
@@ -280,5 +281,66 @@ func TestSVGDetectAndFormat(t *testing.T) {
 	}
 	if f := DetectFormat([]byte(`<svg:sv`), ""); f == FormatSVG {
 		t.Errorf("truncated svg:sv = %v, want not FormatSVG", f)
+	}
+}
+
+// TestRasterizeSVGNonFinitePageSizeErrorsCleanly proves an attacker-controlled
+// SVG root size that scales to a non-finite/huge pixel dimension (width/height
+// are unclamped SVG attributes, unlike CSS-derived sizes elsewhere in the
+// reflow pipeline) returns a clean error from RasterizePage instead of
+// panicking inside image.NewRGBA ("Rectangle has huge or negative dimensions").
+func TestRasterizeSVGNonFinitePageSizeErrorsCleanly(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1e300" height="1e300"/>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72}); err == nil {
+		t.Fatal("1e300x1e300 svg rasterized without error; want clean error, not a panic/success")
+	}
+}
+
+// TestRasterizeSVGHugeFinitePageSizeErrorsFast proves a huge-but-finite SVG
+// page size (which would attempt a multi-terabyte allocation, e.g. 1e6 x 1e6
+// px at 72 DPI) is rejected by the pixel-count cap quickly, rather than
+// hanging the process trying to allocate it.
+func TestRasterizeSVGHugeFinitePageSizeErrorsFast(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1e6" height="1e6"/>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("1e6x1e6 svg rasterized without error; want a clean pixel-cap error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RasterizePage did not return within 5s; want a fast, clean error, not a hang")
+	}
+}
+
+// TestRasterizeSVGNormalPageSizeUnaffected proves the new size guard does not
+// over-trigger: an ordinary small SVG still rasterizes successfully.
+func TestRasterizeSVGNormalPageSizeUnaffected(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+	  <rect width="200" height="100" fill="#00ff00"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatalf("normal svg rejected: %v", err)
+	}
+	rgba := img.(*image.RGBA)
+	if got := rgba.RGBAAt(100, 50); got != (color.RGBA{0, 255, 0, 255}) {
+		t.Errorf("center = %+v, want green", got)
 	}
 }
