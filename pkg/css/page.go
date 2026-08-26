@@ -150,7 +150,7 @@ func parsePageSelector(prelude string) (name string, pseudo PagePseudo) {
 // parsePageBody splits an @page rule body into its top-level declarations and its
 // nested margin-box rules. It re-scans the body with the shared ruleScanner so a
 // nested "@top-center { … }" block is recognized (and its braces not mistaken for a
-// declaration) — parseDeclarations alone splits on ';' and cannot see nested blocks.
+// declaration) — ParseDeclarations alone splits on ';' and cannot see nested blocks.
 // Text spans between nested blocks are parsed as declarations.
 func parsePageBody(body string) (decls []Declaration, boxes []MarginBoxRule) {
 	s := &ruleScanner{src: body}
