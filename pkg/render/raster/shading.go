@@ -98,6 +98,17 @@ type shading struct {
 	// (used when the shading is a pattern fill). hasBackground reports presence.
 	background    color.RGBA
 	hasBackground bool
+
+	// alphaFromFn is true only for a shading built via NewAxialShader/
+	// NewRadialShader (SVG paint servers), whose fn is a 4-output
+	// (straight RGBA) ramp — see pkg/svg/stops.go. When true, toRGBA takes
+	// comps[3] as alpha in [0,1] instead of forcing opaque. This is a flag
+	// on the struct, not a check on len(comps)/fn.NumOutputs(), because a
+	// PDF shading function can legitimately return 4 components for a CMYK
+	// /ColorSpace — component count alone cannot tell CMYK from RGBA.
+	// PDF-constructed shadings (newShader) never set this, so every
+	// existing PDF rendering path keeps producing A=0xFF exactly as before.
+	alphaFromFn bool
 }
 
 // Spread selects how an axial or radial gradient extends beyond its defining
@@ -167,6 +178,7 @@ func NewAxialShader(x0, y0, x1, y1 float64, fn function.Func, spread Spread) ren
 		axis:        [4]float64{x0, y0, x1, y1},
 		extend:      [2]bool{true, true},
 		spread:      spread,
+		alphaFromFn: true,
 	}
 }
 
@@ -185,6 +197,7 @@ func NewRadialShader(fx, fy, fr, cx, cy, cr float64, fn function.Func, spread Sp
 		circles:     [6]float64{fx, fy, fr, cx, cy, cr},
 		extend:      [2]bool{true, true},
 		spread:      spread,
+		alphaFromFn: true,
 	}
 }
 
@@ -243,12 +256,32 @@ func newShader(doc *pdf.Document, obj pdf.Object) (render.Shader, error) {
 	}
 }
 
-// toRGBA converts shading color components to an opaque RGBA via the shading's
-// color-space kind (reusing the image converter).
+// toRGBA converts shading color components to RGBA via the shading's
+// color-space kind (reusing the image converter). Alpha is 0xFF (opaque)
+// unless s.alphaFromFn is set — true only for a shading built via
+// NewAxialShader/NewRadialShader, whose fn returns a 4th component (straight
+// alpha in [0,1]) after its color components. Every PDF-constructed shading
+// (newShader) leaves alphaFromFn false, so a CMYK /ColorSpace's 4 components
+// are never misread as RGB+alpha: componentsToRGBA still consumes comps[0:4]
+// as C,M,Y,K in that case, exactly as before this change.
 func (s *shading) toRGBA(comps []float64) color.RGBA {
 	c := componentsToRGBA(s.csKind, comps)
 	c.A = 0xFF
+	if s.alphaFromFn && len(comps) > 3 {
+		c.A = uint8(math.Round(clamp01(comps[3]) * 255))
+	}
 	return c
+}
+
+// clamp01 clamps v to [0,1].
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 // colorAt maps a parametric value t through /Function to an RGBA color. When no

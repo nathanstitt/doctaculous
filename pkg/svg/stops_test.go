@@ -11,20 +11,23 @@ func stopEl(attrs map[string]string) *element {
 	return &element{space: svgNS, local: "stop", attrs: attrs}
 }
 
-// evalRGB is a small test helper: it calls fn.Eval at t and returns the 3
-// outputs rounded to uint8 channels (assuming a straight [0,1] RGB ramp),
-// for terse assertions against expected colors.
+// evalRGB is a small test helper: it calls fn.Eval at t and returns the 4
+// outputs (straight RGBA) rounded to uint8 channels, for terse assertions
+// against expected colors. Every stopRamp is 4-output (R,G,B,A); alpha
+// carries stop-opacity through to the caller instead of being folded into
+// RGB, so wantColor below checks A whenever the expectation supplies one
+// other than the implicit fully-opaque default.
 func evalRGB(t *testing.T, fn interface {
 	Eval(in []float64) []float64
 	NumOutputs() int
 }, at float64) color.RGBA {
 	t.Helper()
-	if fn.NumOutputs() != 3 {
-		t.Fatalf("NumOutputs() = %d, want 3", fn.NumOutputs())
+	if fn.NumOutputs() != 4 {
+		t.Fatalf("NumOutputs() = %d, want 4", fn.NumOutputs())
 	}
 	out := fn.Eval([]float64{at})
-	if len(out) != 3 {
-		t.Fatalf("Eval(%v) returned %d outputs, want 3", at, len(out))
+	if len(out) != 4 {
+		t.Fatalf("Eval(%v) returned %d outputs, want 4", at, len(out))
 	}
 	toByte := func(v float64) uint8 {
 		if v < 0 {
@@ -35,7 +38,7 @@ func evalRGB(t *testing.T, fn interface {
 		}
 		return uint8(v*255 + 0.5)
 	}
-	return color.RGBA{R: toByte(out[0]), G: toByte(out[1]), B: toByte(out[2]), A: 255}
+	return color.RGBA{R: toByte(out[0]), G: toByte(out[1]), B: toByte(out[2]), A: toByte(out[3])}
 }
 
 func wantColor(t *testing.T, got color.RGBA, want color.RGBA) {
@@ -47,7 +50,7 @@ func wantColor(t *testing.T, got color.RGBA, want color.RGBA) {
 		}
 		return d <= 1
 	}
-	if !near(got.R, want.R) || !near(got.G, want.G) || !near(got.B, want.B) {
+	if !near(got.R, want.R) || !near(got.G, want.G) || !near(got.B, want.B) || !near(got.A, want.A) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
@@ -220,10 +223,9 @@ func TestParseStopsNilElementAndNilAttrs(t *testing.T) {
 	wantColor(t, evalRGB(t, ramp, 0), color.RGBA{0, 0, 0, 255})
 }
 
-// TestParseStopsOpacity verifies stop-opacity affects the ramp's output:
-// the ramp folds opacity into the RGB channels by compositing over black
-// (there is no alpha channel in a 1-in/3-out function.Func), so a
-// half-opacity white stop yields mid-gray rather than white.
+// TestParseStopsOpacity verifies stop-opacity affects the ramp's output as
+// real (straight) alpha, not a darkened RGB: a half-opacity white stop
+// yields white with A≈128, not mid-gray at A=255.
 func TestParseStopsOpacity(t *testing.T) {
 	parent := &element{space: svgNS, local: "linearGradient", kids: []*element{
 		stopEl(map[string]string{"offset": "0", "stop-color": "white", "stop-opacity": "0.5"}),
@@ -233,7 +235,7 @@ func TestParseStopsOpacity(t *testing.T) {
 	if !ok {
 		t.Fatal("parseStops reported ok=false")
 	}
-	wantColor(t, evalRGB(t, ramp, 0), color.RGBA{128, 128, 128, 255})
+	wantColor(t, evalRGB(t, ramp, 0), color.RGBA{255, 255, 255, 128})
 	wantColor(t, evalRGB(t, ramp, 1), color.RGBA{255, 255, 255, 255})
 }
 
@@ -263,8 +265,8 @@ func TestParseStopsThroughCascade(t *testing.T) {
 	if !ok {
 		t.Fatal("parseStops reported ok=false")
 	}
-	// lime at 50% opacity, composited over black: (0,255,0)*0.5 = (0,128,0).
-	wantColor(t, evalRGB(t, ramp, 0), color.RGBA{0, 128, 0, 255})
+	// lime at 50% opacity: straight RGB unchanged, alpha carries the opacity.
+	wantColor(t, evalRGB(t, ramp, 0), color.RGBA{0, 255, 0, 128})
 	wantColor(t, evalRGB(t, ramp, 1), color.RGBA{0, 0, 255, 255})
 }
 

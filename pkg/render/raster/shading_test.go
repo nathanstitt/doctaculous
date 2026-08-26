@@ -34,6 +34,24 @@ func (f linRamp) Eval(in []float64) []float64 {
 }
 func (f linRamp) NumOutputs() int { return 3 }
 
+// linRampAlpha is a 1-in/4-out linear ramp Func (straight RGBA), modeling
+// the shape pkg/svg/stops.go's stopRamp produces: at t it returns
+// lerp(c0,c1,t) per channel including alpha.
+type linRampAlpha struct{ c0, c1 [4]float64 }
+
+func (f linRampAlpha) Eval(in []float64) []float64 {
+	t := 0.0
+	if len(in) > 0 {
+		t = in[0]
+	}
+	out := make([]float64, 4)
+	for i := range out {
+		out[i] = f.c0[i] + t*(f.c1[i]-f.c0[i])
+	}
+	return out
+}
+func (f linRampAlpha) NumOutputs() int { return 4 }
+
 func near(a, b uint8, tol int) bool {
 	d := int(a) - int(b)
 	if d < 0 {
@@ -315,5 +333,73 @@ func TestNewRadialShaderZeroRadius(t *testing.T) {
 		sh := NewRadialShader(0, 0, 0, 0, 0, 0, fn, sp)
 		sh.ColorAt(1, 1)
 		sh.ColorAt(0, 0)
+	}
+}
+
+// TestNewAxialShaderAlphaFromFn confirms a shader built via NewAxialShader
+// with a 4-output Func (straight RGBA, the shape pkg/svg/stops.go's
+// stopRamp produces) carries the 4th component through as real alpha rather
+// than forcing opaque: a stop fading from opaque red to fully transparent
+// blue must read back A≈255 at t=0, A≈128 at t=0.5, and A≈0 at t=1.
+func TestNewAxialShaderAlphaFromFn(t *testing.T) {
+	fn := linRampAlpha{c0: [4]float64{1, 0, 0, 1}, c1: [4]float64{0, 0, 1, 0}}
+	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadPad)
+
+	c, ok := sh.ColorAt(0, 0)
+	if !ok {
+		t.Fatalf("ColorAt(0,0) reported !ok")
+	}
+	if !near(c.A, 255, 1) {
+		t.Fatalf("t=0: A = %d, want ~255", c.A)
+	}
+	c, ok = sh.ColorAt(5, 0)
+	if !ok {
+		t.Fatalf("ColorAt(5,0) reported !ok")
+	}
+	if !near(c.A, 128, 1) {
+		t.Fatalf("t=0.5: A = %d, want ~128", c.A)
+	}
+	c, ok = sh.ColorAt(10, 0)
+	if !ok {
+		t.Fatalf("ColorAt(10,0) reported !ok")
+	}
+	if !near(c.A, 0, 1) {
+		t.Fatalf("t=1: A = %d, want ~0", c.A)
+	}
+}
+
+// TestPDFShadingCMYKStaysOpaque confirms a PDF-constructed shading (built via
+// newShader, never via NewAxialShader/NewRadialShader) keeps A=0xFF even when
+// its /Function returns 4 components for a CMYK /ColorSpace — the
+// alphaFromFn flag (not component count) gates alpha interpretation, so a
+// CMYK shading's K component is never misread as alpha.
+func TestPDFShadingCMYKStaysOpaque(t *testing.T) {
+	dict := pdf.Dict{
+		"ShadingType": pdf.Integer(2),
+		"ColorSpace":  pdf.Name("DeviceCMYK"),
+		"Coords":      pdf.Array{pdf.Integer(0), pdf.Integer(0), pdf.Integer(10), pdf.Integer(0)},
+		"Domain":      pdf.Array{pdf.Integer(0), pdf.Integer(1)},
+		"Function": pdf.Dict{
+			"FunctionType": pdf.Integer(2),
+			"Domain":       pdf.Array{pdf.Integer(0), pdf.Integer(1)},
+			// C0/C1 are 4-component CMYK: full black (K=1) at t=0, no ink at t=1.
+			"C0": pdf.Array{pdf.Integer(0), pdf.Integer(0), pdf.Integer(0), pdf.Integer(1)},
+			"C1": pdf.Array{pdf.Integer(0), pdf.Integer(0), pdf.Integer(0), pdf.Integer(0)},
+			"N":  pdf.Integer(1),
+		},
+		"Extend": pdf.Array{pdf.Boolean(true), pdf.Boolean(true)},
+	}
+	sh, err := newShader(nil, dict)
+	if err != nil {
+		t.Fatalf("newShader: %v", err)
+	}
+	for _, x := range []float64{0, 5, 10} {
+		c, ok := sh.ColorAt(x, 0)
+		if !ok {
+			t.Fatalf("ColorAt(%v,0) reported !ok", x)
+		}
+		if c.A != 0xFF {
+			t.Fatalf("ColorAt(%v,0).A = %d, want 0xFF (CMYK K component must not be read as alpha)", x, c.A)
+		}
 	}
 }
