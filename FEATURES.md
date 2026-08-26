@@ -620,13 +620,17 @@ read+write vocabulary for the tinycld text adoption path):
   to fill incorrectly (also affecting the PDF content interpreter's `f` operator on unclosed paths).
 - Group opacity (`<g opacity>`, including on the root `<svg>` element, and nested groups multiplying)
   composites correctly via a new `render.Device.BeginGroup`/`EndGroup` offscreen-compositing
-  primitive (raster backend only; pdfwrite is a logged pass-through pending Form XObject support):
-  overlapping children inside an opacity group blend once, at the flattened result, instead of each
-  child's own paint alpha double-darkening the overlap. The same primitive fixes the analogous
-  double-paint case on a single shape carrying both a fill AND a stroke at element `opacity` < 1 (the
-  stroke's inner edge overlaps the fill) — routed through a group only when both a fill and a stroke
-  are present and opacity < 1, so the common opaque/single-paint shape stays on the cheap per-paint
-  path with no offscreen allocation.
+  primitive, implemented by BOTH backends: overlapping children inside an opacity group blend once, at
+  the flattened result, instead of each child's own paint alpha double-darkening the overlap. The same
+  primitive fixes the analogous double-paint case on a single shape carrying both a fill AND a stroke
+  at element `opacity` < 1 (the stroke's inner edge overlaps the fill) — routed through a group only
+  when both a fill and a stroke are present and opacity < 1, so the common opaque/single-paint shape
+  stays on the cheap per-paint path with no offscreen allocation. In PDF output, `BeginGroup`/`EndGroup`
+  emit a real `/Group << /S /Transparency /CS /DeviceRGB /I true >>` Form XObject: children paint into
+  their own content stream/resources, and the group composites back with one `/GSn gs /Fmn Do`
+  referencing an ExtGState carrying the group's `/ca` and `/BM`. A fully-opaque, ungrouped document's
+  PDF output stays byte-identical to before this feature (verified: `cmp` on a rendered fixture matches
+  the pre-groups commit exactly).
 - `clip-path`/`<clipPath>`: a clipPath's children form a UNION (not an intersection), flattened via a
   new `render.Device.BuildClipMask(paths []MaskPath) GroupMask` primitive that rasterizes EACH child
   under its OWN `clip-rule` and combines coverage with `max()` — the correctness-critical design
@@ -644,9 +648,10 @@ read+write vocabulary for the tinycld text adoption path):
   clip-rule, and clip-path matter. Resolved during `Parse` (like paint servers), with a
   `buildingClip`-style recursion guard so a self-referencing or mutually-cyclic clipPath terminates.
   raster implements `BuildClipMask` exactly (per-child rasterize + max union); pdfwrite — which has no
-  offscreen surface to rasterize into and whose group compositing is still a pass-through stub —
-  returns a documented rectangular bounding-box approximation instead of an empty/nil mask, ready for
-  when transparency-group compositing lands there.
+  offscreen surface to rasterize a pixel-exact per-child-rule union into — returns a documented
+  rectangular bounding-box approximation, now applied for real: it feeds the same `/SMask` machinery a
+  luminance mask uses (a DeviceGray coverage image behind a luminosity soft mask), so a PDF clip-path
+  is a real (if rectangular-approximate) restriction rather than an inert no-op.
 - `mask`/`<mask>`: the mask's rendered content's LUMINANCE (not its geometry) becomes per-pixel alpha,
   via a new `render.Device.BuildLuminanceMask(size, alphaOnly, paint func(dev Device)) GroupMask`
   primitive — the backend hands back a scratch surface, `pkg/svg/draw` paints the mask's subtree into
@@ -665,8 +670,17 @@ read+write vocabulary for the tinycld text adoption path):
   masks (a mask referencing another mask) and a self-referencing/cyclic mask chain (a `buildingMask`
   recursion guard mirroring `buildingClip`) both terminate. Resolved during `Parse`, like clip-path;
   raster implements `BuildLuminanceMask` exactly (renders into a scratch `*image.RGBA`, converts per
-  pixel); pdfwrite — which has no offscreen surface yet — returns `nil` (no masking) with a logged
-  fidelity note, pending the luminosity soft-mask work.
+  pixel); pdfwrite renders the mask's content into a SECOND, nested Form XObject
+  (`/Group << /S /Transparency /CS /DeviceGray >>`) and wires it into the group's own ExtGState as
+  `/SMask << /S /Luminosity /G <form> /BC [0] >>` — a real PDF luminosity soft mask, not an
+  approximation. `/BC [0]` (a black backdrop) is mandatory: without it, the area outside the mask form's
+  own content is undefined where SVG requires fully transparent. `pkg/pdf/content` (the PDF *reader*)
+  was taught `/SMask` too (an ExtGState soft mask now renders through `Device.BuildLuminanceMask`
+  exactly like the writer produces it, scoped per paint operator: fills, strokes, `sh`, image/inline-
+  image `Do`, and a form XObject's entire nested content — text glyph fill/stroke is the one documented
+  gap, since masking each glyph individually would reintroduce the per-child compositing seam this
+  whole feature exists to avoid), so the SVG → PDF → reopen → raster round trip is genuine end-to-end
+  proof for masks, independently cross-checked against Poppler's own renderer.
 - Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, filters,
   `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices in
   `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
@@ -734,10 +748,14 @@ read+write vocabulary for the tinycld text adoption path):
   nudged apart by a sub-point epsilon so `/Bounds` stays strictly increasing without visibly smearing
   the break. Proven by rendering an opaque multi-stop gradient two ways (SVG→raster directly, and
   SVG→PDF→reopen→raster) and asserting pixel-for-pixel equivalence, not just a well-formed dictionary.
-  A gradient with any `stop-opacity` < 1 (no alpha channel in `/Shading` without a soft mask) or a
-  `reflect`/`repeat` spread (no native `/Extend` equivalent) still rasterizes into an image XObject
-  exactly as before, logged once with the reason — the previous stub-era "no vector output" gap is
-  now the correctness boundary, not a permanent limitation.
+  A gradient with `stop-opacity` < 1 ALSO emits vector output now that luminosity soft masks exist: the
+  color ramp still emits as the native `/DeviceRGB` `/Shading` above, paired with a second, parallel
+  `/DeviceGray` shading (one gray component per stop, equal to that stop's own alpha) painted into a
+  Form XObject and wired in as the `sh` operator's ExtGState `/SMask` — same `/Coords`/`/Extend`/offset
+  segmentation as the color shading, so the two agree pixel-for-pixel. This is a lift of a real,
+  previously-shipped fallback, not new scope: **only the alpha half lifts** — a `reflect`/`repeat`
+  spread still has no native `/Extend` equivalent and still rasterizes into an image XObject, logged
+  once with the reason, exactly as before.
 - Known gaps, each verified by rendering rather than merely inferred, and excluded from the golden
   corpus rather than locked in as correct: **gradient/pattern strokes** (`stroke="url(#g)")`) degrade
   to the paint's fallback color (or no stroke) with a one-per-document warn-once log — no
