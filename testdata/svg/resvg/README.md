@@ -264,3 +264,184 @@ function, not an unimplemented feature. Fixed by stripping comments inside
 `ParseDeclarations` itself (a new `stripComments` helper) so both callers
 get identical, correct behavior; covered by rerunning the existing
 `pkg/css` test suite (all passing) plus this golden.
+
+## What shipped in this tranche (PR 3)
+
+110 files vendored from `tests/paint-servers/` (149 candidates curated down),
+covering gradient and pattern paint servers end to end:
+
+- `linearGradient/` (35 files) — both unit systems (`objectBoundingBox`
+  default and `userSpaceOnUse`, including percentage values in each),
+  `gradientTransform` alone and combined with the element's own `transform`,
+  all three `spreadMethod` values, `xlink:href` attribute/stop inheritance
+  (simple, "only required", and multi-hop chains with mixed override order),
+  2-cycle/3-cycle/self-referencing href chains (all terminate and degrade to
+  "own stops win" or "paints nothing"), an href to a non-gradient element
+  (no-op, own stops still apply), invalid `gradientTransform`/`gradientUnits`/
+  `spreadMethod`/`xlink:href` (each degrades to a spec-reasonable default),
+  a single-stop gradient (solid-color fill; also proves fill still paints
+  correctly when the same shape's *stroke* uses the same gradient and
+  degrades to the fallback), `hsla()` stop colors, many-stops ramps, and an
+  invalid `<stop>`-position child (a `<rect>` in gradient-child position,
+  both standalone and reached through an href).
+- `radialGradient/` (32 files) — the linearGradient list above plus
+  `fx`/`fy` focal-point resolution (bare, defaulting to `cx`/`cy`, and
+  through an href chain), and `r`/`cx`/`cy` default-attribute resolution.
+  `negative-r` (resvg-tagged UB) is kept because this engine's degenerate-
+  matrix/degenerate-circle handling produces a deterministic, defensible
+  fallback (solid first-stop color) rather than garbage.
+- `pattern/` (26 files) — `patternUnits`/`patternContentUnits` in both unit
+  systems (including percentages), a `viewBox` on the pattern (including
+  through `xlink:href`, and its precedence over `patternContentUnits` when
+  both are present), `preserveAspectRatio`, `patternTransform` alone and
+  combined with the element's own `transform` (proving the two compose
+  rather than one silently winning), `x`/`y` cell offset, missing
+  `width`/`height` (disables the pattern per spec), no tile children
+  (disables the pattern), `display:none` on one tile child (that child
+  alone is skipped), a pattern nested inside another pattern's tile
+  (including `objectBoundingBox` units resolving against the *outer*
+  shape's bbox), out-of-order forward references, a tile whose own fill
+  references a gradient (paint-server composition), an invalid
+  `patternTransform` (degenerate matrix, paints nothing), invalid
+  `patternUnits`/`patternContentUnits` (default to `objectBoundingBox`/
+  `userSpaceOnUse` respectively), attribute/child inheritance via
+  `xlink:href` (including "everything inherited" and a pure passthrough
+  link), a self-referencing tile and a two-pattern mutual-reference cycle
+  (both terminate via `sceneBuilder.buildingPattern`, degrading to
+  "unpainted fill, tile's own stroke still shows"), and a tiny tile
+  upscaled 10x via `patternTransform="scale(10)"`.
+- `stop/`, `stop-color/`, `stop-opacity/` (20 files) — `offset` as a bare
+  number or percentage, offset clamping (out-of-[0,1] values, and a
+  non-monotonic sequence clamping forward rather than sorting), coincident
+  offsets (a hard color edge, not a divide-by-zero), a missing `offset`
+  (defaults to the previous stop's position), an invalid (unit-suffixed)
+  `offset` (falls back to 0, then clamps forward same as any other 0),
+  `stop-color` absent (defaults to black), `hsla()` stop colors, and
+  `stop-opacity` as a fraction and as a percentage — verified as REAL alpha
+  (the shape fades to whatever is behind it, not to a black-composited
+  color).
+
+## Notable exclusions (this tranche)
+
+- **`fr` (SVG2 radial focal radius)** — entirely unimplemented;
+  `radialGradientCoords` has no `fr` parameter at all, so a value there is
+  silently ignored. Excluded all four `radialGradient/fr=*.svg` fixtures
+  (`-1`, `0.2`, `0.5`, `0.7`) rather than lock in a golden that quietly
+  drops an attribute the fixture is specifically about.
+- **Radial-gradient focal-point-outside-circle correction** — per spec, an
+  `fx`/`fy` outside the `r` circle must be projected onto the circle's
+  boundary along the line from the center; nothing in `gradient.go` or
+  `shading.go` implements this projection. Verified by rendering
+  `radialGradient/focal-point-correction.svg`: the unclamped focal point
+  breaks `atRadial`'s quadratic assumptions and paints an inverted/wrong
+  pattern (black at the circle's center, white outside it) rather than the
+  intended smooth radial fade. Excluded.
+- **Radial gradient with `r="0"`** — per spec this must paint a solid fill
+  of the *last* stop's color; `atRadial`'s quadratic degenerates to `a=0,
+  b=0` for a zero-radius circle at a fixed focal point and returns
+  `paint=false` (nothing painted) instead. Verified by rendering: the shape
+  comes out fully unpainted, not solid green. Excluded
+  `radialGradient/zero-r.svg` and both `zero-r-with-stop-opacity-*.svg`
+  fixtures (the second of which uses the same zero-radius case on a
+  *stroke*, doubly out of scope with the stroke-gradient deferral below).
+- **Gradient/pattern `stroke="url(...)"`** — a known PR-scope deferral (see
+  `pkg/render/raster/stroke.go`'s doc comment): no stroke-to-outline
+  conversion exists to clip a shading or tile against, so a gradient/
+  pattern stroke degrades to the fallback color (or no stroke, absent a
+  fallback) with a one-per-document warn-once log. Grepped every candidate
+  for `stroke="url(`; the three hits
+  (`linearGradient/single-stop-with-opacity-used-by-{stroke,fill-and-
+  stroke}.svg`, `radialGradient/zero-r-with-stop-opacity-2.svg`) were kept
+  only where the fixture's *fill* behavior (not the stroke) is what the
+  golden actually locks in, and dropped otherwise (see the zero-r bullet
+  above for the third).
+- **`currentColor`/`inherit` on a `<stop>`'s `stop-color`, when the value
+  lives on a real DOM ancestor** — `resolveStopColor` (`pkg/svg/stops.go`)
+  only ever resolves `color`/`stop-color` against the `<stop>` element's
+  *own* attributes/cascade; there is no inherited-style walk from a stop up
+  through its parent gradient or an ancestor `<g>`, so `stop-color="green"`
+  or `color="green"` set on the immediate `<linearGradient>` (let alone a
+  further ancestor `<g>`) never reaches a child `<stop>`'s `currentColor`/
+  `inherit` resolution — verified by rendering: `stop-color-with-
+  currentColor-1.svg` (color set directly on the parent gradient) and
+  `stop-color-with-inherit-1.svg` (`stop-color` set directly on the parent
+  gradient) both come out pixel-identical to the "no ancestor value at all"
+  baseline, i.e. black, not green. Excluded all `currentColor-{1,2,3}` and
+  `inherit-{1,2,3,5}` fixtures; kept only `currentColor-4` and `inherit-4`
+  (the "no ancestor sets a value, default to black" baseline, which is
+  correct either way).
+- **Cross-type `xlink:href` attribute inheritance is unfiltered by the
+  target's own element kind** — `paintServerResolver.resolve`'s attribute
+  inheritance is a flat per-attribute-name copy across the whole href
+  chain, with no notion of "this attribute is meaningless on that source
+  element." A `radialGradient`'s stray `y2` attribute (meaningful only to a
+  `linearGradient`) is therefore inherited into a `linearGradient` that
+  hrefs it, even though `y2` never had any effect on the `radialGradient`
+  it was written on. Verified by rendering
+  `linearGradient/attributes-via-xlink-href-from-radialGradient.svg`
+  (explicitly titled with `<desc>y2 should be ignored</desc>`): the
+  resulting gradient varies with Y as well as X, instead of the intended
+  pure horizontal ramp. The equivalent `-from-rect.svg` fixtures are
+  unaffected and kept — a `<rect>` is not a paint-server kind at all, so
+  `followHrefChain`'s visitor stops before copying any of its attributes —
+  and `radialGradient/attributes-via-xlink-href-from-linearGradient.svg` is
+  also kept: the leaked attribute there (`cx`) happens to be meaningful to
+  the referencing `radialGradient` too, so no incorrect behavior is
+  observable. Excluded only the one broken fixture.
+- **`overflow="visible"` on a `<pattern>`** — resvg itself tags this
+  fixture "(UB)"; `resolvePattern`/`fillPattern` have no `overflow` handling
+  at all (every tile is always clipped to its own cell), so this is a
+  documented gap rather than a defensible UB response. Excluded
+  `pattern/overflow=visible.svg`.
+- **`<text>` inside a pattern tile** — `<text>` rendering is out of scope
+  regardless of the paint-server construct under test. Excluded
+  `pattern/text-child.svg`.
+- **Near-duplicate permutations pruned after curation** — per the existing
+  curation rule (one representative per distinct mechanism, not one per
+  numeric variant), trimmed the `stop/missing-offset-*` family from 7 to 3
+  (first/middle/last position missing), `stop/stops-with-equal-offset-*`
+  from 6 to 2 (a mid-ramp coincident pair, and the whole-ramp-collapsed
+  case), and dropped a handful of single-mechanism repeats elsewhere
+  (`linearGradient/single-stop-with-opacity-used-by-fill.svg`, subsumed by
+  the plain `single-stop.svg`; `stops-via-xlink-href-complex-order-1.svg`,
+  subsumed by `stops-via-xlink-href.svg` + `recursive-xlink-href-3.svg`;
+  `radialGradient/{fx,fy}-resolving-{2,3}.svg`, subsumed by `-1` plus the
+  general href-attribute-inheritance coverage above;
+  `radialGradient/attributes-via-xlink-href-complex-order.svg` and
+  `gradientTransform-and-transform.svg`, subsumed by the linearGradient
+  equivalents already exercising the same mechanism;
+  `pattern/child-with-invalid-FuncIRI.svg` and
+  `invalid-patternUnits-and-patternContentUnits.svg`, subsumed by the
+  gradient-side unresolved-url()/invalid-enum coverage; `pattern/missing-
+  width.svg`, subsumed by `missing-height.svg`; `pattern/self-recursive-
+  on-child.svg`, subsumed by `recursive-on-child.svg` and `self-
+  recursive.svg`).
+
+## Bugs found in this tranche
+
+Generating a golden only proves the harness works; every one of the 110
+PNGs was visually inspected against its source SVG's `<title>`/`<desc>`
+before being committed. None of this tranche's fixtures use the
+green=correct/red=wrong convention some PR 1/PR 2 fixtures used — paint-
+server fixtures instead show the gradient/pattern content directly, with a
+`stroke="darkblue"`/`stroke="black"` outline for reference, so "does the
+rendered ramp/tile match the described geometry" was the check, not a
+color-coded pass/fail.
+
+Two real, pre-existing rendering bugs surfaced during implementation and
+were fixed (see the git history for the fix commit): `resolveGradient`'s
+`objectBoundingBox` matrix composed `Translate(minX,minY).Mul(Scale(w,h))`
+— translate first, then scale — which (per this codebase's
+`Matrix.Mul(m,n)` = "m first, then n" convention) scales the translation by
+`(w,h)` too. For any shape not anchored at the document origin, this sent
+the gradient's local space to a device-space location far outside the
+visible page, so the shape painted as a flat block of the gradient's first
+stop color instead of a ramp. `pkg/render/pdfwrite`'s `FillShading` had the
+identical mistake placing its rasterized shading image. Both needed
+`Scale(...).Mul(Translate(...))` instead. Neither bug was caught by the
+pre-existing unit tests because every one of them used a shape/clip
+anchored at `(0,0)`, where `Translate(0,0)` is inert regardless of
+composition order — this tranche's off-origin fixtures (nearly all of
+them; the corpus's shapes sit at `x="20" y="20"`) surfaced it immediately.
+Fixed at the source, with new regression tests using an off-origin
+rect/clip in both `pkg/svg/draw` and `pkg/render/pdfwrite`.
