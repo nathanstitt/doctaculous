@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"image/color"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -184,7 +187,10 @@ func TestBuildRampFunctionThreeStops(t *testing.T) {
 // produce a zero-width /Bounds interval, which PDF's Type 3 stitching function
 // requires be strictly increasing (a reader's behavior on a degenerate bound
 // is undefined). The nudge must still preserve strictly-increasing /Bounds
-// across more than one coincident pair.
+// across more than one coincident pair. This checks the in-memory Real
+// values; TestBoundsSurviveSerialization is the byte-level counterpart that
+// actually caught the round-1 regression (a nudge too small to survive
+// formatReal's 4-decimal rounding).
 func TestBuildRampFunctionCoincidentOffsets(t *testing.T) {
 	stops := []render.ShadingStop{
 		{Offset: 0, Color: color.RGBA{R: 255, A: 255}},
@@ -202,9 +208,169 @@ func TestBuildRampFunctionCoincidentOffsets(t *testing.T) {
 	if !(float64(b0) < float64(b1)) {
 		t.Errorf("Bounds = [%v %v], want strictly increasing (coincident offsets must be nudged apart)", b0, b1)
 	}
-	if float64(b0) < 0.5 || float64(b0) > 0.5+1e-3 {
+	if float64(b0) < 0.5 || float64(b0) > 0.5+2e-3 {
 		t.Errorf("Bounds[0] = %v, want ~0.5 (the hard break, only nudged an imperceptible amount)", b0)
 	}
+}
+
+// dictBoundsBytes serializes dict (a /FunctionType 3 dict, as buildRampFunction
+// returns for >2 stops) through the SAME writeTo/formatReal code path
+// production uses (writer.put1 -> serialize), then extracts and parses the
+// /Bounds array back out of the raw PDF bytes with a regex — proving what a
+// real reader would actually see, not what the in-memory Real values were
+// before formatReal's 4-decimal rounding. This is the check the round-1
+// reviewer specifically asked for: the 1e-6 nudge regression was invisible to
+// any test that only inspected pre-serialization floats.
+var boundsRe = regexp.MustCompile(`/Bounds\s*\[([^\]]*)\]`)
+
+func dictBoundsBytes(t *testing.T, dict Dict) []float64 {
+	t.Helper()
+	var buf bytes.Buffer
+	dict.writeTo(&buf)
+	raw := buf.String()
+	m := boundsRe.FindStringSubmatch(raw)
+	if m == nil {
+		t.Fatalf("no /Bounds array found in emitted dict:\n%s", raw)
+	}
+	fields := strings.Fields(m[1])
+	out := make([]float64, len(fields))
+	for i, f := range fields {
+		v, err := strconv.ParseFloat(f, 64)
+		if err != nil {
+			t.Fatalf("/Bounds entry %q did not parse as a number: %v", f, err)
+		}
+		out[i] = v
+	}
+	return out
+}
+
+// assertBoundsWellFormed asserts, on values parsed back out of emitted PDF
+// bytes, that /Bounds is strictly increasing and every entry lies strictly
+// inside /Domain [0 1] (ISO 32000-1 §7.10.4: Domain₀ < Bounds₀ < … <
+// Bounds_{n-2} < Domain₁). A reader (Acrobat, Ghostscript) need not tolerate a
+// violation even though this project's own lenient parser does.
+func assertBoundsWellFormed(t *testing.T, bounds []float64) {
+	t.Helper()
+	for i, b := range bounds {
+		if b <= 0 || b >= 1 {
+			t.Errorf("Bounds[%d] = %v, want strictly inside (0,1)", i, b)
+		}
+		if i > 0 && !(b > bounds[i-1]) {
+			t.Errorf("Bounds[%d] = %v <= Bounds[%d] = %v, want strictly increasing", i, b, i-1, bounds[i-1])
+		}
+	}
+}
+
+// TestBoundsSurviveSerialization re-runs the round-1 reviewer's exact repro
+// (validated independently against Poppler, which rejects a non-strictly-
+// increasing /Bounds where this project's own lenient parser would not) on
+// the bytes buildRampFunction's dict actually serializes to, for all four
+// reported cases: a normal 3-stop ramp, a hard break (two stops at the same
+// offset), three stops at the same offset, and a cluster sitting AT the top
+// domain endpoint (1.0) — the case that additionally requires the upper-bound
+// clamp (Fix B), since naive forward-only nudging pushes it to or past 1.
+func TestBoundsSurviveSerialization(t *testing.T) {
+	rgba := func(r, g, b uint8) color.RGBA { return color.RGBA{R: r, G: g, B: b, A: 255} }
+	cases := map[string][]render.ShadingStop{
+		"normal 3-stop": {
+			{Offset: 0, Color: rgba(255, 0, 0)},
+			{Offset: 0.5, Color: rgba(0, 255, 0)},
+			{Offset: 1, Color: rgba(0, 0, 255)},
+		},
+		"hard break (two at 0.5)": {
+			{Offset: 0, Color: rgba(255, 0, 0)},
+			{Offset: 0.5, Color: rgba(255, 0, 0)},
+			{Offset: 0.5, Color: rgba(0, 0, 255)},
+			{Offset: 1, Color: rgba(0, 0, 255)},
+		},
+		"three at 0.5": {
+			{Offset: 0, Color: rgba(255, 0, 0)},
+			{Offset: 0.5, Color: rgba(255, 0, 0)},
+			{Offset: 0.5, Color: rgba(0, 255, 0)},
+			{Offset: 0.5, Color: rgba(0, 0, 255)},
+			{Offset: 1, Color: rgba(0, 0, 255)},
+		},
+		"cluster at 1.0": {
+			{Offset: 0, Color: rgba(255, 0, 0)},
+			{Offset: 1, Color: rgba(0, 255, 0)},
+			{Offset: 1, Color: rgba(0, 0, 255)},
+			{Offset: 1, Color: rgba(255, 255, 0)},
+		},
+	}
+	for name, stops := range cases {
+		t.Run(name, func(t *testing.T) {
+			fn := buildRampFunction(stops)
+			bounds := dictBoundsBytes(t, fn)
+			t.Logf("%s: /Bounds %v", name, bounds)
+			assertBoundsWellFormed(t, bounds)
+		})
+	}
+}
+
+// TestSpreadOffsetsClampsToDomainBoundary is TestBoundsSurviveSerialization's
+// unit-level counterpart, directly on spreadOffsets: a cluster at exactly 1.0,
+// a cluster at exactly 0.0, and a long run of coincident stops (long enough
+// that naive upward-only spreading would overflow past 1) must all still
+// yield strictly increasing offsets with every interior (would-be /Bounds)
+// value strictly inside (0,1).
+func TestSpreadOffsetsClampsToDomainBoundary(t *testing.T) {
+	mk := func(offsets ...float64) []render.ShadingStop {
+		stops := make([]render.ShadingStop, len(offsets))
+		for i, o := range offsets {
+			stops[i] = render.ShadingStop{Offset: o, Color: color.RGBA{A: 255}}
+		}
+		return stops
+	}
+	cases := map[string][]render.ShadingStop{
+		"cluster at 1.0":               mk(0, 1, 1, 1),
+		"cluster at 0.0":               mk(0, 0, 0, 1),
+		"long run at 1.0 (50 stops)":   append(mk(0), mkOnes(49)...),
+		"long run at 0.0 (50 stops)":   append(mkZeros(49), render.ShadingStop{Offset: 1, Color: color.RGBA{A: 255}}),
+		"2000 coincident stops at 0.5": mkAllSame(2000, 0.5),
+	}
+	for name, stops := range cases {
+		t.Run(name, func(t *testing.T) {
+			out := spreadOffsets(stops)
+			n := len(out)
+			for i := 1; i < n; i++ {
+				if !(out[i] > out[i-1]) {
+					t.Fatalf("offsets[%d]=%v <= offsets[%d]=%v, want strictly increasing", i, out[i], i-1, out[i-1])
+				}
+			}
+			// Only interior offsets (index 1..n-2) become /Bounds entries and
+			// must be strictly inside (0,1); the first/last offsets are the
+			// ramp's own endpoints and may legitimately sit at 0 or 1.
+			for i := 1; i < n-1; i++ {
+				if out[i] <= 0 || out[i] >= 1 {
+					t.Errorf("interior offsets[%d] = %v, want strictly inside (0,1)", i, out[i])
+				}
+			}
+		})
+	}
+}
+
+func mkOnes(n int) []render.ShadingStop {
+	out := make([]render.ShadingStop, n)
+	for i := range out {
+		out[i] = render.ShadingStop{Offset: 1, Color: color.RGBA{A: 255}}
+	}
+	return out
+}
+
+func mkZeros(n int) []render.ShadingStop {
+	out := make([]render.ShadingStop, n)
+	for i := range out {
+		out[i] = render.ShadingStop{Offset: 0, Color: color.RGBA{A: 255}}
+	}
+	return out
+}
+
+func mkAllSame(n int, offset float64) []render.ShadingStop {
+	out := make([]render.ShadingStop, n)
+	for i := range out {
+		out[i] = render.ShadingStop{Offset: offset, Color: color.RGBA{A: 255}}
+	}
+	return out
 }
 
 // TestFillShadingEmitsNativeShadingForOpaqueAxial is the device-level

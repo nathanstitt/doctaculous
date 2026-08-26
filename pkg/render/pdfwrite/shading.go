@@ -72,13 +72,20 @@ func buildShadingDict(desc render.ShadingDesc) Dict {
 // PDF /Bounds interval. Two (or more) stops at the same, or nearly the same,
 // offset make a hard color break in SVG/CSS ("later stop wins" — see
 // pkg/svg/stops.go's stopRamp.Eval); PDF's Type 3 stitching function instead
-// requires /Bounds to be STRICTLY increasing, so a zero (or near-zero) width
-// subdomain would be malformed and reader behavior on it is undefined. Nudging
-// the later offset forward by this amount keeps /Bounds strictly increasing
-// while the resulting subdomain is visually imperceptible (a fraction of a
-// point at any realistic gradient size), preserving the hard break instead of
-// smearing it into a visible ramp.
-const minStopSpan = 1e-6
+// requires /Bounds to be STRICTLY increasing (ISO 32000-1 §7.10.4:
+// Domain₀ < Bounds₀ < … < Bounds_{n-2} < Domain₁), so a zero (or near-zero)
+// width subdomain would be malformed and reader behavior on it is undefined.
+// Nudging the later offset forward by this amount keeps /Bounds strictly
+// increasing while the resulting subdomain is visually imperceptible (at any
+// realistic gradient size) — but the nudge must also survive serialization:
+// formatReal (object.go) writes PDF reals at 4 decimal places, a representable
+// step of 1e-4, so a nudge smaller than that (an earlier version of this code
+// used 1e-6) rounds away to nothing and the very zero-width interval it was
+// meant to prevent is what gets written. 5e-4 sits comfortably above that
+// step, so it always survives rounding, while still being sub-pixel (and
+// therefore an imperceptible hard break, not a visible ramp) at any gradient
+// length a page-space PDF would realistically use.
+const minStopSpan = 5e-4
 
 // buildRampFunction converts a non-decreasing stop list into a PDF /Function:
 // a single FunctionType 2 (exponential, N=1 = linear) for exactly two stops, or
@@ -142,20 +149,52 @@ func rgbArray(c color.RGBA) Array {
 	}
 }
 
-// spreadOffsets returns stops' offsets with any coincident (or too-close) run
-// nudged forward by minStopSpan so consecutive values are strictly increasing,
-// matching PDF's requirement that /Bounds (built from the interior offsets) be
-// strictly increasing. Only interior offsets (index 1..n-2) become /Bounds
-// entries, but every offset is normalized here so the nudging is monotonic
-// across the whole list rather than computed piecemeal.
+// spreadOffsets returns stops' offsets nudged so that every value that will
+// become a /Bounds entry (interior offsets, index 1..n-2 — see
+// buildRampFunction) is STRICTLY increasing and strictly inside PDF's
+// /Domain [0 1] (ISO 32000-1 §7.10.4: Domain₀ < Bounds₀ < … < Bounds_{n-2} <
+// Domain₁). Two passes:
+//
+//  1. Forward: any run of coincident (or too-close) offsets is nudged forward
+//     by minStopSpan off its predecessor, exactly as a naive "spread upward"
+//     pass would do. This alone can push a run sitting at or near the top of
+//     the range (offset 1.0) to or past 1 — outside the domain.
+//  2. Backward: walk from the end, pulling any value that is at or above the
+//     one after it down by minStopSpan. Anchored at (n-1, 1.0) — the last
+//     offset conceptually never exceeds 1 — this guarantees the last INTERIOR
+//     offset (the one that actually becomes a /Bounds entry) lands strictly
+//     below 1, and re-establishes strictly-decreasing spacing for any run the
+//     forward pass pushed over the top, compressing it back under the domain
+//     ceiling instead of clamping it flat (which would reintroduce the very
+//     zero-width interval this function exists to avoid).
+//
+// A gradient with enough coincident stops to make both a minStopSpan-wide
+// forward run AND a minStopSpan-wide backward run impossible to fit inside
+// (0,1) simultaneously (many hundreds of stops, all clustered at the same
+// offset) still cannot produce a NON-increasing result: the backward pass's
+// floor is exactly the forward pass's output, so in the pathological case the
+// two passes converge on the same (still strictly increasing, by
+// construction of pass 1) sequence rather than crossing each other.
 func spreadOffsets(stops []render.ShadingStop) []float64 {
-	out := make([]float64, len(stops))
+	n := len(stops)
+	out := make([]float64, n)
+
+	// Pass 1: forward nudge (unbounded above).
 	for i, s := range stops {
 		v := s.Offset
 		if i > 0 && v <= out[i-1]+minStopSpan {
 			v = out[i-1] + minStopSpan
 		}
 		out[i] = v
+	}
+
+	// Pass 2: backward pull-down, anchored just under Domain₁ = 1.
+	ceiling := 1.0
+	for i := n - 1; i >= 0; i-- {
+		if out[i] >= ceiling {
+			out[i] = ceiling - minStopSpan
+		}
+		ceiling = out[i]
 	}
 	return out
 }

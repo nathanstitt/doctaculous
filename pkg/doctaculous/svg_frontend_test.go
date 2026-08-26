@@ -199,6 +199,54 @@ func TestSVGOpaqueGradientVisualEquivalence(t *testing.T) {
 	}
 }
 
+// TestHardBreakStillRendersAsBreak proves pkg/render/pdfwrite's coincident-
+// offset nudge (minStopSpan, widened from 1e-6 to 5e-4 so it survives
+// formatReal's 4-decimal-place rounding — see shading.go) does not visibly
+// smear a hard two-tone color break (two stops at the same offset) into a
+// ramp: sampling just before and just after the break in the round-tripped
+// PDF render must show the two solid colors, not an interpolated blend.
+func TestHardBreakStillRendersAsBreak(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="20">
+	  <defs>
+	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+	      <stop offset="0" stop-color="red"/>
+	      <stop offset="0.5" stop-color="red"/>
+	      <stop offset="0.5" stop-color="blue"/>
+	      <stop offset="1" stop-color="blue"/>
+	    </linearGradient>
+	  </defs>
+	  <rect x="0" y="0" width="100" height="20" fill="url(#g1)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	re, err := OpenBytes(pdfBuf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := re.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rgba := img.(*image.RGBA)
+	// Just before the break (x=48 of 100) should be solid red; just after
+	// (x=52) should be solid blue. Neither should show a purple blend.
+	before := rgba.RGBAAt(48, 10)
+	after := rgba.RGBAAt(52, 10)
+	t.Logf("before break: %+v; after break: %+v", before, after)
+	if before.R < 200 || before.B > 20 {
+		t.Errorf("pixel just before break = %+v, want solid red (no smear)", before)
+	}
+	if after.B < 200 || after.R > 20 {
+		t.Errorf("pixel just after break = %+v, want solid blue (no smear)", after)
+	}
+}
+
 // TestSVGOpaqueGradientEmitsNativeShading is the structural counterpart to
 // TestSVGOpaqueGradientVisualEquivalence: an opaque, pad-spread gradient's PDF
 // output must contain a /ShadingType dictionary and must NOT contain an image
