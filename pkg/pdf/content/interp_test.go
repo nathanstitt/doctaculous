@@ -48,6 +48,9 @@ func (d *recDevice) Restore()                                   { d.restores++ }
 func (d *recDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }
+func (d *recDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 func runContent(t *testing.T, src string, res Resources) *recDevice {
 	t.Helper()

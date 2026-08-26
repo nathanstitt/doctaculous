@@ -43,6 +43,14 @@ type Group struct {
 	// the ClipPath type (clippath.go) for how pkg/svg/draw turns this into a
 	// render.Device.BuildClipMask call.
 	ClipPath *ClipPath
+
+	// Mask is the resolved mask="url(#...)" reference on the <g> element
+	// itself, or nil when absent/invalid/"none". See the Mask type
+	// (mask.go) for how pkg/svg/draw turns this into a
+	// render.Device.BuildLuminanceMask call. Applied AFTER ClipPath and
+	// BEFORE Opacity in the composite order (clip -> mask -> opacity), per
+	// the design doc.
+	Mask *Mask
 }
 
 func (*Group) isNode() {}
@@ -73,6 +81,10 @@ type Shape struct {
 	// ClipPath is the resolved clip-path="url(#...)" reference on this
 	// shape, or nil when absent/invalid/"none". See Group.ClipPath.
 	ClipPath *ClipPath
+
+	// Mask is the resolved mask="url(#...)" reference on this shape, or nil
+	// when absent/invalid/"none". See Group.Mask.
+	Mask *Mask
 }
 
 func (*Shape) isNode() {}
@@ -127,6 +139,8 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		buildingPattern: map[string]bool{},
 		clipMemo:        map[string]*ClipPath{},
 		buildingClip:    map[string]bool{},
+		maskMemo:        map[string]*Mask{},
+		buildingMask:    map[string]bool{},
 	}
 	if hasVB {
 		// Gradient userSpaceOnUse coordinates live in the same user-unit
@@ -269,7 +283,6 @@ var unsupportedElements = map[string]bool{
 	"symbol":           true,
 	"text":             true,
 	"image":            true,
-	"mask":             true,
 	"filter":           true,
 	"marker":           true,
 	"switch":           true,
@@ -319,6 +332,15 @@ var unsupportedElements = map[string]bool{
 // separately, through the clip-only allowlist in clippath.go, which is
 // deliberately stricter than buildGroup's forgiving default — see that
 // file's buildClipChild).
+//
+// mask is likewise resolved entirely out-of-band: a shape/group referencing
+// one via mask="url(#...)" carries the resolved *Mask directly (see
+// resolveMask in mask.go), so the <mask> element itself must contribute NO
+// scene nodes. Unlike clipPath, a <mask>'s children ARE walked through the
+// ordinary buildKidsGroup machinery (a mask may contain any paintable
+// content, not a shape-only allowlist) — but that walk happens inside
+// resolveMask itself, not here, so the main scene walk must still never
+// descend into a <mask> a second time.
 var skippedElements = map[string]bool{
 	"defs":           true,
 	"style":          true,
@@ -330,6 +352,7 @@ var skippedElements = map[string]bool{
 	"pattern":        true,
 	"stop":           true,
 	"clipPath":       true,
+	"mask":           true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -381,6 +404,18 @@ type sceneBuilder struct {
 	// to "no clip-path" for the self-referencing property instead of
 	// recursing forever.
 	buildingClip map[string]bool
+
+	// maskMemo memoizes resolveMask by id, mirroring clipMemo exactly (see
+	// that field's doc comment): several elements can reference the same
+	// <mask>, and each reference resolves the identical *Mask value.
+	maskMemo map[string]*Mask
+
+	// buildingMask guards against a <mask> whose own mask attribute (or,
+	// once <use>/<image> can appear inside a mask's content, a descendant's)
+	// refers back to a <mask> already being resolved further up the current
+	// call stack — directly (self-reference) or through a cycle of several
+	// masks. Mirrors buildingClip's shape exactly.
+	buildingMask map[string]bool
 
 	// buildingPattern guards against a pattern tile's content referencing
 	// (directly, or via its own href chain, or indirectly through a chain of
@@ -498,6 +533,9 @@ func (b *sceneBuilder) buildGroupElement(el *element, st Style, ctx *cascadeCtx)
 	if ref, ok := st.ClipPathRef(); ok {
 		g.ClipPath = b.resolveClipPathRef(ref)
 	}
+	if ref, ok := st.MaskRef(); ok {
+		g.Mask = b.resolveMaskRef(ref)
+	}
 	return g
 }
 
@@ -537,6 +575,9 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	}
 	if ref, ok := st.ClipPathRef(); ok {
 		s.ClipPath = b.resolveClipPathRef(ref)
+	}
+	if ref, ok := st.MaskRef(); ok {
+		s.Mask = b.resolveMaskRef(ref)
 	}
 	return s
 }

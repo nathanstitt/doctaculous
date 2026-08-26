@@ -122,6 +122,34 @@ type Device interface {
 	// boxes into a rectangular approximation, or returning a mask that
 	// covers its overall bounds — but must never panic and never return nil.
 	BuildClipMask(paths []MaskPath) GroupMask
+
+	// BuildLuminanceMask renders paint's content into a scratch surface the
+	// same size as the device, then converts the result into a GroupMask
+	// suitable for EndGroup: this is how an SVG <mask> (rendered content,
+	// not geometry) turns into a per-pixel alpha multiplier.
+	//
+	// paint receives a Device to draw into — NOT necessarily the receiver
+	// itself, since the backend may hand back a device wrapping a fresh
+	// scratch surface — so pkg/svg/draw can paint the mask's subtree through
+	// the ordinary render.Device seam without importing a concrete backend
+	// (the same layering rule BuildClipMask upholds for clip-path). The
+	// scratch starts fully transparent black, matching BeginGroup's
+	// isolated-group backdrop, so area the mask content never touches
+	// evaluates to "fully masked out" per SVG.
+	//
+	// alphaOnly selects mask-type: false (the default, "luminance") converts
+	// each painted pixel's sRGB color to luminance via the Rec. 709
+	// coefficients (0.2126*R + 0.7152*G + 0.0722*B), then multiplies by that
+	// pixel's own alpha, per this engine's decision to follow browsers/SVG2/
+	// resvg's sRGB default rather than SVG 1.1's linearRGB (see the SVG
+	// groups/clip/mask design doc, decision 2). true ("alpha") uses the
+	// pixel's own alpha channel directly, ignoring color.
+	//
+	// A backend that cannot rasterize offscreen (a not-yet-built vector
+	// writer path) may degrade gracefully — e.g. by returning nil and
+	// logging, which pkg/svg/draw's caller must treat as "no masking" — but
+	// must never panic and must never invoke paint with a nil Device.
+	BuildLuminanceMask(size image.Point, alphaOnly bool, paint func(dev Device)) GroupMask
 }
 
 // MaskPath is one child shape contributing to a clip-path union: a path

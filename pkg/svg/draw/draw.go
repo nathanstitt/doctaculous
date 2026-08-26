@@ -128,14 +128,15 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			return
 		}
 		gm := node.M.Mul(m)
-		if node.Opacity >= 1 && node.ClipPath == nil {
-			// The common case (a plain <g> with no opacity and no clip-path):
-			// skip BeginGroup/EndGroup entirely. Opening a group allocates a
-			// full-page offscreen scratch buffer (see raster.Device.BeginGroup),
-			// so paying that cost for every plain <g> in a document would be a
-			// serious, needless performance regression — there is nothing for
-			// a group with no opacity or clip to composite that per-paint alpha
-			// (unchanged, alpha=alpha) doesn't already produce correctly.
+		if node.Opacity >= 1 && node.ClipPath == nil && node.Mask == nil {
+			// The common case (a plain <g> with no opacity, clip-path, or
+			// mask): skip BeginGroup/EndGroup entirely. Opening a group
+			// allocates a full-page offscreen scratch buffer (see
+			// raster.Device.BeginGroup), so paying that cost for every plain
+			// <g> in a document would be a serious, needless performance
+			// regression — there is nothing for a group with no opacity,
+			// clip, or mask to composite that per-paint alpha (unchanged,
+			// alpha=alpha) doesn't already produce correctly.
 			for _, kid := range node.Kids {
 				r.paint(dev, kid, gm, alpha, warned)
 			}
@@ -184,6 +185,16 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			// helper exists.
 			mask = r.buildClipMask(dev, node.ClipPath, gm, nil)
 		}
+		if node.Mask != nil {
+			// Composite order is clip -> mask -> opacity (see the design
+			// doc): intersecting the luminance mask with whatever clip mask
+			// already exists applies both, in that order, to the same
+			// flattened group result. Same nil-target approximation as
+			// ClipPath just above: a Group has no single Path for an
+			// objectBoundingBox maskUnits/maskContentUnits target.
+			lumMask := r.buildMask(dev, node.Mask, gm, nil)
+			mask = intersectMasks(mask, lumMask)
+		}
 		dev.EndGroup(alpha*node.Opacity, "", mask)
 		dev.Restore()
 	case *svg.Shape:
@@ -231,7 +242,7 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 	hasFill := s.FillGradient != nil || s.FillPattern != nil || hasFillPaint
 	_, hasStroke := s.Style.StrokePaint()
 
-	if s.ClipPath != nil || (opacity < 1 && hasFill && hasStroke) {
+	if s.ClipPath != nil || s.Mask != nil || (opacity < 1 && hasFill && hasStroke) {
 		// alpha (the caller's incoming, e.g. from an enclosing pattern
 		// tile's own fill alpha) and opacity (this shape's own element
 		// opacity) both need to reach the final composite, but only ONE of
@@ -242,11 +253,11 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		// stroke alike), so folding it into the paints INSIDE the group is
 		// equally correct and avoids a second nested group.
 		//
-		// A clip-path forces this same grouped path even when opacity is 1
-		// or the shape has only a fill or only a stroke: EndGroup is the
-		// only place a GroupMask can be applied, so clipping a shape at all
-		// requires opening a group regardless of whether opacity itself
-		// would have needed one.
+		// A clip-path or mask forces this same grouped path even when
+		// opacity is 1 or the shape has only a fill or only a stroke:
+		// EndGroup is the only place a GroupMask can be applied, so clipping
+		// or masking a shape at all requires opening a group regardless of
+		// whether opacity itself would have needed one.
 		r.paintShapeGrouped(dev, s, dp, sm, alpha, opacity, warned)
 		return
 	}
@@ -274,6 +285,14 @@ func (r *Renderer) paintShapeGrouped(dev render.Device, s *svg.Shape, dp *render
 		// gradient's objectBoundingBox mapping (see gradient.go) — the exact
 		// reuse the design calls for.
 		mask = r.buildClipMask(dev, s.ClipPath, sm, s.Path.Bounds)
+	}
+	if s.Mask != nil {
+		// Composite order is clip -> mask -> opacity (see the design doc):
+		// intersecting the luminance mask with whatever clip mask already
+		// exists applies both, in that order, to the same flattened fill+
+		// stroke result. Same objectBoundingBox target as ClipPath above.
+		lumMask := r.buildMask(dev, s.Mask, sm, s.Path.Bounds)
+		mask = intersectMasks(mask, lumMask)
 	}
 	dev.EndGroup(opacity, "", mask)
 	dev.Restore()

@@ -27,6 +27,14 @@ import (
 // fill/stroke url() reference. clip-rule IS consumed by Style.apply
 // (applyClipRule), since — unlike clip-path itself — it is an ordinary
 // inherited enum property with no document-index dependency.
+//
+// mask is resolved out-of-band exactly like clip-path (see resolveMask),
+// for the same document-index reason. mask-type IS consumed by Style.apply
+// (applyMaskType): it is an ordinary non-inherited enum property with no
+// document-index dependency, but it must still be listed here (not just in
+// apply()) so `style="mask-type:alpha"` and a `mask-type` sheet rule both
+// reach it — see the resvg mask-type-in-style fixture, which this hint
+// entry is what makes pass.
 var svgPresentationAttrs = []string{
 	"color",
 	"fill",
@@ -47,6 +55,8 @@ var svgPresentationAttrs = []string{
 	"stop-opacity",
 	"clip-path",
 	"clip-rule",
+	"mask",
+	"mask-type",
 }
 
 // svgPresentationHints maps an element's SVG presentation attributes to CSS

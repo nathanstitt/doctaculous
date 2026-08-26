@@ -361,6 +361,65 @@ func (d *Device) BuildClipMask(paths []render.MaskPath) render.GroupMask {
 	return union
 }
 
+// BuildLuminanceMask renders paint's content into a fresh, fully-transparent
+// scratch *image.RGBA the same size as size, then converts the result into a
+// GroupMask: see render.Device's doc comment for the luminance-vs-alpha
+// formula (alphaOnly selects which).
+//
+// paint runs against a NEW *Device wrapping the scratch, not d itself: d's
+// own clip/group stacks must stay untouched by whatever pkg/svg/draw does
+// while painting mask content (a mask's content establishes its own,
+// independent paint state — SVG defines no inheritance of the masked
+// element's clip into the mask), and giving paint a throwaway Device is the
+// simplest way to guarantee that. The scratch device shares d's logf so a
+// degradation logged while painting mask content is still surfaced.
+func (d *Device) BuildLuminanceMask(size image.Point, alphaOnly bool, paint func(dev render.Device)) render.GroupMask {
+	if paint == nil || size.X <= 0 || size.Y <= 0 {
+		return image.NewAlpha(image.Rectangle{})
+	}
+	scratch := New(image.NewRGBA(image.Rectangle{Max: size}))
+	scratch.logf = d.logf
+	paint(scratch)
+
+	b := scratch.img.Bounds()
+	mask := image.NewAlpha(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			mask.SetAlpha(x, y, color.Alpha{A: pixelMaskValue(scratch.img.RGBAAt(x, y), alphaOnly)})
+		}
+	}
+	return mask
+}
+
+// pixelMaskValue converts one premultiplied *image.RGBA pixel into a mask
+// coverage value: the pixel's own alpha directly for mask-type=alpha, or its
+// sRGB luminance (Rec. 709 coefficients, on sRGB — NOT linearRGB, see
+// render.Device.BuildLuminanceMask's doc comment) times its own alpha for
+// the default mask-type=luminance. c is premultiplied (the raw *image.RGBA
+// convention this backend's scratch surfaces use), so un-premultiplying
+// first is required before the sRGB coefficients mean anything — computing
+// luminance directly on premultiplied channels would silently double-count
+// alpha (once from premultiplication, once from the explicit "times its own
+// alpha" step SVG's masking spec calls for).
+func pixelMaskValue(c color.RGBA, alphaOnly bool) uint8 {
+	if c.A == 0 {
+		return 0
+	}
+	if alphaOnly {
+		return c.A
+	}
+	straight := unpremultiplyRGBA(c)
+	lum := 0.2126*float64(straight.R) + 0.7152*float64(straight.G) + 0.0722*float64(straight.B)
+	v := lum * float64(c.A) / 255
+	if v < 0 {
+		v = 0
+	}
+	if v > 255 {
+		v = 255
+	}
+	return uint8(math.Round(v))
+}
+
 // unionAlphaMax returns a new alpha mask covering the union of a and b's
 // bounding rectangles, with each pixel's coverage the MAX of a's and b's
 // (each treated as zero outside its own bounds). max() is the correct

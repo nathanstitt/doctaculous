@@ -485,6 +485,24 @@ func (d *pageDevice) BuildClipMask(paths []render.MaskPath) render.GroupMask {
 	return mask
 }
 
+// BuildLuminanceMask is a STUB: this writer has no offscreen raster surface
+// to render mask content into and read pixels back from (real support is
+// the next task — a PDF `/SMask << /S /Luminosity >>` soft mask, per the
+// SVG groups/clip/mask design doc's decision 3). It returns nil (meaning "no
+// masking" to EndGroup, which this writer's BeginGroup/EndGroup also
+// currently pass through — see those methods) and logs once per device
+// rather than fabricating an approximation the way BuildClipMask does: an
+// inert rectangular stand-in would be actively misleading for a mask (whose
+// whole point is graduated coverage from rendered content), unlike a clip
+// union's binary in/out shape.
+func (d *pageDevice) BuildLuminanceMask(size image.Point, alphaOnly bool, paint func(dev render.Device)) render.GroupMask {
+	if d.logf != nil && !d.groupLogged {
+		d.groupLogged = true
+		d.logf("pdfwrite: groups not yet composited as PDF transparency groups; painting children directly (opacity/mask ignored)")
+	}
+	return nil
+}
+
 // unionClipBounds returns the smallest rectangle enclosing both a and b; a
 // nil operand is treated as "no contribution yet" (returns the other).
 func unionClipBounds(a, b *clipBounds) *clipBounds {

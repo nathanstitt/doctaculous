@@ -52,6 +52,20 @@ type Style struct {
 	// fill/stroke url() references are recorded as a string here and
 	// resolved later (see fillServer/strokeServer).
 	clipPathRef string
+
+	// maskRef is the raw, unresolved mask property value ("none",
+	// "url(#id)", or an invalid/unrecognized value), NOT inherited (mask is
+	// a non-inherited property per SVG/CSS Masking, exactly like
+	// clip-path). Resolved against the document index by the scene builder
+	// (see resolveMask in mask.go), not here — see clipPathRef's doc
+	// comment for why.
+	maskRef string
+
+	// maskType is mask-type (SVG2: "luminance" (default) | "alpha"),
+	// non-inherited. Unlike maskRef, this IS a plain enum with no
+	// document-index dependency, so it is fully resolved here rather than
+	// deferred to the scene builder.
+	maskType string
 }
 
 // defaultStyle returns the SVG initial presentation state: black fill, no
@@ -79,6 +93,8 @@ func defaultStyle() Style {
 		visible:       true,
 		clipRule:      render.NonZero,
 		clipPathRef:   "", // not inherited; reset every apply() call below
+		maskRef:       "", // not inherited; reset every apply() call below
+		maskType:      "luminance",
 	}
 }
 
@@ -96,8 +112,10 @@ func defaultStyle() Style {
 // property is inherited.
 func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s := parent
-	s.opacity = 1      // not inherited; may be overridden below
-	s.clipPathRef = "" // not inherited; may be overridden below
+	s.opacity = 1            // not inherited; may be overridden below
+	s.clipPathRef = ""       // not inherited; may be overridden below
+	s.maskRef = ""           // not inherited; may be overridden below
+	s.maskType = "luminance" // not inherited; may be overridden below
 
 	if el == nil {
 		return s
@@ -133,6 +151,8 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyVisibility(&s, attr, logf)
 	applyClipRule(&s, attr, logf)
 	applyClipPathProp(&s, attr, logf)
+	applyMaskProp(&s, attr, logf)
+	applyMaskType(&s, attr, logf)
 
 	return s
 }
@@ -323,6 +343,43 @@ func applyClipPathProp(s *Style, attr func(string) (string, bool), logf func(str
 		return
 	}
 	s.clipPathRef = val
+}
+
+// applyMaskProp records the raw mask property value for the scene builder to
+// resolve against the document index, mirroring applyClipPathProp exactly:
+// "none" and "inherit" both clear/keep maskRef as appropriate; anything else
+// (including a syntactically invalid url()) is recorded verbatim —
+// resolveMask is where an invalid FuncIRI is distinguished from a valid one
+// that doesn't resolve, both of which mean "no masking" per SVG's
+// error-handling model.
+func applyMaskProp(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("mask")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		s.maskRef = ""
+		return
+	}
+	s.maskRef = val
+}
+
+// applyMaskType resolves mask-type (SVG2: luminance|alpha), non-inherited.
+// An unrecognized value is logged and ignored, keeping the default
+// (luminance) — matching applyFillRule's error-handling shape for an
+// unparseable enum.
+func applyMaskType(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("mask-type")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch val {
+	case "luminance", "alpha":
+		s.maskType = val
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "mask-type", val)
+	}
 }
 
 // applyStrokeWidth resolves stroke-width as a length in user units.
@@ -545,4 +602,17 @@ func (s Style) ClipRule() render.FillRule {
 // is present ("" / absent / "none" report ok=false).
 func (s Style) ClipPathRef() (string, bool) {
 	return s.clipPathRef, s.clipPathRef != ""
+}
+
+// MaskRef returns the element's raw, unresolved (non-inherited) mask
+// property value ("url(#id)" or an invalid value) and whether one is
+// present ("" / absent / "none" report ok=false).
+func (s Style) MaskRef() (string, bool) {
+	return s.maskRef, s.maskRef != ""
+}
+
+// MaskTypeValue returns the element's resolved (non-inherited) mask-type
+// value: "luminance" (default) or "alpha".
+func (s Style) MaskTypeValue() string {
+	return s.maskType
 }

@@ -58,6 +58,9 @@ func (d *recordDevice) Restore()                                         { d.res
 func (d *recordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }
+func (d *recordDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 // triangle returns a small closed outline in em units so a glyph is non-empty.
 func triangle() *render.Path {

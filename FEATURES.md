@@ -647,12 +647,32 @@ read+write vocabulary for the tinycld text adoption path):
   offscreen surface to rasterize into and whose group compositing is still a pass-through stub —
   returns a documented rectangular bounding-box approximation instead of an empty/nil mask, ready for
   when transparency-group compositing lands there.
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, `mask`,
-  filters, `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices
-  in `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- `mask`/`<mask>`: the mask's rendered content's LUMINANCE (not its geometry) becomes per-pixel alpha,
+  via a new `render.Device.BuildLuminanceMask(size, alphaOnly, paint func(dev Device)) GroupMask`
+  primitive — the backend hands back a scratch surface, `pkg/svg/draw` paints the mask's subtree into
+  it through the ordinary `Device` seam (never importing a concrete backend), and the backend converts
+  the result to a mask. Default sRGB luminance (`0.2126R+0.7152G+0.0722B`, times the pixel's own
+  alpha) rather than SVG 1.1's linearRGB, matching browsers/SVG2/resvg (following the letter of SVG
+  1.1 here would make every mask golden visibly wrong). `mask-type` (SVG2, new non-inherited property
+  in both `hints.go` and `style.go`) selects `luminance` (default) or `alpha` (reads the pixel's own
+  alpha channel directly). `maskUnits` (`objectBoundingBox` default, `-10%/-10%/120%/120%` region —
+  a real 10% bleed past the masked element's bbox) and `maskContentUnits` (`userSpaceOnUse` default —
+  the OPPOSITE default from `maskUnits`) both ship, reusing the clip-path objectBoundingBox mapping. A
+  `transform` on the `<mask>` element itself is ignored (only a transform on the masked element
+  applies); an empty `<mask>` (no children) makes its target FULLY TRANSPARENT, distinct from
+  `mask="none"`/an unresolved reference (no masking at all). Mask, clip-path, and opacity compose in
+  that order (clip → mask → opacity) via mask intersection before a single `EndGroup` call. Nested
+  masks (a mask referencing another mask) and a self-referencing/cyclic mask chain (a `buildingMask`
+  recursion guard mirroring `buildingClip`) both terminate. Resolved during `Parse`, like clip-path;
+  raster implements `BuildLuminanceMask` exactly (renders into a scratch `*image.RGBA`, converts per
+  pixel); pdfwrite — which has no offscreen surface yet — returns `nil` (no masking) with a logged
+  fidelity note, pending the luminosity soft-mask work.
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, filters,
+  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices in
+  `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
 - 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
-  with committed goldens; clip-path is covered by hand-authored fixtures/tests in `pkg/svg`,
-  `pkg/svg/draw`, and `pkg/render/raster` (no resvg `masking/clipPath` tranche is vendored yet).
+  with committed goldens; clip-path and mask are covered by hand-authored fixtures/tests in `pkg/svg`,
+  `pkg/svg/draw`, and `pkg/render/raster` (no resvg `masking/**` tranche is vendored yet).
 
 **SVG input — CSS styling** (`pkg/svg`, `pkg/css`):
 
