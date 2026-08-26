@@ -123,6 +123,15 @@ func (w *writer) alloc() Ref {
 // put stores obj at id (from alloc).
 func (w *writer) put(id Ref, obj object) { w.objs[int(id)-1] = obj }
 
+// put1 allocates a new indirect object holding obj and returns its reference,
+// combining alloc+put for a value that has no separate identity to track
+// afterward (e.g. a /Shading dictionary referenced only from a resource dict).
+func (w *writer) put1(obj object) Ref {
+	id := w.alloc()
+	w.put(id, obj)
+	return id
+}
+
 // setRoot records the document catalog reference written into the trailer.
 func (w *writer) setRoot(id Ref) { w.root = id }
 
