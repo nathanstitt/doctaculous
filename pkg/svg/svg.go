@@ -33,10 +33,23 @@ func (*Group) isNode() {}
 
 // Shape is one paintable path with its resolved style (an SVG basic shape:
 // rect, circle, ellipse, line, polyline, polygon, or path).
+//
+// FillGradient/StrokeGradient carry an ALREADY-RESOLVED paint server (a
+// render.Shader plus the matrix mapping its local coordinate space into this
+// Shape's own user space, i.e. composed before M) rather than a url() id:
+// the document index a gradient id resolves through is discarded when Parse
+// returns, and Document must stay a read-only, side-table-free value so it
+// can be shared lock-free across the engine's parallel page-render fan-out.
+// Either field is nil when the corresponding fill/stroke does not reference
+// a (successfully resolved) gradient — see Style.FillServer/StrokeServer for
+// why a Style may still carry a server id even when resolution fails or a
+// pattern is referenced (patterns are not yet resolved into either field).
 type Shape struct {
-	M     render.Matrix // local transform
-	Path  *render.Path  // user-space geometry, pre-transform
-	Style Style
+	M              render.Matrix // local transform
+	Path           *render.Path  // user-space geometry, pre-transform
+	Style          Style
+	FillGradient   *paintServer // resolved fill="url(#...)" gradient, or nil
+	StrokeGradient *paintServer // resolved stroke="url(#...)" gradient, or nil
 }
 
 func (*Shape) isNode() {}
@@ -84,8 +97,16 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		doc.rootM = render.Identity
 	}
 
-	b := &sceneBuilder{logf: logf, warned: map[string]bool{}}
+	b := &sceneBuilder{logf: logf, warned: map[string]bool{}, vp: viewport{w: doc.WidthPt, h: doc.HeightPt}}
+	if hasVB {
+		// Gradient userSpaceOnUse coordinates live in the same user-unit
+		// space as the element geometry they paint — i.e. viewBox space when
+		// a viewBox is present, not the post-rootM viewport pixel space — so
+		// percentage resolution must use the viewBox extent in that case.
+		b.vp = viewport{w: vb.W, h: vb.H}
+	}
 	b.idx = buildIndex(root, b.warnOnceMsg)
+	b.servers = newPaintServerResolver(b.idx, logf)
 	ctx := &cascadeCtx{idx: b.idx, logf: logf}
 	doc.root = b.buildGroup(root, defaultStyle(), ctx)
 
@@ -268,9 +289,11 @@ var shapeElements = map[string]bool{
 // walk begins, and is discarded along with the sceneBuilder when Parse
 // returns — it never reaches Document.
 type sceneBuilder struct {
-	logf   func(string, ...any)
-	warned map[string]bool
-	idx    *docIndex
+	logf    func(string, ...any)
+	warned  map[string]bool
+	idx     *docIndex
+	servers *paintServerResolver // gradient/pattern href-chain resolver, built once from idx
+	vp      viewport             // current viewport size, for userSpaceOnUse percentage resolution
 }
 
 // buildGroup converts el's children into a Group, threading inherited style
@@ -370,7 +393,12 @@ const groupOpacityWarnKey = " group-opacity"
 
 // buildShape converts a basic-shape element into a Shape, or nil when
 // shapePath reports the shape degenerate (zero/negative extent) or
-// visibility:hidden drops it.
+// visibility:hidden drops it. A fill or stroke that references a gradient
+// (Style.FillServer/StrokeServer) is resolved here, against path's
+// PRE-TRANSFORM geometry (the objectBoundingBox definition), and the result
+// is stored on the Shape rather than the "#id" alone — see the Shape doc
+// comment on why resolution must happen now, before Parse discards the
+// document index.
 func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	if !st.visible {
 		// visibility:hidden drops the shape outright in this PR: visibility
@@ -382,11 +410,26 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	if path == nil {
 		return nil
 	}
-	return &Shape{
+	s := &Shape{
 		M:     elementTransform(el, b.logf),
 		Path:  path,
 		Style: st,
 	}
+	if ref, ok := st.FillServer(); ok {
+		if id, ok := fragmentID(ref); ok {
+			if ps, ok := resolveGradient(id, b.servers, path, b.vp, b.logf); ok {
+				s.FillGradient = &ps
+			}
+		}
+	}
+	if ref, ok := st.StrokeServer(); ok {
+		if id, ok := fragmentID(ref); ok {
+			if ps, ok := resolveGradient(id, b.servers, path, b.vp, b.logf); ok {
+				s.StrokeGradient = &ps
+			}
+		}
+	}
+	return s
 }
 
 // elementTransform parses el's transform attribute (absent -> Identity).
