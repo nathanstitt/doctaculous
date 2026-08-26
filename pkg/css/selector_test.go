@@ -197,3 +197,30 @@ func TestPseudoClassMatching(t *testing.T) {
 		t.Error("a:hover should match nothing in a static render")
 	}
 }
+
+func TestSelectorTypeCasePreserved(t *testing.T) {
+	// A camelCase type selector must match a node reporting that exact name
+	// (SVG: linearGradient, clipPath, feGaussianBlur are case-sensitive names).
+	sheet := Parse(`linearGradient { fill: red }`)
+	if len(sheet.Rules) != 1 || len(sheet.Rules[0].Selectors) != 1 {
+		t.Fatalf("parse produced %d rules", len(sheet.Rules))
+	}
+	sel := sheet.Rules[0].Selectors[0]
+	if !sel.Matches(&fakeNode{tag: "linearGradient"}) {
+		t.Error("linearGradient selector did not match a linearGradient node")
+	}
+	// HTML stays case-insensitive: authored case must not matter against a
+	// lowercase-reporting HTML node.
+	for _, src := range []string{"DIV { color: red }", "Div { color: red }", "div { color: red }"} {
+		s := Parse(src)
+		if !s.Rules[0].Selectors[0].Matches(&fakeNode{tag: "div"}) {
+			t.Errorf("%q did not match an html div node", src)
+		}
+	}
+	// And a lowercase selector still matches a camelCase node (no SVG element
+	// names differ only by case, so this collision is harmless and documented).
+	lower := Parse(`lineargradient { fill: red }`)
+	if !lower.Rules[0].Selectors[0].Matches(&fakeNode{tag: "linearGradient"}) {
+		t.Error("case-insensitive match failed")
+	}
+}
