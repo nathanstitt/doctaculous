@@ -70,6 +70,55 @@ func TestParseAndSizing(t *testing.T) {
 	}
 }
 
+// TestPaintServerElementsSkipped asserts the scene walk contributes ZERO
+// nodes for linearGradient/radialGradient/pattern/stop, even though they
+// are now fully supported (resolved out-of-band through the document
+// index, not by appearing as scene nodes). It asserts kid COUNTS, not just
+// pixels: an empty Group would silently change the tree shape while still
+// painting nothing, which a pixel-only golden comparison would not catch.
+// It also asserts these elements never produce a "not yet supported" log
+// line, since they are no longer in unsupportedElements.
+func TestPaintServerElementsSkipped(t *testing.T) {
+	const hdr = `xmlns="http://www.w3.org/2000/svg"`
+	// linearGradient/radialGradient/pattern are placed as DIRECT children of
+	// <svg> (valid SVG; not nested inside <defs>) so the scene walk's
+	// buildNode actually dispatches on them itself — a <defs>-wrapped
+	// placement would be skipped one level up and wouldn't exercise the
+	// buildNode case this test targets. The pattern's <rect> tile child is
+	// the trap: a forgiving-container fallthrough would paint it directly
+	// into the visible scene at document coordinates.
+	src := `<svg ` + hdr + ` width="100" height="100">
+	  <linearGradient id="g1"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+	  <radialGradient id="g2"><stop offset="0" stop-color="green"/></radialGradient>
+	  <pattern id="p1" width="10" height="10"><rect width="10" height="10" fill="yellow"/></pattern>
+	  <rect width="20" height="20" fill="url(#g1)"/>
+	</svg>`
+
+	var logs []string
+	d, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, root := d.Root()
+
+	// The only scene contribution is the <rect> that references the
+	// (unresolved-here) gradient. The linearGradient/radialGradient/pattern
+	// elements — and the pattern's <rect> tile, and the gradients' <stop>
+	// children — must contribute NOTHING: no extra Shape or Group.
+	if len(root.Kids) != 1 {
+		t.Fatalf("root kids = %d, want 1 (only the referencing <rect>; paint-server subtrees contribute nothing)", len(root.Kids))
+	}
+	if _, ok := root.Kids[0].(*Shape); !ok {
+		t.Fatalf("root.Kids[0] = %#v, want *Shape", root.Kids[0])
+	}
+
+	for _, l := range logs {
+		if strings.Contains(l, "not yet supported") {
+			t.Errorf("unexpected 'not yet supported' log for a paint-server element: %q", l)
+		}
+	}
+}
+
 // assertFinite fails t if v is NaN or ±Inf.
 func assertFinite(t *testing.T, label string, v float64) {
 	t.Helper()

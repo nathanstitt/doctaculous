@@ -188,16 +188,13 @@ func hasPercentSuffix(s string) bool {
 // not yet implement. Each is skipped with one debug log line per element
 // name per document (see sceneBuilder.warned) rather than being silently
 // dropped or treated as an unknown forgiving container, since silently
-// recursing into e.g. <linearGradient>'s <stop> children would misrender
+// recursing into e.g. an unsupported container's children would misrender
 // them as shapes/groups.
 var unsupportedElements = map[string]bool{
 	"use":              true,
 	"symbol":           true,
 	"text":             true,
 	"image":            true,
-	"linearGradient":   true,
-	"radialGradient":   true,
-	"pattern":          true,
 	"clipPath":         true,
 	"mask":             true,
 	"filter":           true,
@@ -229,12 +226,27 @@ var unsupportedElements = map[string]bool{
 // reason: buildIndex's pre-pass already consumed every <style> element's
 // text into docIndex.sheets, so by the time the scene walk reaches one,
 // there is nothing left for it to do but produce zero Nodes.
+//
+// linearGradient, radialGradient, and pattern are paint servers: fully
+// supported (Style.FillServer/StrokeServer + the document index resolve
+// them out-of-band), but they contribute nothing to the scene walk
+// themselves — a shape that references one is painted using the resolved
+// paint server, not by the gradient/pattern element appearing as a node.
+// stop is a gradient's child and must be skipped for the same reason:
+// without an explicit entry here it would fall to buildNode's forgiving
+// "unknown element" default and get painted directly into the visible
+// scene at document coordinates, since Go map membership provides no
+// transitive "skip my children too" behavior.
 var skippedElements = map[string]bool{
-	"defs":     true,
-	"style":    true,
-	"title":    true,
-	"desc":     true,
-	"metadata": true,
+	"defs":           true,
+	"style":          true,
+	"title":          true,
+	"desc":           true,
+	"metadata":       true,
+	"linearGradient": true,
+	"radialGradient": true,
+	"pattern":        true,
+	"stop":           true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -308,6 +320,16 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style, ctx *cascadeCtx
 		return b.buildGroupElement(el, st, ctx)
 	case shapeElements[el.local]:
 		return b.buildShape(el, st)
+	case el.local == "linearGradient", el.local == "radialGradient", el.local == "pattern", el.local == "stop":
+		// Paint servers (and a gradient's <stop> children) are fully
+		// supported, but resolved out-of-band through the document index —
+		// see Style.FillServer/StrokeServer — not by appearing as scene
+		// nodes. This case is listed explicitly, ahead of and independent of
+		// skippedElements table membership, so a <pattern>'s tile children
+		// (e.g. <rect>) can NEVER fall through to the forgiving default
+		// below and get painted directly into the visible scene at document
+		// coordinates.
+		return nil
 	case skippedElements[el.local]:
 		return nil
 	case unsupportedElements[el.local]:
