@@ -275,15 +275,20 @@ func TestSVGOpaqueGradientEmitsNativeShading(t *testing.T) {
 	}
 }
 
-// TestSVGTransparentGradientStillRasterizes is the inverse of
-// TestSVGOpaqueGradientEmitsNativeShading: a gradient with a stop-opacity < 1
-// stop has no native PDF /Shading equivalent (no alpha channel without a soft
-// mask, out of scope here — see docs/superpowers/specs/2026-08-26-shader-
-// describe-design.md), so it must still rasterize into an image XObject and
-// must NOT emit a /ShadingType dictionary that would silently drop the
-// transparency.
-func TestSVGTransparentGradientStillRasterizes(t *testing.T) {
+// TestSVGTransparentGradientEmitsShadingUnderSoftMask proves a gradient with
+// a stop-opacity < 1 stop now emits VECTOR content instead of rasterizing:
+// with luminosity soft masks available (pkg/render/pdfwrite's group.go/
+// softmask.go), the color ramp emits as a native /Shading dictionary paired
+// with a /DeviceGray alpha shading under an /SMask, per the SVG groups/clip/
+// mask design doc's decision 4 ("lift the alpha-gradient fallback"). The PDF
+// must carry NO image XObject (the vector path, not the old raster
+// fallback), and the round-tripped raster must match direct SVG rendering —
+// the equivalence proof that the emitted alpha shading and soft mask are
+// correct, not merely present (same technique as
+// TestSVGOpaqueGradientVisualEquivalence).
+func TestSVGTransparentGradientEmitsShadingUnderSoftMask(t *testing.T) {
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+	  <rect width="100" height="50" fill="white"/>
 	  <defs>
 	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
 	      <stop offset="0" stop-color="red" stop-opacity="0.2"/>
@@ -296,16 +301,47 @@ func TestSVGTransparentGradientStillRasterizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// DPI 72 keeps 1 PDF point == 1 device pixel exactly (the SVG's 100x50
+	// viewport has no fractional pixel edge at this DPI). A non-1:1 DPI here
+	// would land the shape's right edge mid-pixel, and BOTH the shading's own
+	// clip (reapplied once at EndGroup) AND the /SMask form's own MANDATORY
+	// /BBox clip (ISO 32000-1 SS8.10.1 — every form XObject, including a soft
+	// mask's /G, is clipped to its BBox) independently antialias that same
+	// physical edge; compounding two honest partial-coverage values at one
+	// boundary pixel is expected PDF behavior (confirmed independently: real
+	// Poppler renders the identical edge softening at a fractional-pixel
+	// boundary here), not a bug in this equivalence check, so the test avoids
+	// the fractional edge entirely rather than loosening the tolerance.
+	direct, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var pdfBuf bytes.Buffer
 	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	raw := pdfBuf.Bytes()
-	if bytes.Contains(raw, []byte("/ShadingType")) {
-		t.Error("gradient with stop-opacity emitted a native /Shading dict; alpha has no native PDF equivalent")
+	if !bytes.Contains(raw, []byte("/ShadingType")) {
+		t.Error("gradient with stop-opacity emitted no /ShadingType dict; want the vector path")
 	}
-	if !bytes.Contains(raw, []byte("/Subtype/Image")) && !bytes.Contains(raw, []byte("/Subtype /Image")) {
-		t.Error("gradient with stop-opacity produced no image XObject; want the rasterized fallback")
+	if bytes.Contains(raw, []byte("/Subtype/Image")) || bytes.Contains(raw, []byte("/Subtype /Image")) {
+		t.Error("gradient with stop-opacity produced an image XObject; want vector /Shading + /SMask, not the raster fallback")
+	}
+	if !bytes.Contains(raw, []byte("/SMask")) {
+		t.Error("gradient with stop-opacity emitted no /SMask; alpha cannot survive as vector content without one")
+	}
+
+	re, err := OpenBytes(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaPDF, err := re.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff, n := compareImages(direct.(*image.RGBA), viaPDF.(*image.RGBA)); diff {
+		t.Errorf("alpha-gradient PDF round-trip drifted: %d pixels beyond tolerance", n)
 	}
 }
 
