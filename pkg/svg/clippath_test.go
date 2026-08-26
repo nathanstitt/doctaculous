@@ -121,11 +121,14 @@ func TestClipPathDisplayNoneChildRemoved(t *testing.T) {
 	}
 }
 
-func TestClipPathVisibilityHiddenChildKept(t *testing.T) {
-	// visibility:hidden behaves DIFFERENTLY from display:none on a clipPath
-	// child: it still contributes to the union (only geometry/clip-rule
-	// matter for a clip child -- fill/stroke/opacity/visibility have no
-	// rendering effect at all here).
+func TestClipPathVisibilityHiddenChildDropped(t *testing.T) {
+	// visibility:hidden behaves the SAME as display:none on a clipPath
+	// child: per SVG 1.1 section 14.3.5 and SVG2's clipPath rendering
+	// model, a child that is not rendered — for either reason — does not
+	// contribute to the union. Verified against the resvg corpus's
+	// invisible-child-1 reference render (a visibility:hidden-only child
+	// clips its target to nothing, i.e. the same as invisible-child-2's
+	// display:none case), not just a spec reading.
 	src := `<svg ` + clipHdr + ` width="100" height="100">
 	  <clipPath id="c1">
 	    <circle cx="10" cy="10" r="5" visibility="hidden"/>
@@ -139,8 +142,8 @@ func TestClipPathVisibilityHiddenChildKept(t *testing.T) {
 	}
 	_, root := d.Root()
 	s := root.Kids[0].(*Shape)
-	if len(s.ClipPath.Kids) != 2 {
-		t.Fatalf("ClipPath.Kids = %d, want 2 (visibility:hidden child must still be included)", len(s.ClipPath.Kids))
+	if len(s.ClipPath.Kids) != 1 {
+		t.Fatalf("ClipPath.Kids = %d, want 1 (visibility:hidden child must be dropped)", len(s.ClipPath.Kids))
 	}
 }
 

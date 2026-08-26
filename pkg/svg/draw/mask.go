@@ -2,6 +2,7 @@ package draw
 
 import (
 	"image"
+	"image/color"
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/svg"
@@ -58,9 +59,44 @@ func (r *Renderer) buildMask(dev render.Device, msk *svg.Mask, m render.Matrix, 
 
 	if msk.Self != nil {
 		selfMask := r.buildMask(dev, msk.Self, m, target)
-		mask = intersectMasks(mask, selfMask)
+		mask = multiplyMasks(mask, selfMask)
 	}
 	return mask
+}
+
+// multiplyMasks returns a mask whose per-pixel coverage is the PRODUCT
+// (not the min — contrast intersectMasks, used for clip-path's boolean-AND
+// region semantics) of a and b's coverage, fractions in [0,1] scaled to
+// [0,255]: a <mask> that itself carries a mask="url(#...)" self-reference
+// composes as "this mask's value = this mask's own content x its referenced
+// mask" (see TestNestedMaskOnMask's doc comment), the same multiplicative
+// stacking as two alpha channels compositing, NOT a hard intersection of two
+// regions. Using min here instead of a product is invisible whenever both
+// masks are locally binary (0 or 255, as in every prior nested-mask test)
+// but diverges visibly once either mask carries a soft gradient value,
+// which is exactly the resvg mask-on-self-with-mixed-mask-type corpus
+// fixture: min systematically UNDER-attenuates (produces more coverage than
+// correct) wherever both operand alphas are fractional.
+func multiplyMasks(a, b render.GroupMask) render.GroupMask {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	r := a.Bounds().Union(b.Bounds())
+	out := image.NewAlpha(r)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			av := a.AlphaAt(x, y).A
+			bv := b.AlphaAt(x, y).A
+			v := uint8((uint16(av) * uint16(bv)) / 255)
+			if v != 0 {
+				out.SetAlpha(x, y, color.Alpha{A: v})
+			}
+		}
+	}
+	return out
 }
 
 // maskUnitsMatrix returns the matrix mapping a <mask>'s REGION rect

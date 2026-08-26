@@ -486,3 +486,159 @@ suite's terms:
   trip point is covered by a Go benchmark/timing test rather than a golden,
   since a document deep enough to matter for that test is intentionally
   truncated mid-render.
+
+## What shipped in this tranche (PR 4 — masking)
+
+74 files vendored under `masking/clipPath/` (37) and `masking/mask/` (37),
+covering group opacity's prerequisite offscreen-compositing primitive,
+`clip-path`/`<clipPath>` (union semantics, mixed `clip-rule`, nested/
+self-referencing clipPaths, `clipPathUnits`, a shape-only child allowlist),
+and `mask`/`<mask>` (luminance and `mask-type=alpha` coverage, `maskUnits`/
+`maskContentUnits`, the default 10%-bleed region, nested/self-referencing
+masks, `mask-type` via attribute and `style=`).
+
+**This tranche ships with resvg's own reference PNGs**, a strictly stronger
+check than eyeballing intent alone: every one of the 74 goldens was diffed
+pixel-by-pixel against resvg's reference render (both composited onto an
+opaque white backdrop, nearest-neighbor-sampled from resvg's 500x500
+reference down to our 200x200 golden resolution, tolerance ±24/channel) in
+addition to being individually viewed. All 74 matched closely — the
+handful of fixtures with an above-baseline diff percentage are the
+documented, expected divergences listed under "Notable exclusions" and
+"Known divergences from resvg's reference" below, not bugs. The universal
+~4-6% baseline seen on every fixture is edge antialiasing noise from the
+2.5x resolution mismatch between the two renderers, confirmed by a visual
+diff heatmap that lights up only the shape outlines, never interior fills.
+
+## Notable exclusions (this tranche)
+
+- **`<use>`-dependent** (3, per the design's explicit deferral to a `<use>`
+  PR): `clipPath/with-use-child.svg`, `clipPath/with-invalid-child-via-use.svg`,
+  `clipPath/symbol-via-use-is-not-a-valid-child.svg`.
+- **`<image>`-dependent** (2, deferred): `mask/with-image.svg`,
+  `mask/with-grayscale-image.svg`.
+- **Text-dependent** (5 — one more than the 4 originally flagged):
+  `clipPath/clipping-with-text.svg`, `clipPath/clipping-with-complex-text-1.svg`,
+  `clipPath/clipping-with-complex-text-2.svg`,
+  `clipPath/clipping-with-complex-text-and-clip-rule.svg`, and
+  `clipPath/clip-path-with-transform-on-text.svg` (a `<text>` clip *target*,
+  not a `<text>` clipPath *child* — found during inspection: `<text>` is not
+  implemented at all — see `pkg/svg/clippath.go`'s `clipPathChildKinds`
+  comment — so any fixture involving `<text>` in either role is excluded).
+- **Marker-dependent** (1): `clipPath/with-marker-on-clip.svg`.
+- **The deprecated SVG 1.1 `clip` property, and a duplicate** (2):
+  `clip/simple-case.svg` uses the SVG 1.1 `clip="rect(...)"` presentation
+  property (via `<image>`, itself also out of scope) — obsolete, skipped.
+  `clip-rule/clip-rule=evenodd.svg` is, on inspection, byte-identical in
+  intent to `clipPath/clip-rule=evenodd.svg` (both test the modern
+  `clip-path`/`clip-rule` attributes, not the deprecated `clip` property —
+  resvg's own directory layout just files a duplicate copy under
+  `clip-rule/`); skipped as a duplicate, not a feature gap.
+- **CSS basic-shape `clip-path` values (SVG2/CSS Shapes)** (3):
+  `clipPath/circle-shorthand.svg`, `circle-shorthand-with-view-box.svg`,
+  `circle-shorthand-with-stroke-box.svg` all set `clip-path="circle()"` (a
+  CSS basic-shape function, not a `url(#id)` reference) directly on the
+  target element. Verified against source:
+  `sceneBuilder.resolveClipPathRef` only recognizes a `url(...)` prefix and
+  treats anything else as unresolvable/no-clip; `circle()`/`inset()`/
+  `polygon()` parsing does not exist anywhere in `pkg/svg`. Excluded as an
+  unshipped feature, not merely an unshipped fixture.
+- **`clip-path`/`opacity`/`display` on the root `<svg>` element itself** (2,
+  found during the golden-eyeball comparison against resvg's reference, not
+  by grep): `clipPath/on-the-root-svg-with-size.svg` and
+  `on-the-root-svg-without-size.svg`. `svg.Parse` only ever special-cases
+  `opacity` on the root element (`rootOpacity`, with a doc comment
+  explaining why) — `clip-path` set directly on `<svg>` is never read. This
+  is the same root cause PR 1 already excluded `painting/opacity/
+  on-the-root-svg.svg` and `painting/display/none-on-svg.svg` for; the
+  fixture-comparison pass here is what caught the `clip-path` case, since
+  neither fixture's filename mentioned this at all.
+- **Near-duplicate/redundant coverage**: none pruned beyond the above — the
+  masking tranche's fixture set does not have the numeric-variant families
+  (`stop/missing-offset-*`-style) earlier tranches needed to trim.
+
+## Known divergences from resvg's reference (not bugs)
+
+Found and confirmed via the pixel-diff sweep, each is a documented,
+deliberate scope boundary rather than a defect:
+
+- **`mask/color-interpolation=linearRGB.svg`** — this fixture is the
+  corpus's OWN opt-in signal that sRGB is the assumed default (see the
+  design doc's decision 2): resvg renders it in linearRGB space per the
+  fixture's explicit request, this engine always uses sRGB luminance
+  coefficients on sRGB values (browsers/SVG2/resvg's own DEFAULT, just not
+  what this one fixture asks for) and does not read `color-interpolation`
+  at all. Kept to lock in the sRGB-default behavior; the divergence from
+  resvg's non-default rendering here is expected.
+- **`mask/on-group-with-transform.svg`, `mask/half-width-region-with-
+  rotation.svg`** — both apply a default-`objectBoundingBox`-units mask to
+  a `<g>` target. A `<g>` has no single `Path` to measure a bounding box
+  from (unlike a `Shape`), so `pkg/svg/draw`'s mask/clip-path builders pass
+  a nil `boundsFunc` for a Group target, which `clipUnitsMatrix` degrades to
+  Identity (i.e. `userSpaceOnUse`) rather than resolving a real bbox — a
+  documented, narrow approximation (see `draw.go`'s "Same nil-target
+  approximation" comments) pending a group-subtree bbox helper. Kept: both
+  correctly render blank (the degenerate Identity-mapped region misses the
+  actual geometry), which is a graceful degradation, not a crash or
+  garbage output.
+- **`mask/recursive-on-child.svg`** — resvg's own title suffix marks this
+  "(UB)": a mutually-cyclic mask reference has no spec-defined resolution,
+  so implementations reasonably disagree. Kept: this engine's cycle guard
+  terminates deterministically and produces sane (non-garbage) output.
+- **`mask/recursive-on-self.svg`** — the same class of genuinely-cyclic
+  mask reference (not marked "(UB)" by resvg, but inherently
+  implementation-defined for the same reason): two masks each reference the
+  other via `mask="url(#...)"`. This engine's `buildingMask` cycle guard
+  resolves the inner reference to "no Self" once the cycle is detected,
+  producing a fainter, more radial-looking result than resvg's; both are
+  plausible resolutions of an ambiguous cycle, verified sane (a smooth
+  gradient, not NaN/inverted/garbage pixels).
+
+## Bugs found and fixed in this tranche
+
+Three real, pre-existing bugs surfaced by cross-checking every golden
+against resvg's reference PNGs (not just eyeballing intent) — the sharpest
+argument yet for vendoring a corpus with reference renders:
+
+1. **`visibility:hidden` on a `<clipPath>` child was incorrectly kept in
+   the union.** `pkg/svg/clippath.go`'s `buildClipChild` had an explicit
+   comment asserting "per SVG a visibility:hidden clipPath child STILL
+   contributes to the union (only display:none removes it)" — this is
+   wrong. Per SVG 1.1 §14.3.5 and SVG2's clipPath model, and confirmed
+   against resvg's `invisible-child-1.svg` reference (a
+   `visibility="hidden"`-only child clips its target to nothing, identical
+   to `invisible-child-2.svg`'s `display="none"` case), both properties
+   remove a child from the union. `TestClipPathVisibilityHiddenChildKept`
+   (renamed `TestClipPathVisibilityHiddenChildDropped`) had encoded the
+   same wrong assumption and was corrected alongside the fix.
+2. **Nested/self-referencing masks composed via `min` instead of
+   multiplication.** `pkg/svg/draw/mask.go`'s `buildMask` intersected a
+   mask's own `Self` reference (`mask="url(#...)"` on a `<mask>` element)
+   using the same `intersectMasks` (per-pixel `min`) that `clip-path`
+   correctly uses for its boolean-AND region semantics. A mask stacking on
+   another mask is multiplicative alpha compositing, not a hard
+   intersection — `TestNestedMaskOnMask`'s own doc comment already stated
+   "outer's mask value = outer content x inner mask" but every existing
+   test used only binary (0/255) mask values, where `min` and product are
+   indistinguishable. `mask/mask-on-self-with-mixed-mask-type.svg`, whose
+   two composed masks are both soft gradients, exposed the gap (a
+   systematically darker/more-opaque result versus resvg's reference). Added
+   `multiplyMasks` (used only for `Mask.Self`, not for clip-path
+   intersection or clip+mask combination, both still correctly `min`-based)
+   and re-verified against resvg's reference at multiple sample points
+   (post-fix values matched to within 1/255).
+3. **A clipPath child's own nested `clip-path` was resolved in the wrong
+   coordinate space.** `pkg/svg/draw/clip.go`'s `buildClipMask`, when a
+   `<clipPath>` child itself carries `clip-path="url(#...)"`, resolved that
+   nested reference against `cpM` (the parent clipPath's own units/
+   transform matrix) — omitting the child's OWN transform (`kid.M`), even
+   though the child's geometry (`dp`) is correctly transformed by
+   `kid.M.Mul(cpM)` two lines above. Since a clip-path is userSpaceOnUse
+   relative to the referencing element's own coordinate system, the missing
+   `kid.M` sent the nested clip's geometry into the wrong space whenever the
+   child had its own transform. `clipPath/clip-path-on-child-with-
+   transform.svg` (child has `transform="translate(20 20)"`, its nested
+   clip has `transform="translate(30 32)"` plus a `scale(0.7)` on its own
+   circle) exposed this as a lopsided, asymmetric result instead of resvg's
+   symmetric flower shape. Fixed by composing `kid.M.Mul(cpM)` for the
+   nested resolve, matching the sibling `dp` composition.

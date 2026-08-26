@@ -642,9 +642,9 @@ read+write vocabulary for the tinycld text adoption path):
   union), and an explicit shape/`<text>`/`<use>` allowlist for valid children (a `<g>`/`<image>`/
   `<switch>` child is dropped, not recursed into as a forgiving container) all ship. An empty
   `<clipPath>` (no valid children) clips its target to NOTHING, distinct from `clip-path="none"`/an
-  unresolved reference (no clipping at all). `display:none` removes a clip child from the union;
-  `visibility:hidden` does not (clip children have no rendering pass of their own for visibility to
-  gate). fill/stroke/opacity/filter/mask on a clip child have no effect — only geometry, transform,
+  unresolved reference (no clipping at all). `display:none` and `visibility:hidden` both remove a clip
+  child from the union (verified against the resvg corpus's reference renders for both). fill/stroke/
+  opacity/filter/mask on a clip child have no effect — only geometry, transform,
   clip-rule, and clip-path matter. Resolved during `Parse` (like paint servers), with a
   `buildingClip`-style recursion guard so a self-referencing or mutually-cyclic clipPath terminates.
   raster implements `BuildClipMask` exactly (per-child rasterize + max union); pdfwrite — which has no

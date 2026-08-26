@@ -242,16 +242,14 @@ func clipPathUnits(el *element) string {
 // simply dropped — a <clipPath> does not recurse into disallowed structural
 // elements, per SVG's explicit restriction to shapes/text/use.
 //
-// visibility:hidden is DELIBERATELY not checked here (contrast buildShape,
-// which drops a visibility:hidden shape outright): the two invisible-child
-// corpus fixtures this design doc calls out
-// (invisible-child-1/invisible-child-2) distinguish visibility:hidden from
-// display:none specifically because clip geometry is not "visible" in the
-// ordinary painting sense at all — clip-rule/fill/stroke/opacity on a
-// clipPath child have no rendering effect either, and per SVG a
-// visibility:hidden clipPath child STILL contributes to the union (only
-// display:none removes it), so visibility must not gate inclusion the way
-// it does for an ordinary painted shape.
+// Both display:none and visibility:hidden remove a child from the union
+// (verified against the corpus's invisible-child-1/invisible-child-2
+// reference renders, both of which clip their target rect to nothing): per
+// SVG 1.1 §14.3.5 and SVG2's clipPath rendering model, a clipPath child that
+// is not rendered — for either reason — does not contribute to the clip
+// region. This mirrors buildShape's ordinary painted-shape visibility gate;
+// clip-rule/fill/stroke/opacity on a clipPath child still have no rendering
+// effect and are simply never read here.
 func (b *sceneBuilder) buildClipChild(el *element, parentStyle Style, ctx *cascadeCtx, depth int) (ClipPathChild, bool) {
 	if el == nil || el.space != svgNS {
 		return ClipPathChild{}, false
@@ -261,7 +259,7 @@ func (b *sceneBuilder) buildClipChild(el *element, parentStyle Style, ctx *casca
 	}
 
 	st := parentStyle.apply(el, ctx)
-	if !st.display {
+	if !st.display || !st.visible {
 		return ClipPathChild{}, false
 	}
 

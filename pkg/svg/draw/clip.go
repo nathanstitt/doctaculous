@@ -58,15 +58,20 @@ func (r *Renderer) buildClipMask(dev render.Device, cp *svg.ClipPath, m render.M
 		// top-level union uses) intersected against the child's own
 		// resolved mask, then folded into the overall union by max()
 		// alongside every other contribution (see unionMasks below). The
-		// child's own clip-path is resolved as userSpaceOnUse against the
-		// SAME device-space CTM the child's geometry now lives in: this
-		// engine does not resolve a per-nested-child objectBoundingBox
-		// target for this case (a documented, narrow approximation — the
-		// common case, and every corpus fixture for this feature, applies
-		// clip-path to a clipPath's direct children without a further
-		// nested reference).
+		// child's own clip-path is a userSpaceOnUse reference defined
+		// relative to the CHILD's own user coordinate system — which
+		// includes the child's own transform (kid.M), not just the parent
+		// clipPath's units/transform matrix (cpM) the child's geometry
+		// composes under. Composing kid.M.Mul(cpM) here (matching the "dp"
+		// composition just above) is what makes clip-path-on-child-with-
+		// transform resolve clip2 in path1's own rotated/translated space
+		// rather than clip1's: this engine does not resolve a
+		// per-nested-child objectBoundingBox target for this case (a
+		// documented, narrow approximation — the common case, and most
+		// corpus fixtures for this feature, apply clip-path to a
+		// clipPath's direct children without a further nested reference).
 		childMask := dev.BuildClipMask([]render.MaskPath{{Path: dp, Rule: kid.Rule}})
-		selfMask := r.buildClipMask(dev, kid.Self, cpM, nil)
+		selfMask := r.buildClipMask(dev, kid.Self, kid.M.Mul(cpM), nil)
 		nested = append(nested, intersectMasks(childMask, selfMask))
 	}
 
