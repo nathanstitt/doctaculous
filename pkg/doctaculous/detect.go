@@ -94,7 +94,7 @@ func detectGzip(data []byte) Format {
 	if err != nil {
 		return FormatUnknown
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 	prefix, err := io.ReadAll(io.LimitReader(zr, 4096))
 	if err != nil && len(prefix) == 0 {
 		return FormatUnknown

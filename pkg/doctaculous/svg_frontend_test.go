@@ -40,8 +40,12 @@ func TestOpenSVGBytes(t *testing.T) {
 	// svgz: same doc gzipped.
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write(src)
-	zw.Close()
+	if _, err := zw.Write(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	doc, err = OpenSVGBytes(buf.Bytes())
 	if err != nil || doc.PageCount() != 1 {
 		t.Fatalf("svgz: %v", err)
@@ -100,7 +104,9 @@ func gzipSVGWithFiller(fillerLen int) []byte {
 	var buf bytes.Buffer
 	buf.Grow(total / 100)
 	zw := gzip.NewWriter(&buf)
-	zw.Write(head)
+	if _, err := zw.Write(head); err != nil {
+		panic(err)
+	}
 	filler := bytes.Repeat([]byte(" "), 1<<16)
 	remaining := fillerLen
 	for remaining > 0 {
@@ -108,11 +114,17 @@ func gzipSVGWithFiller(fillerLen int) []byte {
 		if n > len(filler) {
 			n = len(filler)
 		}
-		zw.Write(filler[:n])
+		if _, err := zw.Write(filler[:n]); err != nil {
+			panic(err)
+		}
 		remaining -= n
 	}
-	zw.Write(tail)
-	zw.Close()
+	if _, err := zw.Write(tail); err != nil {
+		panic(err)
+	}
+	if err := zw.Close(); err != nil {
+		panic(err)
+	}
 	return buf.Bytes()
 }
 
@@ -211,16 +223,24 @@ func TestSVGDetectAndFormat(t *testing.T) {
 	// svgz magic.
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write(plain)
-	zw.Close()
+	if _, err := zw.Write(plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if f := DetectFormat(buf.Bytes(), ""); f != FormatSVG {
 		t.Errorf("svgz = %v", f)
 	}
 	// Gzip of something else stays unknown.
 	buf.Reset()
 	zw = gzip.NewWriter(&buf)
-	zw.Write([]byte("just text"))
-	zw.Close()
+	if _, err := zw.Write([]byte("just text")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if f := DetectFormat(buf.Bytes(), ""); f != FormatUnknown {
 		t.Errorf("gz-text = %v", f)
 	}
