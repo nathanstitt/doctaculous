@@ -110,12 +110,13 @@ func resolveGradient(id string, resolver *paintServerResolver, path *render.Path
 		}
 	}
 
-	// bboxM first (or Identity for userSpaceOnUse), then gradientTransform:
-	// gradientTransform is defined to apply within the already-established
-	// gradient coordinate system (objectBoundingBox or userSpaceOnUse), so it
-	// composes AFTER the bbox mapping, per Matrix.Mul(m, n) = "m first, then
-	// n" semantics.
-	localToUser := bboxM.Mul(gradM)
+	// gradientTransform first, then bboxM (or Identity for userSpaceOnUse):
+	// gradientTransform is defined to apply WITHIN the already-established
+	// gradient coordinate system (objectBoundingBox or userSpaceOnUse) — i.e.
+	// it transforms gradient-local coordinates, and the result is then mapped
+	// into user space by the bbox (or identity) mapping. Per Matrix.Mul(m, n)
+	// = "m first, then n" semantics, that composition is gradM.Mul(bboxM).
+	localToUser := gradM.Mul(bboxM)
 
 	spread := parseSpreadMethod(ps.attrs["spreadMethod"])
 
