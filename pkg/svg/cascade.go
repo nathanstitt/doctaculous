@@ -71,6 +71,12 @@ func (c *cascadeCtx) resolve(el *element) func(name string) (string, bool) {
 		sheet := &c.idx.sheets[si]
 		for ri := range sheet.Rules {
 			rule := &sheet.Rules[ri]
+			// TODO: the media context is hardcoded to screen because SVG only
+			// opens as a standalone document today, where OpenSVGBytes
+			// documents the media option as inert. When SVG gains a print
+			// path (SVG-in-PDF, or <img src="*.svg"> inside a paged HTML
+			// document), thread the caller's media through cascadeCtx and
+			// filter against it here instead — this line is the seam.
 			if rule.Media != css.MediaAll && rule.Media != css.MediaScreen {
 				continue // rule belongs to a different media context
 			}

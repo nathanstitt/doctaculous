@@ -195,9 +195,11 @@ func ParseDeclarations(body string) []Declaration {
 		// "url(x!important.png)": that string does not end in "!important"
 		// at all (it ends in ".png)"), so HasSuffix already rejects it.
 		// CSS allows any amount of whitespace (including none) between the
-		// value and "!important" and between "!" and "important", so no
-		// separator is required before the suffix once it truly is one —
-		// "red!important" and "red !important" both flag the same way.
+		// value and "!important", so no separator is required before the
+		// suffix once it truly is one — "red!important" and "red !important"
+		// both flag the same way. Whitespace WITHIN the token ("red ! important")
+		// is also legal CSS but is not recognized here; it is vanishingly rare
+		// in real stylesheets and would cost a tokenizer pass to support.
 		const bang = "!important"
 		if strings.HasSuffix(strings.ToLower(val), bang) {
 			important = true
