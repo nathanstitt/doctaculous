@@ -189,17 +189,19 @@ func ParseDeclarations(body string) []Declaration {
 			continue
 		}
 		important := false
-		// Match !important only as the trailing token (suffix + preceding
-		// whitespace), case-insensitively; the suffix is ASCII so cutting len(bang)
-		// bytes off the original is safe. This avoids the substring false-positive
-		// where "url(x!important.png)" would otherwise be flagged.
+		// Match !important as the trailing token, case-insensitively; the
+		// suffix is ASCII so cutting len(bang) bytes off the original is
+		// safe. A plain suffix match cannot false-positive on something like
+		// "url(x!important.png)": that string does not end in "!important"
+		// at all (it ends in ".png)"), so HasSuffix already rejects it.
+		// CSS allows any amount of whitespace (including none) between the
+		// value and "!important" and between "!" and "important", so no
+		// separator is required before the suffix once it truly is one —
+		// "red!important" and "red !important" both flag the same way.
 		const bang = "!important"
 		if strings.HasSuffix(strings.ToLower(val), bang) {
-			candidate := val[:len(val)-len(bang)]
-			if candidate == "" || isWhitespace(candidate[len(candidate)-1]) {
-				important = true
-				val = strings.TrimSpace(candidate)
-			}
+			important = true
+			val = strings.TrimSpace(val[:len(val)-len(bang)])
 		}
 		if val == "" {
 			continue

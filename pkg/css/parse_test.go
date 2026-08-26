@@ -87,6 +87,13 @@ func TestParseDeclarationImportantEdgeCases(t *testing.T) {
 	if len(d) != 1 || d[0].Property != "margin-top" || d[0].Value != "10px" || !d[0].Important {
 		t.Fatalf("got %+v, want {margin-top 10px important}", d)
 	}
+	// CSS allows zero whitespace between the value and "!important" (the
+	// leading "!" cannot appear inside a value token, so no space is needed
+	// to disambiguate). "red!important" must flag exactly like "red !important".
+	d = ParseDeclarations("color:red!important")
+	if len(d) != 1 || d[0].Property != "color" || d[0].Value != "red" || !d[0].Important {
+		t.Fatalf("got %+v, want {color red important=true} (no space before !important)", d)
+	}
 	// "!important" as a substring of a value (not a trailing token) is NOT a flag.
 	d = ParseDeclarations("background: url(x!important.png)")
 	if len(d) != 1 || d[0].Important || d[0].Value != "url(x!important.png)" {
