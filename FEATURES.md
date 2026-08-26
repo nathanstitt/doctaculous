@@ -681,12 +681,35 @@ read+write vocabulary for the tinycld text adoption path):
   gap, since masking each glyph individually would reintroduce the per-child compositing seam this
   whole feature exists to avoid), so the SVG → PDF → reopen → raster round trip is genuine end-to-end
   proof for masks, independently cross-checked against Poppler's own renderer.
+- Known gaps in the group/clip/mask feature, each verified by rendering rather than merely inferred:
+  **`BuildClipMask`'s pdfwrite approximation is rectangular, not exact** — a non-rectangular
+  `<clipPath>` union (e.g. two non-overlapping circles) clips to the union's BOUNDING BOX in PDF
+  output, not its true shape (raster remains pixel-exact via the per-child rasterize + max-union
+  primitive; only the PDF writer, which has no offscreen surface to rasterize a pixel-exact union
+  into, degrades). **Glyph fill/stroke is not soft-mask-wrapped** — `pkg/pdf/content`'s ExtGState
+  soft-mask support scopes to fills, strokes, `sh`, images, and nested form XObjects, but not
+  per-glyph text painting, to avoid reintroducing the per-child compositing seam this feature exists
+  to eliminate. **`reflect`/`repeat` gradient spreads still rasterize** in PDF output (see the
+  alpha-gradient shading lift above — only `pad` gets a native `/Shading`/`/Extend`). **`objectBoundingBox`
+  clip-path/mask units on a `<g>` target degrade to `userSpaceOnUse`** (Identity mapping): a `<g>` has
+  no single `Path` to measure a bounding box from the way a `Shape` does, so `pkg/svg/draw` passes a
+  nil `boundsFunc` for a Group target and `clipUnitsMatrix`/mask region resolution falls back to
+  Identity rather than resolving the group's real (post-layout) bbox — verified against the resvg
+  corpus's `mask/on-group-with-transform.svg` and `mask/half-width-region-with-rotation.svg`, both of
+  which render blank under this engine (a graceful degradation, not a crash) versus resvg's correctly
+  bbox-relative result.
 - Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, filters,
   `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices in
   `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
-- 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
-  with committed goldens; clip-path and mask are covered by hand-authored fixtures/tests in `pkg/svg`,
-  `pkg/svg/draw`, and `pkg/render/raster` (no resvg `masking/**` tranche is vendored yet).
+- 74 curated fixtures from the resvg test suite's `masking/**` tranche (MIT, commit
+  `d8e064337faf01bc5a9579187a56dbdbe3eacc72`; see `testdata/svg/resvg/README.md` for the earlier
+  tranches' counts) land with this feature: `clipPath/` (37) and `mask/` (37), all with committed
+  goldens. This tranche's goldens were additionally cross-checked pixel-for-pixel against resvg's own
+  reference PNGs (not just visually inspected against fixture intent), the strongest verification
+  available — the sweep found and fixed three real bugs (a `visibility:hidden` clipPath child wrongly
+  kept in the union, nested/self-referencing masks composing via `min` instead of multiplication, and
+  a clipPath child's own nested `clip-path` resolving in the wrong coordinate space when the child
+  carried its own transform).
 
 **SVG input — CSS styling** (`pkg/svg`, `pkg/css`):
 
