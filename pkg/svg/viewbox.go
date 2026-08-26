@@ -43,7 +43,19 @@ func parseViewBox(s string) (viewBox, bool) {
 // vpW×vpH viewport per preserveAspectRatio (raw attribute value; "" and
 // unrecognized values fall back to the spec default "xMidYMid meet"). vb
 // must come from a parseViewBox that reported true (see its doc comment).
+//
+// Defensive guard: a zero/negative/non-finite W or H returns render.Identity
+// instead of dividing by it. The single call site in this package already
+// enforces the parseViewBox invariant above, so this guard is currently
+// unreachable dead code from that path — do not "simplify" it away. It exists
+// because nested <svg>, <symbol>, <pattern>, and <marker> viewBoxes (each a
+// new call site) give a future caller more chances to pass an unvalidated
+// viewBox, and an all-NaN matrix silently propagating into paint ops is worse
+// than a no-op transform.
 func viewBoxMatrix(vb viewBox, vpW, vpH float64, par string) render.Matrix {
+	if !isFinitePositive(vb.W) || !isFinitePositive(vb.H) {
+		return render.Identity
+	}
 	align, meet := "xMidYMid", true
 	fields := strings.Fields(par)
 	if len(fields) >= 1 && fields[0] != "" {
@@ -91,4 +103,11 @@ func viewBoxMatrix(vb viewBox, vpW, vpH float64, par string) render.Matrix {
 	return render.Translate(-vb.MinX, -vb.MinY).
 		Mul(render.Scale(sx, sy)).
 		Mul(render.Translate(tx, ty))
+}
+
+// isFinitePositive reports whether v is a finite, strictly positive number.
+// Used by viewBoxMatrix's defensive guard against dividing by a degenerate
+// extent.
+func isFinitePositive(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v > 0
 }

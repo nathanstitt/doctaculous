@@ -1,6 +1,11 @@
 package svg
 
-import "testing"
+import (
+	"math"
+	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/render"
+)
 
 func TestViewBoxMatrix(t *testing.T) {
 	vb := viewBox{0, 0, 100, 50}
@@ -38,5 +43,34 @@ func TestViewBoxMatrix(t *testing.T) {
 	}
 	if vb, ok := parseViewBox(" 0,0 100 50 "); !ok || vb.W != 100 {
 		t.Errorf("comma form = %+v,%v", vb, ok)
+	}
+}
+
+// TestViewBoxMatrixDegenerateExtentReturnsIdentity is a direct unit test of
+// viewBoxMatrix's defensive guard: a zero/negative/non-finite W or H must
+// return render.Identity rather than dividing by it (which would produce an
+// all-NaN or all-Inf matrix). The single current call site in svg.go already
+// rejects these via parseViewBox, so this guard is unreachable from there
+// today; it protects the additional viewBoxMatrix call sites nested <svg>,
+// <symbol>, <pattern>, and <marker> support will add.
+func TestViewBoxMatrixDegenerateExtentReturnsIdentity(t *testing.T) {
+	cases := []struct {
+		name string
+		vb   viewBox
+	}{
+		{"zero-width", viewBox{0, 0, 0, 50}},
+		{"zero-height", viewBox{0, 0, 100, 0}},
+		{"negative-width", viewBox{0, 0, -100, 50}},
+		{"negative-height", viewBox{0, 0, 100, -50}},
+		{"nan-width", viewBox{0, 0, math.NaN(), 50}},
+		{"inf-height", viewBox{0, 0, 100, math.Inf(1)}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := viewBoxMatrix(c.vb, 200, 200, "")
+			if m != render.Identity {
+				t.Errorf("viewBoxMatrix(%+v) = %+v, want render.Identity", c.vb, m)
+			}
+		})
 	}
 }
