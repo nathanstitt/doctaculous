@@ -72,7 +72,7 @@ func (r *Renderer) buildClipMask(dev render.Device, cp *svg.ClipPath, m render.M
 		// clipPath's direct children without a further nested reference).
 		childMask := dev.BuildClipMask([]render.MaskPath{{Path: dp, Rule: kid.Rule}})
 		selfMask := r.buildClipMask(dev, kid.Self, kid.M.Mul(cpM), nil)
-		nested = append(nested, intersectMasks(childMask, selfMask))
+		nested = append(nested, combineClipRegions(childMask, selfMask))
 	}
 
 	mask := dev.BuildClipMask(flat)
@@ -82,7 +82,7 @@ func (r *Renderer) buildClipMask(dev render.Device, cp *svg.ClipPath, m render.M
 
 	if cp.Self != nil {
 		selfMask := r.buildClipMask(dev, cp.Self, m, target)
-		mask = intersectMasks(mask, selfMask)
+		mask = combineClipRegions(mask, selfMask)
 	}
 	return mask
 }
@@ -115,12 +115,23 @@ func clipUnitsMatrix(units string, target boundsFunc) render.Matrix {
 	return render.Scale(w, h).Mul(render.Translate(minX, minY))
 }
 
-// intersectMasks returns a mask covering the intersection of a and b's
-// coverage. Both are always non-nil in this file's call sites (BuildClipMask
-// never returns nil — see its doc comment), but nil is still handled
-// defensively (treated as "no restriction", i.e. returns the other operand)
-// so this helper's contract doesn't silently depend on that.
-func intersectMasks(a, b render.GroupMask) render.GroupMask {
+// combineClipRegions returns a mask covering the boolean-AND (min, per
+// pixel) of a and b's coverage: genuine region intersection, correct ONLY
+// when both operands are clip regions (geometry-derived masks that are
+// locally binary in intent — "this pixel is inside the shape" or not, with
+// antialiasing as the only source of fractional edge values). Both are
+// always non-nil in this file's call sites (BuildClipMask never returns nil
+// — see its doc comment), but nil is still handled defensively (treated as
+// "no restriction", i.e. returns the other operand) so this helper's
+// contract doesn't silently depend on that.
+//
+// Do NOT use this to combine a clip region with a <mask> luminance result —
+// a luminance mask is deliberately fractional (that is the entire point of
+// a soft mask), and min() systematically UNDER-attenuates wherever it holds
+// a fractional value, producing more coverage than correct. Use
+// attenuateByMask (mask.go) for clip-with-luminance-mask combination; see
+// its doc comment for the failure mode this guards against.
+func combineClipRegions(a, b render.GroupMask) render.GroupMask {
 	if a == nil {
 		return b
 	}

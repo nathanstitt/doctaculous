@@ -30,6 +30,24 @@ import (
 // exactly "fully masked out" — the correct SVG behavior for an empty mask
 // (see svg.Mask.Kids's doc comment), achieved for free without a special
 // case here.
+//
+// CALL-SITE INVARIANT (do not break without reading this): every caller of
+// buildMask passes its result straight to EndGroup, optionally combining it
+// with a clip mask via attenuateByMask FIRST (see draw.go's Group case and
+// paintShapeGrouped) — never storing it, deferring the matching EndGroup, or
+// routing it through anything else in between. This matters because at
+// least one backend (pkg/render/pdfwrite) returns a SENTINEL pointer from
+// BuildLuminanceMask rather than real per-pixel content, recognized only by
+// exact pointer identity in its own EndGroup (see softmask.go's
+// takePendingSoftMask); combining that sentinel with another mask (as
+// attenuateByMask does) yields a plain *image.Alpha that no longer matches
+// the sentinel, which pdfwrite then silently treats as a real (but
+// wrong — a 1x1 stand-in) coverage buffer instead of erroring. A future PR
+// that builds a mask here and defers its EndGroup, or introduces a THIRD
+// mask-combining call between BuildLuminanceMask and EndGroup, must first
+// resolve this by making pdfwrite's sentinel survive combination (or by
+// rejecting the combination outright) — do not assume "it still compiles"
+// means it still renders correctly on the PDF backend.
 func (r *Renderer) buildMask(dev render.Device, msk *svg.Mask, m render.Matrix, target boundsFunc) render.GroupMask {
 	regionM := maskUnitsMatrix(msk.Units, target).Mul(m)
 	regionPath := maskRegionPath(msk, regionM)
@@ -59,25 +77,33 @@ func (r *Renderer) buildMask(dev render.Device, msk *svg.Mask, m render.Matrix, 
 
 	if msk.Self != nil {
 		selfMask := r.buildMask(dev, msk.Self, m, target)
-		mask = multiplyMasks(mask, selfMask)
+		mask = attenuateByMask(mask, selfMask)
 	}
 	return mask
 }
 
-// multiplyMasks returns a mask whose per-pixel coverage is the PRODUCT
-// (not the min — contrast intersectMasks, used for clip-path's boolean-AND
-// region semantics) of a and b's coverage, fractions in [0,1] scaled to
-// [0,255]: a <mask> that itself carries a mask="url(#...)" self-reference
-// composes as "this mask's value = this mask's own content x its referenced
-// mask" (see TestNestedMaskOnMask's doc comment), the same multiplicative
-// stacking as two alpha channels compositing, NOT a hard intersection of two
-// regions. Using min here instead of a product is invisible whenever both
-// masks are locally binary (0 or 255, as in every prior nested-mask test)
-// but diverges visibly once either mask carries a soft gradient value,
-// which is exactly the resvg mask-on-self-with-mixed-mask-type corpus
-// fixture: min systematically UNDER-attenuates (produces more coverage than
-// correct) wherever both operand alphas are fractional.
-func multiplyMasks(a, b render.GroupMask) render.GroupMask {
+// attenuateByMask returns a mask whose per-pixel coverage is the PRODUCT
+// (not the min — contrast combineClipRegions in clip.go, used for
+// clip-path's boolean-AND region semantics) of a and b's coverage, fractions
+// in [0,1] scaled to [0,255]. Use this whenever EITHER operand is (or may
+// be) a <mask> luminance/alpha result — a soft mask is deliberately
+// fractional, that is the entire point of it — including a <mask> that
+// itself carries a mask="url(#...)" self-reference, which composes as "this
+// mask's value = this mask's own content x its referenced mask" (see
+// TestNestedMaskOnMask's doc comment), the same multiplicative stacking as
+// two alpha channels compositing, NOT a hard intersection of two regions.
+// Using min here instead of a product is invisible whenever both masks are
+// locally binary (0 or 255, as in every prior nested-mask test) but diverges
+// visibly once either mask carries a soft gradient value, which is exactly
+// the resvg mask-on-self-with-mixed-mask-type corpus fixture: min
+// systematically UNDER-attenuates (produces more coverage than correct)
+// wherever either operand alpha is fractional. This is why a clip mask
+// combined with a luminance mask (see draw.go's Group- and Shape-level mask
+// handling) must also go through attenuateByMask, not combineClipRegions:
+// the clip operand may be binary, but the luminance operand generally is
+// not, and combineClipRegions's min would under-attenuate exactly like the
+// mask-on-mask case above.
+func attenuateByMask(a, b render.GroupMask) render.GroupMask {
 	if a == nil {
 		return b
 	}

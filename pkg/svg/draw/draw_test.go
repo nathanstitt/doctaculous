@@ -470,6 +470,96 @@ func TestNestedDistinctPatternsShallowChainStillPaints(t *testing.T) {
 	}
 }
 
+// nestedGroupsSVG builds depth levels of nested <g opacity="0.999">, each
+// wrapping the next, with a single leaf rect at the center. opacity is kept
+// just under 1 (never exactly 1) so every level takes the real
+// BeginGroup/EndGroup compositing path (see paint's Group case: opacity>=1
+// with no clip/mask skips group-opening entirely) — the path
+// maxGroupNestingDepth guards — while the cumulative opacity stays
+// indistinguishable from fully opaque for pixel-level assertions.
+func nestedGroupsSVG(depth int) string {
+	var sb strings.Builder
+	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">`)
+	for i := 0; i < depth; i++ {
+		sb.WriteString(`<g opacity="0.999">`)
+	}
+	sb.WriteString(`<rect x="10" y="10" width="20" height="20" fill="#000000"/>`)
+	for i := 0; i < depth; i++ {
+		sb.WriteString(`</g>`)
+	}
+	sb.WriteString(`</svg>`)
+	return sb.String()
+}
+
+// TestDeeplyNestedGroupsDoNotExhaustMemory is MUST-FIX 2's regression test:
+// every BeginGroup allocates a full-canvas scratch RGBA that lives until its
+// matching EndGroup (see raster.Device.BeginGroup), so unbounded nesting
+// depth is unbounded concurrently-live scratch memory, reachable from
+// Open/OpenBytes on untrusted input via nested <g opacity>/clip-path/mask.
+// This renders a document nested far deeper (200 levels) than
+// maxGroupNestingDepth (16) and asserts it completes at all (the real risk
+// is an OOM kill or multi-GB allocation, not a hang — a timeout would not
+// catch a memory blowup the way it catches a runaway loop) AND that the
+// depth-cap guard actually fired, the same log-line-based assertion
+// TestNestedDistinctPatternsDoNotBlowUp uses for the analogous pattern-depth
+// guard.
+func TestDeeplyNestedGroupsDoNotExhaustMemory(t *testing.T) {
+	doc, err := svg.Parse([]byte(nestedGroupsSVG(200)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs []string
+	img := image.NewRGBA(image.Rect(0, 0, 40, 40))
+	stddraw.Draw(img, img.Bounds(), image.NewUniform(color.White), image.Point{}, stddraw.Src)
+	r := New(doc)
+	r.Logf = func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
+
+	done := make(chan struct{})
+	go func() {
+		r.DrawVector(raster.New(img), render.Identity)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("200-deep nested groups did not complete within 10s (unbounded recursion/allocation?)")
+	}
+
+	var tripped bool
+	for _, l := range logs {
+		if strings.Contains(l, "nesting exceeded") {
+			tripped = true
+			t.Logf("guard fired: %s", l)
+		}
+	}
+	if !tripped {
+		t.Errorf("200-deep nested groups did not trip the group-nesting-depth guard; logs=%v", logs)
+	}
+
+	// The leaf rect must still have painted (degraded past the cap, not
+	// dropped): center of the 20x20 rect at (10,10) is (20,20).
+	got := img.RGBAAt(20, 20)
+	if got.R > 20 || got.G > 20 || got.B > 20 {
+		t.Errorf("center = %+v, want ~black (leaf content must still paint once the depth cap trips, just without further isolation)", got)
+	}
+}
+
+// TestModestlyNestedGroupsStillRenderCorrectly verifies a realistic nesting
+// depth (4 levels, well under maxGroupNestingDepth) is unaffected by the
+// cap and still composites its cumulative opacity correctly end to end —
+// the guard must not trip, or degrade fidelity, for ordinary documents.
+func TestModestlyNestedGroupsStillRenderCorrectly(t *testing.T) {
+	img := renderSVG(t, nestedGroupsSVG(4), 40, 40)
+	got := img.RGBAAt(20, 20)
+	t.Logf("4-deep nested opacity=0.999 groups, center = %+v", got)
+	// Cumulative opacity 0.999^4 ~= 0.996, i.e. still essentially opaque
+	// black -- this is a correctness check (the content survived 4 levels
+	// of real compositing), not a precision check on the opacity math.
+	if got.R > 5 || got.G > 5 || got.B > 5 {
+		t.Errorf("center = %+v, want ~black (near-fully-opaque black through 4 nested compositing groups)", got)
+	}
+}
+
 // TestGroupOpacityCompositesOnce is the discriminating test for group
 // opacity: two OVERLAPPING opaque shapes inside <g opacity="0.5"> must
 // composite to the SAME color at the overlap as at a non-overlap area. Under

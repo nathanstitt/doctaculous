@@ -42,6 +42,7 @@ type warnFlags struct {
 	patternCap     bool
 	depthCap       bool
 	budgetCap      bool
+	groupDepthCap  bool
 
 	// patternDepth counts nested <pattern> fills currently on the stack: a
 	// tile painted while resolving pattern P that itself fills with a
@@ -61,6 +62,17 @@ type warnFlags struct {
 	// draw-time expansion graphs (e.g. <use>/<symbol>) that don't run
 	// through fillPattern at all.
 	drawCalls int
+
+	// groupDepth counts BeginGroup/EndGroup nesting currently open on the
+	// device (a nested <g opacity>/clip-path/mask, or a masked/clipped
+	// shape reached while already inside one of those). Each level
+	// allocates a full-canvas scratch surface (see
+	// raster.Device.BeginGroup) that lives until the matching EndGroup, so
+	// depth — not just per-call count — is what bounds memory: an
+	// adversarial chain of nested groups can hold arbitrarily many
+	// scratch buffers live at once even though each individual DrawVector
+	// call is otherwise cheap. See maxGroupNestingDepth.
+	groupDepth int
 }
 
 // maxPatternNestingDepth bounds how many <pattern> fills may be nested
@@ -73,6 +85,22 @@ type warnFlags struct {
 // headroom above that while still stopping the exponential blowup (each
 // level multiplies draw calls by its own cell count) in well under a second.
 const maxPatternNestingDepth = 4
+
+// maxGroupNestingDepth bounds how many offscreen compositing groups
+// (BeginGroup/EndGroup pairs — opened for a <g opacity>/clip-path/mask, or a
+// masked/clipped shape with both a fill and a stroke — may be open at once
+// on the device during one DrawVector call. Every open group holds a
+// full-canvas scratch RGBA alive until its matching EndGroup (see
+// raster.Device.BeginGroup), so unbounded nesting depth is an unbounded
+// number of live full-canvas buffers, not just unbounded CPU time like
+// maxPatternNestingDepth guards against — this is reachable from untrusted
+// input via Open/OpenBytes, through nested <g>, nested <mask>/<clipPath>
+// content, or any combination stacking clip+mask+opacity several levels
+// deep. Real-world SVG nests transparency groups at most a handful deep;
+// this is generous headroom above that while still capping worst-case
+// concurrent scratch-buffer memory to a small constant multiple of one
+// page's canvas size.
+const maxGroupNestingDepth = 16
 
 // maxDrawCalls bounds the total number of leaf paint operations
 // (Fill/Stroke/FillShading/pattern-cell placements) one DrawVector call may
@@ -163,11 +191,29 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 		// exactly what creates the overlap risk), so multiplying it in at
 		// composite time is equally correct and avoids yet another nested
 		// group just to carry it.
+		if warned.groupDepth >= maxGroupNestingDepth {
+			// Every open BeginGroup holds a full-canvas scratch RGBA alive
+			// until its EndGroup (see raster.Device.BeginGroup) — unlike
+			// maxPatternNestingDepth/maxDrawCalls, which bound total CPU
+			// work, this bounds concurrently-live MEMORY, so it must stop
+			// opening a NEW group rather than merely stop recursing further.
+			// Degrade like a backend that cannot composite offscreen (see
+			// render.Device.BeginGroup's doc comment): paint children
+			// directly, without the isolation this group would have given
+			// them, rather than drop the subtree's content entirely.
+			r.logGroupDepthCapOnce(warned)
+			for _, kid := range node.Kids {
+				r.paint(dev, kid, gm, alpha, warned)
+			}
+			return
+		}
 		dev.Save()
 		dev.BeginGroup()
+		warned.groupDepth++
 		for _, kid := range node.Kids {
 			r.paint(dev, kid, gm, 1.0, warned)
 		}
+		warned.groupDepth--
 		var mask render.GroupMask
 		if node.ClipPath != nil {
 			// gm (not m): clip-path applies in the clipped element's OWN
@@ -187,13 +233,16 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 		}
 		if node.Mask != nil {
 			// Composite order is clip -> mask -> opacity (see the design
-			// doc): intersecting the luminance mask with whatever clip mask
-			// already exists applies both, in that order, to the same
-			// flattened group result. Same nil-target approximation as
+			// doc): attenuating by the luminance mask (product, NOT the min
+			// combineClipRegions would give — see attenuateByMask's doc
+			// comment) combines it with whatever clip mask already exists,
+			// applying both, in that order, to the same flattened group
+			// result. A luminance mask is deliberately fractional, so min
+			// would under-attenuate here. Same nil-target approximation as
 			// ClipPath just above: a Group has no single Path for an
 			// objectBoundingBox maskUnits/maskContentUnits target.
 			lumMask := r.buildMask(dev, node.Mask, gm, nil)
-			mask = intersectMasks(mask, lumMask)
+			mask = attenuateByMask(mask, lumMask)
 		}
 		dev.EndGroup(alpha*node.Opacity, "", mask)
 		dev.Restore()
@@ -274,10 +323,24 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 // overlap requires this split. dp/sm are s's already-device-space path and
 // accumulated matrix, computed once by the caller.
 func (r *Renderer) paintShapeGrouped(dev render.Device, s *svg.Shape, dp *render.Path, sm render.Matrix, innerAlpha, opacity float64, warned *warnFlags) {
+	if warned.groupDepth >= maxGroupNestingDepth {
+		// See the matching guard in paint's Group case for why this bounds
+		// memory, not just CPU time. Degrade to painting fill/stroke
+		// directly, without isolation, clip-path, or mask (best-effort: a
+		// clip-path or mask on a shape that also needed the fill/stroke
+		// overlap isolation cannot get both without a group) rather than
+		// drop the shape entirely.
+		r.logGroupDepthCapOnce(warned)
+		r.paintFill(dev, s, dp, sm, innerAlpha*opacity, warned)
+		r.paintStroke(dev, s, dp, sm, innerAlpha*opacity, warned)
+		return
+	}
 	dev.Save()
 	dev.BeginGroup()
+	warned.groupDepth++
 	r.paintFill(dev, s, dp, sm, innerAlpha, warned)
 	r.paintStroke(dev, s, dp, sm, innerAlpha, warned)
+	warned.groupDepth--
 	var mask render.GroupMask
 	if s.ClipPath != nil {
 		// objectBoundingBox target: s.Path is the shape's own PRE-transform
@@ -288,11 +351,15 @@ func (r *Renderer) paintShapeGrouped(dev render.Device, s *svg.Shape, dp *render
 	}
 	if s.Mask != nil {
 		// Composite order is clip -> mask -> opacity (see the design doc):
-		// intersecting the luminance mask with whatever clip mask already
-		// exists applies both, in that order, to the same flattened fill+
-		// stroke result. Same objectBoundingBox target as ClipPath above.
+		// attenuating by the luminance mask (product, NOT the min
+		// combineClipRegions would give — see attenuateByMask's doc comment)
+		// combines it with whatever clip mask already exists, applying both,
+		// in that order, to the same flattened fill+stroke result. A
+		// luminance mask is deliberately fractional, so min would
+		// under-attenuate here. Same objectBoundingBox target as ClipPath
+		// above.
 		lumMask := r.buildMask(dev, s.Mask, sm, s.Path.Bounds)
-		mask = intersectMasks(mask, lumMask)
+		mask = attenuateByMask(mask, lumMask)
 	}
 	dev.EndGroup(opacity, "", mask)
 	dev.Restore()
@@ -587,6 +654,17 @@ func (r *Renderer) logDrawBudgetCapOnce(warned *warnFlags) {
 	}
 	warned.budgetCap = true
 	r.Logf("svg: draw call budget of %d exceeded; remaining content was not painted", maxDrawCalls)
+}
+
+// logGroupDepthCapOnce emits the group-nesting-depth-capped notice the first
+// time it is needed for the current DrawVector call, and is a no-op on
+// subsequent calls.
+func (r *Renderer) logGroupDepthCapOnce(warned *warnFlags) {
+	if warned.groupDepthCap || r.Logf == nil {
+		return
+	}
+	warned.groupDepthCap = true
+	r.Logf("svg: transparency group nesting exceeded %d levels; deeper groups painted without isolation, opacity, clip, or mask", maxGroupNestingDepth)
 }
 
 // alphaShader wraps a render.Shader to scale every returned color's alpha by

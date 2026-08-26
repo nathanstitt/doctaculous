@@ -2,6 +2,7 @@ package draw
 
 import (
 	"image"
+	"image/color"
 	"testing"
 	"time"
 )
@@ -351,5 +352,107 @@ func TestNestedMaskOnMask(t *testing.T) {
 	// since outer's mask value = outer content x inner mask.
 	if c := img.RGBAAt(30, 30); c.R != 255 || c.G != 255 || c.B != 255 {
 		t.Errorf("inside outer only (30,30) = %+v, want unpainted white (inner mask must restrict outer)", c)
+	}
+}
+
+// TestClipCombinedWithFractionalMaskUsesProductNotMin is THE discriminating
+// regression test for the bug fixed at draw.go's two Group/Shape mask call
+// sites: combining a clip mask with a <mask> luminance mask must multiply
+// their coverage, not take the min. A BINARY mask cannot tell the two
+// combining rules apart (see combineClipRegions's and attenuateByMask's own
+// doc comments: min(a,b) == a*b/255 whenever either operand is already fully
+// opaque, 255) — that is exactly why this bug shipped and slipped through
+// review undetected. This test uses a 50%-grey (fractional) luminance mask
+// combined with a PARTIAL (also fractional, not fully opaque) clip
+// coverage value, so the two combining rules diverge and the test fails
+// under the old (wrong) intersectMasks-at-those-call-sites behavior.
+//
+// Direct white-box check: with clip coverage a=200 and mask coverage
+// b=128 (both deliberately fractional), min(a,b)=128 but the correct
+// product a*b/255=100 -- a divergence of 28/255 (~11%), easily distinguished
+// from pixel sampling noise or antialiasing.
+func TestClipCombinedWithFractionalMaskUsesProductNotMin(t *testing.T) {
+	bounds := image.Rect(0, 0, 4, 4)
+	clip := image.NewAlpha(bounds)
+	lum := image.NewAlpha(bounds)
+	const clipVal, lumVal = 200, 128 // both fractional: neither is 0 or 255
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			clip.SetAlpha(x, y, color.Alpha{A: clipVal})
+			lum.SetAlpha(x, y, color.Alpha{A: lumVal})
+		}
+	}
+
+	wrong := combineClipRegions(clip, lum) // the bug: min-based combine
+	right := attenuateByMask(clip, lum)    // the fix: product-based combine
+
+	gotWrong := wrong.AlphaAt(1, 1).A
+	gotRight := right.AlphaAt(1, 1).A
+	wantWrong := uint8(min(clipVal, lumVal))                   // min(200,128) = 128
+	wantRight := uint8(uint16(clipVal) * uint16(lumVal) / 255) // 200*128/255 = 100
+
+	t.Logf("clip=%d mask=%d -> combineClipRegions (min, WRONG here)=%d, attenuateByMask (product, CORRECT)=%d",
+		clipVal, lumVal, gotWrong, gotRight)
+
+	if gotWrong != wantWrong {
+		t.Fatalf("combineClipRegions(%d,%d) = %d, want min = %d (sanity check on the min helper itself)", clipVal, lumVal, gotWrong, wantWrong)
+	}
+	if gotRight != wantRight {
+		t.Fatalf("attenuateByMask(%d,%d) = %d, want product = %d", clipVal, lumVal, gotRight, wantRight)
+	}
+	if gotRight == gotWrong {
+		t.Fatalf("attenuateByMask and combineClipRegions produced the SAME value (%d) for fractional inputs %d,%d -- the two combining rules must diverge here, or this test isn't discriminating", gotRight, clipVal, lumVal)
+	}
+	if gotRight >= gotWrong {
+		t.Errorf("attenuateByMask (product, %d) is not less than combineClipRegions (min, %d) for fractional inputs -- product must be <= min always, and strictly less whenever both inputs are < 255", gotRight, gotWrong)
+	}
+}
+
+// TestGroupMaskWithClipUsesAttenuationEndToEnd is the end-to-end rendering
+// companion to TestClipCombinedWithFractionalMaskUsesProductNotMin: a rect
+// clipped to a diagonal-edged triangle AND masked by a 50%-grey luminance
+// mask. The triangle's hypotenuse gives pixel (99,100) an antialiased clip
+// coverage of ~50% (~128/255, confirmed empirically: clip-only rendering at
+// that pixel comes out exactly halfway between full green and white).
+// Combined with the mask's ~50% (128/255), the CORRECT product rule
+// (128*128/255 ~= 64, ~25% total coverage) and the WRONG min rule
+// (min(128,128) = 128, ~50% total coverage, i.e. as if the clip weren't
+// fractional at all) predict clearly different, well-separated pixel
+// colors, proving the fix is wired up correctly at the real draw.go call
+// site (Shape case: s.ClipPath != nil && s.Mask != nil), not just correct
+// in the isolated helper-function test above.
+func TestGroupMaskWithClipUsesAttenuationEndToEnd(t *testing.T) {
+	src := `<svg ` + maskSVGHdr + ` width="200" height="200">
+	  <mask id="m1"><rect x="0" y="0" width="200" height="200" fill="rgb(128,128,128)"/></mask>
+	  <clipPath id="c1"><polygon points="0,0 200,0 0,200"/></clipPath>
+	  <rect x="0" y="0" width="200" height="200" fill="green" mask="url(#m1)" clip-path="url(#c1)"/>
+	</svg>`
+	img := renderSVG(t, src, 200, 200)
+
+	// Deep inside the clip triangle (clip coverage = 255) and under the 50%
+	// mask: green blended ~50% over white, same as TestMaskMidGreyGivesHalfAlpha.
+	inside := img.RGBAAt(30, 30)
+	t.Logf("deep inside clip, under 50%% mask (30,30) = %+v", inside)
+	if inside.G < 175 || inside.G > 210 {
+		t.Errorf("inside pixel G = %d, want ~191 (50%% mask alone, clip fully opaque here)", inside.G)
+	}
+
+	// On the triangle's antialiased hypotenuse (99,100): clip coverage here
+	// is ~50%, confirmed by clip-only rendering giving exactly the halfway
+	// blend (R=127,G=191,B=127 -- see the package-level probe this value is
+	// derived from). Combined with the mask's ~50%:
+	//   - correct (product):  128*128/255 ~= 64  -> G ~= 223 (mostly white)
+	//   - wrong   (min):      min(128,128) = 128  -> G ~= 191 (same as fully
+	//     inside the clip, AS IF clip coverage being fractional had no
+	//     effect at all -- exactly the bug this test catches)
+	edge := img.RGBAAt(99, 100)
+	t.Logf("on antialiased clip edge (~50%% clip coverage), under 50%% mask (99,100) = %+v", edge)
+	if edge.G < 208 || edge.G > 238 {
+		t.Errorf("edge pixel G = %d, want ~223 (product of two ~50%% coverages: ~25%% total green coverage). "+
+			"A value near ~191 here would mean the clip and mask were combined with min() instead of product, "+
+			"reproducing the fixed bug", edge.G)
+	}
+	if edge.G <= inside.G {
+		t.Errorf("edge pixel G = %d, want strictly greater than inside pixel G = %d (the fractional clip coverage must further attenuate the mask's own ~50%%, showing MORE white / less green at the edge than deep inside the clip)", edge.G, inside.G)
 	}
 }

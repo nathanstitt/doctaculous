@@ -183,9 +183,9 @@ func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.Group
 // re-rasterizing — this is what keeps a native gradient-based mask (not just
 // a flat rectangle) as real PDF vector/shading content instead of a baked
 // raster fallback. Any other mask (e.g. BuildClipMask's rectangular
-// approximation, or one produced by intersectMasks/unionMasks combining two
-// masks) falls back to emitting mask's own pixel buffer as a DeviceGray
-// image-backed form.
+// approximation, or one produced by combineClipRegions/attenuateByMask/
+// unionMasks combining two masks) falls back to emitting mask's own pixel
+// buffer as a DeviceGray image-backed form.
 func (d *pageDevice) registerLuminosityMask(mask render.GroupMask) string {
 	if name, ok := d.takePendingSoftMask(mask); ok {
 		return name
@@ -199,9 +199,9 @@ func (d *pageDevice) registerLuminosityMask(mask render.GroupMask) string {
 // mask uniformly as "a form to reference from /SMask /G". This is the
 // fallback for a mask this writer cannot trace back to real vector/shading
 // content (BuildClipMask's rectangular approximation, or the result of
-// combining two masks via intersectMasks/unionMasks in pkg/svg/draw) — still
-// correct (the soft mask's rendered result matches the coverage buffer
-// exactly), just not resolution-independent.
+// combining two masks via combineClipRegions/attenuateByMask/unionMasks in
+// pkg/svg/draw) — still correct (the soft mask's rendered result matches the
+// coverage buffer exactly), just not resolution-independent.
 func (d *pageDevice) registerRasterMaskForm(mask render.GroupMask) string {
 	b := mask.Bounds()
 	w, h := b.Dx(), b.Dy()

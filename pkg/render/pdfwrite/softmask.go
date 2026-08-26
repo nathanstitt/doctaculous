@@ -137,6 +137,26 @@ func (d *pageDevice) registerScratchForm(scratch *pageDevice, alphaOnly bool) st
 // consumed by the very next EndGroup that receives it, mirroring how
 // pkg/svg/draw always calls BuildLuminanceMask immediately before the
 // EndGroup that consumes its result).
+//
+// SILENT FAILURE MODE, DOCUMENTED HERE SO IT CANNOT SNEAK BACK IN: this
+// lookup only succeeds when EndGroup receives the EXACT sentinel pointer
+// unmodified. A caller that combines the sentinel with another mask first
+// (e.g. pkg/svg/draw's attenuateByMask/combineClipRegions, when a clip-path
+// and a <mask> both apply to the same element) produces a NEW *image.Alpha
+// that is not in d.pendingSoftMasks — this lookup then misses (returns
+// false, not an error) and registerLuminosityMask falls back to
+// registerRasterMaskForm, which calls AlphaAt on a value that, if one
+// operand was this sentinel, is a 1x1-pixel opaque stand-in rather than the
+// real mask content: it reads as fully-transparent everywhere outside that
+// single pixel, silently producing a wrong (near-empty) mask instead of an
+// error. If a future change defers an EndGroup, reorders it relative to its
+// BuildLuminanceMask call, or combines a pdfwrite sentinel with another
+// GroupMask before EndGroup sees it, this will fail exactly this way:
+// silently, not loudly. There is no cheap guard against it here (a sentinel
+// is indistinguishable from a real 1x1 mask by type), so any code path that
+// might do this needs to route the two masks to PDF as separate composited
+// groups instead of combining them client-side — see the draw-side callers
+// of BuildLuminanceMask for the current invariant this relies on.
 func (d *pageDevice) takePendingSoftMask(mask render.GroupMask) (string, bool) {
 	if d.pendingSoftMasks == nil {
 		return "", false
