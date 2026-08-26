@@ -62,3 +62,22 @@ func TestRotateSkew(t *testing.T) {
 		t.Errorf("SkewY(45)(1,0) = (%g,%g), want (1,1)", x, y)
 	}
 }
+
+func TestInvertRoundTrips(t *testing.T) {
+	m := Translate(10, -5).Mul(Scale(2, 3)).Mul(Rotate(0.7))
+	inv, ok := m.Invert()
+	if !ok {
+		t.Fatal("Invert reported not-invertible for a non-degenerate matrix")
+	}
+	x, y := m.Apply(3, 4)
+	bx, by := inv.Apply(x, y)
+	if !approx(bx, 3) || !approx(by, 4) {
+		t.Errorf("Invert round trip = (%v,%v), want (3,4)", bx, by)
+	}
+}
+
+func TestInvertSingularReportsNotOK(t *testing.T) {
+	if _, ok := Scale(0, 1).Invert(); ok {
+		t.Error("Invert of a zero-scale matrix reported ok=true, want false")
+	}
+}

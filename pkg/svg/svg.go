@@ -34,22 +34,25 @@ func (*Group) isNode() {}
 // Shape is one paintable path with its resolved style (an SVG basic shape:
 // rect, circle, ellipse, line, polyline, polygon, or path).
 //
-// FillGradient/StrokeGradient carry an ALREADY-RESOLVED paint server (a
-// render.Shader plus the matrix mapping its local coordinate space into this
-// Shape's own user space, i.e. composed before M) rather than a url() id:
-// the document index a gradient id resolves through is discarded when Parse
-// returns, and Document must stay a read-only, side-table-free value so it
-// can be shared lock-free across the engine's parallel page-render fan-out.
-// Either field is nil when the corresponding fill/stroke does not reference
-// a (successfully resolved) gradient — see Style.FillServer/StrokeServer for
-// why a Style may still carry a server id even when resolution fails or a
-// pattern is referenced (patterns are not yet resolved into either field).
+// FillGradient/StrokeGradient/FillPattern/StrokePattern carry an
+// ALREADY-RESOLVED paint server (a render.Shader, or a tile Group plus
+// placement, together with the matrix mapping its local coordinate space
+// into this Shape's own user space, i.e. composed before M) rather than a
+// url() id: the document index a gradient/pattern id resolves through is
+// discarded when Parse returns, and Document must stay a read-only,
+// side-table-free value so it can be shared lock-free across the engine's
+// parallel page-render fan-out. A field is nil when the corresponding
+// fill/stroke does not reference a (successfully resolved) paint server of
+// that kind — see Style.FillServer/StrokeServer for why a Style may still
+// carry a server id even when resolution fails.
 type Shape struct {
 	M              render.Matrix // local transform
 	Path           *render.Path  // user-space geometry, pre-transform
 	Style          Style
-	FillGradient   *paintServer // resolved fill="url(#...)" gradient, or nil
-	StrokeGradient *paintServer // resolved stroke="url(#...)" gradient, or nil
+	FillGradient   *paintServer  // resolved fill="url(#...)" gradient, or nil
+	StrokeGradient *paintServer  // resolved stroke="url(#...)" gradient, or nil
+	FillPattern    *patternPaint // resolved fill="url(#...)" pattern, or nil
+	StrokePattern  *patternPaint // resolved stroke="url(#...)" pattern, or nil
 }
 
 func (*Shape) isNode() {}
@@ -97,7 +100,7 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		doc.rootM = render.Identity
 	}
 
-	b := &sceneBuilder{logf: logf, warned: map[string]bool{}, vp: viewport{w: doc.WidthPt, h: doc.HeightPt}}
+	b := &sceneBuilder{logf: logf, warned: map[string]bool{}, vp: viewport{w: doc.WidthPt, h: doc.HeightPt}, buildingPattern: map[string]bool{}}
 	if hasVB {
 		// Gradient userSpaceOnUse coordinates live in the same user-unit
 		// space as the element geometry they paint — i.e. viewBox space when
@@ -294,6 +297,19 @@ type sceneBuilder struct {
 	idx     *docIndex
 	servers *paintServerResolver // gradient/pattern href-chain resolver, built once from idx
 	vp      viewport             // current viewport size, for userSpaceOnUse percentage resolution
+
+	// buildingPattern guards against a pattern tile's content referencing
+	// (directly, or via its own href chain / a chain of DIFFERENT patterns)
+	// the pattern currently being built into a tile Group. This is a
+	// SEPARATE cycle-prone graph from followHrefChain's href-chain walk
+	// (Task 4): here the cycle runs through buildShape -> resolvePattern ->
+	// buildGroup -> buildShape again for a shape inside the tile, not
+	// through a single element's href attribute. A pattern id present in
+	// this set is currently "in progress" one call further up the Go call
+	// stack; resolvePattern treats resolving it again as a cycle and stops,
+	// exactly like SVG's own "an indirect cycle must be treated as an error
+	// (ignore the fill/stroke)" rule for patternful tiles.
+	buildingPattern map[string]bool
 }
 
 // buildGroup converts el's children into a Group, threading inherited style
@@ -303,8 +319,17 @@ type sceneBuilder struct {
 // carries the cascade (stylesheets + logger) that apply resolves each
 // child's attributes against.
 func (b *sceneBuilder) buildGroup(el *element, parentStyle Style, ctx *cascadeCtx) *Group {
+	return b.buildKidsGroup(el.kids, parentStyle, ctx)
+}
+
+// buildKidsGroup is buildGroup's loop body, factored out so a caller that
+// already has a []*element slice not sourced from a single element's own
+// kids field — a <pattern>'s inherited tile content (patternTileKids), which
+// may come from a DIFFERENT element in the href chain than the one being
+// resolved — can build a Group from it directly.
+func (b *sceneBuilder) buildKidsGroup(kids []*element, parentStyle Style, ctx *cascadeCtx) *Group {
 	g := &Group{M: render.Identity}
-	for _, kid := range el.kids {
+	for _, kid := range kids {
 		if n := b.buildNode(kid, parentStyle, ctx); n != nil {
 			g.Kids = append(g.Kids, n)
 		}
@@ -417,19 +442,37 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	}
 	if ref, ok := st.FillServer(); ok {
 		if id, ok := fragmentID(ref); ok {
-			if ps, ok := resolveGradient(id, b.servers, path, b.vp, b.logf); ok {
-				s.FillGradient = &ps
-			}
+			b.resolvePaint(id, path, &s.FillGradient, &s.FillPattern)
 		}
 	}
 	if ref, ok := st.StrokeServer(); ok {
 		if id, ok := fragmentID(ref); ok {
-			if ps, ok := resolveGradient(id, b.servers, path, b.vp, b.logf); ok {
-				s.StrokeGradient = &ps
-			}
+			b.resolvePaint(id, path, &s.StrokeGradient, &s.StrokePattern)
 		}
 	}
 	return s
+}
+
+// resolvePaint resolves id (a fill/stroke url() reference) against b.servers
+// and stores the result into *gradOut or *patOut, whichever kind id names.
+// Both out-pointers are left nil if id does not resolve to a paintable
+// server (unknown id, no stops, a pattern with no usable tile, or a
+// degenerate objectBoundingBox) — see resolveGradient/resolvePattern for the
+// exact conditions. path is the shape's own PRE-TRANSFORM geometry.
+func (b *sceneBuilder) resolvePaint(id string, path *render.Path, gradOut **paintServer, patOut **patternPaint) {
+	ps, ok := b.servers.resolve(id)
+	if !ok {
+		return
+	}
+	if ps.kind == "pattern" {
+		if pp, ok := b.resolvePattern(id, ps, path); ok {
+			*patOut = pp
+		}
+		return
+	}
+	if g, ok := resolveGradient(id, b.servers, path, b.vp, b.logf); ok {
+		*gradOut = &g
+	}
 }
 
 // elementTransform parses el's transform attribute (absent -> Identity).

@@ -37,7 +37,18 @@ func New(doc *svg.Document) *Renderer {
 type warnFlags struct {
 	opacity        bool
 	strokeGradient bool
+	patternCap     bool
 }
+
+// maxPatternTileCells bounds how many tile repetitions fillPattern will draw
+// to cover one shape's fill region. A tile cell this small relative to the
+// shape it paints is a pathological document (or a percentage/unit
+// mistake), not a legitimate use — real-world patterns tile a visibly-sized
+// swatch a few dozen times per axis at most. Bounding the repeat count keeps
+// a single shape from generating an unbounded number of draw calls;
+// fillPattern logs once and clips the grid to a centered window of this many
+// cells when a document would otherwise exceed it.
+const maxPatternTileCells = 10_000
 
 // DrawVector renders the document with ctm mapping the document's viewport
 // coordinates (points, origin top-left) into device space. It satisfies
@@ -100,19 +111,22 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 
 	if s.FillGradient != nil {
 		r.fillGradient(dev, dp, s.Style, s.FillGradient, sm, alpha)
+	} else if s.FillPattern != nil {
+		r.fillPattern(dev, dp, s.Style, s.FillPattern, sm, alpha, warned)
 	} else if fp, ok := s.Style.FillPaint(); ok {
 		fp.Color.A = scaleAlpha(fp.Color.A, alpha)
 		dev.Fill(dp, fp)
 	}
 
-	if s.StrokeGradient != nil {
+	if s.StrokeGradient != nil || s.StrokePattern != nil {
 		// No stroke-to-outline conversion exists in pkg/render/raster (see
-		// stroke.go) to clip a shading against, so a gradient stroke cannot
-		// be painted as a gradient today: degrade to the fallback solid
-		// color instead (Style.StrokePaint already reflects a url() paint's
-		// fallback color, or reports ok=false when there is none — see
-		// applyPaint), with a one-per-document warning. This is a documented
-		// follow-up, not final behavior; gradient FILLS are unaffected.
+		// stroke.go) to clip a shading/tile against, so a gradient or
+		// pattern stroke cannot be painted as such today: degrade to the
+		// fallback solid color instead (Style.StrokePaint already reflects a
+		// url() paint's fallback color, or reports ok=false when there is
+		// none — see applyPaint), with a one-per-document warning. This is a
+		// documented follow-up, not final behavior; gradient/pattern FILLS
+		// are unaffected.
 		r.logStrokeGradientOnce(warned)
 	}
 	if sp, ok := s.Style.StrokePaint(); ok {
@@ -171,6 +185,153 @@ func (r *Renderer) fillGradient(dev render.Device, dp *render.Path, st svg.Style
 	dev.PushClip(dp, rule)
 	dev.FillShading(shader, ctm, "")
 	dev.Restore()
+}
+
+// pattern is the accessor surface pkg/draw needs from a resolved pattern
+// paint server, satisfied by *svg.Shape's FillPattern/StrokePattern fields
+// without either package exporting the concrete patternPaint type — the same
+// pattern as the gradient interface above.
+type pattern interface {
+	Tile() *svg.Group
+	Matrix() render.Matrix
+	Cell() (x, y, w, h float64)
+	ContentMatrix() render.Matrix
+}
+
+// fillPattern paints dp (already in device space) with a resolved pattern by
+// repeated clipped draws of its tile content: no offscreen raster buffer is
+// involved (pkg/svg/draw only has a render.Device, which cannot produce one
+// without importing a backend — see the package doc), so this instead clips
+// to dp once, then for every tile cell overlapping dp's device-space bounds,
+// clips further to that one cell and paints the tile Group under the
+// composed cell-placement matrix. This is more, smaller draw calls than an
+// offscreen-image approach for a small tile over a large area, but it is
+// exact (no resampling) and requires no new Device capability.
+//
+// alpha folds in accumulated group/element opacity exactly like fillGradient
+// (Device.FillShading/Fill/Stroke each take their own alpha; painting a
+// Group has no single alpha sink, so this multiplies alpha into the
+// recursive paint call instead, matching how group opacity already
+// propagates through r.paint).
+func (r *Renderer) fillPattern(dev render.Device, dp *render.Path, st svg.Style, p pattern, sm render.Matrix, alpha float64, warned *warnFlags) {
+	rule := render.NonZero
+	if fp, ok := st.FillPaint(); ok {
+		rule = fp.Rule
+	}
+
+	// ctm maps the shape's user space (where p.Cell()'s X/Y/CellW/CellH
+	// already live, patternUnits already resolved) into device space:
+	// p.Matrix() (patternTransform alone) composed with sm (shape user
+	// space -> device, already fully accumulated). Per spec,
+	// patternTransform applies to the whole established pattern coordinate
+	// system, so it is applied here rather than per-cell below.
+	ctm := p.Matrix().Mul(sm)
+	inv, ok := ctm.Invert()
+	if !ok {
+		return // degenerate (e.g. zero-scale) CTM: nothing sensible to tile
+	}
+
+	x0, y0, cw, ch := p.Cell()
+	if cw <= 0 || ch <= 0 {
+		return // resolvePattern already guards this, but never divide below
+	}
+
+	minX, minY, maxX, maxY, ok := dp.Bounds()
+	if !ok {
+		return
+	}
+	// Map dp's four device-space corners back into tile space to find the
+	// index range covering them (a rotated/skewed ctm means the device-space
+	// AABB doesn't map to a tile-space AABB directly, so all four corners
+	// are considered, not just two).
+	corners := [4][2]float64{{minX, minY}, {maxX, minY}, {minX, maxY}, {maxX, maxY}}
+	tMinX, tMinY := math.Inf(1), math.Inf(1)
+	tMaxX, tMaxY := math.Inf(-1), math.Inf(-1)
+	for _, c := range corners {
+		tx, ty := inv.Apply(c[0], c[1])
+		tMinX, tMaxX = math.Min(tMinX, tx), math.Max(tMaxX, tx)
+		tMinY, tMaxY = math.Min(tMinY, ty), math.Max(tMaxY, ty)
+	}
+
+	iMin := int(math.Floor((tMinX - x0) / cw))
+	iMax := int(math.Ceil((tMaxX - x0) / cw))
+	jMin := int(math.Floor((tMinY - y0) / ch))
+	jMax := int(math.Ceil((tMaxY - y0) / ch))
+	if iMax < iMin || jMax < jMin {
+		return
+	}
+	cols, rows := iMax-iMin+1, jMax-jMin+1
+	if cols <= 0 || rows <= 0 {
+		return
+	}
+	if cols*rows > maxPatternTileCells {
+		r.logPatternCellCapOnce(warned)
+		// Clip to a centered window of at most maxPatternTileCells cells
+		// rather than refusing to paint at all: a capped, honestly-partial
+		// tiling degrades far better than either an unbounded draw-call
+		// storm or a blank shape.
+		side := int(math.Sqrt(float64(maxPatternTileCells)))
+		if side < 1 {
+			side = 1
+		}
+		iMax = iMin + min(cols, side) - 1
+		jMax = jMin + min(rows, side) - 1
+	}
+
+	dev.Save()
+	dev.PushClip(dp, rule)
+
+	contentM := p.ContentMatrix()
+	tile := p.Tile()
+	cellPath := cellRectPath(cw, ch)
+	for j := jMin; j <= jMax; j++ {
+		for i := iMin; i <= iMax; i++ {
+			// cellM places THIS cell (i,j) in device space: translate the
+			// unit cell box to its (x0+i*cw, y0+j*ch) origin, then apply the
+			// shared pattern-space -> device ctm. Recomputed per cell (not
+			// hoisted out of the loop) since every cell needs its own
+			// translation composed with ctm — reusing one ctm for both the
+			// clip AND the content would paint every cell with cell (0,0)'s
+			// content translated only by the CLIP, never actually moving the
+			// tile's own drawing commands.
+			cellM := render.Translate(x0+float64(i)*cw, y0+float64(j)*ch).Mul(ctm)
+			dp2 := render.TransformPath(cellPath, cellM)
+			if dp2 == nil {
+				continue
+			}
+			dev.Save()
+			dev.PushClip(dp2, render.NonZero)
+			r.paint(dev, tile, contentM.Mul(cellM), alpha, warned)
+			dev.Restore()
+		}
+	}
+
+	dev.Restore()
+}
+
+// cellRectPath builds the unit rect [0,w]x[0,h] path used to clip one tile
+// cell before painting its content, so a tile whose content extends past its
+// own cell bounds (a common, spec-legal pattern authoring choice) does not
+// bleed into a neighboring cell.
+func cellRectPath(w, h float64) *render.Path {
+	p := &render.Path{}
+	p.MoveTo(0, 0)
+	p.LineTo(w, 0)
+	p.LineTo(w, h)
+	p.LineTo(0, h)
+	p.Close()
+	return p
+}
+
+// logPatternCellCapOnce emits the pattern-tile-count-capped notice the first
+// time it is needed for the current DrawVector call, and is a no-op on
+// subsequent calls.
+func (r *Renderer) logPatternCellCapOnce(warned *warnFlags) {
+	if warned.patternCap || r.Logf == nil {
+		return
+	}
+	warned.patternCap = true
+	r.Logf("svg: <pattern> tile count exceeded %d cells; painting was truncated to a centered window", maxPatternTileCells)
 }
 
 // alphaShader wraps a render.Shader to scale every returned color's alpha by

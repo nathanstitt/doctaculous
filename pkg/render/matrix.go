@@ -55,6 +55,23 @@ func (m Matrix) ScaleFactor() float64 {
 	return math.Sqrt(math.Abs(det))
 }
 
+// Invert returns the matrix that undoes m, and ok=false if m is singular
+// (zero determinant, e.g. a zero scale) rather than dividing by zero.
+func (m Matrix) Invert() (Matrix, bool) {
+	det := m.A*m.D - m.B*m.C
+	if det == 0 {
+		return Matrix{}, false
+	}
+	inv := 1 / det
+	a := m.D * inv
+	b := -m.B * inv
+	c := -m.C * inv
+	d := m.A * inv
+	e := -(m.E*a + m.F*c)
+	f := -(m.E*b + m.F*d)
+	return Matrix{A: a, B: b, C: c, D: d, E: e, F: f}, true
+}
+
 // Rotate returns a rotation by theta radians. In the Y-down device space used
 // throughout, a positive theta rotates clockwise (matching SVG/CSS rotate()).
 func Rotate(theta float64) Matrix {

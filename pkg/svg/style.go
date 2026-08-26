@@ -157,11 +157,15 @@ func applyColorProp(s *Style, attr func(string) (string, bool), logf func(string
 // SVG's optional fallback-color syntax, "url(#id) red") records the
 // referenced fragment id in *server for the scene builder to resolve
 // against the document index — plus the fallback color, if given, applied
-// exactly as an ordinary color would be so *has/*c reflect it; a url()
-// with no fallback and no prior inherited fill leaves *has/*c untouched,
-// since a still-unresolved reference is not yet known to paint nothing.
-// "inherit" keeps the parent's value, and anything else is parsed as a
-// color or logged and ignored.
+// exactly as an ordinary color would be so *has/*c reflect it. A url() with
+// NO fallback clears *has (mirroring the "none" case): per SVG, the
+// fallback is only ever the explicit color written in the attribute value
+// itself, never the inherited fill/stroke, so FillPaint/StrokePaint must
+// not paint the parent's solid color for a still-unresolved reference — the
+// scene builder (buildShape) is the one place with the document index to
+// resolve *server into an actual gradient/pattern, and does so entirely
+// independently of *has/*c. "inherit" keeps the parent's value, and
+// anything else is parsed as a color or logged and ignored.
 func applyPaint(name string, has *bool, c *color.RGBA, server *string, cur color.RGBA, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr(name)
 	if !ok {
@@ -186,15 +190,21 @@ func applyPaint(name string, has *bool, c *color.RGBA, server *string, cur color
 			logf("svg: ignoring %s=%q: unparseable url() reference", name, val)
 			return
 		}
-		*server = id
 		if fallback == "" {
+			*server = id
+			*has = false
 			return
 		}
 		parsed, ok := parseColorValue(fallback)
 		if !ok {
+			// The whole value is invalid per SVG/CSS error handling: neither
+			// the reference nor a fallback commits, and the property keeps
+			// whatever it already had (inherited *has/*c/*server), not "no
+			// paint" — mirroring the unparseable-plain-color branch below.
 			logf("svg: ignoring %s=%q: unparseable fallback color", name, val)
 			return
 		}
+		*server = id
 		*has = true
 		*c = parsed
 		return

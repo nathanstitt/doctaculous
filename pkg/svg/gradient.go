@@ -66,17 +66,14 @@ func (v viewport) diag() float64 {
 // ok is false when: id does not resolve to a paint server at all (unknown
 // id, or a non-gradient/non-pattern target — resolver.resolve already
 // reports that), the resolved server has no stops (paints nothing per SVG),
-// the server is a <pattern> (Task 9's job, not this one — logged once), or
-// the gradient is objectBoundingBox-relative over a shape with a degenerate
-// bounding box (zero width or height): per the SVG spec, a gradient cannot be
-// established in that case and the element must not be painted with it.
+// the server is a <pattern> (buildShape routes those to resolvePattern
+// instead — not this function's job), or the gradient is
+// objectBoundingBox-relative over a shape with a degenerate bounding box
+// (zero width or height): per the SVG spec, a gradient cannot be established
+// in that case and the element must not be painted with it.
 func resolveGradient(id string, resolver *paintServerResolver, path *render.Path, vp viewport, logf func(string, ...any)) (paintServer, bool) {
 	ps, ok := resolver.resolve(id)
-	if !ok {
-		return paintServer{}, false
-	}
-	if ps.kind == "pattern" {
-		logf("svg: <pattern> paint servers not yet supported (skipped)")
+	if !ok || ps.kind == "pattern" {
 		return paintServer{}, false
 	}
 	if ps.stops == nil {

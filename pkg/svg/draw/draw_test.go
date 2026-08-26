@@ -5,6 +5,7 @@ import (
 	"image/color"
 	stddraw "image/draw"
 	"testing"
+	"time"
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
@@ -224,5 +225,136 @@ func TestStrokeGradientDegradesToFallbackColor(t *testing.T) {
 	t.Logf("stroke fallback color = %+v", got)
 	if got.G < 100 || got.R > 60 || got.B > 60 {
 		t.Errorf("stroke = %+v, want the fallback color green (gradient strokes degrade to fallback)", got)
+	}
+}
+
+// checkerPatternSVG builds a 40x40 document filled with a 10x10
+// userSpaceOnUse pattern tile: a red square in the tile's left half, nothing
+// (background white) in its right half. The tile repeats 4x along each axis
+// over the 40x40 fill rect, so x=2 (left half of cell 0), x=12 (left half of
+// cell 1) and x=22 (left half of cell 2) should all read red, while x=7
+// (right half of cell 0) should read white (untouched fill background).
+func checkerPatternSVG(extra string) string {
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <pattern id="p" patternUnits="userSpaceOnUse" width="10" height="10" ` + extra + `>
+	    <rect x="0" y="0" width="5" height="10" fill="red"/>
+	  </pattern>
+	  <rect x="0" y="0" width="40" height="40" fill="url(#p)"/>
+	</svg>`
+}
+
+// TestPatternFillTiles verifies a pattern fill repeats its tile content
+// across the shape: two positions at the same offset within different tile
+// cells read the same color (both inside the tile's red half), while a
+// position between tiles (the tile's transparent half) differs.
+func TestPatternFillTiles(t *testing.T) {
+	img := renderSVG(t, checkerPatternSVG(""), 40, 40)
+
+	cell0 := img.RGBAAt(2, 5)  // left half of tile cell (0,0): red
+	cell1 := img.RGBAAt(12, 5) // left half of tile cell (1,0): red
+	cell2 := img.RGBAAt(22, 5) // left half of tile cell (2,0): red
+	gap := img.RGBAAt(7, 5)    // right half of tile cell (0,0): untouched white
+
+	t.Logf("cell0=%+v cell1=%+v cell2=%+v gap=%+v", cell0, cell1, cell2, gap)
+
+	if cell0 != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("cell0 = %+v, want red", cell0)
+	}
+	if cell1 != cell0 {
+		t.Errorf("cell1 = %+v, want to match cell0 (%+v) — pattern must tile", cell1, cell0)
+	}
+	if cell2 != cell0 {
+		t.Errorf("cell2 = %+v, want to match cell0 (%+v) — pattern must tile", cell2, cell0)
+	}
+	if gap == cell0 {
+		t.Errorf("gap = %+v, want to DIFFER from the tile's red half (%+v) — same color everywhere would mean it isn't really tiling", gap, cell0)
+	}
+	if gap != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("gap = %+v, want untouched white", gap)
+	}
+}
+
+// TestPatternTransformApplies verifies patternTransform visibly shifts the
+// tile grid: translating by half a tile width should swap which half of each
+// cell reads red.
+func TestPatternTransformApplies(t *testing.T) {
+	img := renderSVG(t, checkerPatternSVG(`patternTransform="translate(5 0)"`), 40, 40)
+
+	// Under the untransformed pattern (see TestPatternFillTiles), x=2 is red
+	// and x=7 is white within the first cell. Shifting the pattern right by
+	// 5 should swap that: x=2 becomes white, x=7 becomes red.
+	shiftedLeft := img.RGBAAt(2, 5)
+	shiftedRight := img.RGBAAt(7, 5)
+	t.Logf("shiftedLeft=%+v shiftedRight=%+v", shiftedLeft, shiftedRight)
+
+	if shiftedLeft != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("shiftedLeft = %+v, want white (patternTransform must shift the grid)", shiftedLeft)
+	}
+	if shiftedRight != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("shiftedRight = %+v, want red (patternTransform must shift the grid)", shiftedRight)
+	}
+}
+
+// TestPatternWithNoChildrenPaintsNothing verifies a <pattern> with zero
+// children paints nothing at all (the shape's fill is simply absent), per
+// SVG's rule that an invalid/empty paint server is treated as unpainted
+// rather than falling back to any default color.
+func TestPatternWithNoChildrenPaintsNothing(t *testing.T) {
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <pattern id="p" patternUnits="userSpaceOnUse" width="10" height="10"></pattern>
+	  <rect x="0" y="0" width="40" height="40" fill="url(#p)"/>
+	</svg>`
+	img := renderSVG(t, src, 40, 40)
+	got := img.RGBAAt(20, 20)
+	if got != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("center = %+v, want untouched white (empty pattern paints nothing)", got)
+	}
+}
+
+// TestPatternZeroSizePaintsNothing verifies a <pattern> with zero width or
+// height paints nothing, per SVG's explicit "width or height of zero
+// disables rendering of the element referencing it" rule.
+func TestPatternZeroSizePaintsNothing(t *testing.T) {
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <pattern id="p" patternUnits="userSpaceOnUse" width="0" height="10">
+	    <rect x="0" y="0" width="10" height="10" fill="red"/>
+	  </pattern>
+	  <rect x="0" y="0" width="40" height="40" fill="url(#p)"/>
+	</svg>`
+	img := renderSVG(t, src, 40, 40)
+	got := img.RGBAAt(20, 20)
+	if got != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("center = %+v, want untouched white (zero-size pattern tile paints nothing)", got)
+	}
+}
+
+// TestSelfReferencingPatternTerminates verifies a <pattern> whose tile
+// content references the pattern itself (fill="url(#p)" on a shape inside
+// <pattern id="p">) does not recurse forever: the self-referencing shape's
+// own fill resolves to nothing (the cycle guard stops it), but the pattern
+// still paints via its OTHER, non-cyclic tile content. This must complete
+// quickly, not hang.
+func TestSelfReferencingPatternTerminates(t *testing.T) {
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <pattern id="p" patternUnits="userSpaceOnUse" width="10" height="10">
+	    <rect x="0" y="0" width="10" height="10" fill="red"/>
+	    <rect x="0" y="0" width="5" height="5" fill="url(#p)"/>
+	  </pattern>
+	  <rect x="0" y="0" width="40" height="40" fill="url(#p)"/>
+	</svg>`
+
+	done := make(chan *image.RGBA, 1)
+	go func() { done <- renderSVG(t, src, 40, 40) }()
+
+	select {
+	case img := <-done:
+		// The tile's first rect (solid red, no self-reference) still paints;
+		// only the second, self-referencing rect's own fill is dropped.
+		got := img.RGBAAt(2, 2)
+		if got != (color.RGBA{255, 0, 0, 255}) {
+			t.Errorf("center = %+v, want red from the tile's non-cyclic rect", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("self-referencing pattern did not terminate within 5s (infinite recursion?)")
 	}
 }
