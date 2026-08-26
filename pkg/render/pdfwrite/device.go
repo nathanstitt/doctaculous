@@ -22,6 +22,7 @@ type pageDevice struct {
 	embed    *fontEmbedder
 	images   []pendingImage   // images referenced this page (assembled later)
 	shadings []pendingShading // native /Shading dicts referenced this page (assembled later)
+	forms    []pendingForm    // transparency-group/mask Form XObjects referenced this page
 	logf     func(string, ...any)
 
 	// extGStates holds every distinct /ExtGState dict this page has emitted,
@@ -40,8 +41,18 @@ type pageDevice struct {
 	clipRect  *clipBounds
 	clipStack []*clipBounds
 
+	// groupStack holds the buffer/resource/clip state BeginGroup swapped out,
+	// restored by the matching EndGroup (see group.go).
+	groupStack []groupFrame
+
+	// pendingSoftMasks maps a sentinel *image.Alpha BuildLuminanceMask
+	// returned to the name of the real luminosity Form XObject it stands for
+	// (see softmask.go's BuildLuminanceMask/takePendingSoftMask) — the
+	// mechanism that lets EndGroup emit a native PDF soft mask instead of a
+	// baked raster fallback for the common case.
+	pendingSoftMasks map[*image.Alpha]string
+
 	shadingLogged bool // true once a fidelity note has been logged for this device
-	groupLogged   bool // true once a fidelity note has been logged for group pass-through
 }
 
 // clipBounds is an axis-aligned device-space rectangle in PDF points.
@@ -292,6 +303,16 @@ func (d *pageDevice) tryNativeShading(s render.Shader, ctm render.Matrix, blend 
 	// spec `sh` is not modulated by constant alpha (/ca) — only the blend mode
 	// applies (ISO 32000-1 §8.7.4.3), so only /BM is set here.
 	g := extGState{blendMode: blend}
+	if needsAlphaMask(desc) {
+		// The color-only shading above cannot express desc's per-stop alpha
+		// (PDF /Shading has no alpha channel). Pair it with a parallel
+		// /DeviceGray alpha shading, painted into its own Form XObject and
+		// wired in as a luminosity soft mask — this is the "lift the
+		// alpha-gradient fallback" from the design doc: only the alpha half
+		// lifts (a non-pad spread already returned false from
+		// canEmitShading above and never reaches here).
+		g.smaskFormName = d.registerAlphaShadingMask(desc, ctm)
+	}
 	d.buf.WriteString("q\n")
 	d.emitGState(g)
 	m := ctm
@@ -300,6 +321,44 @@ func (d *pageDevice) tryNativeShading(s render.Shader, ctm render.Matrix, blend 
 	fmt.Fprintf(&d.buf, "/%s sh\n", name)
 	d.buf.WriteString("Q\n")
 	return true
+}
+
+// registerAlphaShadingMask builds a DeviceGray Form XObject whose content
+// paints desc's ALPHA shading (buildAlphaShadingDict) under ctm, clipped to
+// the device's full page box (the mask's own BBox — the soft mask's coverage
+// outside the shape being filled is irrelevant, since the shape's own path
+// clip, still active in the outer content stream, already restricts where
+// the masked `sh` paints), and returns its resource name for
+// extGState.smaskFormName. This mirrors registerScratchForm's "form +
+// resources" shape but builds the content directly (a single `sh` under the
+// CTM) rather than running an arbitrary paint callback, since a shading has
+// no sub-content to recurse into.
+func (d *pageDevice) registerAlphaShadingMask(desc render.ShadingDesc, ctm render.Matrix) string {
+	alphaShadings := []pendingShading{{name: "Sh0", dict: buildAlphaShadingDict(desc)}}
+	var content bytes.Buffer
+	m := ctm
+	fmt.Fprintf(&content, "%s %s %s %s %s %s cm\n",
+		formatReal(m.A), formatReal(m.B), formatReal(m.C), formatReal(m.D), formatReal(m.E), formatReal(m.F))
+	content.WriteString("/Sh0 sh\n")
+
+	forms := &d.forms
+	if n := len(d.groupStack); n > 0 {
+		// See registerScratchForm's doc comment for why an in-progress group
+		// (BeginGroup already swapped d.forms to the group's own accumulator)
+		// requires registering into the ENCLOSING scope instead: the "/GSn gs"
+		// referencing this mask is emitted into the outer buffer by whichever
+		// call restores it, not into the group's own still-open content.
+		forms = &d.groupStack[n-1].forms
+	}
+	name := fmt.Sprintf("Fm%d", len(*forms))
+	*forms = append(*forms, pendingForm{
+		name:       name,
+		content:    content.Bytes(),
+		bbox:       [4]float64{0, 0, d.wPt, d.hPt},
+		colorSpace: "DeviceGray",
+		shadings:   alphaShadings,
+	})
+	return name
 }
 
 // logShadingFallback logs (once per page) why FillShading fell back to
@@ -421,87 +480,10 @@ func intersectClipBounds(a, b *clipBounds) *clipBounds {
 	return r
 }
 
-// BeginGroup is a STUB: this writer does not yet emit transparency Form
-// XObjects (a later PR — see the SVG groups/clip/mask design), so it treats a
-// group as transparent pass-through. Children between BeginGroup and EndGroup
-// paint directly onto the page exactly as if the group were absent; nothing
-// is dropped, but group opacity/blend/mask has no effect (each child keeps
-// painting as its own separate operation, so overlapping children under a
-// group's opacity will double-darken at the overlap until real transparency
-// groups land). Logs once per device so callers using WithLogf see the
-// fidelity gap.
-func (d *pageDevice) BeginGroup() {
-	if d.logf != nil && !d.groupLogged {
-		d.groupLogged = true
-		d.logf("pdfwrite: groups not yet composited as PDF transparency groups; painting children directly (opacity/mask ignored)")
-	}
-}
-
-// EndGroup is the pass-through counterpart to BeginGroup: see its doc for the
-// current fidelity limitation. alpha, blendMode, and mask are accepted for
-// interface conformance but not yet applied.
-func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {}
-
-// BuildClipMask is a documented APPROXIMATION: this writer has no offscreen
-// raster surface to build an exact per-pixel union mask into (see
-// render.Device.BuildClipMask's doc comment on why the exact union requires
-// rasterizing), and EndGroup does not yet apply a GroupMask at all (see
-// BeginGroup's doc comment) — so the mask this returns is currently inert
-// regardless of its shape. It still computes a faithful rectangular
-// approximation (the union of each child path's device-space bounding box,
-// as a fully-opaque mask over that combined rectangle) rather than an empty
-// or nil mask, so that once transparency-group compositing lands here,
-// clip-path gets a reasonable non-exact result for free instead of clipping
-// to nothing. This is exactly decision (c) from the design doc — geometry
-// concatenation with a rectangular stand-in for the rule — used ONLY here,
-// where no exact backend exists yet; the raster backend never takes this
-// shortcut. Logs once per device.
-func (d *pageDevice) BuildClipMask(paths []render.MaskPath) render.GroupMask {
-	if d.logf != nil && !d.groupLogged {
-		d.groupLogged = true
-		d.logf("pdfwrite: groups not yet composited as PDF transparency groups; painting children directly (opacity/mask ignored)")
-	}
-	var union *clipBounds
-	for _, mp := range paths {
-		if mp.Path == nil || mp.Path.Empty() {
-			continue
-		}
-		minX, minY, maxX, maxY, ok := mp.Path.Bounds()
-		if !ok {
-			continue
-		}
-		union = unionClipBounds(union, &clipBounds{minX, minY, maxX, maxY})
-	}
-	if union == nil {
-		return image.NewAlpha(image.Rectangle{})
-	}
-	r := image.Rect(int(math.Floor(union.minX)), int(math.Floor(union.minY)), int(math.Ceil(union.maxX)), int(math.Ceil(union.maxY)))
-	mask := image.NewAlpha(r)
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			mask.SetAlpha(x, y, color.Alpha{A: 255})
-		}
-	}
-	return mask
-}
-
-// BuildLuminanceMask is a STUB: this writer has no offscreen raster surface
-// to render mask content into and read pixels back from (real support is
-// the next task — a PDF `/SMask << /S /Luminosity >>` soft mask, per the
-// SVG groups/clip/mask design doc's decision 3). It returns nil (meaning "no
-// masking" to EndGroup, which this writer's BeginGroup/EndGroup also
-// currently pass through — see those methods) and logs once per device
-// rather than fabricating an approximation the way BuildClipMask does: an
-// inert rectangular stand-in would be actively misleading for a mask (whose
-// whole point is graduated coverage from rendered content), unlike a clip
-// union's binary in/out shape.
-func (d *pageDevice) BuildLuminanceMask(size image.Point, alphaOnly bool, paint func(dev render.Device)) render.GroupMask {
-	if d.logf != nil && !d.groupLogged {
-		d.groupLogged = true
-		d.logf("pdfwrite: groups not yet composited as PDF transparency groups; painting children directly (opacity/mask ignored)")
-	}
-	return nil
-}
+// BeginGroup, EndGroup, BuildClipMask, and BuildLuminanceMask are implemented
+// in group.go and softmask.go (transparency-group Form XObjects and
+// luminosity soft masks), kept in their own files since they carry
+// substantially more machinery than this file's other per-operator methods.
 
 // unionClipBounds returns the smallest rectangle enclosing both a and b; a
 // nil operand is treated as "no contribution yet" (returns the other).

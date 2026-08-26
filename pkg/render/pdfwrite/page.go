@@ -54,6 +54,7 @@ type renderedPage struct {
 	images     []pendingImage
 	shadings   []pendingShading
 	extGStates []pendingExtGState
+	forms      []pendingForm
 	pdfW, pdfH float64
 }
 
@@ -207,6 +208,7 @@ func renderBand(b band, index int, embed *fontEmbedder, opts Options) renderedPa
 		images:     dev.images,
 		shadings:   dev.shadings,
 		extGStates: dev.extGStates,
+		forms:      dev.forms,
 		pdfW:       b.pdfW,
 		pdfH:       b.pdfH,
 	}
@@ -250,8 +252,8 @@ func assemble(out io.Writer, rendered []renderedPage, embed *fontEmbedder, opts 
 		if len(sharedFonts) > 0 {
 			res["Font"] = sharedFonts
 		}
+		xobjs := Dict{}
 		if len(rp.images) > 0 {
-			xobjs := Dict{}
 			for _, pi := range rp.images {
 				imgRef, err := embedImage(w, pi.img)
 				if err != nil {
@@ -262,6 +264,20 @@ func assemble(out io.Writer, rendered []renderedPage, embed *fontEmbedder, opts 
 				}
 				xobjs[pi.name] = imgRef
 			}
+		}
+		if len(rp.forms) > 0 {
+			for _, pf := range rp.forms {
+				formRef, err := embedForm(w, pf, opts.Logf)
+				if err != nil {
+					if opts.Logf != nil {
+						opts.Logf("pdfwrite: form embed failed: %v", err)
+					}
+					continue
+				}
+				xobjs[pf.name] = formRef
+			}
+		}
+		if len(xobjs) > 0 {
 			res["XObject"] = xobjs
 		}
 		if len(rp.shadings) > 0 {
@@ -274,7 +290,7 @@ func assemble(out io.Writer, rendered []renderedPage, embed *fontEmbedder, opts 
 		if len(rp.extGStates) > 0 {
 			gstates := Dict{}
 			for _, pg := range rp.extGStates {
-				gstates[pg.name] = w.put1(pg.dict)
+				gstates[pg.name] = w.put1(extGStateDict(pg.state, xobjs))
 			}
 			res["ExtGState"] = gstates
 		}
@@ -461,6 +477,88 @@ func embedImage(w *writer, img image.Image) (Ref, error) {
 		dict["SMask"] = smask
 	}
 	return w.addStream(dict, rgb), nil
+}
+
+// embedForm writes pf as a PDF Form XObject: a stream carrying its own
+// content bytes, /BBox, /Group (transparency, the color space EndGroup or
+// BuildLuminanceMask chose), and a /Resources dict scoped to exactly what pf
+// itself references — recursing for any nested forms (a group inside a
+// group, or a mask whose content itself contains a group/mask) so a form
+// never depends on its parent's /Resources (ISO 32000-1 §8.10.2: a form's
+// resources are looked up in its OWN /Resources, not inherited from the
+// invoking content stream, unlike a page).
+func embedForm(w *writer, pf pendingForm, logf func(string, ...any)) (Ref, error) {
+	res := Dict{}
+	xobjs := Dict{}
+	for _, pi := range pf.images {
+		imgRef, err := embedImage(w, pi.img)
+		if err != nil {
+			if logf != nil {
+				logf("pdfwrite: form image embed failed: %v", err)
+			}
+			continue
+		}
+		xobjs[pi.name] = imgRef
+	}
+	for _, nested := range pf.forms {
+		formRef, err := embedForm(w, nested, logf)
+		if err != nil {
+			if logf != nil {
+				logf("pdfwrite: nested form embed failed: %v", err)
+			}
+			continue
+		}
+		xobjs[nested.name] = formRef
+	}
+	if len(xobjs) > 0 {
+		res["XObject"] = xobjs
+	}
+	if len(pf.shadings) > 0 {
+		shadings := Dict{}
+		for _, ps := range pf.shadings {
+			shadings[ps.name] = w.put1(ps.dict)
+		}
+		res["Shading"] = shadings
+	}
+	if len(pf.extGStates) > 0 {
+		gstates := Dict{}
+		for _, pg := range pf.extGStates {
+			gstates[pg.name] = w.put1(extGStateDict(pg.state, xobjs))
+		}
+		res["ExtGState"] = gstates
+	}
+
+	dict := Dict{
+		"Type":      Name("XObject"),
+		"Subtype":   Name("Form"),
+		"BBox":      Array{Real(pf.bbox[0]), Real(pf.bbox[1]), Real(pf.bbox[2]), Real(pf.bbox[3])},
+		"Group":     Dict{"S": Name("Transparency"), "CS": Name(pf.colorSpace), "I": Bool(true)},
+		"Resources": res,
+	}
+	return w.addStream(dict, pf.content), nil
+}
+
+// extGStateDict finishes an extGState value into its PDF dictionary, resolving
+// a pending soft-mask form name (see extGState.smaskFormName) against xobjs
+// — the SAME /XObject dict this ExtGState's own resource scope will carry —
+// into a real /SMask << /S /Luminosity /G <ref> /BC [0] >> entry. /BC [0] (a
+// black backdrop) is per the design doc: without it, the area outside the
+// mask form's own BBox is undefined where SVG requires fully transparent.
+func extGStateDict(g extGState, xobjs Dict) Dict {
+	d := g.dict()
+	if g.smaskFormName == "" {
+		return d
+	}
+	formRef, ok := xobjs[g.smaskFormName]
+	if !ok {
+		return d // the named form failed to embed; degrade to no soft mask rather than a dangling reference
+	}
+	d["SMask"] = Dict{
+		"S":  Name("Luminosity"),
+		"G":  formRef,
+		"BC": Array{Int(0)},
+	}
+	return d
 }
 
 // normalizeOpts clamps a negative margin to 0. It does NOT force a page size: an
