@@ -50,9 +50,11 @@ func parseNumberList(s string) []float64 {
 }
 
 // parseLength parses an SVG length with an optional unit into user units.
-// Percentages resolve against ref. em/ex use the UA default font (16px em,
-// 8px ex) until the style cascade lands (PR 2); this matches how a unitless
-// browser default resolves them at the root.
+// Percentages resolve against ref. em/ex use the UA default font metrics
+// (16px em, 8px ex), which matches how a unitless browser default resolves
+// them at the root. Real resolution needs a font-size on the resolved style;
+// the CSS cascade landed without one because font-size is only meaningful
+// once SVG text ships, so these stay fixed until the text slice adds it.
 func parseLength(s string, ref float64) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
