@@ -272,7 +272,7 @@ func (d *pageDevice) FillShading(s render.Shader, ctm render.Matrix, blend strin
 	}
 	// DrawImage maps the image's unit square [0,1]x[0,1] into device space; place
 	// it exactly over [minX,maxX]x[minY,maxY] in page space.
-	place := render.Translate(float64(minX), float64(minY)).Mul(render.Scale(float64(w), float64(h)))
+	place := render.Scale(float64(w), float64(h)).Mul(render.Translate(float64(minX), float64(minY)))
 	d.DrawImage(img, place, 1, blend)
 }
 

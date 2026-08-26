@@ -105,6 +105,46 @@ func TestLinearGradientFillObjectBoundingBox(t *testing.T) {
 	}
 }
 
+// TestLinearGradientFillObjectBoundingBoxOffsetRect verifies the same
+// left-to-right red->blue transition as TestLinearGradientFillObjectBoundingBox,
+// but for a rect NOT anchored at the origin. objectBoundingBox composes a
+// Translate(minX,minY) with a Scale(w,h): with the rect at (0,0),
+// Translate(0,0) is the identity, so composing the two in the wrong order
+// (translate-then-scale vs. scale-then-translate) is invisible — this test
+// pins a rect at (10,10) specifically so a regression in that composition
+// order (which blows up the translation by the scale factor) fails loudly
+// instead of only manifesting on off-origin shapes.
+func TestLinearGradientFillObjectBoundingBoxOffsetRect(t *testing.T) {
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60">
+	  <linearGradient id="g">
+	    <stop offset="0" stop-color="red"/>
+	    <stop offset="1" stop-color="blue"/>
+	  </linearGradient>
+	  <rect x="10" y="10" width="40" height="40" fill="url(#g)"/>
+	</svg>`
+	img := renderSVG(t, src, 60, 60)
+
+	left := img.RGBAAt(15, 30)
+	mid := img.RGBAAt(30, 30)
+	right := img.RGBAAt(45, 30)
+	t.Logf("left=%+v mid=%+v right=%+v", left, mid, right)
+
+	if left.R < 200 || left.B > 60 {
+		t.Errorf("left = %+v, want strongly red", left)
+	}
+	if right.B < 200 || right.R > 60 {
+		t.Errorf("right = %+v, want strongly blue", right)
+	}
+	if mid.R < 60 || mid.R > 200 || mid.B < 60 || mid.B > 200 {
+		t.Errorf("mid = %+v, want a red/blue mix (purple-ish)", mid)
+	}
+	// Outside the rect entirely: must stay the white background, not a
+	// bogus color from a mis-translated gradient painting the wrong region.
+	if outside := img.RGBAAt(2, 2); outside != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("outside rect = %+v, want white background untouched", outside)
+	}
+}
+
 // TestLinearGradientUserSpaceOnUse verifies gradientUnits="userSpaceOnUse"
 // coordinates are read as user-space lengths, not objectBoundingBox
 // fractions: a gradient spanning only x in [0,20] over a 40-wide rect should

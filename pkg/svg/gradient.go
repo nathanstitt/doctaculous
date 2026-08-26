@@ -97,7 +97,7 @@ func resolveGradient(id string, resolver *paintServerResolver, path *render.Path
 			// than let a zero-scale matrix invert to garbage downstream.
 			return paintServer{}, false
 		}
-		bboxM = render.Translate(minX, minY).Mul(render.Scale(w, h))
+		bboxM = render.Scale(w, h).Mul(render.Translate(minX, minY))
 	}
 
 	gradM := render.Identity
