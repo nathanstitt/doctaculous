@@ -48,7 +48,7 @@ func Parse(src string) Stylesheet {
 		}
 		if strings.HasPrefix(prelude, "@") {
 			if strings.EqualFold(strings.TrimSpace(prelude), "@font-face") {
-				if ff, ok := parseFontFace(parseDeclarations(body)); ok {
+				if ff, ok := parseFontFace(ParseDeclarations(body)); ok {
 					sheet.FontFaces = append(sheet.FontFaces, ff)
 				}
 			} else if rest, ok := atKeyword(prelude, "@page"); ok {
@@ -80,7 +80,7 @@ func Parse(src string) Stylesheet {
 		}
 		sheet.Rules = append(sheet.Rules, Rule{
 			Selectors:    sels,
-			Declarations: parseDeclarations(body),
+			Declarations: ParseDeclarations(body),
 		})
 	}
 	return sheet
@@ -164,10 +164,12 @@ func (s *ruleScanner) skipComment() {
 	s.pos = len(s.src)
 }
 
-// parseDeclarations parses a rule body (the text between { and }) into
-// declarations. Malformed declarations (no colon, empty property, empty value)
-// are skipped so one bad declaration cannot void the rest.
-func parseDeclarations(body string) []Declaration {
+// ParseDeclarations parses a declaration list (the body of a CSS rule or
+// the value of a style="" attribute) into declarations. The !important flag
+// is honored; malformed declarations (no colon, empty property, empty value)
+// are dropped individually per CSS error recovery, so one bad declaration
+// cannot void the rest.
+func ParseDeclarations(body string) []Declaration {
 	var out []Declaration
 	// NOTE: the body is split naively on ';'. A value containing a literal
 	// semicolon (e.g. a data: URI in url(...)) will be split incorrectly; that is
