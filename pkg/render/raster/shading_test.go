@@ -195,3 +195,125 @@ func TestFillShadingClipAndMap(t *testing.T) {
 		t.Fatalf("outside clip = %v, want white (untouched)", got)
 	}
 }
+
+// TestNewAxialShaderPad confirms NewAxialShader(..., SpreadPad) matches the
+// existing /Extend[true true] clamp behavior exactly: t beyond [0,1] clamps to
+// the endpoint color rather than mirroring or wrapping.
+func TestNewAxialShaderPad(t *testing.T) {
+	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
+	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadPad)
+	c, ok := sh.ColorAt(-5, 0)
+	wantRGB(t, c, ok, 255, 0, 0) // clamps to t=0 (red)
+	c, ok = sh.ColorAt(15, 0)
+	wantRGB(t, c, ok, 0, 0, 255) // clamps to t=1 (blue)
+	c, ok = sh.ColorAt(2.5, 0)
+	wantRGB(t, c, ok, 191, 0, 64) // t=0.25
+}
+
+// TestNewAxialShaderReflect confirms SpreadReflect mirrors the ramp beyond
+// [0,1]: sval=1.25 folds to 0.75, sval=2.25 folds to 0.25, sval=-0.25 folds to
+// 0.25 (mirrored around 0).
+func TestNewAxialShaderReflect(t *testing.T) {
+	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
+	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadReflect)
+
+	want075, ok := sh.ColorAt(7.5, 0) // sval=0.75, within [0,1] unaffected by fold
+	if !ok {
+		t.Fatalf("ColorAt(7.5,0) reported !ok")
+	}
+	got, ok := sh.ColorAt(12.5, 0) // sval=1.25 -> reflects to 0.75
+	wantRGB(t, got, ok, want075.R, want075.G, want075.B)
+
+	want025, ok := sh.ColorAt(2.5, 0) // sval=0.25
+	if !ok {
+		t.Fatalf("ColorAt(2.5,0) reported !ok")
+	}
+	got, ok = sh.ColorAt(22.5, 0) // sval=2.25 -> reflects to 0.25
+	wantRGB(t, got, ok, want025.R, want025.G, want025.B)
+
+	got, ok = sh.ColorAt(-2.5, 0) // sval=-0.25 -> reflects to 0.25
+	wantRGB(t, got, ok, want025.R, want025.G, want025.B)
+}
+
+// TestNewAxialShaderRepeat confirms SpreadRepeat wraps the ramp modulo 1:
+// sval=1.25 wraps to 0.25, sval=-0.25 wraps to 0.75.
+func TestNewAxialShaderRepeat(t *testing.T) {
+	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
+	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadRepeat)
+
+	want025, ok := sh.ColorAt(2.5, 0) // sval=0.25
+	if !ok {
+		t.Fatalf("ColorAt(2.5,0) reported !ok")
+	}
+	got, ok := sh.ColorAt(12.5, 0) // sval=1.25 -> wraps to 0.25
+	wantRGB(t, got, ok, want025.R, want025.G, want025.B)
+
+	want075, ok := sh.ColorAt(7.5, 0) // sval=0.75
+	if !ok {
+		t.Fatalf("ColorAt(7.5,0) reported !ok")
+	}
+	got, ok = sh.ColorAt(-2.5, 0) // sval=-0.25 -> wraps to 0.75
+	wantRGB(t, got, ok, want075.R, want075.G, want075.B)
+}
+
+// TestNewRadialShaderPad, TestNewRadialShaderReflect, and
+// TestNewRadialShaderRepeat exercise the radial (focal-circle) form using
+// SVG-style parameters (fx,fy,fr,cx,cy,cr) mapped onto circles[0..2]/[3..5].
+func TestNewRadialShaderPad(t *testing.T) {
+	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
+	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, SpreadPad)
+	c, ok := sh.ColorAt(0, 0)
+	wantRGB(t, c, ok, 0, 255, 0)
+	c, ok = sh.ColorAt(10, 0)
+	wantRGB(t, c, ok, 255, 255, 0)
+	c, ok = sh.ColorAt(20, 0) // beyond outer radius -> clamps to s=1
+	wantRGB(t, c, ok, 255, 255, 0)
+}
+
+func TestNewRadialShaderReflect(t *testing.T) {
+	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
+	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, SpreadReflect)
+
+	want, ok := sh.ColorAt(5, 0) // s=0.5, within [0,1]
+	if !ok {
+		t.Fatalf("ColorAt(5,0) reported !ok")
+	}
+	// s=1.5 (radius 15) reflects to 0.5.
+	got, ok := sh.ColorAt(15, 0)
+	wantRGB(t, got, ok, want.R, want.G, want.B)
+}
+
+func TestNewRadialShaderRepeat(t *testing.T) {
+	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
+	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, SpreadRepeat)
+
+	want025, ok := sh.ColorAt(2.5, 0) // s=0.25
+	if !ok {
+		t.Fatalf("ColorAt(2.5,0) reported !ok")
+	}
+	// s=1.25 (radius 12.5) wraps to 0.25.
+	got, ok := sh.ColorAt(12.5, 0)
+	wantRGB(t, got, ok, want025.R, want025.G, want025.B)
+}
+
+// TestNewAxialShaderDegenerate confirms a zero-length axis never panics and
+// paints the domain-start color under every spread mode.
+func TestNewAxialShaderDegenerate(t *testing.T) {
+	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
+	for _, sp := range []Spread{SpreadPad, SpreadReflect, SpreadRepeat} {
+		sh := NewAxialShader(5, 5, 5, 5, fn, sp)
+		c, ok := sh.ColorAt(100, -100)
+		wantRGB(t, c, ok, 255, 0, 0)
+	}
+}
+
+// TestNewRadialShaderZeroRadius confirms a zero-radius radial shader never
+// panics under any spread mode.
+func TestNewRadialShaderZeroRadius(t *testing.T) {
+	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
+	for _, sp := range []Spread{SpreadPad, SpreadReflect, SpreadRepeat} {
+		sh := NewRadialShader(0, 0, 0, 0, 0, 0, fn, sp)
+		sh.ColorAt(1, 1)
+		sh.ColorAt(0, 0)
+	}
+}

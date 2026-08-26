@@ -92,11 +92,100 @@ type shading struct {
 	fnHasInv bool
 
 	extend [2]bool // /Extend [b0 b1] for axial/radial
+	spread Spread  // SVG spreadMethod for axial/radial; PDF shadings leave this at SpreadPad
 
 	// background is the color painted for points that fall outside the shading
 	// (used when the shading is a pattern fill). hasBackground reports presence.
 	background    color.RGBA
 	hasBackground bool
+}
+
+// Spread selects how an axial or radial gradient extends beyond its defining
+// [0,1] parameter range, mirroring SVG's spreadMethod attribute. PDF shadings
+// have no equivalent concept — they use the two-bool /Extend clamp, which
+// SpreadPad reproduces exactly — so Spread only matters for gradients built via
+// NewAxialShader/NewRadialShader (SVG paint servers).
+type Spread int
+
+const (
+	// SpreadPad clamps the parameter to the nearest endpoint beyond [0,1],
+	// painting a solid endpoint color outside the gradient. This is the PDF
+	// /Extend[true true] behavior and the default for un-extended PDF shadings
+	// (which instead leave the region outside [0,1] unpainted).
+	SpreadPad Spread = iota
+	// SpreadReflect mirrors the ramp back and forth beyond [0,1] (0..1..0..1..).
+	SpreadReflect
+	// SpreadRepeat wraps the ramp modulo 1, repeating it beyond [0,1].
+	SpreadRepeat
+)
+
+// foldSpread maps an out-of-[0,1] parameter v into [0,1] per the spread mode.
+// Callers only invoke this for SpreadReflect/SpreadRepeat; SpreadPad is handled
+// by the existing extend-clamp logic so PDF behavior is untouched.
+func foldSpread(v float64, spread Spread) float64 {
+	switch spread {
+	case SpreadRepeat:
+		f := math.Mod(v, 1)
+		if f < 0 {
+			f += 1
+		}
+		return f
+	case SpreadReflect:
+		// Fold into [0,2) then mirror the [1,2) half back onto [0,1].
+		f := math.Mod(v, 2)
+		if f < 0 {
+			f += 2
+		}
+		if f > 1 {
+			f = 2 - f
+		}
+		return f
+	default:
+		// Not reached from ColorAt (SpreadPad never calls foldSpread), but keep
+		// this total and sane if called directly.
+		if v < 0 {
+			return 0
+		}
+		if v > 1 {
+			return 1
+		}
+		return v
+	}
+}
+
+// NewAxialShader builds a render.Shader for an SVG linear-gradient-style axial
+// gradient from (x0,y0) to (x1,y1), sampling fn (a 1-input color ramp keyed on
+// domain [0,1]) and extending beyond the axis per spread. It shares evaluation
+// code (atAxial) with the PDF Type 2 shading path but never touches PDF types,
+// so it can be built directly from parsed SVG attributes.
+func NewAxialShader(x0, y0, x1, y1 float64, fn function.Func, spread Spread) render.Shader {
+	return &shading{
+		shadingType: 2,
+		csKind:      csRGB,
+		fn:          fn,
+		domain:      [2]float64{0, 1},
+		axis:        [4]float64{x0, y0, x1, y1},
+		extend:      [2]bool{true, true},
+		spread:      spread,
+	}
+}
+
+// NewRadialShader builds a render.Shader for an SVG radial-gradient-style
+// gradient: a focal point (fx,fy,fr) — SVG gradients always use r0=0 for the
+// focal circle — expanding to the outer circle (cx,cy,cr), sampling fn (a
+// 1-input color ramp keyed on domain [0,1]) and extending beyond the circle per
+// spread. It shares evaluation code (atRadial) with the PDF Type 3 shading path
+// but never touches PDF types.
+func NewRadialShader(fx, fy, fr, cx, cy, cr float64, fn function.Func, spread Spread) render.Shader {
+	return &shading{
+		shadingType: 3,
+		csKind:      csRGB,
+		fn:          fn,
+		domain:      [2]float64{0, 1},
+		circles:     [6]float64{fx, fy, fr, cx, cy, cr},
+		extend:      [2]bool{true, true},
+		spread:      spread,
+	}
 }
 
 // newShader parses a /Shading object into a render.Shader. The object may be a
@@ -260,17 +349,21 @@ func (s *shading) atAxial(x, y float64) (color.RGBA, bool) {
 	} else {
 		sval = ((x-x0)*dx + (y-y0)*dy) / dd
 	}
-	switch {
-	case sval < 0:
-		if !s.extend[0] {
-			return color.RGBA{}, false
+	if s.spread != SpreadPad && (sval < 0 || sval > 1) {
+		sval = foldSpread(sval, s.spread)
+	} else {
+		switch {
+		case sval < 0:
+			if !s.extend[0] {
+				return color.RGBA{}, false
+			}
+			sval = 0
+		case sval > 1:
+			if !s.extend[1] {
+				return color.RGBA{}, false
+			}
+			sval = 1
 		}
-		sval = 0
-	case sval > 1:
-		if !s.extend[1] {
-			return color.RGBA{}, false
-		}
-		sval = 1
 	}
 	t := s.domain[0] + sval*(s.domain[1]-s.domain[0])
 	return s.colorAt(t), true
@@ -297,19 +390,25 @@ func (s *shading) atRadial(x, y float64) (color.RGBA, bool) {
 	best := math.Inf(-1)
 	found := false
 	consider := func(sv float64) {
-		// Map s into [0,1] honoring Extend; reject if outside and not extended.
+		// Map s into [0,1]: SpreadPad honors /Extend (reject if outside and not
+		// extended, else clamp to the nearest endpoint); SpreadReflect/SpreadRepeat
+		// always accept and fold sv into [0,1] instead.
 		cs := sv
-		switch {
-		case sv < 0:
-			if !s.extend[0] {
-				return
+		if s.spread != SpreadPad && (sv < 0 || sv > 1) {
+			cs = foldSpread(sv, s.spread)
+		} else {
+			switch {
+			case sv < 0:
+				if !s.extend[0] {
+					return
+				}
+				cs = 0
+			case sv > 1:
+				if !s.extend[1] {
+					return
+				}
+				cs = 1
 			}
-			cs = 0
-		case sv > 1:
-			if !s.extend[1] {
-				return
-			}
-			cs = 1
 		}
 		if r0+cs*dr < 0 { // radius must be non-negative on the painted circle
 			return
@@ -338,7 +437,9 @@ func (s *shading) atRadial(x, y float64) (color.RGBA, bool) {
 		return color.RGBA{}, false
 	}
 	cs := best
-	if cs < 0 {
+	if s.spread != SpreadPad && (cs < 0 || cs > 1) {
+		cs = foldSpread(cs, s.spread)
+	} else if cs < 0 {
 		cs = 0
 	} else if cs > 1 {
 		cs = 1
