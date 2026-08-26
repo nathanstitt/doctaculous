@@ -132,6 +132,18 @@ degrade gracefully; a TODO becoming supported just turns that skip into real out
    scanned-PDF OCR.
 7. **Fuller paged-media in the PDF-writer path** — carry the CSS Paged Media features into
    `pkg/render/pdfwrite`.
+8. **CSS selector coverage** (`pkg/css/selector.go`) — the engine supports type, class, id,
+   universal, descendant, grouping, and the structural pseudo-classes, but has NO child (`>`),
+   adjacent-sibling (`+`), general-sibling (`~`), attribute (`[foo]`, `[foo=bar]`), `:not()`/`:is()`/
+   `:where()`, or namespace (`svg|rect`) selectors. `parseOneSelector` splits on whitespace
+   (`strings.Fields`), so `>` becomes a bogus simple selector with tag `">"` that never matches.
+   These **fail safe** (a rule with an unsupported selector is inert, never mis-matched) but are
+   **silent** — an author whose `>` rule is ignored gets no diagnostic. This affects **HTML as much
+   as SVG**, since `pkg/css` is shared. Two resvg fixtures are excluded from the SVG corpus for this
+   reason (see `testdata/svg/resvg/README.md`). Wanted, roughly in value order: `>` (common in
+   hand-authored SVG and real stylesheets), attribute selectors, then the sibling combinators. A
+   warn-once at selector-parse time would close the silent-failure half cheaply, ahead of the parser
+   work.
 
 **Open fidelity follow-ups** (the engine renders these paths; these are the known approximations —
 each degrades gracefully and is documented in the relevant spec):

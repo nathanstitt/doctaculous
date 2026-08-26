@@ -636,7 +636,8 @@ read+write vocabulary for the tinycld text adoption path):
 - Known gaps that fail safe rather than mismatch: attribute selectors (`[foo]`) and the
   combinators (`>`, `+`, `~`) parse without erroring but never match (the selector engine has no
   handling for either, so they parse into an inert simple selector); `@import` is recognized and
-  skipped with a debug log rather than fetched.
+  skipped with a debug log rather than fetched. The selector gaps are shared with HTML (`pkg/css`)
+  and are tracked as planned work — see CLAUDE.md's roadmap item 8, "CSS selector coverage".
 - Landed two shared `pkg/css` fixes that also apply to HTML: `!important` is now recognized with no
   preceding whitespace (`red!important`), and `/* */` comments inside a `style=""` attribute value
   are stripped before parsing, matching what a `<style>` sheet's rule body already did.
