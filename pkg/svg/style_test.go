@@ -45,8 +45,7 @@ func TestStyleApply(t *testing.T) {
 		t.Errorf("fill-opacity p=%d c=%d, want 128,128", p.fillRGBA().A, c.fillRGBA().A)
 	}
 
-	// currentColor follows color; none kills fill; url() degrades to none + log.
-	var logged bool
+	// currentColor follows color; none kills fill.
 	s = applyAttrs(base, map[string]string{"color": "teal", "fill": "currentColor"})
 	if s.fillRGBA() != (color.RGBA{0, 128, 128, 255}) {
 		t.Errorf("currentColor = %+v", s.fillRGBA())
@@ -54,11 +53,6 @@ func TestStyleApply(t *testing.T) {
 	s = applyAttrs(base, map[string]string{"fill": "none"})
 	if s.hasFill {
 		t.Error("fill none kept")
-	}
-	s = base.apply(&element{attrs: map[string]string{"fill": "url(#g)"}},
-		&cascadeCtx{logf: func(string, ...any) { logged = true }})
-	if s.hasFill || !logged {
-		t.Errorf("url() fill: hasFill=%v logged=%v", s.hasFill, logged)
 	}
 
 	// Bad value ignored (parent kept), dasharray parsed, evenodd mapped.
@@ -69,5 +63,58 @@ func TestStyleApply(t *testing.T) {
 	}
 	if !reflect.DeepEqual(s.dashes, []float64{4, 2}) || s.visible {
 		t.Errorf("dash/vis = %v %v", s.dashes, s.visible)
+	}
+}
+
+// TestStylePaintServer covers fill/stroke="url(#id)" reference retention:
+// the bare form, the fallback-color form, a malformed (unterminated) url(),
+// and inheritance of the reference to a child with no fill of its own.
+func TestStylePaintServer(t *testing.T) {
+	base := defaultStyle()
+
+	// Bare reference: id recorded, no fallback color applied.
+	s := applyAttrs(base, map[string]string{"fill": "url(#g)"})
+	id, ok := s.FillServer()
+	if !ok || id != "#g" {
+		t.Errorf("FillServer = %q, %v; want #g, true", id, ok)
+	}
+
+	// Reference + fallback color: both recorded.
+	s = applyAttrs(base, map[string]string{"fill": "url(#g) red"})
+	id, ok = s.FillServer()
+	if !ok || id != "#g" {
+		t.Errorf("FillServer = %q, %v; want #g, true", id, ok)
+	}
+	if !s.hasFill || s.fillRGBA() != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("fallback fill = %+v hasFill=%v", s.fillRGBA(), s.hasFill)
+	}
+
+	// Same for stroke.
+	s = applyAttrs(base, map[string]string{"stroke": "url(#s) blue"})
+	id, ok = s.StrokeServer()
+	if !ok || id != "#s" {
+		t.Errorf("StrokeServer = %q, %v; want #s, true", id, ok)
+	}
+	if !s.hasStroke || s.strokeRGBA() != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("fallback stroke = %+v hasStroke=%v", s.strokeRGBA(), s.hasStroke)
+	}
+
+	// Malformed (unterminated) url(): degrades safely, no panic, no reference recorded.
+	var logged bool
+	s = base.apply(&element{attrs: map[string]string{"fill": "url(#g"}},
+		&cascadeCtx{logf: func(string, ...any) { logged = true }})
+	if _, ok := s.FillServer(); ok {
+		t.Error("malformed url() recorded a server reference")
+	}
+	if !logged {
+		t.Error("malformed url() did not log")
+	}
+
+	// Inheritance: a child with no fill of its own keeps the parent's reference.
+	parent := applyAttrs(base, map[string]string{"fill": "url(#grad1)"})
+	child := parent.apply(&element{}, nil)
+	id, ok = child.FillServer()
+	if !ok || id != "#grad1" {
+		t.Errorf("inherited FillServer = %q, %v; want #grad1, true", id, ok)
 	}
 }
