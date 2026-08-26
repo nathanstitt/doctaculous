@@ -344,8 +344,7 @@ func patternMatrix(doc *pdf.Document, o pdf.Object) render.Matrix {
 }
 
 // ExtGState resolves a named entry of the /ExtGState resource dict, reporting the
-// constant alpha (/ca, /CA) and whether the entry carries parameters this
-// renderer does not interpret (a non-Normal /BM or a non-None /SMask).
+// constant alpha (/ca, /CA), blend mode, and any /SMask soft mask.
 func (r *pageResources) ExtGState(name string) (content.ExtGStateParams, bool) {
 	gsDicts := r.doc.GetDict(r.dict["ExtGState"])
 	if gsDicts == nil {
@@ -367,13 +366,52 @@ func (r *pageResources) ExtGState(name string) (content.ExtGStateParams, bool) {
 	if bm := blendModeName(r.doc, gs["BM"]); bm != "" {
 		p.BlendMode, p.HasBlendMode = bm, true
 	}
-	// Soft masks (other than /None) are still unsupported.
-	if sm, ok := r.doc.GetName(gs["SMask"]); ok && sm != "None" {
-		p.HasUnsupported = true
-	} else if _, isDict := r.doc.Resolve(gs["SMask"]).(pdf.Dict); isDict {
-		p.HasUnsupported = true
+	if smVal, present := gs["SMask"]; present {
+		r.resolveSoftMask(smVal, &p)
 	}
 	return p, true
+}
+
+// resolveSoftMask fills p.SoftMask/ExplicitNone/HasUnsupported from an
+// ExtGState's /SMask entry: /None explicitly clears any mask in effect; a
+// dictionary is resolved via ResolveFormObject (the same form-decoding
+// pageres.go's ResolveForm uses, since /G is a form XObject reference) into a
+// content.SoftMask; anything else (absent already handled by the caller,
+// malformed dict, unresolvable /G) is flagged HasUnsupported so the
+// interpreter degrades to "no mask" and logs once rather than silently
+// misrendering.
+func (r *pageResources) resolveSoftMask(smVal pdf.Object, p *content.ExtGStateParams) {
+	if name, ok := r.doc.GetName(smVal); ok {
+		if name == "None" {
+			p.ExplicitNone = true
+		} else {
+			p.HasUnsupported = true
+		}
+		return
+	}
+	smDict := r.doc.GetDict(smVal)
+	if smDict == nil {
+		p.HasUnsupported = true
+		return
+	}
+	subtype, _ := r.doc.GetName(smDict["S"])
+	alphaOnly := subtype == "Alpha"
+	if subtype != "Luminosity" && subtype != "Alpha" {
+		p.HasUnsupported = true
+		return
+	}
+	data, childRes, matrix, bbox, ok := pageres.ResolveFormObject(r.doc, r.dict, smDict["G"], "raster", r.logf)
+	if !ok {
+		p.HasUnsupported = true
+		return
+	}
+	p.SoftMask = &content.SoftMask{
+		AlphaOnly: alphaOnly,
+		Content:   data,
+		Res:       &pageResources{doc: r.doc, dict: childRes, logf: r.logf, provider: r.provider},
+		Matrix:    matrix,
+		BBox:      bbox,
+	}
 }
 
 // blendModeName resolves a /BM entry (a name or an array of names) to a single

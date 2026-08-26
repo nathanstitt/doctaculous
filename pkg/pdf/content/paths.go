@@ -72,16 +72,20 @@ func (it *Interpreter) fillPath(rule render.FillRule) {
 	// does not leak into later drawing, and evaluate the shading under the matrix
 	// captured when the pattern was selected.
 	if src := it.gs.fillShading; src != nil {
-		it.dev.Save()
-		it.dev.PushClip(&it.path, rule)
-		it.dev.FillShading(src.shader, src.ctm, it.gs.blendMode)
-		it.dev.Restore()
+		it.withSoftMask(func() {
+			it.dev.Save()
+			it.dev.PushClip(&it.path, rule)
+			it.dev.FillShading(src.shader, src.ctm, it.gs.blendMode)
+			it.dev.Restore()
+		})
 		return
 	}
-	it.dev.Fill(&it.path, render.FillPaint{
-		Color:     withAlpha(it.gs.fill, it.gs.fillAlpha),
-		Rule:      rule,
-		BlendMode: it.gs.blendMode,
+	it.withSoftMask(func() {
+		it.dev.Fill(&it.path, render.FillPaint{
+			Color:     withAlpha(it.gs.fill, it.gs.fillAlpha),
+			Rule:      rule,
+			BlendMode: it.gs.blendMode,
+		})
 	})
 	if it.graphicsSink != nil {
 		it.graphicsSink(VectorOp{Kind: VectorFill, Path: it.path.Clone()})
@@ -98,15 +102,17 @@ func (it *Interpreter) strokePath() {
 		w = 1 // a zero-width line is the thinnest renderable line (1 device px)
 	}
 	dash := it.scaledDash()
-	it.dev.Stroke(&it.path, render.StrokePaint{
-		Color:      withAlpha(it.gs.stroke, it.gs.strokeAlpha),
-		BlendMode:  it.gs.blendMode,
-		Width:      w,
-		Cap:        it.gs.lineCap,
-		Join:       it.gs.lineJoin,
-		MiterLimit: it.gs.miterLimit,
-		DashArray:  dash,
-		DashPhase:  it.gs.dashPhase * it.gs.ctm.ScaleFactor(),
+	it.withSoftMask(func() {
+		it.dev.Stroke(&it.path, render.StrokePaint{
+			Color:      withAlpha(it.gs.stroke, it.gs.strokeAlpha),
+			BlendMode:  it.gs.blendMode,
+			Width:      w,
+			Cap:        it.gs.lineCap,
+			Join:       it.gs.lineJoin,
+			MiterLimit: it.gs.miterLimit,
+			DashArray:  dash,
+			DashPhase:  it.gs.dashPhase * it.gs.ctm.ScaleFactor(),
+		})
 	})
 	if it.graphicsSink != nil {
 		it.graphicsSink(VectorOp{Kind: VectorStroke, Path: it.path.Clone(), StrokeWidth: w})

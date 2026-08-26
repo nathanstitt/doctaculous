@@ -52,6 +52,17 @@ type gstate struct {
 	// value with the rest of the gstate on q/Q.
 	fillShading *shadingSource
 
+	// softMask, when non-nil, is the soft mask set by the most recent "gs"
+	// carrying an /SMask (ISO 32000-1 §11.6.5.2), applied to every paint
+	// operation until a later "gs" replaces or clears it (/SMask /None) or a
+	// "Q" restores an outer state that had none. softMaskCTM is the CTM that
+	// was in effect at that "gs" — the soft mask's /G form is rendered in
+	// THAT space, not the CTM active at each later paint call (a "cm" after
+	// "gs" must not move the mask). Copied by value (a shared *SoftMask
+	// pointer) on q/Q; the pointed-to value itself is immutable.
+	softMask    *SoftMask
+	softMaskCTM render.Matrix
+
 	text textState
 }
 
@@ -94,8 +105,8 @@ func (g gstate) clone() gstate {
 
 // applyExtGState handles the "gs" operator: it looks the named ExtGState up in
 // the page resources and applies the parameters we support (/ca, /CA constant
-// alpha). Parameters we do not interpret (blend modes, soft masks) are logged
-// once so the unsupported behavior is visible but non-fatal.
+// alpha, /BM blend mode, /SMask soft mask). An entry we could not resolve
+// (HasUnsupported) is logged once so the degradation is visible but non-fatal.
 func (it *Interpreter) applyExtGState(operands []pdf.Object) {
 	name := nameOperand(operands)
 	if name == "" || it.res == nil {
@@ -115,8 +126,15 @@ func (it *Interpreter) applyExtGState(operands []pdf.Object) {
 	if params.HasBlendMode {
 		it.gs.blendMode = params.BlendMode
 	}
+	switch {
+	case params.SoftMask != nil:
+		it.gs.softMask = params.SoftMask
+		it.gs.softMaskCTM = it.gs.ctm
+	case params.ExplicitNone:
+		it.gs.softMask = nil
+	}
 	if params.HasUnsupported {
-		it.logf("content: /ExtGState (gs) not applied: soft mask unsupported")
+		it.logf("content: /ExtGState (gs) not fully applied: soft mask unresolvable")
 	}
 }
 

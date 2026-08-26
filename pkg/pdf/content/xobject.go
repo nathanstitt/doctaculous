@@ -90,25 +90,34 @@ func (it *Interpreter) doXObject(operands []pdf.Object, depth int) {
 		// Image space maps the unit square to device space via the CTM. PDF image
 		// space has (0,0) at the top-left of the image with y down within the unit
 		// square, which our DrawImage contract already expects.
-		it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha, it.gs.blendMode)
+		it.withSoftMask(func() {
+			it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha, it.gs.blendMode)
+		})
 		return
 	}
 	if content, res, matrix, bbox, ok := it.res.Form(name); ok {
 		// A form XObject runs as if wrapped in q/Q with its /Matrix concatenated.
-		saved := it.gs.clone()
-		savedRes := it.res
-		it.dev.Save()
-		it.gs.ctm = matrix.Mul(it.gs.ctm)
-		// ISO 32000 §8.10.1: the form's /BBox is a mandatory clip. Clip to the BBox
-		// rectangle mapped through the (now form-relative) CTM before running content,
-		// so the form cannot paint outside its declared box. A missing/malformed BBox
-		// (bbox == nil) degrades to no clip.
-		it.clipFormBBox(bbox)
-		it.res = res
-		_ = it.run(content, depth+1) // form errors are logged internally, never fatal
-		it.res = savedRes
-		it.gs = saved
-		it.dev.Restore()
+		// The soft mask (if any) wraps the form's ENTIRE execution: this is what
+		// makes "q /GSn gs /Fmn Do Q" — the exact pattern pkg/render/pdfwrite
+		// emits for a group's own composite — apply the mask to the form's
+		// flattened content once, rather than needing every nested paint call
+		// inside it to know about the mask individually.
+		it.withSoftMask(func() {
+			saved := it.gs.clone()
+			savedRes := it.res
+			it.dev.Save()
+			it.gs.ctm = matrix.Mul(it.gs.ctm)
+			// ISO 32000 §8.10.1: the form's /BBox is a mandatory clip. Clip to the BBox
+			// rectangle mapped through the (now form-relative) CTM before running content,
+			// so the form cannot paint outside its declared box. A missing/malformed BBox
+			// (bbox == nil) degrades to no clip.
+			it.clipFormBBox(bbox)
+			it.res = res
+			_ = it.run(content, depth+1) // form errors are logged internally, never fatal
+			it.res = savedRes
+			it.gs = saved
+			it.dev.Restore()
+		})
 		return
 	}
 	it.logf("content: XObject %q not found", name)
@@ -157,5 +166,7 @@ func (it *Interpreter) inlineImage(tok *contentTokenizer) {
 		it.logf("content: inline image not decoded")
 		return
 	}
-	it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha, it.gs.blendMode)
+	it.withSoftMask(func() {
+		it.dev.DrawImage(img, it.gs.ctm, it.gs.fillAlpha, it.gs.blendMode)
+	})
 }

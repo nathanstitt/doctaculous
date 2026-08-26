@@ -69,7 +69,8 @@ type TintTransform struct {
 // ExtGStateParams holds the subset of an ExtGState dictionary the interpreter
 // understands. Fill/StrokeAlpha come from /ca and /CA. HasUnsupported is true
 // when the dict carries entries we do not interpret (a non-Normal /BM blend mode
-// or a non-None /SMask), so the caller can emit a degradation log.
+// or an /SMask this backend could not resolve), so the caller can emit a
+// degradation log.
 type ExtGStateParams struct {
 	FillAlpha      float64
 	HasFillAlpha   bool
@@ -77,9 +78,49 @@ type ExtGStateParams struct {
 	HasStrokeAlpha bool
 	// BlendMode is the /BM entry (a separable or non-separable PDF blend-mode
 	// name), set only when present. "Normal"/"Compatible" mean source-over.
-	BlendMode      string
-	HasBlendMode   bool
+	BlendMode    string
+	HasBlendMode bool
+	// SoftMask, when non-nil, is a resolved luminosity/alpha soft mask (ISO
+	// 32000-1 §11.6.5.2) the interpreter applies to every paint operation
+	// until the next "gs" changes or clears it (an explicit /SMask /None
+	// clears it — see applyExtGState). nil means "unchanged" (no /SMask key
+	// present at all), matching every other ExtGStateParams field's
+	// unchanged-when-absent convention; ExplicitNone (below) distinguishes
+	// "clear the mask" from "not mentioned."
+	SoftMask *SoftMask
+	// ExplicitNone is true when the dict sets /SMask /None: the interpreter
+	// must CLEAR any soft mask inherited from an earlier "gs", distinct from
+	// simply not mentioning /SMask at all (which leaves the current mask, if
+	// any, in effect — PDF's "absent key means unchanged" rule).
+	ExplicitNone bool
+	// HasUnsupported is true when the dict carries an /SMask this backend
+	// could not resolve into a SoftMask (malformed group, unresolvable form)
+	// — the interpreter degrades to "no mask" and logs once.
 	HasUnsupported bool
+}
+
+// SoftMask is a resolved luminosity/alpha soft mask: the /G transparency
+// group form's content and resources, ready for the interpreter to render
+// through render.Device.BuildLuminanceMask exactly like a form XObject's
+// content is run through Form/doXObject, plus the group's placement (Matrix,
+// BBox) and the /S subtype selecting luminosity vs. alpha coverage.
+type SoftMask struct {
+	// AlphaOnly selects mask-type: false (the default, /S /Luminosity) reads
+	// the group's rendered luminance; true (/S /Alpha) reads the group's own
+	// alpha channel — see render.Device.BuildLuminanceMask's alphaOnly
+	// parameter, which this is passed straight through to.
+	AlphaOnly bool
+	// Content is the mask group form's decoded content stream.
+	Content []byte
+	// Res resolves the mask group's own resources (fonts, images, nested
+	// forms, ...), scoped exactly like Resources.Form's childRes.
+	Res Resources
+	// Matrix is the group form's /Matrix (form space -> the space the /SMask
+	// was set in, i.e. the CTM in effect at the "gs" operator).
+	Matrix render.Matrix
+	// BBox is the group form's /BBox ([minX minY maxX maxY] in form space),
+	// or nil when absent/malformed (no extra clip on the mask's own content).
+	BBox *[4]float64
 }
 
 // Interpreter executes a content stream against a Device.

@@ -48,7 +48,26 @@ func ResolveForm(doc *pdf.Document, res pdf.Dict, name string, logPrefix string,
 	if xobjs == nil {
 		return nil, nil, render.Identity, nil, false
 	}
-	s := doc.GetStream(xobjs[pdf.Name(name)])
+	return decodeForm(doc, res, xobjs[pdf.Name(name)], "form "+string(name), logPrefix, logf)
+}
+
+// ResolveFormObject decodes obj (a direct object reference, not a named
+// resource lookup) as a form XObject: its content, its child /Resources dict
+// (falling back to res so names resolve, matching ResolveForm), its /Matrix,
+// and its /BBox. This is the shape an ExtGState's /SMask /G entry needs — the
+// mask group form is referenced directly by object reference inside the
+// ExtGState dict, not through a page's /XObject resource name — so it shares
+// decodeForm with ResolveForm rather than duplicating the stream/Subtype/
+// Resources/Matrix/BBox handling.
+func ResolveFormObject(doc *pdf.Document, res pdf.Dict, obj pdf.Object, logPrefix string, logf func(string, ...any)) (data []byte, childRes pdf.Dict, m render.Matrix, bbox *[4]float64, ok bool) {
+	return decodeForm(doc, res, obj, "form object", logPrefix, logf)
+}
+
+// decodeForm resolves obj to a stream, validates /Subtype /Form, decodes its
+// content, and reads /Resources (falling back to res), /Matrix, and /BBox.
+// desc names what failed in a log line (e.g. "form %q" or "form object").
+func decodeForm(doc *pdf.Document, res pdf.Dict, obj pdf.Object, desc string, logPrefix string, logf func(string, ...any)) (data []byte, childRes pdf.Dict, m render.Matrix, bbox *[4]float64, ok bool) {
+	s := doc.GetStream(obj)
 	if s == nil {
 		return nil, nil, render.Identity, nil, false
 	}
@@ -58,7 +77,7 @@ func ResolveForm(doc *pdf.Document, res pdf.Dict, name string, logPrefix string,
 	data, _, err := doc.DecodedStream(s)
 	if err != nil {
 		if logf != nil {
-			logf(logPrefix+": form %q: %v", name, err)
+			logf(logPrefix+": %s: %v", desc, err)
 		}
 		return nil, nil, render.Identity, nil, false
 	}

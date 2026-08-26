@@ -47,5 +47,7 @@ func (it *Interpreter) paintShading(operands []pdf.Object) {
 		it.logf("content: shading %q unsupported or not found", name)
 		return
 	}
-	it.dev.FillShading(shader, it.gs.ctm, it.gs.blendMode)
+	it.withSoftMask(func() {
+		it.dev.FillShading(shader, it.gs.ctm, it.gs.blendMode)
+	})
 }
