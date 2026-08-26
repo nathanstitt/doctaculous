@@ -148,6 +148,31 @@ func (s *ruleScanner) readBody() string {
 	return b.String()
 }
 
+// stripComments removes every /* */ comment from src, unconditionally (no
+// brace-depth tracking needed: a declaration list has no nested blocks). An
+// unterminated comment consumes the rest of the string, matching
+// ruleScanner.skipComment's behavior at end of input.
+func stripComments(src string) string {
+	if !strings.Contains(src, "/*") {
+		return src // fast path: no comment marker at all
+	}
+	var b strings.Builder
+	for {
+		start := strings.Index(src, "/*")
+		if start < 0 {
+			b.WriteString(src)
+			break
+		}
+		b.WriteString(src[:start])
+		end := strings.Index(src[start+2:], "*/")
+		if end < 0 {
+			break // unterminated comment: drop the remainder
+		}
+		src = src[start+2+end+2:]
+	}
+	return b.String()
+}
+
 func (s *ruleScanner) atComment() bool {
 	return s.pos+1 < len(s.src) && s.src[s.pos] == '/' && s.src[s.pos+1] == '*'
 }
@@ -168,8 +193,13 @@ func (s *ruleScanner) skipComment() {
 // the value of a style="" attribute) into declarations. The !important flag
 // is honored; malformed declarations (no colon, empty property, empty value)
 // are dropped individually per CSS error recovery, so one bad declaration
-// cannot void the rest.
+// cannot void the rest. /* */ comments are stripped first, so e.g.
+// `style="/*c*/fill:green/*c*/"` parses identically to `style="fill:green"` —
+// Parse's ruleScanner already strips comments from a <style> sheet's rule
+// bodies before they ever reach here, but a style="" attribute's text is
+// handed to this function directly, so the stripping has to happen here too.
 func ParseDeclarations(body string) []Declaration {
+	body = stripComments(body)
 	var out []Declaration
 	// NOTE: the body is split naively on ';'. A value containing a literal
 	// semicolon (e.g. a data: URI in url(...)) will be split incorrectly; that is
