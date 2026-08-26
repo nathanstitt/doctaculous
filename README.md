@@ -17,10 +17,12 @@ convert (a format to itself is a deliberate `ErrSameFormat`):
 
 > `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg`
 
-Plus one input-only format: **`heic`**. HEIF/HEIC stills decode through an
-in-tree pure-Go HEVC intra decoder (no libheif, no CGo), so an iPhone photo
-converts to any of the thirteen outputs and drops into HTML/EPUB `<img>`
-unchanged.
+Plus two input-only formats: **`heic`** and **`svg`**. HEIF/HEIC stills decode
+through an in-tree pure-Go HEVC intra decoder (no libheif, no CGo), so an
+iPhone photo converts to any of the thirteen outputs and drops into HTML/EPUB
+`<img>` unchanged. Standalone `.svg`/`.svgz` documents open as a vector page —
+paths, shapes, transforms, solid fill/stroke — and convert to PDF as real
+vectors, not a rasterized image.
 
 ```sh
 doctaculous convert report.docx report.pdf         # typeset through the CSS engine
