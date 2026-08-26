@@ -66,25 +66,30 @@ func defaultStyle() Style {
 	}
 }
 
-// apply returns parent overridden by el's presentation attributes. logf
-// receives a debug line for a url() paint reference (gradients land in a
-// later PR) and for any attribute value that fails to parse — the attribute
-// is then ignored, per SVG's error-handling model, and the inherited value
-// is kept. opacity is not inherited: it resets to el's own value (default 1)
-// on every call. Every other listed property is inherited.
-func (parent Style) apply(el *element, logf func(string, ...any)) Style {
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
+// apply returns parent overridden by el's resolved style. ctx supplies the
+// cascade: with a nil ctx (or one built from a document with no stylesheets
+// or style="" attributes anywhere) attr resolution falls back to el's
+// presentation attributes alone, exactly PR 1's behavior — every one of PR
+// 1's 148 golden fixtures uses no CSS and so exercises only this path. ctx's
+// logf receives a debug line for a url() paint reference (gradients land in
+// a later PR) and for any attribute value that fails to parse — the
+// attribute is then ignored, per SVG's error-handling model, and the
+// inherited value is kept. opacity is not inherited: it resets to el's own
+// value (default 1) on every call. Every other listed property is inherited.
+func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s := parent
 	s.opacity = 1 // not inherited; may be overridden below
 
 	if el == nil {
 		return s
 	}
-	attr := func(name string) (string, bool) {
-		v, ok := el.attrs[name]
-		return v, ok
+	attr := ctx.resolve(el)
+	var logf func(string, ...any)
+	if ctx != nil {
+		logf = ctx.logf
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
 	}
 
 	// 'color' must resolve before fill/stroke so currentColor sees the
