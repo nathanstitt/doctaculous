@@ -28,8 +28,15 @@ type Resources interface {
 	// ok=false if name is not a form XObject. matrix is the form's /Matrix; bbox is
 	// the form's /BBox ([llx lly urx ury] in form space) which the interpreter applies
 	// as a mandatory clip (ISO 32000 §8.10.1), or nil when the /BBox is absent/malformed
-	// (no clip — a graceful degradation, since /BBox is technically required).
-	Form(name string) (content []byte, res Resources, matrix render.Matrix, bbox *[4]float64, ok bool)
+	// (no clip — a graceful degradation, since /BBox is technically required). isGroup
+	// reports whether the form declares /Group << /S /Transparency >> (ISO 32000-1
+	// §8.10.3): the interpreter uses this to decide whether the form's content must
+	// be composited as an isolated group (via Device.BeginGroup/EndGroup) rather than
+	// painted straight into the enclosing content stream — required whenever the
+	// form is invoked under a non-default constant alpha, blend mode, or soft mask,
+	// since painting each of the form's own paint calls with that state applied
+	// individually double-darkens any overlap between them (see doXObject).
+	Form(name string) (content []byte, res Resources, matrix render.Matrix, bbox *[4]float64, isGroup bool, ok bool)
 	// Shading returns a backend-built shader for a named /Shading resource, or
 	// ok=false if the name is absent or the shading cannot be built (unsupported
 	// type, malformed geometry). The backend keeps shading geometry and color math

@@ -95,32 +95,124 @@ func (it *Interpreter) doXObject(operands []pdf.Object, depth int) {
 		})
 		return
 	}
-	if content, res, matrix, bbox, ok := it.res.Form(name); ok {
-		// A form XObject runs as if wrapped in q/Q with its /Matrix concatenated.
-		// The soft mask (if any) wraps the form's ENTIRE execution: this is what
-		// makes "q /GSn gs /Fmn Do Q" — the exact pattern pkg/render/pdfwrite
-		// emits for a group's own composite — apply the mask to the form's
-		// flattened content once, rather than needing every nested paint call
-		// inside it to know about the mask individually.
-		it.withSoftMask(func() {
-			saved := it.gs.clone()
-			savedRes := it.res
-			it.dev.Save()
-			it.gs.ctm = matrix.Mul(it.gs.ctm)
-			// ISO 32000 §8.10.1: the form's /BBox is a mandatory clip. Clip to the BBox
-			// rectangle mapped through the (now form-relative) CTM before running content,
-			// so the form cannot paint outside its declared box. A missing/malformed BBox
-			// (bbox == nil) degrades to no clip.
-			it.clipFormBBox(bbox)
-			it.res = res
-			_ = it.run(content, depth+1) // form errors are logged internally, never fatal
-			it.res = savedRes
-			it.gs = saved
-			it.dev.Restore()
-		})
+	if content, res, matrix, bbox, isGroup, ok := it.res.Form(name); ok {
+		it.runForm(content, res, matrix, bbox, isGroup, depth)
 		return
 	}
 	it.logf("content: XObject %q not found", name)
+}
+
+// runForm executes a form XObject's content (as if wrapped in q/Q with its
+// /Matrix concatenated). It composites the form as an isolated transparency
+// group — via Device.BeginGroup/EndGroup — whenever doing so can change the
+// result:
+//
+//   - isGroup (the form declares /Group << /S /Transparency >>, ISO 32000-1
+//     §8.10.3) AND the invocation carries a constant alpha < 1 or a
+//     non-Normal blend mode: a group's whole point is that its own content
+//     composites against a transparent backdrop first, so the group's alpha/
+//     blend apply exactly ONCE to the flattened result, not per child paint.
+//   - an active soft mask is set, REGARDLESS of isGroup: /SMask scoping (ISO
+//     32000-1 §11.6.4.3) applies to "every subsequent painting operation"
+//     until cleared, which includes a plain (non-group) form's content just
+//     as much as a single fill — masking needs an isolated composite to
+//     apply per-pixel coverage to a flattened result, the same mechanism a
+//     group uses, independent of whether the form declares one itself.
+//
+// THE BUG THIS GUARDS AGAINST (the alpha/blend half): running a group form's
+// content directly against the current alpha (the pre-existing behavior)
+// folds that alpha into EVERY paint call inside the form individually, so
+// two overlapping opaque children under 50% alpha double-darken at the
+// overlap — the exact seam a transparency group exists to prevent. This is
+// pkg/render/pdfwrite's OWN EndGroup output being misread: the writer emits
+// a spec-correct isolated /Group Form composited via one "/GSn gs /Fmn Do",
+// but until this fix nothing here ever inspected /Group, so the constant
+// alpha from that "gs" leaked into each of the form's own fills instead of
+// applying once to the form as a whole (confirmed independently: Poppler
+// renders this writer's own group output correctly, so the emitted PDF was
+// always right — only this reader's interpretation of it was wrong).
+//
+// A form invoked at full opacity/Normal blend/no mask skips the group
+// entirely even when isGroup is true: an isolated group with nothing to
+// apply produces an identical flattened result to painting its content
+// directly, so this keeps the overwhelmingly common case (an opaque group,
+// or a non-group form) on the cheap no-offscreen-allocation path. A
+// non-group form under alpha < 1 with NO mask also skips the group (alpha
+// applies per-primitive there, which is correct: a non-group form has no
+// isolated backdrop of its own to flatten against).
+func (it *Interpreter) runForm(content []byte, res Resources, matrix render.Matrix, bbox *[4]float64, isGroup bool, depth int) {
+	sm := it.gs.softMask
+	groupAlpha := isGroup && (it.gs.fillAlpha < 1 || (it.gs.blendMode != "" && it.gs.blendMode != "Normal"))
+	if !groupAlpha && sm == nil {
+		it.runFormContent(content, res, matrix, bbox, depth)
+		return
+	}
+	it.dev.Save()
+	it.dev.BeginGroup()
+	// The mask is suspended for the DURATION of the form's own content
+	// regardless of groupAlpha: it applies ONCE, at EndGroup, to the
+	// flattened result below — exactly like withSoftMask suspends
+	// gs.softMask for the same reason (see that function's doc comment).
+	// Without this, a nested form or shape inside content would see the
+	// same still-set mask and open a SECOND, redundant group for it.
+	//
+	// Alpha/blend are suspended ONLY when groupAlpha is true (an isolated
+	// /Group form composited under alpha < 1 or a non-Normal blend): that is
+	// the case where they must apply ONCE to the flattened group, not
+	// per-primitive inside it (see this function's doc comment on why). A
+	// non-group form reaching this branch purely because a mask is active
+	// (groupAlpha false) has no isolated backdrop of its own — its content
+	// still sees the ambient alpha/blend per-primitive exactly as it would
+	// ungrouped, and only the mask's coverage is applied once at EndGroup
+	// (with alpha 1, below), matching withSoftMask's identical reasoning.
+	savedAlpha, savedStrokeAlpha, savedBlend := it.gs.fillAlpha, it.gs.strokeAlpha, it.gs.blendMode
+	if groupAlpha {
+		it.gs.fillAlpha, it.gs.strokeAlpha, it.gs.blendMode = 1, 1, "Normal"
+	}
+	it.gs.softMask = nil
+	it.runFormContent(content, res, matrix, bbox, depth)
+	it.gs.fillAlpha, it.gs.strokeAlpha, it.gs.blendMode = savedAlpha, savedStrokeAlpha, savedBlend
+	it.gs.softMask = sm
+
+	var mask render.GroupMask
+	if sm != nil {
+		mask = it.renderSoftMask(sm, it.gs.softMaskCTM)
+	}
+	// /ca (not /CA) is the constant alpha PDF applies to a group's own
+	// composite (ISO 32000-1 §11.4.7.2: a group is always composited as if
+	// filled, using the current non-stroking alpha) — fillAlpha, not a
+	// stroke/fill blend, is the correct single alpha for the flattened form.
+	// A mask-only (non-group) composite has no group alpha of its own to
+	// apply beyond the mask, so it always passes 1 here regardless of
+	// savedAlpha — matching withSoftMask's identical reasoning for its own
+	// EndGroup call.
+	alpha := 1.0
+	if groupAlpha {
+		alpha = savedAlpha
+	}
+	it.dev.EndGroup(alpha, savedBlend, mask)
+	it.dev.Restore()
+}
+
+// runFormContent runs a form's content stream in form-relative space,
+// clipped to its mandatory /BBox, restoring the interpreter's graphics state
+// and resources afterward. Factored out of doXObject/runForm so both the
+// grouped and ungrouped paths share identical form-execution semantics.
+func (it *Interpreter) runFormContent(content []byte, res Resources, matrix render.Matrix, bbox *[4]float64, depth int) {
+	saved := it.gs.clone()
+	savedRes := it.res
+	it.dev.Save()
+	it.gs.ctm = matrix.Mul(it.gs.ctm)
+	// ISO 32000 §8.10.1: the form's /BBox is a mandatory clip. Clip to the BBox
+	// rectangle mapped through the (now form-relative) CTM before running content,
+	// so the form cannot paint outside its declared box. A missing/malformed BBox
+	// (bbox == nil) degrades to no clip.
+	it.clipFormBBox(bbox)
+	it.res = res
+	_ = it.run(content, depth+1) // form errors are logged internally, never fatal
+	it.res = savedRes
+	it.gs = saved
+	it.dev.Restore()
 }
 
 // clipFormBBox intersects the device clip with a form XObject's /BBox

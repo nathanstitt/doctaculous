@@ -14,8 +14,12 @@ import (
 // output to a reader with no soft-mask support at all.
 //
 // Call sites: fillPath, strokePath, paintShading ("sh"), doXObject's image
-// and form branches ("Do"), and inlineImage — every PAINTING operator this
-// package implements except glyph fill/stroke (showText/showTextArray). Text
+// branch ("Do"), and inlineImage. A form XObject's "Do" is handled
+// separately by runForm (xobject.go), which composes mask handling with its
+// own /Group alpha/blend logic in one BeginGroup/EndGroup rather than
+// nesting two independent group-opening helpers. Together these cover every
+// PAINTING operator this package implements except glyph fill/stroke
+// (showText/showTextArray). Text
 // is intentionally NOT wrapped per glyph: a text run paints many glyphs in
 // sequence, and wrapping each one individually would (a) re-render the mask
 // form once per glyph, a real performance cliff for masked text, and (b)

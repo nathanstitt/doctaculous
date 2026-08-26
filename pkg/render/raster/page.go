@@ -185,17 +185,18 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 }
 
 // Form resolves a form XObject by name to its decoded content stream, its scoped
-// resources, and its /Matrix. It returns ok=false if name is not a form XObject
-// or its content cannot be decoded, so the interpreter skips it gracefully. Per
-// the PDF spec a form without its own /Resources inherits the page's, so the
-// child pageResources falls back to this dict.
-func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool) {
-	data, childRes, m, bbox, ok := pageres.ResolveForm(r.doc, r.dict, name, "raster", r.logf)
+// resources, its /Matrix, and whether it declares a transparency /Group. It
+// returns ok=false if name is not a form XObject or its content cannot be
+// decoded, so the interpreter skips it gracefully. Per the PDF spec a form
+// without its own /Resources inherits the page's, so the child pageResources
+// falls back to this dict.
+func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool, bool) {
+	data, childRes, m, bbox, isGroup, ok := pageres.ResolveForm(r.doc, r.dict, name, "raster", r.logf)
 	if !ok {
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
 	child := &pageResources{doc: r.doc, dict: childRes, logf: r.logf, provider: r.provider}
-	return data, child, m, bbox, true
+	return data, child, m, bbox, isGroup, true
 }
 
 // ColorSpace resolves a named /ColorSpace resource that is a Separation or DeviceN space
@@ -400,7 +401,7 @@ func (r *pageResources) resolveSoftMask(smVal pdf.Object, p *content.ExtGStatePa
 		p.HasUnsupported = true
 		return
 	}
-	data, childRes, matrix, bbox, ok := pageres.ResolveFormObject(r.doc, r.dict, smDict["G"], "raster", r.logf)
+	data, childRes, matrix, bbox, _, ok := pageres.ResolveFormObject(r.doc, r.dict, smDict["G"], "raster", r.logf)
 	if !ok {
 		p.HasUnsupported = true
 		return

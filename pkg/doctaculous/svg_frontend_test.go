@@ -702,6 +702,88 @@ func hexColor(c color.RGBA) string {
 	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
+// TestSVGGroupOpacityRoundTripsThroughPDFNoSeam is the discriminating
+// regression test for pkg/pdf/content's transparency-group support: a
+// <g opacity="0.5"> containing two OVERLAPPING opaque shapes must render
+// IDENTICALLY at the overlap and at a non-overlapping single-shape point,
+// both directly (SVG -> raster) and through a PDF round trip
+// (SVG -> PDF -> reopen -> raster).
+//
+// Sampling only a single-shape point would NOT catch the bug this guards
+// against: pkg/render/pdfwrite always emitted a spec-correct isolated
+// transparency Form XObject (verified independently against Poppler), but
+// pkg/pdf/content's reader used to run a group Form's content directly
+// against the ambient constant alpha instead of recognizing /Group and
+// compositing it as an isolated unit — so each of the form's two overlapping
+// fills was individually dimmed to 50%, and the overlap (50% blue over 50%
+// blue over white) came out TWICE as dark as either shape alone. Only a
+// point INSIDE the overlap distinguishes "composited once, correctly" from
+// "double-darkened by per-primitive alpha."
+func TestSVGGroupOpacityRoundTripsThroughPDFNoSeam(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+	  <rect width="100" height="100" fill="white"/>
+	  <g opacity="0.5">
+	    <rect x="5" y="5" width="40" height="40" fill="blue"/>
+	    <rect x="20" y="20" width="40" height="40" fill="blue"/>
+	  </g>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directImg, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := directImg.(*image.RGBA)
+	directOverlap := direct.RGBAAt(30, 30) // inside both rects
+	directSingle := direct.RGBAAt(10, 10)  // inside only the first rect
+
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := pdfBuf.Bytes()
+	if !bytes.Contains(raw, []byte("/Subtype/Form")) && !bytes.Contains(raw, []byte("/Subtype /Form")) {
+		t.Error("grouped opacity PDF has no Form XObject; want a transparency group")
+	}
+	if !bytes.Contains(raw, []byte("/S/Transparency")) && !bytes.Contains(raw, []byte("/S /Transparency")) {
+		t.Error("grouped opacity PDF has no /Group /S /Transparency; the writer must emit an isolated group")
+	}
+
+	pdfDoc, err := OpenBytes(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaImg, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	via := viaImg.(*image.RGBA)
+	viaOverlap := via.RGBAAt(30, 30)
+	viaSingle := via.RGBAAt(10, 10)
+
+	t.Logf("direct: overlap=%s single=%s", hexColor(directOverlap), hexColor(directSingle))
+	t.Logf("via PDF: overlap=%s single=%s", hexColor(viaOverlap), hexColor(viaSingle))
+
+	near := func(got, want uint8, tol int) bool {
+		d := int(got) - int(want)
+		return d >= -tol && d <= tol
+	}
+	// #7f7fff: 50% blue over white. Both overlap and single must land here —
+	// a double-darkened overlap would read ~#3f3fff instead.
+	if !near(viaOverlap.R, 0x7f, 4) || !near(viaOverlap.G, 0x7f, 4) || !near(viaOverlap.B, 0xff, 4) {
+		t.Errorf("via PDF overlap = %s, want ~#7f7fff (composited once); a double-darkened seam reads ~#3f3fff", hexColor(viaOverlap))
+	}
+	if viaOverlap != viaSingle {
+		t.Errorf("SEAM: via PDF overlap = %s != single = %s; group opacity must composite once, not per child", hexColor(viaOverlap), hexColor(viaSingle))
+	}
+	if !near(viaOverlap.R, directOverlap.R, 4) || !near(viaOverlap.G, directOverlap.G, 4) || !near(viaOverlap.B, directOverlap.B, 4) {
+		t.Errorf("PDF round-trip overlap %s does not match direct raster overlap %s", hexColor(viaOverlap), hexColor(directOverlap))
+	}
+}
+
 // TestSVGOpaquePDFByteIdenticalAfterExtGState is the primary regression guard
 // for the ExtGState plumbing: a fully-opaque document (every fill/stroke at
 // alpha 1.0, no blend modes) must emit byte-identical PDF output to before

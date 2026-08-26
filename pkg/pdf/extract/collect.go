@@ -400,15 +400,16 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 }
 
 // Form resolves a form XObject to its decoded content, scoped resources, matrix,
-// and BBox, so text inside a form (a common wrapper) is captured too. A form
-// without its own /Resources inherits the page's.
-func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool) {
-	data, childRes, m, bbox, ok := pageres.ResolveForm(r.doc, r.dict, name, "extract", r.logf)
+// BBox, and whether it declares a transparency /Group, so text inside a form (a
+// common wrapper) is captured too. A form without its own /Resources inherits
+// the page's.
+func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool, bool) {
+	data, childRes, m, bbox, isGroup, ok := pageres.ResolveForm(r.doc, r.dict, name, "extract", r.logf)
 	if !ok {
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
 	child := &pageResources{doc: r.doc, dict: childRes, logf: r.logf}
-	return data, child, m, bbox, true
+	return data, child, m, bbox, isGroup, true
 }
 
 // Image reports "not an image" — the extractor discards raster content.
