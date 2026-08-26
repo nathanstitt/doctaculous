@@ -53,6 +53,7 @@ type renderedPage struct {
 	content    []byte
 	images     []pendingImage
 	shadings   []pendingShading
+	extGStates []pendingExtGState
 	pdfW, pdfH float64
 }
 
@@ -201,12 +202,13 @@ func renderBand(b band, index int, embed *fontEmbedder, opts Options) renderedPa
 	mat := render.Translate(b.marginPt, b.marginPt-b.topPt)
 	paint.PaintPage(dev, b.page, mat)
 	return renderedPage{
-		index:    index,
-		content:  dev.contentStream(),
-		images:   dev.images,
-		shadings: dev.shadings,
-		pdfW:     b.pdfW,
-		pdfH:     b.pdfH,
+		index:      index,
+		content:    dev.contentStream(),
+		images:     dev.images,
+		shadings:   dev.shadings,
+		extGStates: dev.extGStates,
+		pdfW:       b.pdfW,
+		pdfH:       b.pdfH,
 	}
 }
 
@@ -268,6 +270,13 @@ func assemble(out io.Writer, rendered []renderedPage, embed *fontEmbedder, opts 
 				shadings[ps.name] = w.put1(ps.dict)
 			}
 			res["Shading"] = shadings
+		}
+		if len(rp.extGStates) > 0 {
+			gstates := Dict{}
+			for _, pg := range rp.extGStates {
+				gstates[pg.name] = w.put1(pg.dict)
+			}
+			res["ExtGState"] = gstates
 		}
 
 		pageRef := w.alloc()

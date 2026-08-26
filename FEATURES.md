@@ -217,6 +217,11 @@ bullet's design rationale is in its PR:
   `/FontFile` for the bundled substitutes; `/ToUnicode` on every face). Concurrent per-band assembly,
   deterministic output, `@media print` capture (`pkg/css/media.go`). Byte-identical for the raster
   corpus (the new `DrawGlyph` seam rasterizes via the outline).
+- **`/ExtGState` resource emission**: a partially-transparent fill/stroke/glyph/image now survives
+  into PDF output as `/ca` (non-stroking) or `/CA` (stroking) alpha, and a non-Normal blend mode as
+  `/BM`, wrapped in a scoped `q`/`Q` so it never leaks to later content. States are deduplicated by
+  content, so many shapes sharing one alpha/blend emit a single `/ExtGState` resource. Fully-opaque,
+  Normal-blend output is unchanged byte-for-byte (no resource, no `gs` operator emitted).
 
 **HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `WriteMarkdown`
 + `WriteText`, CLI `tomd`):

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 	"time"
 )
@@ -588,5 +589,146 @@ func TestRasterizeSVGNormalPageSizeUnaffected(t *testing.T) {
 	rgba := img.(*image.RGBA)
 	if got := rgba.RGBAAt(100, 50); got != (color.RGBA{0, 255, 0, 255}) {
 		t.Errorf("center = %+v, want green", got)
+	}
+}
+
+// TestSVGFillOpacityRoundTripsThroughPDF is the regression guard for a bug
+// where pdfwrite emitted no /ExtGState at all, so Fill/Stroke/FillGlyph/
+// DrawImage silently discarded the paint's alpha and every partially
+// transparent SVG element rendered fully opaque in PDF output. A 50%-alpha
+// red rectangle over a white background must rasterize to ~#ff7f7f (50% red
+// over white), not #ff0000 (fully opaque red), both directly (SVG -> raster)
+// and through a PDF round trip (SVG -> PDF -> reopen -> raster). The two
+// values matching is possible only because pkg/pdf/content's ExtGState
+// support (fillAlpha/strokeAlpha in its gstate) already honors /ca and /CA,
+// so this test also proves the reader half of the loop, not just the writer.
+func TestSVGFillOpacityRoundTripsThroughPDF(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+	  <rect width="100" height="100" fill="white"/>
+	  <rect width="100" height="100" fill="red" fill-opacity="0.5"/>
+	</svg>`)
+
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Direct raster (no PDF involved): the ground truth for the correct color.
+	directImg, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directRGBA := directImg.(*image.RGBA).RGBAAt(50, 50)
+
+	// Through PDF: SVG -> PDF bytes -> reopen -> rasterize.
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := pdfBuf.Bytes()
+
+	if !bytes.Contains(raw, []byte("/ExtGState")) {
+		t.Error("PDF has no /ExtGState resource; alpha cannot survive without it")
+	}
+	if !bytes.Contains(raw, []byte("/ca ")) {
+		t.Error("PDF has no /ca entry; fill alpha was not emitted")
+	}
+
+	pdfDoc, err := OpenBytes(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaImg, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaRGBA := viaImg.(*image.RGBA).RGBAAt(50, 50)
+
+	t.Logf("direct raster: %s", hexColor(directRGBA))
+	t.Logf("via PDF round-trip: %s", hexColor(viaRGBA))
+
+	near := func(got, want uint8, tol int) bool {
+		d := int(got) - int(want)
+		return d >= -tol && d <= tol
+	}
+	// #ff7f7f: 50% red (255) blended over white (255) = 255; 50% of 0 blended
+	// over white (255) for G/B = 127.5 ~ 128.
+	if !near(viaRGBA.R, 0xff, 4) || !near(viaRGBA.G, 0x7f, 4) || !near(viaRGBA.B, 0x7f, 4) {
+		t.Errorf("via PDF round-trip = %s, want ~#ff7f7f (50%% alpha survived), NOT #ff0000 (bug: alpha discarded)", hexColor(viaRGBA))
+	}
+	if !near(viaRGBA.R, directRGBA.R, 4) || !near(viaRGBA.G, directRGBA.G, 4) || !near(viaRGBA.B, directRGBA.B, 4) {
+		t.Errorf("PDF round-trip %s does not match direct raster %s", hexColor(viaRGBA), hexColor(directRGBA))
+	}
+}
+
+// hexColor formats an opaque color.RGBA as "#rrggbb" for readable test output.
+func hexColor(c color.RGBA) string {
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+}
+
+// TestSVGOpaquePDFByteIdenticalAfterExtGState is the primary regression guard
+// for the ExtGState plumbing: a fully-opaque document (every fill/stroke at
+// alpha 1.0, no blend modes) must emit byte-identical PDF output to before
+// ExtGState support existed. extGState.needed() returning false for the
+// opaque case is what this proves — no "/GSn gs" operator and no /ExtGState
+// resource may appear.
+func TestSVGOpaquePDFByteIdenticalAfterExtGState(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
+	  <rect x="0" y="0" width="120" height="80" fill="#0000ff"/>
+	  <rect x="10" y="10" width="40" height="30" fill="#00ff00" stroke="#000000" stroke-width="2"/>
+	  <circle cx="90" cy="40" r="20" fill="red"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &buf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	if bytes.Contains(raw, []byte("/ExtGState")) {
+		t.Error("fully-opaque document emitted /ExtGState; want none")
+	}
+	if bytes.Contains(raw, []byte(" gs\n")) {
+		t.Error("fully-opaque document emitted a \"gs\" operator; want none")
+	}
+	if bytes.Contains(raw, []byte("/ca ")) || bytes.Contains(raw, []byte("/CA ")) {
+		t.Error("fully-opaque document emitted /ca or /CA; want none")
+	}
+}
+
+// TestSVGManySameAlphaShapesDedupeExtGState proves a document with many shapes
+// at the same alpha emits ONE /ExtGState resource, not one per shape.
+func TestSVGManySameAlphaShapesDedupeExtGState(t *testing.T) {
+	var rects strings.Builder
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&rects, `<rect x="%d" y="0" width="2" height="10" fill="red" fill-opacity="0.5"/>`, i*2)
+	}
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="10">` + rects.String() + `</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &buf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	n := bytes.Count(raw, []byte("/Type/ExtGState")) + bytes.Count(raw, []byte("/Type /ExtGState"))
+	if n == 0 {
+		// The writer does not tag ExtGState dicts with /Type; count the resource
+		// dict's GS entries instead (GS0, GS1, ... — one per distinct name).
+		n = bytes.Count(raw, []byte("/GS0 "))
+		if n == 0 {
+			t.Fatal("no /GS0 resource name found in PDF; ExtGState not emitted at all")
+		}
+		if extra := bytes.Count(raw, []byte("/GS1 ")); extra != 0 {
+			t.Errorf("found /GS1 resource name; 50 same-alpha shapes should dedupe to a single GS0, got a second distinct name")
+		}
+		return
+	}
+	if n != 1 {
+		t.Errorf("found %d /ExtGState-typed objects; want exactly 1 (50 same-alpha shapes should dedupe)", n)
 	}
 }
