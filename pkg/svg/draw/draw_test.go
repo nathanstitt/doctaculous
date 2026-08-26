@@ -425,18 +425,36 @@ func nestedDistinctPatternsSVG(depth int) string {
 
 // TestNestedDistinctPatternsDoNotBlowUp verifies a chain of DISTINCT nested
 // patterns (not a cycle: every pattern id along the chain is unique, so
-// pkg/svg's buildingPattern cycle guard never fires) completes quickly at a
-// depth where, absent pkg/svg/draw's nesting-depth guard, draw calls would
-// multiply by each level's own tile cell count (~400/level here) and blow
-// up exponentially — depth 8 would otherwise take well over 20s.
+// pkg/svg's buildingPattern cycle guard never fires) is bounded by
+// pkg/svg/draw's nesting-depth guard. Absent that guard, draw calls multiply
+// by each level's own tile cell count (~400/level here) and blow up
+// exponentially — depth 8 would otherwise take well over 20s.
+//
+// The assertion is on the GUARD FIRING, not on wall-clock time: a timing
+// threshold is machine- and instrumentation-dependent (it flaked in CI under
+// -race at 1.04s against a 1s bound) and only infers the mechanism, whereas
+// the log line proves the depth cap actually stopped the descent.
 func TestNestedDistinctPatternsDoNotBlowUp(t *testing.T) {
-	src := nestedDistinctPatternsSVG(8)
-	start := time.Now()
-	_ = renderSVG(t, src, 200, 200)
-	elapsed := time.Since(start)
-	t.Logf("depth-8 nested distinct patterns rendered in %s", elapsed)
-	if elapsed > time.Second {
-		t.Errorf("depth-8 nested distinct patterns took %s, want under 1s (nesting-depth guard not bounding draw calls?)", elapsed)
+	doc, err := svg.Parse([]byte(nestedDistinctPatternsSVG(8)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs []string
+	img := image.NewRGBA(image.Rect(0, 0, 200, 200))
+	stddraw.Draw(img, img.Bounds(), image.NewUniform(color.White), image.Point{}, stddraw.Src)
+	r := New(doc)
+	r.Logf = func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
+	r.DrawVector(raster.New(img), render.Identity)
+
+	var tripped bool
+	for _, l := range logs {
+		if strings.Contains(l, "nesting exceeded") {
+			tripped = true
+			t.Logf("guard fired: %s", l)
+		}
+	}
+	if !tripped {
+		t.Errorf("depth-8 nested distinct patterns did not trip the nesting-depth guard; logs=%v", logs)
 	}
 }
 
