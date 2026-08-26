@@ -219,4 +219,3 @@ func maskRegion(el *element, units string, vp viewport) (x, y, w, h float64) {
 	h = gradientCoord(el.attrs, "height", 1.2, false, 0)
 	return x, y, w, h
 }
-
