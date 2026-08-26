@@ -1,9 +1,11 @@
 package draw
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	stddraw "image/draw"
+	"strings"
 	"testing"
 	"time"
 
@@ -396,5 +398,56 @@ func TestSelfReferencingPatternTerminates(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("self-referencing pattern did not terminate within 5s (infinite recursion?)")
+	}
+}
+
+// nestedDistinctPatternsSVG builds a chain of depth DISTINCT patterns
+// (p0's tile fills with p1, p1's with p2, ..., p(depth-1) is a plain solid
+// tile), each tile a 10x10 grid of ~10x10 cells over the 200x200 fill rect
+// (~400 cells/level): p0's tile fills with p1, not itself, so
+// sceneBuilder.buildingPattern's cycle guard (which only fires when a
+// pattern id recurs) never trips for this chain, regardless of depth.
+func nestedDistinctPatternsSVG(depth int) string {
+	var sb strings.Builder
+	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">`)
+	for i := 0; i < depth; i++ {
+		fmt.Fprintf(&sb, `<pattern id="p%d" patternUnits="userSpaceOnUse" width="10" height="10">`, i)
+		if i == depth-1 {
+			sb.WriteString(`<rect x="0" y="0" width="5" height="5" fill="red"/>`)
+		} else {
+			fmt.Fprintf(&sb, `<rect x="0" y="0" width="10" height="10" fill="url(#p%d)"/>`, i+1)
+		}
+		sb.WriteString(`</pattern>`)
+	}
+	sb.WriteString(`<rect x="0" y="0" width="200" height="200" fill="url(#p0)"/></svg>`)
+	return sb.String()
+}
+
+// TestNestedDistinctPatternsDoNotBlowUp verifies a chain of DISTINCT nested
+// patterns (not a cycle: every pattern id along the chain is unique, so
+// pkg/svg's buildingPattern cycle guard never fires) completes quickly at a
+// depth where, absent pkg/svg/draw's nesting-depth guard, draw calls would
+// multiply by each level's own tile cell count (~400/level here) and blow
+// up exponentially — depth 8 would otherwise take well over 20s.
+func TestNestedDistinctPatternsDoNotBlowUp(t *testing.T) {
+	src := nestedDistinctPatternsSVG(8)
+	start := time.Now()
+	_ = renderSVG(t, src, 200, 200)
+	elapsed := time.Since(start)
+	t.Logf("depth-8 nested distinct patterns rendered in %s", elapsed)
+	if elapsed > time.Second {
+		t.Errorf("depth-8 nested distinct patterns took %s, want under 1s (nesting-depth guard not bounding draw calls?)", elapsed)
+	}
+}
+
+// TestNestedDistinctPatternsShallowChainStillPaints verifies the
+// nesting-depth guard does not trip on a realistic, shallow chain: a 3-level
+// nested-distinct-pattern fill must still paint its innermost tile's color,
+// not degrade to unpainted.
+func TestNestedDistinctPatternsShallowChainStillPaints(t *testing.T) {
+	img := renderSVG(t, nestedDistinctPatternsSVG(3), 200, 200)
+	got := img.RGBAAt(2, 2)
+	if got != (color.RGBA{255, 0, 0, 255}) {
+		t.Errorf("center = %+v, want red from the innermost tile (a shallow, non-cyclic chain must still paint)", got)
 	}
 }

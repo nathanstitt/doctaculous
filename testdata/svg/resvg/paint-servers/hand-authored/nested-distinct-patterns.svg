@@ -1,0 +1,27 @@
+<svg id="svg1" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <title>Pattern nested inside a DIFFERENT pattern's tile (not a cycle)</title>
+    <desc>Regression fixture: sceneBuilder.buildingPattern only catches a
+    pattern tile that eventually references itself again (a cycle). A chain
+    of otherwise-unrelated patterns -- patt1's tile fills with patt2, whose
+    tile fills with patt3 -- is not a cycle and passes that guard every
+    time, so nothing at scene-build time bounds it. Each level multiplies
+    draw calls by its own cell count; pkg/svg/draw's per-call nesting-depth
+    guard is what stops this from blowing up on a deeper chain. This
+    3-level chain is shallow enough to stay well under the depth cap and
+    render normally.</desc>
+
+    <pattern id="patt3" patternUnits="userSpaceOnUse" width="10" height="10">
+        <rect x="0" y="0" width="5" height="5" fill="green"/>
+    </pattern>
+    <pattern id="patt2" patternUnits="userSpaceOnUse" width="20" height="20">
+        <rect x="0" y="0" width="20" height="20" fill="url(#patt3)"/>
+    </pattern>
+    <pattern id="patt1" patternUnits="userSpaceOnUse" width="40" height="40">
+        <rect x="0" y="0" width="40" height="40" fill="url(#patt2)"/>
+    </pattern>
+
+    <rect id="rect1" x="20" y="20" width="160" height="160" fill="url(#patt1)" stroke="darkblue"/>
+
+    <!-- image frame -->
+    <rect id="frame" x="1" y="1" width="198" height="198" fill="none" stroke="black"/>
+</svg>

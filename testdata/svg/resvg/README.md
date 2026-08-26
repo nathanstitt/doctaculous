@@ -298,9 +298,11 @@ covering gradient and pattern paint servers end to end:
   rather than one silently winning), `x`/`y` cell offset, missing
   `width`/`height` (disables the pattern per spec), no tile children
   (disables the pattern), `display:none` on one tile child (that child
-  alone is skipped), a pattern nested inside another pattern's tile
-  (including `objectBoundingBox` units resolving against the *outer*
-  shape's bbox), out-of-order forward references, a tile whose own fill
+  alone is skipped), a *gradient* nested inside a pattern's tile
+  (`nested-objectBoundingBox.svg`; including `objectBoundingBox` units
+  resolving against the *outer* shape's bbox — note this is a gradient
+  inside a pattern, not a pattern inside a pattern; see `hand-authored/` below
+  for that case), out-of-order forward references, a tile whose own fill
   references a gradient (paint-server composition), an invalid
   `patternTransform` (degenerate matrix, paints nothing), invalid
   `patternUnits`/`patternContentUnits` (default to `objectBoundingBox`/
@@ -445,3 +447,42 @@ composition order — this tranche's off-origin fixtures (nearly all of
 them; the corpus's shapes sit at `x="20" y="20"`) surfaced it immediately.
 Fixed at the source, with new regression tests using an off-origin
 rect/clip in both `pkg/svg/draw` and `pkg/render/pdfwrite`.
+
+A third composition-order bug of the same shape was found in final review
+and fixed afterward: `resolveGradient`'s `gradientTransform` handling
+composed `bboxM.Mul(gradM)` — bbox mapping first, then gradientTransform —
+applying gradientTransform in USER space about the user-space origin
+instead of within the gradient's own local coordinate system. Every
+resvg-sourced `gradientTransform` fixture uses a 160x160 (square) bbox, under
+which a uniform scale makes the two orders differ only by a small
+translation, so the bug produced near-identical PNGs and was invisible to
+the golden sweep. Fixed to `gradM.Mul(bboxM)`; see `hand-authored/` below
+for the fixture that actually distinguishes the two orders.
+
+## Hand-authored fixtures (not from resvg-test-suite)
+
+Two files under `paint-servers/hand-authored/` are original to this
+repository, not vendored — they exist to close corpus gaps the resvg
+tranche above cannot, and are not subject to the MIT-licensed upstream
+suite's terms:
+
+- `gradientTransform-nonsquare-bbox.svg` — every resvg `gradientTransform`
+  fixture (`linearGradient/gradientTransform.svg`,
+  `linearGradient/gradientTransform-and-transform.svg`,
+  `radialGradient/gradientTransform.svg`) uses a square 160x160 bbox, which
+  cannot distinguish `bboxM.Mul(gradM)` from `gradM.Mul(bboxM)` (see "Bugs
+  found" above) — under a uniform scale the two orders differ only by a
+  translation. This fixture uses a 200x50 (non-square) rect so the two
+  composition orders diverge in angle, not just position, making a future
+  regression of this kind visible in the golden.
+- `nested-distinct-patterns.svg` — a 3-level chain of DISTINCT patterns
+  (`patt1`'s tile fills with `patt2`, whose tile fills with `patt3`), which
+  is not a cycle and so is not caught by `sceneBuilder.buildingPattern` (see
+  that field's doc comment in `pkg/svg/pattern.go`): each level multiplies
+  draw calls by its own cell count, and nothing at scene-build time bounds
+  the chain's depth. The only bound on it is `pkg/svg/draw`'s per-`DrawVector`
+  nesting-depth guard (`maxPatternNestingDepth`). This fixture is shallow
+  enough to render normally and lock in correct output; the guard's actual
+  trip point is covered by a Go benchmark/timing test rather than a golden,
+  since a document deep enough to matter for that test is intentionally
+  truncated mid-render.

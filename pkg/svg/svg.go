@@ -299,16 +299,26 @@ type sceneBuilder struct {
 	vp      viewport             // current viewport size, for userSpaceOnUse percentage resolution
 
 	// buildingPattern guards against a pattern tile's content referencing
-	// (directly, or via its own href chain / a chain of DIFFERENT patterns)
-	// the pattern currently being built into a tile Group. This is a
-	// SEPARATE cycle-prone graph from followHrefChain's href-chain walk
-	// (Task 4): here the cycle runs through buildShape -> resolvePattern ->
-	// buildGroup -> buildShape again for a shape inside the tile, not
-	// through a single element's href attribute. A pattern id present in
-	// this set is currently "in progress" one call further up the Go call
-	// stack; resolvePattern treats resolving it again as a cycle and stops,
-	// exactly like SVG's own "an indirect cycle must be treated as an error
-	// (ignore the fill/stroke)" rule for patternful tiles.
+	// (directly, or via its own href chain, or indirectly through a chain of
+	// OTHER patterns that eventually loops back to it) the pattern currently
+	// being built into a tile Group. This is a SEPARATE cycle-prone graph
+	// from followHrefChain's href-chain walk (Task 4): here the cycle runs
+	// through buildShape -> resolvePattern -> buildGroup -> buildShape again
+	// for a shape inside the tile, not through a single element's href
+	// attribute. A pattern id present in this set is currently "in
+	// progress" one call further up the Go call stack; resolvePattern
+	// treats resolving it again as a cycle and stops, exactly like SVG's own
+	// "an indirect cycle must be treated as an error (ignore the
+	// fill/stroke)" rule for patternful tiles.
+	//
+	// This set only fires when a pattern id repeats somewhere on the
+	// current chain — it does NOT bound a chain of entirely DISTINCT
+	// patterns (p0's tile fills with p1, p1's with p2, p2's with p3, ...),
+	// since no id ever recurs there and the membership test never trips.
+	// Each level of such a chain multiplies draw calls by its own tile cell
+	// count, so left unchecked it is exponential in chain depth. That case
+	// is bounded separately, at draw time, by pkg/svg/draw's per-DrawVector
+	// pattern-nesting-depth counter (maxPatternNestingDepth) — not here.
 	buildingPattern map[string]bool
 }
 

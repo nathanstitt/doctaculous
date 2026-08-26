@@ -112,6 +112,11 @@ func (b *sceneBuilder) resolvePattern(id string, ps *resolvedServer, path *rende
 		contentM = render.Scale(bboxW, bboxH)
 	}
 
+	// Set-build-delete: catches id recurring anywhere on the current chain
+	// (a cycle), but a chain of otherwise-DISTINCT pattern ids never repeats
+	// one, so this never bounds THAT kind of nesting — see
+	// buildingPattern's doc comment on sceneBuilder for the draw-time depth
+	// guard that does.
 	b.buildingPattern[id] = true
 	tile := b.buildKidsGroup(ps.kids, defaultStyle(), &cascadeCtx{idx: b.idx, logf: b.logf})
 	delete(b.buildingPattern, id)

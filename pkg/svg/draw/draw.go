@@ -31,14 +31,61 @@ func New(doc *svg.Document) *Renderer {
 }
 
 // warnFlags tracks, for one DrawVector call, which one-per-document
-// degradation notices have already been emitted. It is allocated fresh per
-// call (never stored on Renderer) so concurrent DrawVector calls on the same
-// Renderer never share it and cannot race on it.
+// degradation notices have already been emitted, plus the recursion-guard
+// counters that protect one DrawVector call against pathological input. It is
+// allocated fresh per call (never stored on Renderer) so concurrent
+// DrawVector calls on the same Renderer never share it and cannot race on
+// it — the same reason the guard counters live here rather than on Renderer,
+// which must stay stateless for concurrent use.
 type warnFlags struct {
 	opacity        bool
 	strokeGradient bool
 	patternCap     bool
+	depthCap       bool
+	budgetCap      bool
+
+	// patternDepth counts nested <pattern> fills currently on the stack: a
+	// tile painted while resolving pattern P that itself fills with a
+	// DIFFERENT pattern Q is not a cycle (buildingPattern in pkg/svg only
+	// catches a pattern tile referencing itself, directly or through
+	// another pattern), so nothing at scene-build time bounds a chain of
+	// distinct patterns P0 -> P1 -> P2 -> .... Each level multiplies draw
+	// calls by its own cell count, so an 8-deep chain of ~400-cell tiles
+	// blows past any reasonable render time long before it would ever
+	// legitimately occur (real SVG nests patterns at most 2-3 deep).
+	patternDepth int
+
+	// drawCalls counts every leaf paint op (Fill/Stroke/FillShading, plus
+	// one per pattern-tile-cell placement) issued so far in this
+	// DrawVector call. It bounds total work across the WHOLE call, not
+	// just one shape's pattern fan-out, so it also protects future
+	// draw-time expansion graphs (e.g. <use>/<symbol>) that don't run
+	// through fillPattern at all.
+	drawCalls int
 }
+
+// maxPatternNestingDepth bounds how many <pattern> fills may be nested
+// (a pattern's tile containing a shape filled with a different pattern,
+// containing a shape filled with yet another, ...) within one DrawVector
+// call. buildingPattern (pkg/svg) only catches a pattern tile that
+// eventually references itself; a chain of otherwise-unrelated patterns is
+// not a cycle and passes that guard every time, so this is the only bound on
+// it. Real-world SVG never nests patterns more than 2-3 deep; 4 is generous
+// headroom above that while still stopping the exponential blowup (each
+// level multiplies draw calls by its own cell count) in well under a second.
+const maxPatternNestingDepth = 4
+
+// maxDrawCalls bounds the total number of leaf paint operations
+// (Fill/Stroke/FillShading/pattern-cell placements) one DrawVector call may
+// issue. It is a backstop against any draw-time expansion blowing past a
+// sane render budget — not just nested patterns, but any future
+// draw-time-recursive feature (e.g. <use>/<symbol> chains) that doesn't run
+// through the pattern-depth guard at all. Sized comfortably above what any
+// legitimate document in the corpus needs (worst case today is on the order
+// of maxPatternTileCells for a single heavily-tiled shape) while still
+// tripping well before a pathological chain reaches multi-second render
+// times.
+const maxDrawCalls = 200_000
 
 // maxPatternTileCells bounds how many tile repetitions fillPattern will draw
 // to cover one shape's fill region. A tile cell this small relative to the
@@ -97,6 +144,15 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 	if s == nil || s.Path == nil {
 		return
 	}
+	if warned.drawCalls >= maxDrawCalls {
+		// Backstop for the whole DrawVector call, not just pattern fan-out:
+		// see maxDrawCalls's doc comment. Checked here too so a document
+		// that reaches the budget via patterns doesn't keep silently
+		// painting plain shapes afterward.
+		r.logDrawBudgetCapOnce(warned)
+		return
+	}
+	warned.drawCalls++
 
 	alpha *= clamp01(s.Style.Opacity())
 	if alpha < 1 {
@@ -214,6 +270,21 @@ type pattern interface {
 // recursive paint call instead, matching how group opacity already
 // propagates through r.paint).
 func (r *Renderer) fillPattern(dev render.Device, dp *render.Path, st svg.Style, p pattern, sm render.Matrix, alpha float64, warned *warnFlags) {
+	if warned.patternDepth >= maxPatternNestingDepth {
+		// A chain of DISTINCT patterns (p0's tile fills with p1, p1's with
+		// p2, ...) is not a cycle, so pkg/svg's buildingPattern guard (which
+		// only catches a pattern tile eventually referencing itself) never
+		// fires for it. Each level multiplies draw calls by its own cell
+		// count, so left unbounded this is exponential; stop descending
+		// rather than let it run away.
+		r.logPatternDepthCapOnce(warned)
+		return
+	}
+	if warned.drawCalls >= maxDrawCalls {
+		r.logDrawBudgetCapOnce(warned)
+		return
+	}
+
 	rule := render.NonZero
 	if fp, ok := st.FillPaint(); ok {
 		rule = fp.Rule
@@ -284,8 +355,14 @@ func (r *Renderer) fillPattern(dev render.Device, dp *render.Path, st svg.Style,
 	contentM := p.ContentMatrix()
 	tile := p.Tile()
 	cellPath := cellRectPath(cw, ch)
+	warned.patternDepth++
+cellLoop:
 	for j := jMin; j <= jMax; j++ {
 		for i := iMin; i <= iMax; i++ {
+			if warned.drawCalls >= maxDrawCalls {
+				r.logDrawBudgetCapOnce(warned)
+				break cellLoop
+			}
 			// cellM places THIS cell (i,j) in device space: translate the
 			// unit cell box to its (x0+i*cw, y0+j*ch) origin, then apply the
 			// shared pattern-space -> device ctm. Recomputed per cell (not
@@ -299,12 +376,14 @@ func (r *Renderer) fillPattern(dev render.Device, dp *render.Path, st svg.Style,
 			if dp2 == nil {
 				continue
 			}
+			warned.drawCalls++
 			dev.Save()
 			dev.PushClip(dp2, render.NonZero)
 			r.paint(dev, tile, contentM.Mul(cellM), alpha, warned)
 			dev.Restore()
 		}
 	}
+	warned.patternDepth--
 
 	dev.Restore()
 }
@@ -332,6 +411,28 @@ func (r *Renderer) logPatternCellCapOnce(warned *warnFlags) {
 	}
 	warned.patternCap = true
 	r.Logf("svg: <pattern> tile count exceeded %d cells; painting was truncated to a centered window", maxPatternTileCells)
+}
+
+// logPatternDepthCapOnce emits the pattern-nesting-depth-capped notice the
+// first time it is needed for the current DrawVector call, and is a no-op on
+// subsequent calls.
+func (r *Renderer) logPatternDepthCapOnce(warned *warnFlags) {
+	if warned.depthCap || r.Logf == nil {
+		return
+	}
+	warned.depthCap = true
+	r.Logf("svg: <pattern> nesting exceeded %d levels; deeper tiles were not painted", maxPatternNestingDepth)
+}
+
+// logDrawBudgetCapOnce emits the total-draw-call-budget-exceeded notice the
+// first time it is needed for the current DrawVector call, and is a no-op on
+// subsequent calls.
+func (r *Renderer) logDrawBudgetCapOnce(warned *warnFlags) {
+	if warned.budgetCap || r.Logf == nil {
+		return
+	}
+	warned.budgetCap = true
+	r.Logf("svg: draw call budget of %d exceeded; remaining content was not painted", maxDrawCalls)
 }
 
 // alphaShader wraps a render.Shader to scale every returned color's alpha by
