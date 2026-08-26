@@ -64,7 +64,10 @@ func (it *Interpreter) withSoftMask(paint func()) {
 	paint()
 	it.gs.softMask = sm
 	mask := it.renderSoftMask(sm, it.gs.softMaskCTM)
-	it.dev.EndGroup(1, it.gs.blendMode, mask)
+	// mask is a PDF /SMask (soft mask), not a clip region — see
+	// xobject.go's matching EndGroup call for why this is the softMask
+	// parameter, not clipMask.
+	it.dev.EndGroup(1, it.gs.blendMode, nil, mask)
 	it.dev.Restore()
 }
 

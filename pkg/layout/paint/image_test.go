@@ -24,14 +24,14 @@ func (d *imageRecordDevice) Stroke(*render.Path, render.StrokePaint) {}
 func (d *imageRecordDevice) DrawImage(_ image.Image, ctm render.Matrix, _ float64, _ string) {
 	d.ctms = append(d.ctms, ctm)
 }
-func (d *imageRecordDevice) FillGlyph(*render.Path, render.FillColor, string) {}
-func (d *imageRecordDevice) DrawGlyph(render.GlyphRef)                        {}
-func (d *imageRecordDevice) FillShading(render.Shader, render.Matrix, string) {}
-func (d *imageRecordDevice) PushClip(*render.Path, render.FillRule)           { d.pushClip++ }
-func (d *imageRecordDevice) BeginGroup()                                      {}
-func (d *imageRecordDevice) EndGroup(float64, string, render.GroupMask)       {}
-func (d *imageRecordDevice) Save()                                            {}
-func (d *imageRecordDevice) Restore()                                         {}
+func (d *imageRecordDevice) FillGlyph(*render.Path, render.FillColor, string)             {}
+func (d *imageRecordDevice) DrawGlyph(render.GlyphRef)                                    {}
+func (d *imageRecordDevice) FillShading(render.Shader, render.Matrix, string)             {}
+func (d *imageRecordDevice) PushClip(*render.Path, render.FillRule)                       { d.pushClip++ }
+func (d *imageRecordDevice) BeginGroup()                                                  {}
+func (d *imageRecordDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
+func (d *imageRecordDevice) Save()                                                        {}
+func (d *imageRecordDevice) Restore()                                                     {}
 func (d *imageRecordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }

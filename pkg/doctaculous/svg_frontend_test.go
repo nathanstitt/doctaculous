@@ -784,6 +784,148 @@ func TestSVGGroupOpacityRoundTripsThroughPDFNoSeam(t *testing.T) {
 	}
 }
 
+// TestClipPathAndMaskBothApplyThroughPDF is the discriminating regression
+// test for a bug where an element carrying BOTH clip-path AND mask lost ALL
+// content when rendered through the PDF backend, while rendering correctly
+// direct-to-raster. Root cause: pkg/svg/draw used to pre-combine the clip
+// mask and the <mask> luminance result into a single GroupMask before
+// handing it to EndGroup; pkg/render/pdfwrite's BuildLuminanceMask returns a
+// SENTINEL pointer recognized only by exact identity in its own EndGroup
+// (see softmask.go's takePendingSoftMask), so combining it with a clip mask
+// produced a new value neither backend built, which pdfwrite then silently
+// mis-decoded as a real (but wrong, near-empty) coverage buffer — erasing
+// the element entirely. The fix passes clipMask and softMask to EndGroup as
+// two SEPARATE parameters (see render.Device's doc comment) so pdfwrite's
+// sentinel always reaches its own EndGroup unmodified.
+//
+// A clip-path ALONE, or a mask ALONE, could not have caught this — only the
+// combination trips the bug, so this test exercises exactly that
+// combination and nothing less.
+func TestClipPathAndMaskBothApplyThroughPDF(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+	  <mask id="m1"><rect x="0" y="0" width="100" height="100" fill="white"/></mask>
+	  <clipPath id="c1"><rect x="0" y="0" width="60" height="100"/></clipPath>
+	  <rect x="0" y="0" width="100" height="100" fill="red" mask="url(#m1)" clip-path="url(#c1)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Direct raster: the ground truth. (40,20) is inside the clip rect (x<60)
+	// and inside the (fully white, fully permissive) mask -> red. (80,60) is
+	// outside the clip rect (x>=60) -> unpainted white regardless of the mask.
+	directImg, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := directImg.(*image.RGBA)
+	directInside := direct.RGBAAt(40, 20)
+	directOutside := direct.RGBAAt(80, 60)
+
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	pdfDoc, err := OpenBytes(pdfBuf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaImg, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	via := viaImg.(*image.RGBA)
+	viaInside := via.RGBAAt(40, 20)
+	viaOutside := via.RGBAAt(80, 60)
+
+	t.Logf("direct: inside-clip=%s outside-clip=%s", hexColor(directInside), hexColor(directOutside))
+	t.Logf("via PDF: inside-clip=%s outside-clip=%s", hexColor(viaInside), hexColor(viaOutside))
+
+	near := func(got, want uint8, tol int) bool {
+		d := int(got) - int(want)
+		return d >= -tol && d <= tol
+	}
+	if !near(viaInside.R, 0xff, 4) || viaInside.G > 4 || viaInside.B > 4 {
+		t.Errorf("via PDF inside clip+mask = %s, want ~#ff0000 (red) -- content vanished (bug: clip mask and soft mask combined into a value pdfwrite could not recognize)", hexColor(viaInside))
+	}
+	if !near(viaOutside.R, 0xff, 4) || !near(viaOutside.G, 0xff, 4) || !near(viaOutside.B, 0xff, 4) {
+		t.Errorf("via PDF outside clip (80,60) = %s, want ~#ffffff (unpainted; clip must still restrict content)", hexColor(viaOutside))
+	}
+	if !near(viaInside.R, directInside.R, 4) || !near(viaInside.G, directInside.G, 4) || !near(viaInside.B, directInside.B, 4) {
+		t.Errorf("PDF round-trip inside-clip %s does not match direct raster %s", hexColor(viaInside), hexColor(directInside))
+	}
+	if !near(viaOutside.R, directOutside.R, 4) || !near(viaOutside.G, directOutside.G, 4) || !near(viaOutside.B, directOutside.B, 4) {
+		t.Errorf("PDF round-trip outside-clip %s does not match direct raster %s", hexColor(viaOutside), hexColor(directOutside))
+	}
+}
+
+// TestNestedMaskOnMaskThroughPDF is the PDF-backend companion to
+// pkg/svg/draw's TestNestedMaskOnMask: a <mask> that itself carries a
+// mask="url(#...)" self-reference (mask-on-mask) combines two independent
+// BuildLuminanceMask results, which is the SAME underlying hazard as
+// TestClipPathAndMaskBothApplyThroughPDF (a pdfwrite sentinel losing its
+// identity when combined with another mask) — just triggered entirely
+// within pkg/svg/draw's buildMask instead of at the clip+mask call sites.
+// The fix applies msk.Self's mask INSIDE the same BuildLuminanceMask call as
+// msk's own content, via a nested BeginGroup/EndGroup on the scratch device,
+// so at most one BuildLuminanceMask call (and therefore at most one
+// sentinel) is ever produced per buildMask invocation.
+func TestNestedMaskOnMaskThroughPDF(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+	  <mask id="inner"><rect x="40" y="40" width="120" height="120" fill="white"/></mask>
+	  <mask id="outer" mask="url(#inner)" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+	    <rect x="20" y="20" width="160" height="160" fill="white"/>
+	  </mask>
+	  <rect x="20" y="20" width="160" height="160" fill="green" mask="url(#outer)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directImg, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := directImg.(*image.RGBA)
+	directBoth := direct.RGBAAt(50, 50)  // inside both inner and outer's own content
+	directOuter := direct.RGBAAt(15, 15) // inside outer only, outside inner
+
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	pdfDoc, err := OpenBytes(pdfBuf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaImg, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	via := viaImg.(*image.RGBA)
+	viaBoth := via.RGBAAt(50, 50)
+	viaOuter := via.RGBAAt(15, 15)
+
+	t.Logf("direct: both=%s outer-only=%s", hexColor(directBoth), hexColor(directOuter))
+	t.Logf("via PDF: both=%s outer-only=%s", hexColor(viaBoth), hexColor(viaOuter))
+
+	near := func(got, want uint8, tol int) bool {
+		d := int(got) - int(want)
+		return d >= -tol && d <= tol
+	}
+	if viaBoth.G < 100 || viaBoth.R > 5 {
+		t.Errorf("via PDF inside both masks = %s, want green -- content vanished (mask-on-mask combined into a value pdfwrite could not recognize)", hexColor(viaBoth))
+	}
+	if !near(viaOuter.R, 0xff, 4) || !near(viaOuter.G, 0xff, 4) || !near(viaOuter.B, 0xff, 4) {
+		t.Errorf("via PDF outer-only (15,15) = %s, want ~#ffffff (inner mask must still restrict outer)", hexColor(viaOuter))
+	}
+	if !near(viaBoth.R, directBoth.R, 4) || !near(viaBoth.G, directBoth.G, 4) || !near(viaBoth.B, directBoth.B, 4) {
+		t.Errorf("PDF round-trip (both) %s does not match direct raster %s", hexColor(viaBoth), hexColor(directBoth))
+	}
+}
+
 // TestSVGOpaquePDFByteIdenticalAfterExtGState is the primary regression guard
 // for the ExtGState plumbing: a fully-opaque document (every fill/stroke at
 // alpha 1.0, no blend modes) must emit byte-identical PDF output to before

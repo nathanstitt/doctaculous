@@ -5,6 +5,9 @@ import (
 	"image/color"
 	"testing"
 	"time"
+
+	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/doctaculous/pkg/render/raster"
 )
 
 const maskSVGHdr = `xmlns="http://www.w3.org/2000/svg"`
@@ -355,56 +358,71 @@ func TestNestedMaskOnMask(t *testing.T) {
 	}
 }
 
-// TestClipCombinedWithFractionalMaskUsesProductNotMin is THE discriminating
+// TestEndGroupCombinesClipAndSoftMaskByProductNotMin is THE discriminating
 // regression test for the bug fixed at draw.go's two Group/Shape mask call
-// sites: combining a clip mask with a <mask> luminance mask must multiply
-// their coverage, not take the min. A BINARY mask cannot tell the two
-// combining rules apart (see combineClipRegions's and attenuateByMask's own
-// doc comments: min(a,b) == a*b/255 whenever either operand is already fully
-// opaque, 255) — that is exactly why this bug shipped and slipped through
-// review undetected. This test uses a 50%-grey (fractional) luminance mask
-// combined with a PARTIAL (also fractional, not fully opaque) clip
-// coverage value, so the two combining rules diverge and the test fails
-// under the old (wrong) intersectMasks-at-those-call-sites behavior.
+// sites: render.Device.EndGroup's clipMask and softMask parameters must
+// combine by MULTIPLYING their coverage, not by taking the min -- the two
+// masks reach EndGroup as two SEPARATE parameters specifically so each
+// backend can combine them correctly (see EndGroup's doc comment), and this
+// pins the raster backend's own combining rule directly, white-box, against
+// the ACTUAL two-parameter EndGroup call a real render goes through (not a
+// standalone helper function, which no longer exists after the masks were
+// separated all the way to EndGroup -- see git history for "use product not
+// min when combining a clip mask with a luminance mask" and the follow-up
+// that split EndGroup's mask parameter in two).
 //
-// Direct white-box check: with clip coverage a=200 and mask coverage
-// b=128 (both deliberately fractional), min(a,b)=128 but the correct
-// product a*b/255=100 -- a divergence of 28/255 (~11%), easily distinguished
-// from pixel sampling noise or antialiasing.
-func TestClipCombinedWithFractionalMaskUsesProductNotMin(t *testing.T) {
-	bounds := image.Rect(0, 0, 4, 4)
-	clip := image.NewAlpha(bounds)
-	lum := image.NewAlpha(bounds)
+// A BINARY mask cannot tell a product-combine from a min-combine apart
+// (min(a,b) == a*b/255 whenever either operand is already fully opaque,
+// 255) -- that is exactly why the original bug shipped and slipped through
+// review undetected. This test uses two deliberately fractional coverage
+// values (200 and 128, neither 0 nor 255) so the two combining rules
+// diverge: min(200,128)=128 but the correct product is 200*128/255=100 -- a
+// divergence of 28/255 (~11%), easily distinguished from rounding noise.
+func TestEndGroupCombinesClipAndSoftMaskByProductNotMin(t *testing.T) {
 	const clipVal, lumVal = 200, 128 // both fractional: neither is 0 or 255
+	wantProduct := uint8(uint16(clipVal) * uint16(lumVal) / 255)
+	wantMin := uint8(min(clipVal, lumVal))
+	if wantProduct == wantMin {
+		t.Fatalf("test setup is not discriminating: product (%d) == min (%d) for clip=%d, mask=%d", wantProduct, wantMin, clipVal, lumVal)
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	dev := raster.New(img)
+
+	bounds := image.Rect(0, 0, 4, 4)
+	clipMask := image.NewAlpha(bounds)
+	softMask := image.NewAlpha(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			clip.SetAlpha(x, y, color.Alpha{A: clipVal})
-			lum.SetAlpha(x, y, color.Alpha{A: lumVal})
+			clipMask.SetAlpha(x, y, color.Alpha{A: clipVal})
+			softMask.SetAlpha(x, y, color.Alpha{A: lumVal})
 		}
 	}
 
-	wrong := combineClipRegions(clip, lum) // the bug: min-based combine
-	right := attenuateByMask(clip, lum)    // the fix: product-based combine
+	rect := &render.Path{}
+	rect.MoveTo(0, 0)
+	rect.LineTo(4, 0)
+	rect.LineTo(4, 4)
+	rect.LineTo(0, 4)
+	rect.Close()
 
-	gotWrong := wrong.AlphaAt(1, 1).A
-	gotRight := right.AlphaAt(1, 1).A
-	wantWrong := uint8(min(clipVal, lumVal))                   // min(200,128) = 128
-	wantRight := uint8(uint16(clipVal) * uint16(lumVal) / 255) // 200*128/255 = 100
+	dev.BeginGroup()
+	dev.Fill(rect, render.FillPaint{Color: color.RGBA{0, 0, 0, 255}})
+	dev.EndGroup(1, "", clipMask, softMask)
 
-	t.Logf("clip=%d mask=%d -> combineClipRegions (min, WRONG here)=%d, attenuateByMask (product, CORRECT)=%d",
-		clipVal, lumVal, gotWrong, gotRight)
+	// The group painted fully-opaque black into an initially-transparent
+	// canvas; the composited pixel's own ALPHA channel is exactly the
+	// clip/soft-mask combined coverage value (no background color math
+	// needed -- straight from render.Device's premultiplied-RGBA contract).
+	got := img.RGBAAt(1, 1)
+	gotCoverage := got.A
+	t.Logf("clip=%d soft=%d -> composited coverage=%d (want product=%d, NOT min=%d)", clipVal, lumVal, gotCoverage, wantProduct, wantMin)
 
-	if gotWrong != wantWrong {
-		t.Fatalf("combineClipRegions(%d,%d) = %d, want min = %d (sanity check on the min helper itself)", clipVal, lumVal, gotWrong, wantWrong)
+	if gotCoverage < wantProduct-2 || gotCoverage > wantProduct+2 {
+		t.Errorf("composited coverage = %d, want ~%d (the product of clip=%d and soft=%d)", gotCoverage, wantProduct, clipVal, lumVal)
 	}
-	if gotRight != wantRight {
-		t.Fatalf("attenuateByMask(%d,%d) = %d, want product = %d", clipVal, lumVal, gotRight, wantRight)
-	}
-	if gotRight == gotWrong {
-		t.Fatalf("attenuateByMask and combineClipRegions produced the SAME value (%d) for fractional inputs %d,%d -- the two combining rules must diverge here, or this test isn't discriminating", gotRight, clipVal, lumVal)
-	}
-	if gotRight >= gotWrong {
-		t.Errorf("attenuateByMask (product, %d) is not less than combineClipRegions (min, %d) for fractional inputs -- product must be <= min always, and strictly less whenever both inputs are < 255", gotRight, gotWrong)
+	if gotCoverage == wantMin {
+		t.Errorf("composited coverage (%d) equals the WRONG min-based value -- EndGroup combined clipMask and softMask by min instead of product", gotCoverage)
 	}
 }
 

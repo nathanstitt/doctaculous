@@ -128,9 +128,21 @@ func clipUnitsMatrix(units string, target boundsFunc) render.Matrix {
 // Do NOT use this to combine a clip region with a <mask> luminance result —
 // a luminance mask is deliberately fractional (that is the entire point of
 // a soft mask), and min() systematically UNDER-attenuates wherever it holds
-// a fractional value, producing more coverage than correct. Use
-// attenuateByMask (mask.go) for clip-with-luminance-mask combination; see
-// its doc comment for the failure mode this guards against.
+// a fractional value, producing more coverage than correct (this was a real,
+// shipped bug: see git history for "use product not min when combining a
+// clip mask with a luminance mask"). A clip mask and a <mask> luminance
+// result are never combined by pkg/svg/draw itself anymore — they reach
+// render.Device.EndGroup as two SEPARATE parameters (clipMask, softMask; see
+// its doc comment), and each backend combines them on its own terms: the
+// raster backend multiplies their per-pixel coverage at composite time
+// (pkg/render/raster/device.go's EndGroup), pdfwrite represents each with
+// its own native PDF construct (a `W n` clip vs. an ExtGState /SMask) and
+// never needs to combine them into one value at all. Keeping the two mask
+// kinds apart end-to-end, rather than pre-combining them behind a helper
+// like this one, is what fixed the bug: a backend that recognizes a mask by
+// pointer identity (pdfwrite's own luminosity-soft-mask fast path) cannot
+// survive being handed a value neither it nor render.Device's contract ever
+// produced.
 func combineClipRegions(a, b render.GroupMask) render.GroupMask {
 	if a == nil {
 		return b

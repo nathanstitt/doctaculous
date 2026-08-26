@@ -272,7 +272,13 @@ func (d *Device) BeginGroup() {
 // when the already-dimmed scratch pixel is clipped a second time here),
 // darkening the clip boundary. Applying it exactly once, on the flattened
 // result, is correct regardless of how many children touched that pixel.
-func (d *Device) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {
+//
+// clipMask and softMask are independently optional (see render.Device's doc
+// comment on why they arrive separately rather than pre-combined): this
+// backend has no reason to treat them differently from each other or from
+// the group's own outer clip, since all three are just per-pixel alpha
+// multipliers by the time they reach here — it multiplies all that apply.
+func (d *Device) EndGroup(alpha float64, blendMode string, clipMask, softMask render.GroupMask) {
 	n := len(d.groups)
 	if n == 0 {
 		return // unbalanced EndGroup: degrade to a no-op, never panic
@@ -293,7 +299,7 @@ func (d *Device) EndGroup(alpha float64, blendMode string, mask render.GroupMask
 		alpha = 1
 	}
 	// The clip in effect when BeginGroup ran is the group's own clip; apply it
-	// once here (composite time), alongside the caller-supplied mask.
+	// once here (composite time), alongside the caller-supplied masks.
 	clip := g.outerClip
 
 	sep, isSep := separableBlends[blendMode]
@@ -309,8 +315,11 @@ func (d *Device) EndGroup(alpha float64, blendMode string, mask render.GroupMask
 			if clip != nil {
 				a = a * uint32(clip.AlphaAt(x, y).A) / 255
 			}
-			if mask != nil {
-				a = a * uint32(mask.AlphaAt(x, y).A) / 255
+			if clipMask != nil {
+				a = a * uint32(clipMask.AlphaAt(x, y).A) / 255
+			}
+			if softMask != nil {
+				a = a * uint32(softMask.AlphaAt(x, y).A) / 255
 			}
 			if a == 0 {
 				continue

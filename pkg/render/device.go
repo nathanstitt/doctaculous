@@ -84,14 +84,33 @@ type Device interface {
 	// is the /BM blend mode name ("" or "Normal" = source-over) used when
 	// compositing the group onto its backdrop.
 	//
-	// mask, if non-nil, additionally scales the group's coverage per pixel by
-	// the mask's own alpha channel (see GroupMask) — this is how both a
-	// clipPath union and a luminance mask apply to a group. A nil mask means
-	// a plain opacity/blend group with no extra per-pixel restriction.
+	// clipMask and softMask are two DISTINCT, independently-optional per-pixel
+	// restrictions, each nil meaning "no restriction of this kind":
+	//
+	//   - clipMask carries a flattened clipPath union (from BuildClipMask):
+	//     boolean coverage — in the clipped region or not, antialiasing aside.
+	//   - softMask carries a rendered <mask> luminance/alpha result (from
+	//     BuildLuminanceMask): deliberately fractional coverage.
+	//
+	// Both apply when both are non-nil (their product, matching SVG's
+	// clip-then-mask compositing order), but they are passed SEPARATELY
+	// rather than pre-combined into one GroupMask by the caller: PDF's native
+	// model expresses them as two entirely different constructs (a `W n`
+	// clip vs. an ExtGState `/SMask`), so a backend that can represent one or
+	// both natively (pdfwrite) needs to see them apart to do so. Pre-combining
+	// them into a single opaque GroupMask value, as an earlier revision of
+	// this interface did, silently breaks any backend that recognizes a mask
+	// by identity rather than by resampling its pixels (pdfwrite's
+	// luminosity-soft-mask fast path — see softmask.go's takePendingSoftMask)
+	// the moment the two are combined into a new value neither backend
+	// allocated. A backend that has no reason to distinguish the two (the
+	// raster backend, which resamples both as plain per-pixel alpha) may
+	// simply multiply their coverage together, exactly as it would have
+	// combined one pre-merged mask.
 	//
 	// An EndGroup with no matching BeginGroup (unbalanced) must be a no-op,
 	// mirroring Restore's forgiving behavior on an empty stack — never panic.
-	EndGroup(alpha float64, blendMode string, mask GroupMask)
+	EndGroup(alpha float64, blendMode string, clipMask, softMask GroupMask)
 
 	// Save and Restore manage the clip/state stack so the interpreter's q/Q
 	// operators can be mirrored by the backend where clip state lives.

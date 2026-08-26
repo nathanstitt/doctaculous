@@ -190,7 +190,12 @@ func (it *Interpreter) runForm(content []byte, res Resources, matrix render.Matr
 	if groupAlpha {
 		alpha = savedAlpha
 	}
-	it.dev.EndGroup(alpha, savedBlend, mask)
+	// mask here is always a PDF /SMask (luminosity/alpha soft mask, via
+	// renderSoftMask) — a PDF clip is tracked separately (PushClip/W n, never
+	// routed through EndGroup's mask parameter), so this is a softMask, not a
+	// clipMask; see render.Device.EndGroup's doc comment on why the two are
+	// now distinct parameters.
+	it.dev.EndGroup(alpha, savedBlend, nil, mask)
 	it.dev.Restore()
 }
 

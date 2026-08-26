@@ -2,7 +2,6 @@ package draw
 
 import (
 	"image"
-	"image/color"
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/svg"
@@ -32,22 +31,28 @@ import (
 // case here.
 //
 // CALL-SITE INVARIANT (do not break without reading this): every caller of
-// buildMask passes its result straight to EndGroup, optionally combining it
-// with a clip mask via attenuateByMask FIRST (see draw.go's Group case and
-// paintShapeGrouped) — never storing it, deferring the matching EndGroup, or
-// routing it through anything else in between. This matters because at
-// least one backend (pkg/render/pdfwrite) returns a SENTINEL pointer from
+// buildMask passes its result straight to EndGroup's softMask parameter,
+// SEPARATELY from any clip mask (see draw.go's Group case and
+// paintShapeGrouped, and render.Device.EndGroup's doc comment on why the two
+// are distinct parameters, never pre-combined into one GroupMask) — never
+// storing buildMask's result, deferring the matching EndGroup, or combining
+// it with another mask in between. This matters because at least one
+// backend (pkg/render/pdfwrite) returns a SENTINEL pointer from
 // BuildLuminanceMask rather than real per-pixel content, recognized only by
 // exact pointer identity in its own EndGroup (see softmask.go's
-// takePendingSoftMask); combining that sentinel with another mask (as
-// attenuateByMask does) yields a plain *image.Alpha that no longer matches
-// the sentinel, which pdfwrite then silently treats as a real (but
-// wrong — a 1x1 stand-in) coverage buffer instead of erroring. A future PR
-// that builds a mask here and defers its EndGroup, or introduces a THIRD
-// mask-combining call between BuildLuminanceMask and EndGroup, must first
-// resolve this by making pdfwrite's sentinel survive combination (or by
-// rejecting the combination outright) — do not assume "it still compiles"
-// means it still renders correctly on the PDF backend.
+// takePendingSoftMask); combining that sentinel with another mask (the way
+// an earlier revision of this function combined msk.Self's mask with msk's
+// own via attenuateByMask, and the way an earlier revision of draw.go
+// combined a clip mask with this function's result) yields a plain
+// *image.Alpha that no longer matches the sentinel, which pdfwrite then
+// silently treats as a real (but wrong — a 1x1 stand-in) coverage buffer
+// instead of erroring, erasing content. This is why msk.Self (below) is
+// applied INSIDE the same BuildLuminanceMask call as msk's own content, via
+// a nested BeginGroup/EndGroup on the scratch device, rather than as a
+// second, independent buildMask call whose result gets multiplied in
+// afterward: this function must return AT MOST ONE GroupMask value, built by
+// AT MOST ONE BuildLuminanceMask call, so a backend's sentinel (if any)
+// always reaches its own EndGroup unmodified.
 func (r *Renderer) buildMask(dev render.Device, msk *svg.Mask, m render.Matrix, target boundsFunc) render.GroupMask {
 	regionM := maskUnitsMatrix(msk.Units, target).Mul(m)
 	regionPath := maskRegionPath(msk, regionM)
@@ -56,73 +61,42 @@ func (r *Renderer) buildMask(dev render.Device, msk *svg.Mask, m render.Matrix, 
 
 	w, h := dev.Size()
 	alphaOnly := msk.Type == svg.MaskAlpha
-	mask := dev.BuildLuminanceMask(image.Point{X: w, Y: h}, alphaOnly, func(scratch render.Device) {
+	return dev.BuildLuminanceMask(image.Point{X: w, Y: h}, alphaOnly, func(scratch render.Device) {
 		if regionPath != nil {
 			scratch.PushClip(regionPath, render.NonZero)
 		}
-		if msk.Kids != nil {
+		paintKids := func(target render.Device) {
+			if msk.Kids == nil {
+				return
+			}
 			warned := &warnFlags{}
 			for _, kid := range msk.Kids.Kids {
-				r.paint(scratch, kid, contentM, 1.0, warned)
+				r.paint(target, kid, contentM, 1.0, warned)
 			}
 		}
+		if msk.Self == nil {
+			paintKids(scratch)
+			return
+		}
+		// msk carries its own mask="url(#...)" self-reference: "this mask's
+		// value = this mask's own content x its referenced mask" (see
+		// TestNestedMaskOnMask's doc comment) — the same multiplicative
+		// stacking as two alpha channels compositing, NOT a hard
+		// intersection of two regions, so this is expressed as a nested
+		// compositing GROUP (opacity 1, softMask = msk.Self's resolved
+		// mask) around msk's own content, letting the scratch device's
+		// OWN EndGroup do the per-pixel multiply — exactly the mechanism
+		// this whole file already trusts for every other group+mask
+		// composite, and the only way to combine two masks without ever
+		// materializing an intermediate GroupMask value a backend sentinel
+		// could fail to recognize.
+		selfMask := r.buildMask(scratch, msk.Self, m, target)
+		scratch.Save()
+		scratch.BeginGroup()
+		paintKids(scratch)
+		scratch.EndGroup(1, "", nil, selfMask)
+		scratch.Restore()
 	})
-	if mask == nil {
-		// A backend that cannot rasterize offscreen (see
-		// render.Device.BuildLuminanceMask's doc comment on graceful
-		// degradation, e.g. pdfwrite today): "no masking" is the only
-		// available fallback, since there is no per-pixel result to apply.
-		return nil
-	}
-
-	if msk.Self != nil {
-		selfMask := r.buildMask(dev, msk.Self, m, target)
-		mask = attenuateByMask(mask, selfMask)
-	}
-	return mask
-}
-
-// attenuateByMask returns a mask whose per-pixel coverage is the PRODUCT
-// (not the min — contrast combineClipRegions in clip.go, used for
-// clip-path's boolean-AND region semantics) of a and b's coverage, fractions
-// in [0,1] scaled to [0,255]. Use this whenever EITHER operand is (or may
-// be) a <mask> luminance/alpha result — a soft mask is deliberately
-// fractional, that is the entire point of it — including a <mask> that
-// itself carries a mask="url(#...)" self-reference, which composes as "this
-// mask's value = this mask's own content x its referenced mask" (see
-// TestNestedMaskOnMask's doc comment), the same multiplicative stacking as
-// two alpha channels compositing, NOT a hard intersection of two regions.
-// Using min here instead of a product is invisible whenever both masks are
-// locally binary (0 or 255, as in every prior nested-mask test) but diverges
-// visibly once either mask carries a soft gradient value, which is exactly
-// the resvg mask-on-self-with-mixed-mask-type corpus fixture: min
-// systematically UNDER-attenuates (produces more coverage than correct)
-// wherever either operand alpha is fractional. This is why a clip mask
-// combined with a luminance mask (see draw.go's Group- and Shape-level mask
-// handling) must also go through attenuateByMask, not combineClipRegions:
-// the clip operand may be binary, but the luminance operand generally is
-// not, and combineClipRegions's min would under-attenuate exactly like the
-// mask-on-mask case above.
-func attenuateByMask(a, b render.GroupMask) render.GroupMask {
-	if a == nil {
-		return b
-	}
-	if b == nil {
-		return a
-	}
-	r := a.Bounds().Union(b.Bounds())
-	out := image.NewAlpha(r)
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			av := a.AlphaAt(x, y).A
-			bv := b.AlphaAt(x, y).A
-			v := uint8((uint16(av) * uint16(bv)) / 255)
-			if v != 0 {
-				out.SetAlpha(x, y, color.Alpha{A: v})
-			}
-		}
-	}
-	return out
 }
 
 // maskUnitsMatrix returns the matrix mapping a <mask>'s REGION rect

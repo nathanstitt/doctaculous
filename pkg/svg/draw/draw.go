@@ -214,7 +214,7 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			r.paint(dev, kid, gm, 1.0, warned)
 		}
 		warned.groupDepth--
-		var mask render.GroupMask
+		var clipMask, softMask render.GroupMask
 		if node.ClipPath != nil {
 			// gm (not m): clip-path applies in the clipped element's OWN
 			// user space, i.e. AFTER its own transform has been established
@@ -229,22 +229,29 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			// userSpaceOnUse (Identity mapping) for a Group target, a
 			// documented, narrow approximation until a group-subtree bbox
 			// helper exists.
-			mask = r.buildClipMask(dev, node.ClipPath, gm, nil)
+			clipMask = r.buildClipMask(dev, node.ClipPath, gm, nil)
 		}
 		if node.Mask != nil {
 			// Composite order is clip -> mask -> opacity (see the design
-			// doc): attenuating by the luminance mask (product, NOT the min
-			// combineClipRegions would give — see attenuateByMask's doc
-			// comment) combines it with whatever clip mask already exists,
-			// applying both, in that order, to the same flattened group
-			// result. A luminance mask is deliberately fractional, so min
-			// would under-attenuate here. Same nil-target approximation as
-			// ClipPath just above: a Group has no single Path for an
+			// doc). clipMask and softMask are passed to EndGroup SEPARATELY,
+			// not pre-combined here (see render.Device's doc comment on
+			// EndGroup): a backend gets to decide how to apply both — the
+			// raster backend multiplies their per-pixel coverage at
+			// composite time (the correct product, not a min-based
+			// intersection — see pkg/render/raster/device.go's EndGroup),
+			// while pdfwrite represents each with its own native PDF
+			// construct (a `W n` clip vs. an ExtGState /SMask) rather than
+			// forcing one into the other. Pre-combining them into a single
+			// GroupMask here, as an earlier revision did, broke pdfwrite's
+			// sentinel-identity recognition of its own luminosity mask the
+			// moment a clip-path also applied — see EndGroup's doc comment
+			// in pkg/render/pdfwrite/group.go for the regression this
+			// caused and the fix. Same nil-target approximation as ClipPath
+			// just above: a Group has no single Path for an
 			// objectBoundingBox maskUnits/maskContentUnits target.
-			lumMask := r.buildMask(dev, node.Mask, gm, nil)
-			mask = attenuateByMask(mask, lumMask)
+			softMask = r.buildMask(dev, node.Mask, gm, nil)
 		}
-		dev.EndGroup(alpha*node.Opacity, "", mask)
+		dev.EndGroup(alpha*node.Opacity, "", clipMask, softMask)
 		dev.Restore()
 	case *svg.Shape:
 		r.paintShape(dev, node, m, alpha, warned)
@@ -341,27 +348,25 @@ func (r *Renderer) paintShapeGrouped(dev render.Device, s *svg.Shape, dp *render
 	r.paintFill(dev, s, dp, sm, innerAlpha, warned)
 	r.paintStroke(dev, s, dp, sm, innerAlpha, warned)
 	warned.groupDepth--
-	var mask render.GroupMask
+	var clipMask, softMask render.GroupMask
 	if s.ClipPath != nil {
 		// objectBoundingBox target: s.Path is the shape's own PRE-transform
 		// geometry, matching resolveGradient's identical use of it for a
 		// gradient's objectBoundingBox mapping (see gradient.go) — the exact
 		// reuse the design calls for.
-		mask = r.buildClipMask(dev, s.ClipPath, sm, s.Path.Bounds)
+		clipMask = r.buildClipMask(dev, s.ClipPath, sm, s.Path.Bounds)
 	}
 	if s.Mask != nil {
-		// Composite order is clip -> mask -> opacity (see the design doc):
-		// attenuating by the luminance mask (product, NOT the min
-		// combineClipRegions would give — see attenuateByMask's doc comment)
-		// combines it with whatever clip mask already exists, applying both,
-		// in that order, to the same flattened fill+stroke result. A
-		// luminance mask is deliberately fractional, so min would
-		// under-attenuate here. Same objectBoundingBox target as ClipPath
-		// above.
-		lumMask := r.buildMask(dev, s.Mask, sm, s.Path.Bounds)
-		mask = attenuateByMask(mask, lumMask)
+		// Composite order is clip -> mask -> opacity (see the design doc).
+		// clipMask and softMask reach EndGroup SEPARATELY, not pre-combined
+		// here — see the matching comment in paint's Group case, and
+		// render.Device's EndGroup doc comment, for why: pre-combining broke
+		// pdfwrite's sentinel-identity recognition of its own luminosity
+		// mask whenever a clip-path also applied, silently erasing content.
+		// Same objectBoundingBox target as ClipPath above.
+		softMask = r.buildMask(dev, s.Mask, sm, s.Path.Bounds)
 	}
-	dev.EndGroup(opacity, "", mask)
+	dev.EndGroup(opacity, "", clipMask, softMask)
 	dev.Restore()
 }
 

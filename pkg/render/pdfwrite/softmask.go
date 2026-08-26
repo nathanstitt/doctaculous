@@ -138,25 +138,28 @@ func (d *pageDevice) registerScratchForm(scratch *pageDevice, alphaOnly bool) st
 // pkg/svg/draw always calls BuildLuminanceMask immediately before the
 // EndGroup that consumes its result).
 //
-// SILENT FAILURE MODE, DOCUMENTED HERE SO IT CANNOT SNEAK BACK IN: this
-// lookup only succeeds when EndGroup receives the EXACT sentinel pointer
-// unmodified. A caller that combines the sentinel with another mask first
-// (e.g. pkg/svg/draw's attenuateByMask/combineClipRegions, when a clip-path
-// and a <mask> both apply to the same element) produces a NEW *image.Alpha
-// that is not in d.pendingSoftMasks — this lookup then misses (returns
-// false, not an error) and registerLuminosityMask falls back to
-// registerRasterMaskForm, which calls AlphaAt on a value that, if one
-// operand was this sentinel, is a 1x1-pixel opaque stand-in rather than the
-// real mask content: it reads as fully-transparent everywhere outside that
-// single pixel, silently producing a wrong (near-empty) mask instead of an
-// error. If a future change defers an EndGroup, reorders it relative to its
-// BuildLuminanceMask call, or combines a pdfwrite sentinel with another
-// GroupMask before EndGroup sees it, this will fail exactly this way:
-// silently, not loudly. There is no cheap guard against it here (a sentinel
-// is indistinguishable from a real 1x1 mask by type), so any code path that
-// might do this needs to route the two masks to PDF as separate composited
-// groups instead of combining them client-side — see the draw-side callers
-// of BuildLuminanceMask for the current invariant this relies on.
+// THIS LOOKUP ONLY SUCCEEDS WHEN EndGroup RECEIVES THE EXACT SENTINEL
+// POINTER, UNMODIFIED — a sentinel is indistinguishable from a real 1x1
+// mask by type, so anything that derives a NEW *image.Alpha from it first
+// (e.g. combining it with another mask) breaks recognition silently:
+// registerLuminosityMask would fall through to registerRasterMaskForm,
+// which reads the sentinel's fake 1x1-opaque pixel data as if it were real
+// mask content, producing a wrong (near-empty) mask instead of an error.
+// This DID happen in production: an earlier revision of render.Device's
+// EndGroup took a single, already-combined GroupMask, and pkg/svg/draw's
+// clip+mask compositing (attenuateByMask) combined this exact sentinel with
+// a clip mask before EndGroup ever saw it, silently erasing all content on
+// any element carrying both clip-path and mask (see
+// TestClipPathAndMaskBothApplyThroughPDF in pkg/doctaculous for the
+// regression test, and pkg/render/pdfwrite/group.go's EndGroup doc comment
+// for the fix). The fix was structural, not defensive: EndGroup now takes
+// clipMask and softMask as two SEPARATE parameters (see render.Device's doc
+// comment), so pkg/svg/draw never combines a pdfwrite-built softMask with
+// anything before this method sees it — clipMask is routed to
+// writeClipMaskRect instead, entirely bypassing this map. Keep it that way:
+// if a future change ever needs to fold softMask through another
+// mask-combining helper before EndGroup, that combined value must not be
+// what reaches this method, or this exact silent failure returns.
 func (d *pageDevice) takePendingSoftMask(mask render.GroupMask) (string, bool) {
 	if d.pendingSoftMasks == nil {
 		return "", false

@@ -44,7 +44,7 @@ func TestBuildClipMaskUnionsNonOverlappingChildren(t *testing.T) {
 
 	dev.BeginGroup()
 	dev.Fill(rectPath(0, 0, 100, 100), render.FillPaint{Color: red})
-	dev.EndGroup(1, "", mask)
+	dev.EndGroup(1, "", mask, nil)
 
 	left := img.RGBAAt(leftCenter.X, leftCenter.Y)
 	right := img.RGBAAt(rightCenter.X, rightCenter.Y)
@@ -93,7 +93,7 @@ func TestBuildClipMaskMixedRule(t *testing.T) {
 
 	dev.BeginGroup()
 	dev.Fill(rectPath(0, 0, 100, 100), render.FillPaint{Color: red})
-	dev.EndGroup(1, "", mask)
+	dev.EndGroup(1, "", mask, nil)
 
 	if c := img.RGBAAt(30, 30); c.R != 255 || c.G != 255 {
 		t.Errorf("donut hole (evenodd) at (30,30) = %+v, want unpainted white", c)
@@ -126,7 +126,7 @@ func TestBuildClipMaskOverlappingEvenOdd(t *testing.T) {
 
 	dev.BeginGroup()
 	dev.Fill(rectPath(0, 0, 100, 100), render.FillPaint{Color: red})
-	dev.EndGroup(1, "", mask)
+	dev.EndGroup(1, "", mask, nil)
 
 	// The overlap region (40-60,40-60) must still be covered (union), not
 	// hollowed out the way joint evenodd over the concatenated outline
@@ -157,7 +157,7 @@ func TestBuildClipMaskEmptyClipsToNothing(t *testing.T) {
 
 	dev.BeginGroup()
 	dev.Fill(rectPath(0, 0, 100, 100), render.FillPaint{Color: red})
-	dev.EndGroup(1, "", mask)
+	dev.EndGroup(1, "", mask, nil)
 
 	if c := img.RGBAAt(50, 50); c.R != 255 || c.G != 255 || c.B != 255 {
 		t.Errorf("empty clip mask = %+v, want unpainted white (empty clipPath must clip to nothing)", c)

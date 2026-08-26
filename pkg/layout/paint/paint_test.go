@@ -49,12 +49,12 @@ func (d *recordDevice) DrawGlyph(g render.GlyphRef) {
 	}
 	d.glyphs = append(d.glyphs, recordedGlyph{outline: o, color: g.Color})
 }
-func (d *recordDevice) FillShading(render.Shader, render.Matrix, string) {}
-func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)       { d.clips = append(d.clips, p) }
-func (d *recordDevice) BeginGroup()                                      {}
-func (d *recordDevice) EndGroup(float64, string, render.GroupMask)       {}
-func (d *recordDevice) Save()                                            { d.saves++ }
-func (d *recordDevice) Restore()                                         { d.restores++ }
+func (d *recordDevice) FillShading(render.Shader, render.Matrix, string)             {}
+func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)                   { d.clips = append(d.clips, p) }
+func (d *recordDevice) BeginGroup()                                                  {}
+func (d *recordDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
+func (d *recordDevice) Save()                                                        { d.saves++ }
+func (d *recordDevice) Restore()                                                     { d.restores++ }
 func (d *recordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }

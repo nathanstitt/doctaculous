@@ -62,9 +62,9 @@ func (d *recDevice) BeginGroup() {
 		d.maxGroupDepth = d.groupDepth
 	}
 }
-func (d *recDevice) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {
+func (d *recDevice) EndGroup(alpha float64, blendMode string, clipMask, softMask render.GroupMask) {
 	d.groupDepth--
-	d.endGroupCalls = append(d.endGroupCalls, endGroupCall{alpha: alpha, blendMode: blendMode, hasMask: mask != nil})
+	d.endGroupCalls = append(d.endGroupCalls, endGroupCall{alpha: alpha, blendMode: blendMode, hasMask: clipMask != nil || softMask != nil})
 }
 func (d *recDevice) Save()    { d.saves++ }
 func (d *recDevice) Restore() { d.restores++ }

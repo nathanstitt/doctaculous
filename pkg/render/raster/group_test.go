@@ -25,7 +25,7 @@ func TestGroupOpacityNoSeamAtOverlap(t *testing.T) {
 	// Two opaque, overlapping rectangles inside the group.
 	dev.Fill(rectPath(10, 10, 50, 50), render.FillPaint{Color: red})
 	dev.Fill(rectPath(30, 30, 70, 70), render.FillPaint{Color: blue})
-	dev.EndGroup(0.5, "", nil)
+	dev.EndGroup(0.5, "", nil, nil)
 
 	// (40,40) is inside both rectangles (the overlap, painted blue-over-red
 	// inside the group). (60,60) is inside only the blue rectangle
@@ -62,8 +62,8 @@ func TestNestedGroupsComposite(t *testing.T) {
 	dev.BeginGroup() // outer, alpha 0.5
 	dev.BeginGroup() // inner, alpha 0.5
 	dev.Fill(rectPath(10, 10, 50, 50), render.FillPaint{Color: black})
-	dev.EndGroup(0.5, "", nil)
-	dev.EndGroup(0.5, "", nil)
+	dev.EndGroup(0.5, "", nil, nil)
+	dev.EndGroup(0.5, "", nil, nil)
 
 	// Combined coverage is 0.5*0.5 = 0.25: black at 25% over white ≈ (191,191,191).
 	c := img.RGBAAt(20, 20)
@@ -95,7 +95,7 @@ func TestGroupMaskRestrictsComposite(t *testing.T) {
 	dev.BeginGroup()
 	// Paint a rectangle spanning both halves of the mask.
 	dev.Fill(rectPath(0, 0, 100, 100), render.FillPaint{Color: red})
-	dev.EndGroup(1, "", mask)
+	dev.EndGroup(1, "", mask, nil)
 
 	if c := img.RGBAAt(25, 50); c.R < 200 || c.G > 50 {
 		t.Errorf("inside mask = %+v, want red", c)
@@ -110,7 +110,7 @@ func TestGroupMaskRestrictsComposite(t *testing.T) {
 // forgiving behavior on an empty stack.
 func TestUnbalancedEndGroupNoPanic(t *testing.T) {
 	dev, img := newTestDevice(100, 100)
-	dev.EndGroup(0.5, "", nil) // no BeginGroup: must not panic
+	dev.EndGroup(0.5, "", nil, nil) // no BeginGroup: must not panic
 
 	// Device must remain usable afterward.
 	dev.Fill(rectPath(10, 10, 30, 30), render.FillPaint{Color: color.RGBA{255, 0, 0, 255}})
@@ -137,7 +137,7 @@ func TestGroupSaveRestoreCannotCorruptOuterClip(t *testing.T) {
 	dev.Restore()                                          // one EXTRA restore: must be clamped, not corrupt outer clip
 	dev.Restore()                                          // another extra one for good measure
 	dev.Fill(rectPath(0, 0, 100, 100), render.FillPaint{Color: red})
-	dev.EndGroup(1, "", nil)
+	dev.EndGroup(1, "", nil, nil)
 
 	dev.Restore() // pop the outer Save
 

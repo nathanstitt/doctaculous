@@ -266,18 +266,18 @@ type nullDevice struct {
 	w, h int
 }
 
-func (d *nullDevice) Size() (int, int)                                      { return d.w, d.h }
-func (d *nullDevice) Fill(*render.Path, render.FillPaint)                   {}
-func (d *nullDevice) Stroke(*render.Path, render.StrokePaint)               {}
-func (d *nullDevice) DrawImage(image.Image, render.Matrix, float64, string) {}
-func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string)      {}
-func (d *nullDevice) DrawGlyph(render.GlyphRef)                             {}
-func (d *nullDevice) FillShading(render.Shader, render.Matrix, string)      {}
-func (d *nullDevice) PushClip(*render.Path, render.FillRule)                {}
-func (d *nullDevice) BeginGroup()                                           {}
-func (d *nullDevice) EndGroup(float64, string, render.GroupMask)            {}
-func (d *nullDevice) Save()                                                 {}
-func (d *nullDevice) Restore()                                              {}
+func (d *nullDevice) Size() (int, int)                                             { return d.w, d.h }
+func (d *nullDevice) Fill(*render.Path, render.FillPaint)                          {}
+func (d *nullDevice) Stroke(*render.Path, render.StrokePaint)                      {}
+func (d *nullDevice) DrawImage(image.Image, render.Matrix, float64, string)        {}
+func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string)             {}
+func (d *nullDevice) DrawGlyph(render.GlyphRef)                                    {}
+func (d *nullDevice) FillShading(render.Shader, render.Matrix, string)             {}
+func (d *nullDevice) PushClip(*render.Path, render.FillRule)                       {}
+func (d *nullDevice) BeginGroup()                                                  {}
+func (d *nullDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
+func (d *nullDevice) Save()                                                        {}
+func (d *nullDevice) Restore()                                                     {}
 func (d *nullDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }

@@ -94,18 +94,33 @@ func (d *pageDevice) BeginGroup() {
 // EndGroup closes the most recently opened BeginGroup: it registers the
 // group's accumulated content as a transparency Form XObject (/Group <<
 // /S /Transparency /CS /DeviceRGB /I true >>), pops the outer buffer/
-// resources/clip back into place, then emits "q /GSn gs /Fmn Do Q" into the
-// restored (outer) stream so the form paints once, through an ExtGState
-// carrying the group's constant alpha, blend mode, and (when mask is
-// non-nil) a luminosity soft mask. An unbalanced call (no matching
-// BeginGroup) is a no-op, matching render.Device's documented contract.
+// resources/clip back into place, then emits "q [re W n] /GSn gs /Fmn Do Q"
+// into the restored (outer) stream so the form paints once, through an
+// ExtGState carrying the group's constant alpha and blend mode, an optional
+// native PDF clip rectangle (clipMask), and an optional luminosity soft mask
+// (softMask). An unbalanced call (no matching BeginGroup) is a no-op,
+// matching render.Device's documented contract.
+//
+// clipMask and softMask are kept SEPARATE all the way through (see
+// render.Device's doc comment) rather than combined into one GroupMask
+// before reaching here: this writer represents each with PDF's own native,
+// different construct — clipMask (BuildClipMask's rectangular-bbox
+// approximation) becomes a `W n` clip around the "Do", softMask becomes an
+// ExtGState `/SMask`. Keeping them apart is not just truer to PDF's model,
+// it is also what makes softMask's identity survive intact into
+// registerLuminosityMask: that method recognizes a pdfwrite-built luminosity
+// mask by its exact sentinel pointer (see softmask.go's takePendingSoftMask)
+// and would silently miss if the caller had combined it with clipMask into a
+// new value first — this is the bug a prior revision of this interface had
+// (an element with BOTH clip-path and mask lost all content in PDF output,
+// see the regression test in pkg/svg/draw for the end-to-end reproduction).
 //
 // alpha<=0 still emits the form (so a caller reading the content stream back
 // sees a structurally valid, balanced document) but with /ca 0, which PDF
 // itself already treats as fully transparent — no special-case skip is
 // needed the way raster.Device.EndGroup skips compositing entirely, since
 // pdfwrite has no pixels to save work on.
-func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.GroupMask) {
+func (d *pageDevice) EndGroup(alpha float64, blendMode string, clipMask, softMask render.GroupMask) {
 	n := len(d.groupStack)
 	if n == 0 {
 		return // unbalanced EndGroup: degrade to a no-op, never panic
@@ -152,11 +167,20 @@ func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.Group
 	d.clipStack = frame.clipStack
 
 	g := extGState{hasFillAlpha: true, fillAlpha: clamp01(alpha), blendMode: blendMode}
-	if mask != nil {
-		g.smaskFormName = d.registerLuminosityMask(mask)
+	if softMask != nil {
+		g.smaskFormName = d.registerLuminosityMask(softMask)
 	}
 
 	d.buf.WriteString("q\n")
+	// clipMask (a clipPath union, already a rectangular-bbox approximation —
+	// see BuildClipMask) is applied here as a native PDF clip, entirely
+	// independent of softMask's ExtGState /SMask: PDF has no single construct
+	// that is "clip AND soft-mask combined", so representing each with its
+	// own native mechanism and letting the imaging model intersect them is
+	// both simpler and exactly what the two-mask split exists to enable.
+	if clipMask != nil {
+		writeClipMaskRect(&d.buf, clipMask)
+	}
 	d.emitGState(g)
 	// The outer clip is reapplied here (once), around the group's own "Do",
 	// exactly like BuildClipMask's rectangular approximation is the ONLY
@@ -168,24 +192,44 @@ func (d *pageDevice) EndGroup(alpha float64, blendMode string, mask render.Group
 	d.buf.WriteString("Q\n")
 }
 
+// writeClipMaskRect emits a `x y w h re W n` clip restricted to mask's own
+// device-space bounds, in the same raw top-left/Y-down space this writer
+// uses everywhere else (see writePath/PushClip). mask's bounds are already a
+// rectangle (BuildClipMask's documented approximation — a real per-child-
+// rule union raster would need PushClip per child instead, which this
+// writer cannot yet build offscreen), so a single `re` exactly reproduces
+// it; an empty-bounds mask (BuildClipMask's "clips to nothing" case, e.g. an
+// empty <clipPath>) clips to a zero-area rect, correctly hiding everything.
+func writeClipMaskRect(buf *bytes.Buffer, mask render.GroupMask) {
+	b := mask.Bounds()
+	fmt.Fprintf(buf, "%s %s %s %s re\nW n\n",
+		formatReal(float64(b.Min.X)), formatReal(float64(b.Min.Y)),
+		formatReal(float64(b.Dx())), formatReal(float64(b.Dy())))
+}
+
 // registerLuminosityMask converts mask (an *image.Alpha built by
-// BuildClipMask or BuildLuminanceMask) into a DeviceGray Form XObject and
-// returns its resource name, ready to be set as extGState.smaskFormName.
+// BuildLuminanceMask — see EndGroup's doc comment on why a clip-path's
+// BuildClipMask result is handled entirely separately, via writeClipMaskRect,
+// and never reaches this method) into a DeviceGray Form XObject and returns
+// its resource name, ready to be set as extGState.smaskFormName.
 //
-// mask is a coverage BUFFER (a rasterized approximation for BuildClipMask, or
-// this writer's own soft-mask form recorded via pendingSoftMask for
-// BuildLuminanceMask — see softmask.go), not a live PDF object, by the time
-// it reaches EndGroup: render.Device's contract hands EndGroup a
-// backend-neutral GroupMask, and pdfwrite's own BuildLuminanceMask already
-// built a real luminosity Form XObject for the common case (see
-// softmask.go). When d.pendingSoftMaskFor(mask) recognizes the exact mask
-// pointer it just built, it reuses that form directly instead of
-// re-rasterizing — this is what keeps a native gradient-based mask (not just
-// a flat rectangle) as real PDF vector/shading content instead of a baked
-// raster fallback. Any other mask (e.g. BuildClipMask's rectangular
-// approximation, or one produced by combineClipRegions/attenuateByMask/
-// unionMasks combining two masks) falls back to emitting mask's own pixel
-// buffer as a DeviceGray image-backed form.
+// mask is a coverage BUFFER (this writer's own soft-mask form recorded via
+// pendingSoftMask for BuildLuminanceMask — see softmask.go), not a live PDF
+// object, by the time it reaches EndGroup: render.Device's contract hands
+// EndGroup a backend-neutral GroupMask, and pdfwrite's own BuildLuminanceMask
+// already built a real luminosity Form XObject for the common case (see
+// softmask.go). Because EndGroup's softMask parameter is passed through
+// UNCOMBINED with any clip mask (see render.Device's doc comment on why the
+// two are kept separate), it is always either exactly the sentinel pointer
+// BuildLuminanceMask on this same device returned, or a mask built by some
+// other backend/caller entirely (e.g. a raster-built *image.Alpha in a test
+// double) — never a pdfwrite sentinel merged with something else. When
+// d.pendingSoftMaskFor(mask) recognizes the exact sentinel pointer it just
+// built, it reuses that form directly instead of re-rasterizing — this is
+// what keeps a native gradient-based mask (not just a flat rectangle) as
+// real PDF vector/shading content instead of a baked raster fallback. Any
+// other mask falls back to emitting mask's own pixel buffer as a DeviceGray
+// image-backed form.
 func (d *pageDevice) registerLuminosityMask(mask render.GroupMask) string {
 	if name, ok := d.takePendingSoftMask(mask); ok {
 		return name
@@ -197,11 +241,10 @@ func (d *pageDevice) registerLuminosityMask(mask render.GroupMask) string {
 // DeviceGray image XObject wrapped in a one-shot Form XObject, and returns
 // the FORM's resource name (not the image's) so the caller can treat every
 // mask uniformly as "a form to reference from /SMask /G". This is the
-// fallback for a mask this writer cannot trace back to real vector/shading
-// content (BuildClipMask's rectangular approximation, or the result of
-// combining two masks via combineClipRegions/attenuateByMask/unionMasks in
-// pkg/svg/draw) — still correct (the soft mask's rendered result matches the
-// coverage buffer exactly), just not resolution-independent.
+// fallback for a softMask this writer cannot trace back to its own real
+// vector/shading content (e.g. one a different Device implementation built)
+// — still correct (the soft mask's rendered result matches the coverage
+// buffer exactly), just not resolution-independent.
 func (d *pageDevice) registerRasterMaskForm(mask render.GroupMask) string {
 	b := mask.Bounds()
 	w, h := b.Dx(), b.Dy()
