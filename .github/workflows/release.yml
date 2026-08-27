@@ -16,6 +16,11 @@ jobs:
   goreleaser:
     name: goreleaser
     runs-on: ubuntu-latest
+    # Bounded for the same reason as CI's jobs: without it a stuck runner
+    # inherits GitHub's 6-hour default, and here that would leave a tag's
+    # release hanging rather than failing where someone would notice.
+    # goreleaser cross-compiles several targets, so this is roomier than CI's.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
