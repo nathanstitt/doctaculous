@@ -289,6 +289,57 @@ func TestBisectorBothZero(t *testing.T) {
 	}
 }
 
+// TestVerticesContinuationRun covers the on-ArcTo.svg fixture's shape: a
+// single source command (an SVG elliptical arc) flattened into several
+// CubeTo segments must produce exactly ONE vertex pair (start and end), not
+// one per flattened cubic — a marker walking the result must never see a
+// marker-mid vertex at an internal slice boundary that was never part of the
+// original path data.
+func TestVerticesContinuationRun(t *testing.T) {
+	p := &Path{}
+	p.MoveTo(0, 0)
+	// Three-slice run simulating one arc flattened into three cubics: only
+	// the FINAL CubeTo is a real command boundary.
+	p.CubeToContinuation(1, 1, 2, 2, 3, 3)
+	p.CubeToContinuation(4, 4, 5, 5, 6, 6)
+	p.CubeTo(7, 7, 8, 8, 9, 9)
+	v := Vertices(p)
+	if len(v) != 2 {
+		t.Fatalf("len(v) = %d, want 2 (one run must yield exactly one vertex pair)", len(v))
+	}
+	// Start vertex's out-tangent comes from the RUN'S FIRST slice (P0-cur =
+	// (1,1)-(0,0) = (1,1)).
+	approxVec(t, "v[0].OutTangent", v[0].OutTangent, 1, 1)
+	// End vertex is the run's actual final endpoint (9,9), with its
+	// in-tangent computed from the LAST slice (P2-P1 = (9,9)-(8,8) = (1,1)).
+	if v[1].Pos != (Point{9, 9}) {
+		t.Errorf("v[1].Pos = %v, want (9,9)", v[1].Pos)
+	}
+	approxVec(t, "v[1].InTangent", v[1].InTangent, 1, 1)
+}
+
+// TestVerticesContinuationRunThenMoreSegments checks that a Continuation run
+// does not disturb ordinary vertex walking for whatever follows it in the
+// same subpath (e.g. a LineTo after an arc).
+func TestVerticesContinuationRunThenMoreSegments(t *testing.T) {
+	p := &Path{}
+	p.MoveTo(0, 0)
+	p.CubeToContinuation(1, 0, 2, 0, 3, 0)
+	p.CubeTo(4, 0, 5, 0, 6, 0)
+	p.LineTo(10, 0)
+	v := Vertices(p)
+	if len(v) != 3 {
+		t.Fatalf("len(v) = %d, want 3", len(v))
+	}
+	if v[1].Pos != (Point{6, 0}) {
+		t.Errorf("v[1].Pos = %v, want (6,0)", v[1].Pos)
+	}
+	approxVec(t, "v[1].OutTangent", v[1].OutTangent, 4, 0)
+	if v[2].Pos != (Point{10, 0}) {
+		t.Errorf("v[2].Pos = %v, want (10,0)", v[2].Pos)
+	}
+}
+
 func TestVectorAngle(t *testing.T) {
 	tests := []struct {
 		v    Vector

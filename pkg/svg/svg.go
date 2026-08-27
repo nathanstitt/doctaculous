@@ -105,6 +105,16 @@ type Shape struct {
 	// Mask is the resolved mask="url(#...)" reference on this shape, or nil
 	// when absent/invalid/"none". See Group.Mask.
 	Mask *Mask
+
+	// MarkerStart, MarkerMid, MarkerEnd are the resolved marker-start/-mid/
+	// -end references in effect at this shape (inherited from an ancestor
+	// <g>, or the marker shorthand — see Style.MarkerStartRef/MarkerMidRef/
+	// MarkerEndRef), or nil when absent/invalid/"none". ALWAYS nil for an
+	// element outside markerableElements (a <circle>/<rect>/ellipse — see
+	// buildShape): a resvg-corpus assertion (marker-on-circle.svg etc.)
+	// requires those to paint NO markers even when a marker-* property
+	// reaches them by inheritance.
+	MarkerStart, MarkerMid, MarkerEnd *Marker
 }
 
 func (*Shape) isNode() {}
@@ -162,6 +172,8 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		maskMemo:        map[string]*Mask{},
 		buildingMask:    map[string]bool{},
 		buildingUse:     map[string]bool{},
+		markerMemo:      map[string]*Marker{},
+		buildingMarker:  map[string]bool{},
 	}
 	if hasVB {
 		// Gradient userSpaceOnUse coordinates live in the same user-unit
@@ -303,7 +315,6 @@ var unsupportedElements = map[string]bool{
 	"text":             true,
 	"image":            true,
 	"filter":           true,
-	"marker":           true,
 	"switch":           true,
 	"foreignObject":    true,
 	"svg":              true, // nested <svg>: viewport-establishing, not yet supported
@@ -368,6 +379,16 @@ var unsupportedElements = map[string]bool{
 // unused-symbol.svg corpus fixture) must render nothing without logging
 // "not yet supported", which moving it here (from unsupportedElements)
 // achieves.
+//
+// marker is likewise never rendered where it appears: it is only ever
+// instantiated through a marker-start/-mid/-end/marker reference (see
+// resolveMarker in marker.go), reached directly via idx.ids exactly like
+// clipPath/mask/symbol above. A bare, unreferenced <marker> must render
+// nothing (empty.svg's marker1 IS referenced but has no children, a
+// different case — this is about a <marker> the scene walk would otherwise
+// stumble into as a plain child element) without logging "not yet
+// supported", which is why it moved here from unsupportedElements rather
+// than staying there.
 var skippedElements = map[string]bool{
 	"defs":           true,
 	"style":          true,
@@ -381,6 +402,7 @@ var skippedElements = map[string]bool{
 	"clipPath":       true,
 	"mask":           true,
 	"symbol":         true,
+	"marker":         true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -495,6 +517,22 @@ type sceneBuilder struct {
 	// "cycle guard doesn't bound a distinct-chain" gap and pkg/svg/draw's
 	// separate draw-time depth counter for the exact same reason.
 	useDepth int
+
+	// markerMemo memoizes resolveMarker by id, mirroring clipMemo/maskMemo
+	// exactly (see clipMemo's doc comment): several shapes can reference the
+	// same <marker>, and each reference resolves the identical *Marker
+	// value.
+	markerMemo map[string]*Marker
+
+	// buildingMarker guards against a <marker> whose own content draws a
+	// shape carrying a marker-*/marker property that refers back to a
+	// <marker> already being resolved further up the current call stack —
+	// directly (self-reference, recursive-1/2.svg) or through an ancestor
+	// <g>'s inherited marker property reaching a shape inside the very
+	// <marker> that <g> itself references (recursive-3.svg), or through a
+	// document-wide CSS rule reaching the marker's own content
+	// (recursive-4.svg). Mirrors buildingClip/buildingMask's shape exactly.
+	buildingMarker map[string]bool
 }
 
 // buildGroup converts el's children into a Group, threading inherited style
@@ -641,6 +679,25 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	}
 	if ref, ok := st.MaskRef(); ok {
 		s.Mask = b.resolveMaskRef(ref)
+	}
+	if markerableElements[el.local] {
+		// Per SVG2 §11.6.7, marker-start/-mid/-end paint only on path, line,
+		// polyline, and polygon — NEVER on a circle/ellipse/rect (rounded or
+		// not), even though shapePath has already flattened all of them into
+		// an indistinguishable *render.Path by this point. This check must
+		// happen before that flattening loses the distinction, which is
+		// exactly why it keys off el.local here rather than any property of
+		// s.Path. See marker-on-circle.svg/marker-on-rect.svg/
+		// marker-on-rounded-rect.svg, which assert NO markers are drawn.
+		if ref, ok := st.MarkerStartRef(); ok {
+			s.MarkerStart = b.resolveMarkerRef(ref)
+		}
+		if ref, ok := st.MarkerMidRef(); ok {
+			s.MarkerMid = b.resolveMarkerRef(ref)
+		}
+		if ref, ok := st.MarkerEndRef(); ok {
+			s.MarkerEnd = b.resolveMarkerRef(ref)
+		}
 	}
 	return s
 }

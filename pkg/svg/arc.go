@@ -95,7 +95,21 @@ func arcSegments(p *render.Path, x1, y1, rx, ry, phiDeg float64, largeArc, sweep
 		p3x, p3y := point(t2)
 		d0x, d0y := deriv(t)
 		d3x, d3y := deriv(t2)
-		p.CubeTo(p0x+k*d0x, p0y+k*d0y, p3x-k*d3x, p3y-k*d3y, p3x, p3y)
+		// One elliptical arc command is ONE logical path-data vertex at its
+		// end (x2,y2), regardless of how many cubics approximate it here —
+		// SVG markers must never see the interior slice boundaries this loop
+		// introduces as marker-mid vertices (see the resvg on-ArcTo.svg
+		// fixture, which places marker-start/marker-end on a path with
+		// exactly one M and one A and explicitly NO marker-mid). Every slice
+		// but the last is therefore a Continuation segment; only the final
+		// one (which lands exactly on the caller's real endpoint x2,y2 —
+		// see the render.Vertices call site's reliance on that) is an
+		// ordinary CubeTo.
+		if i == n-1 {
+			p.CubeTo(p0x+k*d0x, p0y+k*d0y, p3x-k*d3x, p3y-k*d3y, p3x, p3y)
+		} else {
+			p.CubeToContinuation(p0x+k*d0x, p0y+k*d0y, p3x-k*d3x, p3y-k*d3y, p3x, p3y)
+		}
 		t = t2
 	}
 }

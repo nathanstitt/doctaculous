@@ -1,8 +1,111 @@
 package svg
 
 import (
+	"reflect"
 	"testing"
 )
+
+// svgPresentationAttrsNotConsumedByApply lists the svgPresentationAttrs
+// entries that Style.apply() deliberately never reads, because they are
+// resolved somewhere else entirely (see the doc comments on
+// svgPresentationAttrs and on each field below for exactly where):
+// stop-color/stop-opacity only ever apply to a <stop> element, consumed by
+// parseStops in stops.go, never by the general cascade's Style.
+var svgPresentationAttrsNotConsumedByApply = map[string]bool{
+	"stop-color":   true,
+	"stop-opacity": true,
+}
+
+// TestSVGPresentationHintsSyncedWithStyleApply guards the exact failure mode
+// hints.go's package comment warns about by hand: a property added to
+// Style.apply()'s appliers but never listed in svgPresentationAttrs (or vice
+// versa) silently stops being settable from a presentation attribute, with
+// no compiler error and no other test catching it. This drives every
+// attribute name in svgPresentationAttrs through a real Style.apply() call
+// (with a sentinel value chosen to be valid for that property) and asserts
+// SOME observable field of the resulting Style changed from the default —
+// proving the attribute actually reaches an applyXxx call, not just that
+// hints.go lists it. An attribute apply() legitimately never consumes (the
+// stop-color/stop-opacity carve-out) is skipped via the map above, mirroring
+// the exception hints.go's own doc comment documents.
+func TestSVGPresentationHintsSyncedWithStyleApply(t *testing.T) {
+	sentinels := map[string]string{
+		"color":             "rgb(1,2,3)",
+		"fill":              "rgb(4,5,6)",
+		"fill-opacity":      "0.42",
+		"fill-rule":         "evenodd",
+		"stroke":            "rgb(7,8,9)",
+		"stroke-opacity":    "0.42",
+		"stroke-width":      "7",
+		"stroke-linecap":    "round",
+		"stroke-linejoin":   "round",
+		"stroke-miterlimit": "7",
+		"stroke-dasharray":  "1 2 3",
+		"stroke-dashoffset": "7",
+		"opacity":           "0.42",
+		"display":           "none",
+		"visibility":        "hidden",
+		"clip-path":         "url(#x)",
+		"clip-rule":         "evenodd",
+		"mask":              "url(#x)",
+		"mask-type":         "alpha",
+		"marker-start":      "url(#x)",
+		"marker-mid":        "url(#x)",
+		"marker-end":        "url(#x)",
+	}
+
+	for _, name := range svgPresentationAttrs {
+		if svgPresentationAttrsNotConsumedByApply[name] {
+			continue
+		}
+		val, ok := sentinels[name]
+		if !ok {
+			t.Errorf("svgPresentationAttrs contains %q but the sync test has no sentinel value for it; add one (or add it to svgPresentationAttrsNotConsumedByApply if apply() deliberately never reads it)", name)
+			continue
+		}
+		before := defaultStyle()
+		after := applyAttrs(before, map[string]string{name: val})
+		if reflectDeepEqualStyle(before, after) {
+			t.Errorf("apply() with %s=%q produced no change: %q is listed in svgPresentationAttrs but Style.apply() never consumes it (hints.go/style.go are out of sync)", name, val, name)
+		}
+	}
+}
+
+// reflectDeepEqualStyle reports whether a and b are field-for-field equal.
+// Style is not comparable with == (it holds a []float64 dashes slice), and
+// it has no exported fields for reflect.DeepEqual to reach from outside the
+// package — but this test lives inside package svg, so reflect.DeepEqual on
+// the whole struct works directly, unexported fields included.
+func reflectDeepEqualStyle(a, b Style) bool {
+	return reflect.DeepEqual(a, b)
+}
+
+// TestMarkerShorthandNotAPresentationAttribute pins the ONE intentional
+// exception hints.go's svgPresentationAttrs doc comment calls out: the
+// "marker" shorthand is consumed by Style.apply() (applyMarkerShorthand) but
+// deliberately excluded from svgPresentationAttrs, so a bare XML
+// marker="url(#m)" attribute must have NO effect (matching resvg's
+// the-marker-property.svg, titled "Should be ignored"), while the exact same
+// value reaching apply() through style="" (which cascade.go resolves
+// independently of svgPresentationAttrs) DOES take effect (matching
+// the-marker-property-in-CSS.svg/recursive-4.svg).
+func TestMarkerShorthandNotAPresentationAttribute(t *testing.T) {
+	asAttr := applyAttrs(defaultStyle(), map[string]string{"marker": "url(#m)"})
+	if _, ok := asAttr.MarkerStartRef(); ok {
+		t.Error("bare marker=\"url(#m)\" attribute applied a marker; want it ignored (not a presentation attribute)")
+	}
+
+	// applyAttrs threads a nil cascadeCtx, which short-circuits to
+	// presentation-hints-only (see cascadeCtx.resolve's doc comment) and
+	// never even looks at style="" — a real ctx (non-nil idx) is needed to
+	// exercise the inline-style path at all.
+	el := &element{attrs: map[string]string{"style": "marker:url(#m)"}}
+	ctx := &cascadeCtx{idx: &docIndex{}}
+	asStyle := defaultStyle().apply(el, ctx)
+	if _, ok := asStyle.MarkerStartRef(); !ok {
+		t.Error("style=\"marker:url(#m)\" did not apply a marker; want the shorthand honored via inline style")
+	}
+}
 
 func TestSVGPresentationHintsDeterminism(t *testing.T) {
 	// Verify that repeated calls return the same order (no map randomization).

@@ -342,11 +342,13 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		// or masking a shape at all requires opening a group regardless of
 		// whether opacity itself would have needed one.
 		r.paintShapeGrouped(dev, s, dp, sm, alpha, opacity, warned)
+		r.paintMarkers(dev, s, sm, alpha*opacity, warned)
 		return
 	}
 	alpha *= opacity
 	r.paintFill(dev, s, dp, sm, alpha, warned)
 	r.paintStroke(dev, s, dp, sm, alpha, warned)
+	r.paintMarkers(dev, s, sm, alpha, warned)
 }
 
 // paintShapeGrouped paints s's fill and stroke at innerAlpha (the caller's

@@ -26,6 +26,28 @@ const (
 type Segment struct {
 	Kind       SegmentKind
 	P0, P1, P2 Point
+
+	// Continuation is true for a segment that exists only because an earlier
+	// producer (e.g. an SVG elliptical-arc "A" command, which this package's
+	// callers flatten into several CubeTo segments — arcs have no native
+	// cubic-Bézier form) subdivided ONE source command into several
+	// segments. It is false (the zero value, so every existing MoveTo/
+	// LineTo/CubeTo/Close caller is unaffected) for a segment that IS itself
+	// a source command's own endpoint.
+	//
+	// This exists for Vertices/marker placement: SVG markers attach to path
+	// DATA vertices (one per "d" attribute command), never to a rendering
+	// backend's internal subdivision of a curve that has no cubic form of
+	// its own — see the resvg on-ArcTo.svg fixture, which places a
+	// marker-start and marker-end but explicitly NO marker-mid on a path
+	// consisting of exactly one M and one A: naively walking every CubeTo
+	// endpoint the arc's flattening produced would wrongly synthesize
+	// marker-mid vertices along the interior of what SVG considers a single
+	// arc segment. Vertices skips a Continuation segment's START vertex
+	// (folding its tangent/position into neighbors as appropriate) so the
+	// reported vertex count matches path-data command count, not
+	// rendering-segment count.
+	Continuation bool
 }
 
 // Path is a sequence of segments already transformed into device space.
@@ -48,6 +70,24 @@ func (p *Path) CubeTo(x0, y0, x1, y1, x2, y2 float64) {
 	p.Segments = append(p.Segments, Segment{
 		Kind: CubeTo,
 		P0:   Point{x0, y0}, P1: Point{x1, y1}, P2: Point{x2, y2},
+	})
+}
+
+// CubeToContinuation appends a cubic Bézier segment exactly like CubeTo, but
+// marks it Continuation: true — this segment is one of SEVERAL flattening a
+// single source command (e.g. one leg of an elliptical arc split into
+// multiple cubics) that together end at a single logical vertex, not its
+// own. Callers that flatten a non-cubic curve into multiple CubeTo calls
+// must use this for every call except the LAST (which should use the
+// ordinary CubeTo, since its endpoint IS the source command's real
+// endpoint) — see arcSegments in pkg/svg for the only caller today, and
+// Segment.Continuation's doc comment for why Vertices needs this
+// distinction.
+func (p *Path) CubeToContinuation(x0, y0, x1, y1, x2, y2 float64) {
+	p.Segments = append(p.Segments, Segment{
+		Kind: CubeTo,
+		P0:   Point{x0, y0}, P1: Point{x1, y1}, P2: Point{x2, y2},
+		Continuation: true,
 	})
 }
 

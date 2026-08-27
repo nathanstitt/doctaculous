@@ -162,6 +162,13 @@ func Vertices(p *Path) []Vertex {
 	subpathStart := -1
 	var cur Point
 
+	// inRun is true while walking the interior CubeTo segments of a
+	// Continuation run (see Segment.Continuation's doc comment — e.g. one
+	// SVG elliptical arc flattened into several cubics): the run's start
+	// vertex was already appended, and its in-tangent is not yet known
+	// until the run's final (non-Continuation) segment is reached.
+	inRun := false
+
 	// setOut sets verts[idx].OutTangent, called exactly once per vertex (the
 	// vertex that STARTS a drawn segment).
 	setOut := func(idx int, v Vector) {
@@ -179,8 +186,19 @@ func Vertices(p *Path) []Vertex {
 			verts = append(verts, Vertex{Pos: s.P0, IsSubpathStart: true})
 			subpathStart = len(verts) - 1
 			cur = s.P0
+			inRun = false
 
 		case LineTo:
+			if inRun {
+				// Malformed input (a Continuation run interrupted before its
+				// final slice — never produced by arcSegments, but Vertices
+				// must not corrupt state on it): close out the run at its
+				// last-seen position rather than let the LineTo below
+				// overwrite the run-start vertex's already-set out-tangent.
+				verts = append(verts, Vertex{Pos: cur})
+				setIn(len(verts)-1, Vector{})
+				inRun = false
+			}
 			if subpathStart < 0 {
 				// Malformed path (LineTo with no preceding MoveTo): treat cur
 				// as an implicit start rather than panic/index out of range.
@@ -195,19 +213,49 @@ func Vertices(p *Path) []Vertex {
 			cur = s.P0
 
 		case CubeTo:
+			if inRun {
+				// An interior or final slice of a run already in progress:
+				// the run's start vertex (and out-tangent) were set by its
+				// FIRST slice below, so this slice only advances the pen —
+				// except on the final (non-Continuation) slice, which is
+				// the run's actual logical endpoint and gets the end vertex
+				// plus in-tangent, computed from THIS slice's own control
+				// points (not the run-start slice's).
+				if !s.Continuation {
+					verts = append(verts, Vertex{Pos: s.P2})
+					setIn(len(verts)-1, cubicInTangent(cur, s.P0, s.P1, s.P2))
+					inRun = false
+				}
+				cur = s.P2
+				continue
+			}
 			if subpathStart < 0 {
 				verts = append(verts, Vertex{Pos: cur, IsSubpathStart: true})
 				subpathStart = len(verts) - 1
 			}
 			startIdx := len(verts) - 1
-			outDir := cubicOutTangent(cur, s.P0, s.P1, s.P2)
-			setOut(startIdx, outDir)
+			setOut(startIdx, cubicOutTangent(cur, s.P0, s.P1, s.P2))
+			if s.Continuation {
+				// First slice of a multi-segment run: the vertex this slice
+				// starts from now has its out-tangent, but the run is not
+				// done — do not emit an end vertex until the run's final
+				// (non-Continuation) slice.
+				inRun = true
+				cur = s.P2
+				continue
+			}
 			verts = append(verts, Vertex{Pos: s.P2})
-			inDir := cubicInTangent(cur, s.P0, s.P1, s.P2)
-			setIn(len(verts)-1, inDir)
+			setIn(len(verts)-1, cubicInTangent(cur, s.P0, s.P1, s.P2))
 			cur = s.P2
 
 		case Close:
+			if inRun {
+				// Same defensive close-out as LineTo above, for malformed
+				// input where a run never reaches its final slice.
+				verts = append(verts, Vertex{Pos: cur})
+				setIn(len(verts)-1, Vector{})
+				inRun = false
+			}
 			if subpathStart < 0 || len(verts) == 0 {
 				continue
 			}

@@ -66,6 +66,18 @@ type Style struct {
 	// document-index dependency, so it is fully resolved here rather than
 	// deferred to the scene builder.
 	maskType string
+
+	// markerStartRef, markerMidRef, markerEndRef are the raw, unresolved
+	// marker-start/-mid/-end property values ("none", "url(#id)", or an
+	// invalid/unrecognized value). Resolved against the document index by
+	// the scene builder (see resolveMarkerRef in marker.go), not here — same
+	// reason as clipPathRef/maskRef. UNLIKE clipPathRef/maskRef, these ARE
+	// inherited (SVG marker properties inherit like an ordinary presentation
+	// property — see the resvg inheritance-1/inheritance-2 fixtures), so
+	// apply() does not reset them to "" on every call.
+	markerStartRef string
+	markerMidRef   string
+	markerEndRef   string
 }
 
 // defaultStyle returns the SVG initial presentation state: black fill, no
@@ -95,6 +107,8 @@ func defaultStyle() Style {
 		clipPathRef:   "", // not inherited; reset every apply() call below
 		maskRef:       "", // not inherited; reset every apply() call below
 		maskType:      "luminance",
+		// markerStartRef/markerMidRef/markerEndRef default to "" (no
+		// marker) and, being inherited, are NOT reset in apply() below.
 	}
 }
 
@@ -153,6 +167,10 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyClipPathProp(&s, attr, logf)
 	applyMaskProp(&s, attr, logf)
 	applyMaskType(&s, attr, logf)
+	applyMarkerShorthand(&s, attr, logf)
+	applyMarkerProp("marker-start", &s.markerStartRef, attr, logf)
+	applyMarkerProp("marker-mid", &s.markerMidRef, attr, logf)
+	applyMarkerProp("marker-end", &s.markerEndRef, attr, logf)
 
 	return s
 }
@@ -363,6 +381,48 @@ func applyMaskProp(s *Style, attr func(string) (string, bool), logf func(string,
 		return
 	}
 	s.maskRef = val
+}
+
+// applyMarkerProp records the raw value of one marker-start/-mid/-end
+// longhand for the scene builder to resolve against the document index,
+// mirroring applyClipPathProp/applyMaskProp's recording shape exactly
+// ("none"/absent clear *dst, "inherit" keeps the parent's value, anything
+// else — including a syntactically invalid url() — is recorded verbatim).
+// The key difference from clip-path/mask: markers ARE inherited, so *dst is
+// never reset to "" at the top of apply() the way clipPathRef/maskRef are —
+// this function is the ONLY place a marker-*-ref field changes, and it only
+// runs when the attribute is actually present on this element.
+func applyMarkerProp(name string, dst *string, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr(name)
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		*dst = ""
+		return
+	}
+	*dst = val
+}
+
+// applyMarkerShorthand resolves the "marker" shorthand property, which sets
+// marker-start/marker-mid/marker-end all at once to the same reference (SVG2
+// §11.6.7). It is applied BEFORE the three longhand calls in apply() so that
+// an explicit marker-start/-mid/-end on the same element (or a
+// higher-specificity/later-in-source cascade winner already folded into
+// attr) can still override just one of the three — mirroring how a CSS
+// shorthand and its own longhands interact when both appear together.
+func applyMarkerShorthand(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("marker")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		s.markerStartRef, s.markerMidRef, s.markerEndRef = "", "", ""
+		return
+	}
+	s.markerStartRef, s.markerMidRef, s.markerEndRef = val, val, val
 }
 
 // applyMaskType resolves mask-type (SVG2: luminance|alpha), non-inherited.
@@ -585,6 +645,19 @@ func (s Style) StrokePaint() (render.StrokePaint, bool) {
 	}, true
 }
 
+// StrokeWidthValue returns the element's resolved (inherited) stroke-width
+// property value in user units, REGARDLESS of whether the element has a
+// paintable stroke (stroke="none", or no stroke color set at all — unlike
+// StrokePaint, which reports ok=false in exactly those cases). A
+// markerUnits="strokeWidth" marker scales by this raw property value per
+// SVG2 §11.6.7 ("the value of the stroke-width property"), not by whether a
+// stroke actually gets painted — see with-a-large-stroke.svg, which sets
+// stroke-width="10" with no stroke color at all and still expects markers
+// scaled by 10, not by StrokePaint's zero-stroke fallback.
+func (s Style) StrokeWidthValue() float64 {
+	return s.strokeWidth
+}
+
 // Opacity returns the element's own (non-inherited) opacity in [0,1].
 func (s Style) Opacity() float64 {
 	return s.opacity
@@ -615,4 +688,23 @@ func (s Style) MaskRef() (string, bool) {
 // value: "luminance" (default) or "alpha".
 func (s Style) MaskTypeValue() string {
 	return s.maskType
+}
+
+// MarkerStartRef returns the element's raw, unresolved (INHERITED) marker-start
+// property value ("url(#id)" or an invalid value) and whether one is present
+// ("" / absent / "none" report ok=false).
+func (s Style) MarkerStartRef() (string, bool) {
+	return s.markerStartRef, s.markerStartRef != ""
+}
+
+// MarkerMidRef returns the element's raw, unresolved (INHERITED) marker-mid
+// property value, mirroring MarkerStartRef.
+func (s Style) MarkerMidRef() (string, bool) {
+	return s.markerMidRef, s.markerMidRef != ""
+}
+
+// MarkerEndRef returns the element's raw, unresolved (INHERITED) marker-end
+// property value, mirroring MarkerStartRef.
+func (s Style) MarkerEndRef() (string, bool) {
+	return s.markerEndRef, s.markerEndRef != ""
 }
