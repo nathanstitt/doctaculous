@@ -3,7 +3,10 @@ package paint
 import (
 	"image"
 	"image/color"
+	"strings"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -19,6 +22,10 @@ type recordDevice struct {
 	saves    int
 	restores int
 	clips    []*render.Path
+	// groups records BeginGroup/EndGroup in call order ("begin"/"end"), so a test can
+	// assert both the count AND the nesting a filter bracket must produce.
+	groups      []string
+	groupAlphas []float64
 }
 
 type recordedGlyph struct {
@@ -49,12 +56,15 @@ func (d *recordDevice) DrawGlyph(g render.GlyphRef) {
 	}
 	d.glyphs = append(d.glyphs, recordedGlyph{outline: o, color: g.Color})
 }
-func (d *recordDevice) FillShading(render.Shader, render.Matrix, string)             {}
-func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)                   { d.clips = append(d.clips, p) }
-func (d *recordDevice) BeginGroup()                                                  {}
-func (d *recordDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
-func (d *recordDevice) Save()                                                        { d.saves++ }
-func (d *recordDevice) Restore()                                                     { d.restores++ }
+func (d *recordDevice) FillShading(render.Shader, render.Matrix, string) {}
+func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)       { d.clips = append(d.clips, p) }
+func (d *recordDevice) BeginGroup()                                      { d.groups = append(d.groups, "begin") }
+func (d *recordDevice) EndGroup(alpha float64, _ string, _, _ render.GroupMask) {
+	d.groups = append(d.groups, "end")
+	d.groupAlphas = append(d.groupAlphas, alpha)
+}
+func (d *recordDevice) Save()    { d.saves++ }
+func (d *recordDevice) Restore() { d.restores++ }
 func (d *recordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }
@@ -399,4 +409,93 @@ func pathBounds(p *render.Path) (minX, minY, maxX, maxY float64) {
 		}
 	}
 	return
+}
+
+// TestPaintFilterPushPopDrivesGroup: a FilterPushKind item opens an isolated
+// offscreen group (BeginGroup) and a FilterPopKind closes it (EndGroup), with the
+// bracketed content painted in between.
+//
+// The chain itself is a PASS-THROUGH at this stage: the group composites at alpha 1
+// with no blend mode and no masks, so a filtered box renders exactly as an
+// unfiltered one. Running the pixel chain hooks in at the EndGroup call site.
+func TestPaintFilterPushPopDrivesGroup(t *testing.T) {
+	chain := []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}}
+	page := &layout.Page{
+		WidthPt: 100, HeightPt: 100,
+		Items: []layout.Item{
+			{Kind: layout.FilterPushKind, Filter: layout.FilterItem{Funcs: chain, XPt: 10, YPt: 20, WPt: 30, HPt: 40}},
+			{Kind: layout.GlyphKind, Glyph: layout.GlyphItem{Outline: triangle(), XPt: 12, YPt: 22, SizePt: 4, Color: color.RGBA{A: 0xff}}},
+			{Kind: layout.FilterPopKind},
+		},
+	}
+	dev := &recordDevice{}
+	PaintPage(dev, page, render.Scale(1, 1))
+
+	if got := strings.Join(dev.groups, ","); got != "begin,end" {
+		t.Errorf("group calls = %q, want \"begin,end\"", got)
+	}
+	if len(dev.groupAlphas) != 1 || dev.groupAlphas[0] != 1 {
+		t.Errorf("EndGroup alphas = %v, want [1] (pass-through composite)", dev.groupAlphas)
+	}
+	if len(dev.glyphs) != 1 {
+		t.Errorf("painted %d glyphs, want 1 (inside the group)", len(dev.glyphs))
+	}
+}
+
+// TestPaintFilterNests: nested filter brackets produce nested groups, in order.
+func TestPaintFilterNests(t *testing.T) {
+	page := &layout.Page{
+		WidthPt: 100, HeightPt: 100,
+		Items: []layout.Item{
+			{Kind: layout.FilterPushKind},
+			{Kind: layout.FilterPushKind},
+			{Kind: layout.FilterPopKind},
+			{Kind: layout.FilterPopKind},
+		},
+	}
+	dev := &recordDevice{}
+	PaintPage(dev, page, render.Identity)
+	if got := strings.Join(dev.groups, ","); got != "begin,begin,end,end" {
+		t.Errorf("group calls = %q, want \"begin,begin,end,end\"", got)
+	}
+}
+
+// TestPaintFilterIsPassThroughPixels: with the chain not yet wired, a filtered box's
+// pixels are IDENTICAL to the same box painted without the bracket. This is what
+// keeps every existing golden from moving, and it is the exact property Task 2 will
+// deliberately change.
+func TestPaintFilterIsPassThroughPixels(t *testing.T) {
+	bg := color.RGBA{0x33, 0x66, 0x99, 0xff}
+	rule := layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: bg}
+	plain := &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.BackgroundKind, Rule: rule},
+	}}
+	wrapped := &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+			Funcs: []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}},
+			XPt:   10, YPt: 10, WPt: 40, HPt: 40,
+		}},
+		{Kind: layout.BackgroundKind, Rule: rule},
+		{Kind: layout.FilterPopKind},
+	}}
+	a := newRasterPage(100, 100, plain)
+	b := newRasterPage(100, 100, wrapped)
+	for _, pt := range [][2]int{{5, 5}, {25, 25}, {49, 49}, {75, 75}} {
+		if got, want := b.RGBAAt(pt[0], pt[1]), a.RGBAAt(pt[0], pt[1]); !isColor(got, want, 1) {
+			t.Errorf("pixel (%d,%d) = %v with the filter bracket, want %v (pass-through)", pt[0], pt[1], got, want)
+		}
+	}
+}
+
+// TestPaintUnbalancedFilterPopIsNoOp: a stray FilterPopKind (which the emission side
+// makes impossible, but a hand-built or corrupted stream could carry) must not panic.
+// render.Device documents EndGroup with no matching BeginGroup as a no-op.
+func TestPaintUnbalancedFilterPopIsNoOp(t *testing.T) {
+	page := &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPopKind},
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 0, YPt: 0, WPt: 10, HPt: 10, Color: color.RGBA{A: 0xff}}},
+	}}
+	// Must not panic on either the recording device or the real rasterizer.
+	PaintPage(&recordDevice{}, page, render.Identity)
+	newRasterPage(100, 100, page)
 }

@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 
+	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
@@ -134,6 +135,29 @@ const (
 	// VectorKind is a vector scene (SVG) drawn into a content box (Item.Vector is
 	// set).
 	VectorKind
+	// FilterPushKind opens an isolated offscreen group for a CSS `filter` box
+	// (Item.Filter is set): the painter calls render.Device.BeginGroup, so every
+	// item up to the matching FilterPopKind composites into that group instead of
+	// onto the page. Not a drawing primitive: it carries no color.
+	//
+	// Emitted by the CSS layout engine around a filtered box's own painted subtree
+	// (its background, border, and contents). Item.Filter carries the parsed
+	// function list and the box's border-box rectangle in page space, which the
+	// pop needs in order to run the chain over the group's pixels.
+	//
+	// Pushes and pops are balanced by construction: the pair is emitted by a single
+	// AppendItems call over one fragment, and PAGINATION SPLITS FRAGMENTS, NOT
+	// ITEMS — each page flattens its own fragment subtree — so a box split across a
+	// page break yields a separate, balanced pair on each page. That makes the
+	// brackets page-local: exact for a per-pixel filter, and a documented
+	// approximation for a spatial one (a blur cannot sample the pixels that fell on
+	// the other page), logged once by the paginator.
+	FilterPushKind
+	// FilterPopKind closes the most recent group opened by FilterPushKind: the
+	// painter runs the pushed filter chain over the group's pixels and composites
+	// the result (render.Device.EndGroup). Carries no geometry of its own — the
+	// geometry and the chain live on the matching push.
+	FilterPopKind
 )
 
 // Item is one drawing primitive on a page. It is a small tagged union rather than
@@ -148,6 +172,39 @@ type Item struct {
 	// Vector is set when Kind is VectorKind: a vector scene (SVG) drawn into a
 	// content box.
 	Vector VectorItem
+	// Filter is set when Kind is FilterPushKind: the CSS filter chain to apply to
+	// the bracketed subtree, plus the box's border-box rectangle. Unused (zero) for
+	// FilterPopKind, which carries no geometry.
+	Filter FilterItem
+}
+
+// FilterItem is a CSS `filter` bracket's payload, carried on the FilterPushKind
+// item that opens the group. Funcs is the already-parsed function list (see
+// pkg/filtereffects) in source order, applied left to right; an empty list means
+// no filter and the painter treats the bracket as a plain pass-through group.
+//
+// XPt,YPt,WPt,HPt is the filtered box's BORDER box in page space (points, Y-down,
+// top-left origin) — the CSS filter region, which unlike SVG's has no
+// filterUnits/x/y/width/height of its own. The painter needs it to size the
+// offscreen surface the chain runs over.
+type FilterItem struct {
+	Funcs              []filtereffects.Function
+	XPt, YPt, WPt, HPt float64
+}
+
+// Spatial reports whether the chain contains a function whose output at a pixel
+// depends on NEIGHBOURING pixels — blur and drop-shadow. Only such a function is
+// affected by the page-local bracketing model (it cannot sample content that fell
+// on the other side of a page break), so the paginator logs its approximation for
+// exactly these and stays silent for the per-pixel colour adjustments, where
+// splitting is exact.
+func (fi *FilterItem) Spatial() bool {
+	for _, f := range fi.Funcs {
+		if f.Kind == filtereffects.FuncBlur || f.Kind == filtereffects.FuncDropShadow {
+			return true
+		}
+	}
+	return false
 }
 
 // GlyphItem is a glyph to fill. The outline is kept in raw em units (Y up, as the

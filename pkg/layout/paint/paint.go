@@ -51,6 +51,21 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 			dev.Restore()
 		case layout.VectorKind:
 			paintVector(dev, &it.Vector, mat)
+		case layout.FilterPushKind:
+			// Open an isolated offscreen group; every item up to the matching
+			// FilterPopKind composites into it rather than onto the page.
+			dev.BeginGroup()
+		case layout.FilterPopKind:
+			// Close the group and composite it back.
+			//
+			// PASS-THROUGH FOR NOW: the group's pixels are composited unchanged
+			// (alpha 1, no blend mode, no masks), so a filtered box renders exactly
+			// as an unfiltered one. The plumbing — cascade, balanced brackets across
+			// page breaks, and the group itself — is what this stage establishes;
+			// mapping each filtereffects.Function onto its pkg/svg/filter primitive
+			// chain and running it over the group's pixels hooks in HERE, replacing
+			// this call with a render-the-group / run-the-chain / composite sequence.
+			dev.EndGroup(1, "", nil, nil)
 		}
 	}
 }
