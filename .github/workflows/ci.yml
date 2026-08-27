@@ -12,6 +12,12 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Without this, a job inherits GitHub's 6-hour default and a runner that
+    # never picks up the work sits "queued" indefinitely — one run on this repo
+    # was stuck for over 25 hours, holding up a stacked PR chain with no signal
+    # either way. The race suite is the long pole at a few minutes, so 30 is
+    # generous headroom over a normal run while still failing fast on a hang.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +48,10 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # See the test job's timeout for why this is set explicitly. Lint builds
+    # golangci-lint from source (install-mode: goinstall below), so it is
+    # slower than a prebuilt binary would be but still well inside 30 minutes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
