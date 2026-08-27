@@ -527,6 +527,15 @@ func cloneFloatForPageMap(f *Fragment, seen map[*Fragment]*Fragment) *Fragment {
 		bg := *f.BgImage
 		c.BgImage = &bg
 	}
+	if f.Vector != nil {
+		// Must be cloned for the same reason Image is: translateFragment
+		// shifts the content's origin IN PLACE, so per-page clones sharing one
+		// *VectorContent would compound every page's shift onto it. A
+		// bottom-anchored position:fixed SVG over three pages then lands
+		// entirely off-page on all of them and silently disappears.
+		vec := *f.Vector
+		c.Vector = &vec
+	}
 	return &c
 }
 

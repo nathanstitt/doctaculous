@@ -252,3 +252,40 @@ func TestParseSVGBytesNeverPanics(t *testing.T) {
 		}()
 	}
 }
+
+// TestCloneFloatForPageClonesVectorContent pins a defect that made a
+// positioned SVG silently disappear.
+//
+// cloneFloatForPage produces one clone of a fragment PER PAGE it appears on,
+// and translateFragment then shifts each clone's content origin IN PLACE. The
+// clone copied Image, Control, and BgImage but not Vector, so every per-page
+// clone shared a single *VectorContent and each page's shift compounded onto
+// it. Measured on a bottom-anchored position:fixed SVG across three pages, the
+// vector landed at y=-480 on all three (want ~220) — entirely off-page, so it
+// rendered nowhere at all.
+//
+// Asserting that the clone's VectorContent is a DISTINCT pointer is what
+// catches this: an aliased pointer is the bug, and mutating through one clone
+// must not be visible through another.
+func TestCloneFloatForPageClonesVectorContent(t *testing.T) {
+	orig := &Fragment{Vector: &VectorContent{CX: 10, CY: 20, CW: 30, CH: 40}}
+
+	a := cloneFloatForPage(orig)
+	b := cloneFloatForPage(orig)
+	if a.Vector == nil || b.Vector == nil {
+		t.Fatal("cloneFloatForPage dropped Vector entirely")
+	}
+	if a.Vector == orig.Vector || a.Vector == b.Vector {
+		t.Fatal("cloneFloatForPage aliased VectorContent; per-page shifts would compound onto one shared value")
+	}
+
+	// Shifting one page's clone must leave the other page's untouched — the
+	// property the aliasing broke.
+	a.Vector.CY += 100
+	if b.Vector.CY != 20 {
+		t.Errorf("shifting one clone moved another: got CY=%v, want 20", b.Vector.CY)
+	}
+	if orig.Vector.CY != 20 {
+		t.Errorf("shifting a clone mutated the original: got CY=%v, want 20", orig.Vector.CY)
+	}
+}

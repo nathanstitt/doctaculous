@@ -52,6 +52,24 @@ type ComputedStyle struct {
 	Color           color.RGBA
 	BackgroundColor color.RGBA // zero-alpha means transparent / not set
 
+	// NOT PRESENT, deliberately, and recorded here because this struct is
+	// where a maintainer would look for them:
+	//
+	//   - filter: the CSS filter shorthand is parsed by pkg/filtereffects
+	//     (built dependency-free for exactly this reuse) and the offscreen
+	//     primitives are already on render.Device, but a filtered box must
+	//     BRACKET its subtree's emitted items the way Clips does with
+	//     ClipPushKind/ClipPopKind. That is a change to the flat
+	//     layout.Page.Items interchange format, not to SVG, so it was kept
+	//     out of the SVG series rather than mixed into it.
+	//
+	//   - letter-spacing / word-spacing: implemented for SVG only (see
+	//     pkg/svg/style.go). An SVG-internal declaration works; inheriting
+	//     one from an enclosing HTML ancestor does not, because there is no
+	//     field here to inherit from. Wiring them into reflow means facing
+	//     line-breaking and justification, which is why PR 6 scoped them to
+	//     SVG.
+	//
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
 	BackgroundImage    string
