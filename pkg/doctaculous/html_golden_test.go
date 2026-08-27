@@ -877,6 +877,52 @@ line area</textarea></div>
   <p>An inline SVG is a replaced element in normal flow.</p>
 </body></html>`,
 	},
+	{
+		// background-image: url(*.svg) — the third SVG route into HTML, and like the
+		// other two it stays VECTOR (TestSVGBackgroundEmitsVectorNotImageXObject is
+		// the structural proof). Four boxes over ONE 100x50 viewBox-only source,
+		// covering every background-size mode against the SVG's intrinsic ratio, plus
+		// the tiling deferral.
+		//
+		// Eyeball, top to bottom:
+		//   1. cover    — the 2:1 artwork fills the 200x60 box and overflows
+		//                 horizontally, clipped: the circle is large and cut off.
+		//   2. contain  — the whole artwork fits inside the box, letterboxed with
+		//                 the pink background colour showing above and below it.
+		//   3. explicit — 80x40, positioned at the box's right edge.
+		//   4. repeat   — DEGRADES to a single paint at intrinsic size in the
+		//                 top-left corner (see the background-repeat deferral). It
+		//                 must be visible and correctly placed, NOT blank and NOT
+		//                 tiled; the pink shows everywhere it does not cover.
+		name:       "bg-svg",
+		viewportPx: 240,
+		loader: resource.MapLoader{"bg.svg": {
+			ContentType: "image/svg+xml",
+			Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+  <rect x="0" y="0" width="100" height="50" fill="#cce5ff"/>
+  <circle cx="25" cy="25" r="18" fill="#cc8822"/>
+  <path d="M55 42 L95 8" stroke="#cc3333" stroke-width="5" fill="none"/>
+</svg>`),
+		}},
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  div {
+    width: 200px; height: 60px; margin-bottom: 6px;
+    background-color: #ffd9e6;
+    background-image: url(bg.svg);
+    background-repeat: no-repeat;
+  }
+  .cover    { background-size: cover; }
+  .contain  { background-size: contain; }
+  .explicit { background-size: 80px 40px; background-position: 100% 0; }
+  .tiled    { background-repeat: repeat; }
+</style></head><body>
+  <div class="cover"></div>
+  <div class="contain"></div>
+  <div class="explicit"></div>
+  <div class="tiled"></div>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for

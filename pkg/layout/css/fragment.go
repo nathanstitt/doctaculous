@@ -178,8 +178,18 @@ type VectorContent struct {
 // is confined to (background-clip) — the two differ when the properties differ. It is
 // flattened into a layout.BackgroundImageItem in paint order (behind the box's
 // content, after its background color, before its border).
+//
+// The source is either a raster image (Img) or a vector scene (Scene, an SVG); the
+// geometry model is identical for both.
 type BackgroundImageContent struct {
-	Img                                image.Image
+	Img image.Image
+	// Scene is set INSTEAD of Img when background-image resolves to an SVG: the
+	// scene travels to the painter and is drawn through a ctm, so the background
+	// stays vector all the way to the backend. SceneW/SceneH are the scene's own
+	// authored viewport size, which the painter needs in order to scale it into the
+	// computed tile rectangle.
+	Scene                              layout.VectorScene
+	SceneW, SceneH                     float64
 	IntrinsicW, IntrinsicH             float64
 	OriginX, OriginY, OriginW, OriginH float64
 	ClipX, ClipY, ClipW, ClipH         float64
@@ -440,11 +450,12 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	}
 	// Background image paints after the background color and before the border (CSS
 	// Backgrounds 3 paint order).
-	if bg := f.BgImage; bg != nil && bg.Img != nil {
+	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil) {
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundImageKind,
 			BgImage: layout.BackgroundImageItem{
-				Img:        bg.Img,
+				Img:   bg.Img,
+				Scene: bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
 				IntrinsicW: bg.IntrinsicW, IntrinsicH: bg.IntrinsicH,
 				OriginX: bg.OriginX, OriginY: bg.OriginY, OriginW: bg.OriginW, OriginH: bg.OriginH,
 				ClipX: bg.ClipX, ClipY: bg.ClipY, ClipW: bg.ClipW, ClipH: bg.ClipH,

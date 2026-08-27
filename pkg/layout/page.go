@@ -3,6 +3,7 @@ package layout
 import (
 	"image"
 	"image/color"
+	"math"
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -223,9 +224,22 @@ const (
 // painter computes the painted tile size from SizeKind + SizeW/SizeH and the intrinsic
 // size, places the first tile from the position within the origin box, tiles along
 // RepeatX/RepeatY, and clips every tile to the clip box. A nil Img draws nothing.
+//
+// The source may be a raster image (Img) or a vector scene (Scene) — the geometry
+// model is identical either way, so only the final draw call differs.
 type BackgroundImageItem struct {
-	Img                    image.Image
-	IntrinsicW, IntrinsicH float64 // decoded pixel size, > 0
+	Img image.Image
+	// Scene is set INSTEAD of Img when the background image is a vector source (an
+	// SVG). The painter draws the scene into the computed tile rectangle through a
+	// ctm, so a vector backend emits real path operators rather than a bitmap —
+	// the same guarantee VectorItem gives a replaced <img src="*.svg">. Exactly one
+	// of Img and Scene is set; a nil pair draws nothing.
+	Scene VectorScene
+	// SceneW, SceneH are Scene's own authored viewport size in points, which the
+	// painter needs to scale the scene into the tile rect. Meaningful only when
+	// Scene is set.
+	SceneW, SceneH         float64
+	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector source's intrinsic size), > 0
 
 	// Origin box: where the image is sized and positioned (background-origin box).
 	OriginX, OriginY, OriginW, OriginH float64
@@ -243,6 +257,43 @@ type BackgroundImageItem struct {
 	PosXIsPct, PosYIsPct bool
 
 	RepeatX, RepeatY bool
+}
+
+// TileSize returns the painted size of one background tile in points, resolving
+// background-size (SizeKind plus SizeW/SizeH) against the intrinsic size and the
+// origin box. cover/contain scale uniformly by the larger/smaller axis ratio; an
+// explicit size with one auto axis derives that axis from the intrinsic ratio;
+// auto is the intrinsic size. A non-positive result means nothing should paint.
+//
+// It is pure geometry over the item and identical for a raster and a vector
+// source, which is why it lives here rather than in the painter.
+func (it *BackgroundImageItem) TileSize() (w, h float64) {
+	iw, ih := it.IntrinsicW, it.IntrinsicH
+	if iw <= 0 || ih <= 0 {
+		return 0, 0
+	}
+	switch it.SizeKind {
+	case BgSizeCover:
+		s := math.Max(it.OriginW/iw, it.OriginH/ih)
+		return iw * s, ih * s
+	case BgSizeContain:
+		s := math.Min(it.OriginW/iw, it.OriginH/ih)
+		return iw * s, ih * s
+	case BgSizeExplicit:
+		w, h = it.SizeW, it.SizeH
+		switch {
+		case w <= 0 && h <= 0: // both auto → intrinsic
+			return iw, ih
+		case w <= 0: // width auto → preserve intrinsic ratio from the height
+			return h * (iw / ih), h
+		case h <= 0: // height auto → preserve intrinsic ratio from the width
+			return w, w * (ih / iw)
+		default:
+			return w, h
+		}
+	default: // BgSizeAuto → intrinsic
+		return iw, ih
+	}
 }
 
 // VectorScene is a resolution-independent drawing (an SVG scene) that paints

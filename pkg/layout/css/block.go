@@ -39,6 +39,23 @@ type Engine struct {
 	// leak across documents; the box tree is read-only after box generation, so a cached
 	// width is exactly what a fresh measure would return (output stays byte-identical).
 	measures map[*cssbox.Box]*minMaxContent
+	// warned records the keys warnOnce has already emitted, so one unsupported
+	// construct repeated across a document logs once rather than once per box. The
+	// engine is per-layout and layout is single-threaded (only rasterization fans
+	// out), so this needs no lock — the same reasoning measures relies on.
+	warned map[string]bool
+}
+
+// warnOnce logs a formatted diagnostic the FIRST time it is called with key, and
+// does nothing on every later call with the same key. It is for a degraded-but-
+// rendered construct that may appear on many boxes (an unsupported background
+// repeat, say), where one line names the gap and N lines are noise.
+func (e *Engine) warnOnce(key, format string, args ...any) {
+	if e.warned[key] {
+		return
+	}
+	e.warned[key] = true
+	e.logf(format, args...)
 }
 
 // minMaxContent holds a box's memoized intrinsic widths; each is filled lazily and
@@ -67,6 +84,7 @@ func New(faces *layoutfont.FaceCache, loader resource.ResourceLoader, logf func(
 		inlineSVGs: newInlineSVGCache(),
 		logf:       logf,
 		measures:   make(map[*cssbox.Box]*minMaxContent),
+		warned:     make(map[string]bool),
 	}
 }
 
