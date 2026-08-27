@@ -109,10 +109,32 @@ func reorder(glyphs []Glyph, dir ParagraphDirection) (out []Glyph, changed bool)
 		return glyphs, false
 	}
 
+	// Emit each GLYPH once, at the first visual position any of its runes
+	// reaches — not once per rune position.
+	//
+	// A glyph can cover several runes (a ligature, or an Arabic contextual
+	// cluster), and lineText deliberately records the glyph's index once per
+	// rune so every rune keeps a slot in the bidi algorithm's own indexing.
+	// Emitting per position therefore DUPLICATED such a glyph, returning more
+	// glyphs than came in: an Arabic phrase with three two-rune clusters came
+	// back three glyphs longer. Callers that assume the count is preserved —
+	// anything pairing the result back against per-character data — then read
+	// off the end of their own arrays or mis-associate every glyph after the
+	// first cluster.
+	//
+	// A cluster moves as a unit under UAX#9 (all its runes belong to the same
+	// directional run), so the first visual position reached is exactly where
+	// the whole cluster belongs.
 	res := make([]Glyph, 0, len(glyphs))
 	rtlAt := rtlPositions(&ord, len(text))
+	emitted := make([]bool, len(glyphs))
 	for _, pos := range visual {
-		g := glyphs[idx[pos]]
+		gi := idx[pos]
+		if emitted[gi] {
+			continue
+		}
+		emitted[gi] = true
+		g := glyphs[gi]
 		if rtlAt[pos] {
 			mirrorGlyph(&g)
 		}
