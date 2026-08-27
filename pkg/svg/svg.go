@@ -743,7 +743,7 @@ func (b *sceneBuilder) buildGroupElement(el *element, st Style, ctx *cascadeCtx)
 		g.Mask = b.resolveMaskRef(ref)
 	}
 	if ref, ok := st.FilterRef(); ok {
-		f, ok := b.resolveFilterRef(ref)
+		f, ok := b.resolveFilterRef(ref, el, st)
 		if !ok {
 			// An unresolvable filter reference means the element is NOT
 			// RENDERED (SVG's error handling, verified against the resvg
@@ -798,7 +798,7 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 		s.Mask = b.resolveMaskRef(ref)
 	}
 	if ref, ok := st.FilterRef(); ok {
-		f, ok := b.resolveFilterRef(ref)
+		f, ok := b.resolveFilterRef(ref, el, st)
 		if !ok {
 			return nil // not rendered at all; see buildGroupElement
 		}

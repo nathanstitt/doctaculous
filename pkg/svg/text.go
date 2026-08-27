@@ -335,7 +335,7 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 		t.Mask = b.resolveMaskRef(ref)
 	}
 	if ref, ok := st.FilterRef(); ok {
-		f, ok := b.resolveFilterRef(ref)
+		f, ok := b.resolveFilterRef(ref, el, st)
 		if !ok {
 			return nil // not rendered at all; see buildGroupElement
 		}
