@@ -454,6 +454,82 @@ func TestRTLTextReorders(t *testing.T) {
 	}
 }
 
+// TestRTLAnchorIsDirectionRelative pins that text-anchor's start/end name the
+// start and end of the INLINE BASE DIRECTION, not the left and right of the
+// canvas: in an rtl chunk the default "start" anchor is the RIGHT edge, so the
+// text runs leftward from its x. The corpus's direction/rtl.svg anchors at
+// x=170 in a 200-wide viewBox and would run off the canvas otherwise.
+func TestRTLAnchorIsDirectionRelative(t *testing.T) {
+	const hebrew = "שלוםשלום"
+	doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"
+	  font-family="sans-serif" font-size="20"><text x="170" y="100" direction="rtl">`+hebrew+`</text></svg>`)
+	placed := New(doc).layoutText(firstText(t, doc))
+	if len(placed) < 4 {
+		t.Fatalf("placed %d glyphs; the Hebrew face did not resolve", len(placed))
+	}
+	minX, maxX := math.Inf(1), math.Inf(-1)
+	for _, p := range placed {
+		minX = math.Min(minX, p.penX)
+		maxX = math.Max(maxX, p.penX+p.glyph.Advance)
+	}
+	if math.Abs(maxX-170) > 1e-6 {
+		t.Errorf("rtl chunk right edge = %v, want 170 (start anchors the RIGHT edge in rtl)", maxX)
+	}
+	if minX >= 170 {
+		t.Errorf("rtl chunk minX = %v; the text must extend LEFT of its x", minX)
+	}
+
+	// The LTR control: the identical anchor in an ltr chunk puts the LEFT
+	// edge at x, so a bug that flipped unconditionally cannot pass.
+	ltr, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"
+	  font-family="sans-serif" font-size="20"><text x="170" y="100">abcd</text></svg>`)
+	ltrPlaced := New(ltr).layoutText(firstText(t, ltr))
+	if len(ltrPlaced) == 0 {
+		t.Fatal("no LTR glyphs placed")
+	}
+	if math.Abs(ltrPlaced[0].penX-170) > 1e-6 {
+		t.Errorf("ltr chunk left edge = %v, want 170", ltrPlaced[0].penX)
+	}
+}
+
+// TestBidiReorderPreservesGlyphCount is a regression test for an
+// inline.Reorder bug this feature surfaced: a glyph covering several runes (an
+// Arabic contextual cluster, or a ligature) was emitted once PER RUNE, so the
+// reordered slice came back longer than it went in. Any caller pairing the
+// result against per-character data then mis-associates every glyph after the
+// first cluster — which is exactly how it showed up here, as Arabic text whose
+// last glyphs jumped back to the first character's absolute x.
+func TestBidiReorderPreservesGlyphCount(t *testing.T) {
+	// Arabic: shaped through harfbuzz inside inline.Shape, which produces
+	// multi-rune cluster glyphs.
+	const arabic = "اقرأ المزيد عن SVG أيضًا."
+	faces := layoutfont.NewFaceCache()
+	glyphs := inline.Shape(faces, []inline.Run{{
+		Text: arabic, Family: "sans-serif", SizePt: 14, WhiteSpace: "pre",
+	}}, nil)
+	if len(glyphs) == 0 {
+		t.Fatal("Arabic did not shape; the fixture proves nothing")
+	}
+	// Confirm the fixture actually exercises the bug: without a multi-rune
+	// glyph, per-rune and per-glyph emission are identical.
+	multi := false
+	for _, g := range glyphs {
+		if len(g.Runes) > 1 {
+			multi = true
+			break
+		}
+	}
+	if !multi {
+		t.Skip("no multi-rune cluster in this shaping; the regression cannot occur")
+	}
+	for _, dir := range []inline.ParagraphDirection{inline.DirLTR, inline.DirRTL} {
+		got := inline.Reorder(glyphs, dir)
+		if len(got) != len(glyphs) {
+			t.Errorf("Reorder(dir=%v) returned %d glyphs from %d; reordering must be a permutation", dir, len(got), len(glyphs))
+		}
+	}
+}
+
 // TestTextAsClipAndMaskGeometry proves the geometry-reuse claim: the same
 // glyph outlines a fill would draw become a clip region and a mask.
 func TestTextAsClipAndMaskGeometry(t *testing.T) {

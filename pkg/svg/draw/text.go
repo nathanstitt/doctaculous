@@ -342,8 +342,144 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 		penX += g.glyph.Advance
 	}
 
+	reorderVisually(placed)
 	applyAnchors(placed, t)
 	return placed
+}
+
+// reorderVisually applies UAX#9 bidi reordering to the already-PLACED glyphs,
+// per text chunk, by permuting which glyph occupies each x slot.
+//
+// The ordering has to happen here rather than before the pen walk. SVG's
+// x/y/dx/dy lists address characters in LOGICAL order (SVG2 §11.5), so the
+// walk must see glyphs in logical order or an absolute x meant for the first
+// logical character lands on whatever reordering put first — which for the
+// corpus's direction/rtl.svg threw the anchor 170 units away from the rest of
+// the text.
+//
+// So the walk assigns each glyph its advance-accumulated slot in logical
+// order, and this then REASSIGNS those slots: the x positions themselves stay
+// exactly where the walk put them (preserving every dx, dy, and absolute
+// reset), and only WHICH glyph sits at each is permuted. Because the slots
+// were laid left to right and inline.Reorder returns visual order, walking
+// the reordered glyphs and re-dealing the slots left to right is precisely
+// UAX#9 rule L2 applied to a line.
+//
+// inline.Reorder is standalone on a flat glyph slice — it needs no line box —
+// which is what lets SVG reuse the engine's real UAX#9 implementation (rule
+// L2 plus L4 bracket mirroring) rather than approximating it. An SVG <text>
+// chunk is one line for bidi purposes, since it never wraps.
+func reorderVisually(placed []placedGlyph) {
+	for i := 0; i < len(placed); {
+		chunk := placed[i].chunk
+		j := i
+		for j < len(placed) && placed[j].chunk == chunk {
+			j++
+		}
+		reorderChunk(placed[i:j])
+		i = j
+	}
+}
+
+// reorderChunk reorders one chunk in place. It is a no-op unless reordering
+// actually changes the sequence, so a Latin-only document pays nothing beyond
+// inline.Reorder's own fast path.
+func reorderChunk(run []placedGlyph) {
+	if len(run) < 2 {
+		return
+	}
+	dir := inline.DirLTR
+	if run[0].style.DirectionRTL() {
+		dir = inline.DirRTL
+	}
+	// Reorder a slice of TAGGED copies rather than the glyphs themselves, so
+	// the permutation can be read back exactly.
+	//
+	// Matching reordered glyphs back to their sources by VALUE does not work:
+	// a shaped run is full of zero-advance, nil-outline mark glyphs that are
+	// indistinguishable from one another, so any value-based match assigns
+	// several visual slots to the same logical glyph and scrambles the rest.
+	// Encoding the index in a field inline.Reorder preserves but does not read
+	// for ordering — Atomic, which it treats as an opaque payload — makes the
+	// permutation exact and total. Runes must stay untouched: they are what
+	// the algorithm reads to classify each glyph's bidi character type.
+	tagged := make([]inline.Glyph, len(run))
+	idx := make([]inline.AtomicItem, len(run))
+	for i := range run {
+		tagged[i] = run[i].glyph
+		idx[i] = inline.AtomicItem{Ref: i}
+		tagged[i].Atomic = &idx[i]
+	}
+	visual := inline.Reorder(tagged, dir)
+	if len(visual) != len(tagged) {
+		return // defensive: a reorder that changed the count is not usable
+	}
+	order := make([]int, 0, len(visual))
+	for _, vg := range visual {
+		if vg.Atomic == nil {
+			return // tag lost: leave logical order rather than guess
+		}
+		l, ok := vg.Atomic.Ref.(int)
+		if !ok || l < 0 || l >= len(run) {
+			return
+		}
+		order = append(order, l)
+	}
+
+	if isIdentity(order) {
+		return // nothing moved: leave the logical placement untouched
+	}
+
+	// Permute the whole glyph record, not just the outline: a glyph's paint,
+	// clip/mask, and rotation all belong to the CHARACTER, and follow it into
+	// its visual position.
+	reordered := make([]placedGlyph, len(run))
+	for s, l := range order {
+		reordered[s] = run[l] // the untagged original; the tag lived only on the copy
+	}
+
+	// Re-lay the x positions along the visual sequence. The slots the logical
+	// walk produced cannot simply be reused: they were accumulated from the
+	// LOGICAL advances, so once the glyphs are permuted a glyph would sit in a
+	// slot sized for a different glyph, overlapping its neighbour wherever the
+	// two advances differ.
+	//
+	// Instead the chunk keeps its logical START — the pen position of its
+	// first character, which is what carries the element's x/y and any leading
+	// dx — and each visual glyph is laid from there by its own advance. Each
+	// glyph also carries the LEAD GAP the logical walk left in front of it
+	// (its own dx, i.e. whatever separated it from its logical predecessor
+	// beyond that predecessor's advance), so a dx on an RTL character still
+	// offsets it in the visual layout.
+	//
+	// Per-character absolute x/y resets inside an RTL chunk are the one case
+	// this does not reproduce exactly: an absolute reset starts a NEW chunk
+	// (see svg.Text.Anchors), so within a single chunk there is at most the
+	// leading one, which is exactly the start captured here.
+	leads := make([]float64, len(run))
+	for l := 1; l < len(run); l++ {
+		if gap := run[l].penX - (run[l-1].penX + run[l-1].glyph.Advance); gap > 0 {
+			leads[l] = gap
+		}
+	}
+	pen := run[0].penX
+	for s := range reordered {
+		pen += leads[order[s]]
+		reordered[s].penX = pen
+		pen += reordered[s].glyph.Advance
+	}
+	copy(run, reordered)
+}
+
+// isIdentity reports whether order is 0,1,2,... i.e. reordering changed
+// nothing.
+func isIdentity(order []int) bool {
+	for i, v := range order {
+		if i != v {
+			return false
+		}
+	}
+	return true
 }
 
 // asGradient narrows svg.GradientPaint to this package's own `gradient`
@@ -365,14 +501,23 @@ func asPattern(p svg.PatternPaint) pattern {
 	return p
 }
 
-// applyAnchors shifts each text chunk by its text-anchor offset: 0 for
-// "start", half the chunk's total advance for "middle", and the whole advance
-// for "end" — measured from the chunk's own first glyph to the end of its
-// last, so an intervening dx or absolute reset inside the chunk is included.
+// applyAnchors shifts each text chunk by its text-anchor offset, measured
+// from the chunk's own first glyph to the end of its last so an intervening
+// dx or absolute reset inside the chunk is included.
 //
-// text-anchor is read from the chunk's FIRST character's style, per SVG2
-// §11.5: the property applies to a text chunk as a whole, so a <tspan> that
-// changes it mid-chunk has no effect on that chunk (the corpus's
+// The offsets are DIRECTION-RELATIVE, which is the part that is easy to miss:
+// text-anchor's "start" and "end" name the start and end of the INLINE BASE
+// DIRECTION, not the left and right of the canvas (SVG2 §11.5, CSS Writing
+// Modes). In an ltr chunk "start" is the left edge and shifts nothing; in an
+// rtl chunk "start" is the RIGHT edge, so the chunk must extend leftward from
+// its anchor point — shifted by its whole advance, exactly what "end" does in
+// ltr. The corpus's direction/rtl.svg is anchored at x=170 with the default
+// text-anchor and expects the Arabic to run leftward from there; treating
+// "start" as "no shift" ran it off the right edge of the viewport.
+//
+// text-anchor itself is read from the chunk's FIRST character's style, per
+// SVG2 §11.5: the property applies to a text chunk as a whole, so a <tspan>
+// that changes it mid-chunk has no effect on that chunk (the corpus's
 // text-anchor-not-on-text-chunk.svg asserts exactly this).
 func applyAnchors(placed []placedGlyph, t *svg.Text) {
 	if len(placed) == 0 {
@@ -389,8 +534,20 @@ func applyAnchors(placed []placedGlyph, t *svg.Text) {
 			j++
 		}
 		width := maxX - minX
+		anchor := placed[i].style.TextAnchor()
+		if placed[i].style.DirectionRTL() {
+			// Map the direction-relative keywords onto physical edges for an
+			// rtl chunk: start is the right edge, end the left. "middle" is
+			// symmetric and unaffected.
+			switch anchor {
+			case "start":
+				anchor = "end"
+			case "end":
+				anchor = "start"
+			}
+		}
 		var shift float64
-		switch placed[i].style.TextAnchor() {
+		switch anchor {
 		case "middle":
 			shift = -width / 2
 		case "end":
@@ -482,15 +639,13 @@ func (r *Renderer) shapeChars(chars []svg.TextChar) []shapedChar {
 			WhiteSpace: "pre",
 		}
 		glyphs := inline.Shape(faces, []inline.Run{run}, r.Logf)
-		dir := inline.DirLTR
-		if st.DirectionRTL() {
-			dir = inline.DirRTL
-		}
-		// An SVG <text> is one line for bidi purposes: there is no wrapping,
-		// so the whole run reorders as a single visual line. inline.Reorder
-		// is standalone on a flat glyph slice — it needs no line box — which
-		// is what lets SVG reuse the engine's UAX#9 implementation directly.
-		glyphs = inline.Reorder(glyphs, dir)
+		// Shaping ONLY here — deliberately NOT inline.Reorder. Bidi reordering
+		// has to happen AFTER the pen walk, not before it: SVG's x/y/dx/dy
+		// lists address characters in LOGICAL order, so a reorder applied here
+		// would hand the pen walk glyphs whose source-character indices jump
+		// around, and an absolute x meant for the first logical character
+		// would land on whichever glyph reordering happened to put first.
+		// See reorderVisually, which the caller runs on the PLACED glyphs.
 		out = append(out, mapGlyphsToChars(glyphs, span, i, st.BidiOverride())...)
 		i = j
 	}
