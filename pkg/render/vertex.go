@@ -134,16 +134,27 @@ func Bisector(in, out Vector) Vector {
 //     zero Vector.
 //
 // Close contributes the implicit line from the current point back to the
-// subpath's start point, exactly like an explicit LineTo to that point
-// (including the same zero-length fallback when the subpath is already
-// there) — and that implicit segment's tangent updates the SUBPATH START
-// vertex's in-tangent (it has none from the initial MoveTo alone). A
-// subpath with no drawing segments before its Close (bare "M Z") produces no
-// implicit line (nothing to close) and leaves the start vertex's in-tangent
-// zero. A repeated Close (Z Z Z, or Z immediately after another Z) after the
-// first is a no-op: the pen is already at the subpath start, so each
-// additional Close is a zero-length implicit line contributing nothing
-// further.
+// subpath's start point, exactly like an explicit LineTo to that point, AND
+// EMITS ITS OWN VERTEX at that start point. SVG 1.1 §11.6.3 is explicit
+// about this: "for a 'path' element which ends with a closed sub-path, the
+// last vertex is the same as the initial vertex on the given sub-path. In
+// this case, if 'marker-end' does not equal none, then it is possible that
+// two markers will be rendered on the given vertex." So "M 30 100 L 170 100
+// Z" has THREE vertices — the start (30,100), the corner (170,100), and a
+// final one back at (30,100) coincident with the start — not two. The
+// closing vertex's in-tangent is the implicit line's direction; its
+// out-tangent is the SUBPATH'S FIRST segment's direction, so that a
+// marker-mid landing there bisects the join the way the rendered corner
+// actually looks (e.g. Bisector((140,0),(-140,0)) at the corner of the
+// fixture above yields "down", matching resvg).
+//
+// A subpath with no drawing segments before its Close (bare "M Z") produces
+// no implicit line and no extra vertex: there is nothing to close, and
+// emitting a duplicate of the MoveTo vertex would invent a marker the path
+// never had. A repeated Close (Z Z Z, or Z immediately after another Z)
+// after the first is likewise a no-op for the same reason — the pen is
+// already at the subpath start, so each additional Close is a zero-length
+// implicit line contributing neither a direction nor a vertex.
 //
 // Multiple subpaths: every MoveTo (including the first) produces a Vertex
 // with IsSubpathStart set. Per SVG, marker-start applies only to the very
@@ -260,20 +271,39 @@ func Vertices(p *Path) []Vertex {
 				continue
 			}
 			start := verts[subpathStart]
-			startIdx := len(verts) - 1
+			prevIdx := len(verts) - 1
 			dir := sub(start.Pos, cur)
+			if dir.IsZero() {
+				// The pen is already exactly at the subpath start: a bare
+				// "M Z", or a repeated Z after a Close already brought it
+				// back. There is no implicit line, so there is no direction
+				// to record and no closing vertex to emit — emitting one
+				// would invent a marker the path never had, and overwriting
+				// the start vertex's in-tangent with zero would clobber the
+				// real direction the FIRST Close computed.
+				cur = start.Pos
+				continue
+			}
 			// The implicit close line's out-tangent belongs to the CURRENT
 			// pen position (the last vertex so far in this subpath); its
-			// in-tangent belongs to the subpath's start vertex. When cur is
-			// already exactly the subpath's start (a bare "M Z", or a
-			// repeated Z), dir is the zero Vector and both assignments are
-			// harmless no-ops (they don't overwrite a previously-computed
-			// non-zero in-tangent on the start vertex with garbage, since
-			// zero here genuinely means "no additional direction").
-			if !dir.IsZero() {
-				setOut(startIdx, dir)
-				setIn(subpathStart, dir)
-			}
+			// in-tangent belongs to the closing vertex emitted below.
+			setOut(prevIdx, dir)
+			// The closing vertex sits exactly on the subpath's start point
+			// (hence coincident with verts[subpathStart]) and carries the
+			// join between the closing line and the subpath's FIRST segment,
+			// so orient="auto" bisects the rendered corner rather than
+			// reporting only one side. It is NOT flagged IsSubpathStart: it
+			// ends a subpath, it does not begin one.
+			verts = append(verts, Vertex{Pos: start.Pos})
+			closeIdx := len(verts) - 1
+			setIn(closeIdx, dir)
+			setOut(closeIdx, start.OutTangent)
+			// The subpath's start vertex likewise now has an incoming
+			// direction it lacked from the MoveTo alone (SVG 1.1 §11.6.3:
+			// "the last vertex is the same as the initial vertex"), so a
+			// marker-start with orient="auto" on a closed subpath sees both
+			// sides of the same join.
+			setIn(subpathStart, dir)
 			cur = start.Pos
 			// subpathStart stays as-is: a Z does not end the subpath for
 			// vertex-walking purposes (SVG permits drawing more segments

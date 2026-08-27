@@ -244,7 +244,14 @@ func TransformPath(p *Path, m Matrix) *Path {
 	}
 	out := &Path{Segments: make([]Segment, len(p.Segments))}
 	for i, s := range p.Segments {
-		ns := Segment{Kind: s.Kind}
+		// Continuation must be carried across: it records that this segment is
+		// one slice of a MULTI-SEGMENT FLATTENING of a single source command
+		// (an SVG elliptical arc), which is a property of the path's authored
+		// structure, not of its coordinates. Dropping it here would leave the
+		// transformed path geometrically identical but structurally wrong, so
+		// any caller running Vertices on the result would silently regain a
+		// spurious marker-mid at every internal slice boundary.
+		ns := Segment{Kind: s.Kind, Continuation: s.Continuation}
 		switch s.Kind {
 		case MoveTo, LineTo:
 			ns.P0 = ap(s.P0)

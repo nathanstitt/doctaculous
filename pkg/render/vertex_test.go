@@ -106,7 +106,7 @@ func TestVerticesCubicCoincidentControlPoints(t *testing.T) {
 	t.Run("P2 coincides with P1, falls back to P2-P0", func(t *testing.T) {
 		p := &Path{}
 		p.MoveTo(0, 0)
-		p.CubeTo(1, 1, 10, 10, 10, 10) // P2==P1; P2-P0 = (10,10)-(0,0)... wait use distinct P0
+		p.CubeTo(1, 1, 10, 10, 10, 10) // P2==P1, so P2-P1 is zero and the chain falls back to P2-P0
 		v := Vertices(p)
 		approxVec(t, "in", v[1].InTangent, 9, 9) // P2-P0 = (10,10)-(1,1)
 	})
@@ -119,32 +119,61 @@ func TestVerticesCubicCoincidentControlPoints(t *testing.T) {
 	})
 }
 
-// TestVerticesClose covers orient=auto-on-M-L-Z.svg: a Close contributes the
-// implicit line back to the subpath start, and that line's direction becomes
-// the start vertex's in-tangent.
+// TestVerticesClose covers orient=auto-on-M-L-Z.svg. SVG 1.1 §11.6.3: "for a
+// 'path' element which ends with a closed sub-path, the last vertex is the
+// same as the initial vertex on the given sub-path. In this case, if
+// 'marker-end' does not equal none, then it is possible that two markers will
+// be rendered on the given vertex." So the Close EMITS A VERTEX at the
+// subpath start: "M 30 100 L 170 100 Z" has three vertices, and resvg's own
+// reference PNG for this fixture shows exactly that — two overlapping markers
+// (a "bowtie") at the left end, and a downward-pointing marker at the corner.
 func TestVerticesClose(t *testing.T) {
 	p := &Path{}
 	p.MoveTo(30, 100)
 	p.LineTo(170, 100)
 	p.Close()
 	v := Vertices(p)
-	if len(v) != 2 {
-		t.Fatalf("len(v) = %d, want 2", len(v))
+	if len(v) != 3 {
+		t.Fatalf("len(v) = %d, want 3 (Close emits a vertex at the subpath start)", len(v))
 	}
-	// v[0] = (30,100): out toward (170,100); in from the closing line
-	// (30,100)-(170,100), i.e. direction (-140,0).
+	// v[0] = (30,100), the marker-start vertex: out toward (170,100); in from
+	// the closing line (30,100)-(170,100), i.e. direction (-140,0).
+	if v[0].Pos != (Point{30, 100}) {
+		t.Errorf("v[0].Pos = %v, want (30,100)", v[0].Pos)
+	}
+	if !v[0].IsSubpathStart {
+		t.Error("v[0].IsSubpathStart = false, want true")
+	}
 	approxVec(t, "v[0].OutTangent", v[0].OutTangent, 140, 0)
 	approxVec(t, "v[0].InTangent", v[0].InTangent, -140, 0)
-	// v[1] = (170,100): in from (30,100)->(170,100) = (140,0); out along the
-	// closing line toward (30,100) = (-140,0).
+	// v[1] = (170,100), the marker-mid vertex: in from (30,100)->(170,100) =
+	// (140,0); out along the closing line toward (30,100) = (-140,0). Those
+	// are exactly opposite, so Bisector returns the perpendicular — the
+	// downward-pointing marker in resvg's reference.
+	if v[1].Pos != (Point{170, 100}) {
+		t.Errorf("v[1].Pos = %v, want (170,100)", v[1].Pos)
+	}
 	approxVec(t, "v[1].InTangent", v[1].InTangent, 140, 0)
 	approxVec(t, "v[1].OutTangent", v[1].OutTangent, -140, 0)
+	// v[2] = (30,100) again, the marker-end vertex, coincident with v[0]:
+	// this is the "two markers on the given vertex" the spec calls out. Its
+	// in-tangent is the closing line's; its out-tangent is the subpath's
+	// FIRST segment's, so orient="auto" bisects the real corner there.
+	if v[2].Pos != (Point{30, 100}) {
+		t.Errorf("v[2].Pos = %v, want (30,100) (coincident with the start)", v[2].Pos)
+	}
+	if v[2].IsSubpathStart {
+		t.Error("v[2].IsSubpathStart = true, want false (it ends a subpath, it does not begin one)")
+	}
+	approxVec(t, "v[2].InTangent", v[2].InTangent, -140, 0)
+	approxVec(t, "v[2].OutTangent", v[2].OutTangent, 140, 0)
 }
 
-// TestVerticesRepeatedClose covers orient=auto-on-M-L-L-Z-Z-Z.svg: repeated Z
-// after the pen is already back at the subpath start must be a harmless
-// no-op, not overwrite the first Close's already-computed in-tangent with a
-// zero-length "direction".
+// TestVerticesRepeatedClose covers orient=auto-on-M-L-L-Z-Z-Z.svg: the FIRST
+// Z emits the closing vertex, and every repeated Z after it — with the pen
+// already back at the subpath start — must be a complete no-op, contributing
+// neither an extra (duplicate) vertex nor a zero-length "direction" that
+// would clobber the first Close's already-computed tangents.
 func TestVerticesRepeatedClose(t *testing.T) {
 	p := &Path{}
 	p.MoveTo(50, 160)
@@ -154,19 +183,26 @@ func TestVerticesRepeatedClose(t *testing.T) {
 	p.Close()
 	p.Close()
 	v := Vertices(p)
-	if len(v) != 3 {
-		t.Fatalf("len(v) = %d, want 3", len(v))
+	if len(v) != 4 {
+		t.Fatalf("len(v) = %d, want 4 (one closing vertex, repeated Z is a no-op)", len(v))
 	}
 	// v[0]'s in-tangent must be the first Close's direction: (50,160)-(150,160) = (-100,0).
 	approxVec(t, "v[0].InTangent", v[0].InTangent, -100, 0)
-	// v[2]'s out-tangent must likewise still be the first Close's direction
-	// (subsequent Z's are zero-length and must not clobber it).
+	// v[2] = (150,160), the last drawn corner: out along the closing line.
 	approxVec(t, "v[2].OutTangent", v[2].OutTangent, -100, 0)
+	// v[3] is the closing vertex, coincident with the subpath start (50,160).
+	if v[3].Pos != (Point{50, 160}) {
+		t.Errorf("v[3].Pos = %v, want (50,160)", v[3].Pos)
+	}
+	approxVec(t, "v[3].InTangent", v[3].InTangent, -100, 0)
+	approxVec(t, "v[3].OutTangent", v[3].OutTangent, 50, -110)
 }
 
 // TestVerticesBareMoveZ covers a subpath with no drawing segment before its
-// Close ("M Z"): there is no implicit line to draw, so the start vertex's
-// in-tangent stays zero rather than becoming some degenerate direction.
+// Close ("M Z"): there is no implicit line to draw, so no closing vertex is
+// emitted (a duplicate would invent a marker the path never had) and the
+// start vertex's in-tangent stays zero rather than becoming some degenerate
+// direction.
 func TestVerticesBareMoveZ(t *testing.T) {
 	p := &Path{}
 	p.MoveTo(50, 50)
@@ -354,5 +390,34 @@ func TestVectorAngle(t *testing.T) {
 		if got := tc.v.Angle(); math.Abs(got-tc.want) > 1e-9 {
 			t.Errorf("Angle(%v) = %v, want %v", tc.v, got, tc.want)
 		}
+	}
+}
+
+// TestTransformPathPreservesContinuation pins that TransformPath carries
+// Segment.Continuation across. Continuation records that a segment is one
+// slice of a multi-segment FLATTENING of a single source command (an SVG
+// elliptical arc) — a property of the path's authored structure, not of its
+// coordinates — so transforming a path must not drop it. Dropping it left
+// the result geometrically identical but structurally wrong: Vertices would
+// silently report a spurious extra vertex (a marker-mid the original path
+// never had) at every internal slice boundary.
+func TestTransformPathPreservesContinuation(t *testing.T) {
+	p := &Path{}
+	p.MoveTo(0, 0)
+	p.CubeToContinuation(1, 1, 2, 2, 3, 3)
+	p.CubeToContinuation(4, 4, 5, 5, 6, 6)
+	p.CubeTo(7, 7, 8, 8, 9, 9)
+
+	tp := TransformPath(p, Scale(2, 2))
+	for i, s := range tp.Segments {
+		if s.Continuation != p.Segments[i].Continuation {
+			t.Errorf("segment %d: Continuation = %v, want %v", i, s.Continuation, p.Segments[i].Continuation)
+		}
+	}
+
+	// The observable consequence: the transformed path must enumerate the
+	// same number of vertices as the original, not one per flattened slice.
+	if got, want := len(Vertices(tp)), len(Vertices(p)); got != want {
+		t.Errorf("Vertices(transformed) = %d vertices, want %d (same as the untransformed path)", got, want)
 	}
 }
