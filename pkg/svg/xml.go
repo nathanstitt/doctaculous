@@ -37,6 +37,17 @@ type element struct {
 	kids         []*element
 	text         string
 
+	// content is el's children and character data INTERLEAVED in document
+	// order — the ordering `kids` and `text` between them cannot express,
+	// since text concatenates every CharData run in the element regardless of
+	// which child elements it fell between. <text>A<tspan>B</tspan>C</text>
+	// has kids=[tspan] and text="AC", which is indistinguishable from
+	// <text>AC<tspan>B</tspan></text>; SVG text layout needs the real order,
+	// because the position cursor threads through the subtree in document
+	// order (SVG2 §11.5). Only pkg/svg/text.go reads this; every other
+	// consumer keeps using kids/text exactly as before.
+	content []contentNode
+
 	// parent is the enclosing element, or nil for the document root. It is
 	// backfilled once a child is fully parsed and attached (both the normal
 	// end-tag path and the truncation-recovery unwind path set it), so CSS
@@ -57,6 +68,15 @@ type element struct {
 	// whitespace-only — so callers can distinguish "no classes" from having
 	// to compare a slice length.
 	classes []string
+}
+
+// contentNode is one entry in an element's interleaved content list: either a
+// child element (el != nil) or a run of character data (el == nil, text
+// holding the raw, uncollapsed characters). Exactly one of the two is set.
+// See element.content for why the ordering matters.
+type contentNode struct {
+	el   *element
+	text string
 }
 
 // parseXML parses an SVG document into a namespace-aware element tree and
@@ -149,6 +169,17 @@ func parseXML(data []byte, logf func(string, ...any)) (*element, error) {
 			if len(stack) > 0 {
 				top := stack[len(stack)-1]
 				top.text += string(t)
+				// Append to the interleaved list too, MERGING with a trailing
+				// text run rather than appending a second one: the decoder can
+				// split one logical run across several CharData tokens (an
+				// entity reference, a CDATA boundary), and a caller walking
+				// content for whitespace collapsing must see the same run
+				// boundaries a single token would have produced.
+				if n := len(top.content); n > 0 && top.content[n-1].el == nil {
+					top.content[n-1].text += string(t)
+				} else {
+					top.content = append(top.content, contentNode{text: string(t)})
+				}
 			}
 		}
 	}
@@ -214,6 +245,7 @@ func unwind(root **element, stack *[]*element) {
 // tree has a coherent parent chain regardless of which path attached it.
 func attach(parent, child *element) {
 	parent.kids = append(parent.kids, child)
+	parent.content = append(parent.content, contentNode{el: child})
 	child.parent = parent
 }
 
