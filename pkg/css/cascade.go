@@ -265,7 +265,38 @@ func NewResolver(sheets []OriginSheet, logf func(string, ...any)) *Resolver {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	reportUnsupportedSelectors(sheets, logf)
 	return &Resolver{sheets: sheets, logf: logf, media: MediaScreen}
+}
+
+// reportUnsupportedSelectors logs ONE line per distinct unimplemented selector
+// construct found across the AUTHOR sheets, quoting the first selector that used
+// it. Parse itself cannot log (see Stylesheet.Unsupported); this is the first
+// point where every sheet and a logger are in hand at once.
+//
+// UA sheets are skipped: the engine ships those, they are written to what the
+// selector parser supports, and a diagnostic about them would blame the author
+// for the engine's own stylesheet.
+//
+// Warn-once per construct, not per selector, is the whole point. A design-tool
+// SVG export or a framework stylesheet can contain hundreds of `>` rules; one
+// line naming the construct tells the author everything the hundred would, and a
+// warning on every valid stylesheet — or a hundred on one invalid one — would be
+// worse than the silence it replaces.
+func reportUnsupportedSelectors(sheets []OriginSheet, logf func(string, ...any)) {
+	seen := map[string]bool{}
+	for _, os := range sheets {
+		if os.Origin != OriginAuthor {
+			continue
+		}
+		for _, u := range os.Sheet.Unsupported {
+			if seen[u.Construct] {
+				continue
+			}
+			seen[u.Construct] = true
+			logf("css: %s is not supported; rules using it are ignored (first: %q)", u.Construct, u.Selector)
+		}
+	}
 }
 
 // SetMedia sets the active media context (MediaScreen or MediaPrint). Rules tagged

@@ -391,6 +391,62 @@ func tileSizeOf(bg layout.BackgroundImageItem) (w, h float64) { return bg.TileSi
 // two paths are compared on identical colour.
 var greenRGBA = color.RGBA{R: 0, G: 192, B: 0, A: 255}
 
+// TestInlineSVGUnsupportedSelectorWarns is the end-to-end case that motivates
+// the selector diagnostic, and the reason it lands in this PR rather than with
+// the selector engine itself: design-tool SVG exports carry their own <style>
+// leaning on `[class^="cls-"]` and `.icon > path`, so an inline <svg> in an HTML
+// document silently loses those rules and renders in the wrong colours with no
+// hint why.
+//
+// The engine still does not SUPPORT those selectors — that is its own project
+// (CLAUDE.md roadmap item 8). What must no longer happen is losing them in
+// silence.
+func TestInlineSVGUnsupportedSelectorWarns(t *testing.T) {
+	logOpt, logged := recordLogf()
+	const src = `<html><body><svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+<style>
+  .icon > path { fill: #00c000; }
+  [class^="cls-"] { stroke: #000; }
+</style>
+<g class="icon"><path d="M0 0 L80 40"/></g>
+</svg></body></html>`
+
+	if _, err := OpenHTMLBytes([]byte(src), logOpt); err != nil {
+		t.Fatal(err)
+	}
+	msgs := logged()
+	for _, want := range []string{"child combinator", "attribute selector"} {
+		if !anyContains(msgs, want) {
+			t.Errorf("no diagnostic naming %q; an SVG export's rules were dropped silently. Logged: %q",
+				want, msgs)
+		}
+	}
+}
+
+// TestOrdinaryDocumentLogsNoSelectorDiagnostic is the negative half at the
+// document layer. Every HTML render carries the UA stylesheet and whatever the
+// author wrote; if either produced a selector diagnostic, the warning would fire
+// on essentially every document and become noise nobody reads.
+func TestOrdinaryDocumentLogsNoSelectorDiagnostic(t *testing.T) {
+	logOpt, logged := recordLogf()
+	const src = `<html><head><style>
+  body { margin: 0 }
+  h1, h2 { color: #333 }
+  div p.lead:first-child { font-weight: bold }
+  li:nth-child(2n+1) { background: #eee }
+</style></head><body><h1>Title</h1><div><p class="lead">Lead.</p></div>
+<ul><li>a</li><li>b</li></ul></body></html>`
+
+	if _, err := OpenHTMLBytes([]byte(src), logOpt); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range logged() {
+		if strings.Contains(m, "is not supported; rules using it are ignored") {
+			t.Errorf("an ordinary, fully-supported document logged a selector diagnostic: %q", m)
+		}
+	}
+}
+
 // anyContains reports whether any string in msgs contains sub.
 func anyContains(msgs []string, sub string) bool {
 	for _, m := range msgs {

@@ -235,16 +235,106 @@ func hasClass(have []string, want string) bool {
 // Parsing is total: a malformed group is skipped rather than erroring, so one bad
 // selector cannot void a rule's other selectors.
 func parseSelectorList(src string) []Selector {
-	var out []Selector
-	for _, group := range strings.Split(src, ",") {
-		sel, ok := parseOneSelector(strings.TrimSpace(group))
-		if ok {
-			out = append(out, sel)
-		}
-	}
-	return out
+	sels, _ := parseSelectorListDiag(src)
+	return sels
 }
 
+// parseSelectorListDiag is parseSelectorList plus the diagnostics: for each
+// selector it DROPPED because of an unimplemented construct, one entry naming
+// that construct and quoting the source. A selector dropped for any other reason
+// (an unsupported pseudo-element, say, which CSS itself says must not match a
+// normal element) produces no entry, because nothing is missing there — the drop
+// IS the correct behavior. Only a construct the author reasonably expects to
+// work is worth telling them about.
+func parseSelectorListDiag(src string) ([]Selector, []UnsupportedSelector) {
+	var (
+		out  []Selector
+		diag []UnsupportedSelector
+	)
+	for _, group := range strings.Split(src, ",") {
+		group = strings.TrimSpace(group)
+		sel, ok := parseOneSelector(group)
+		if ok {
+			out = append(out, sel)
+			continue
+		}
+		if c := unsupportedConstructIn(group); c != "" {
+			diag = append(diag, UnsupportedSelector{Construct: c, Selector: group})
+		}
+	}
+	return out, diag
+}
+
+// The unsupported* constants name the selector constructs this parser does not
+// implement, for UnsupportedSelector.Construct. They are short, stable, and
+// user-facing: they appear verbatim in the diagnostic a caller logs.
+const (
+	unsupportedChild          = "child combinator (>)"
+	unsupportedAdjacent       = "adjacent-sibling combinator (+)"
+	unsupportedGeneralSibling = "general-sibling combinator (~)"
+	unsupportedAttribute      = "attribute selector ([...])"
+	unsupportedNamespace      = "namespace selector (|)"
+)
+
+// unsupportedConstructIn names the unimplemented construct that explains why src
+// was dropped, or "" when the drop has some other cause. A selector using more
+// than one unimplemented construct is named by whichever appears FIRST — the
+// message points at a rule, not at a character, and either name finds it.
+//
+// Text inside a functional pseudo-class's parentheses is SKIPPED. The An+B
+// microsyntax of the supported `:nth-child(2n+1)` family contains a '+', and
+// reading that as an adjacent-sibling combinator would reject a selector the
+// parser handles perfectly — a correctness bug, not merely a mislabeled message.
+//
+// The paren tracking runs over the WHOLE comma-free selector, so it also covers
+// `li:nth-last-child(2n + 1)`, whose spaces put the '+' in a field of its own.
+// That selector is still dropped (the whitespace-splitting parser cannot see
+// past the spaces — CLAUDE.md roadmap item 8), but it is dropped as MALFORMED
+// with no diagnostic, rather than mis-reported as a sibling combinator. Blaming
+// valid CSS is the one failure mode this feature must not have.
+//
+// Quoting is NOT tracked, so a mark inside an attribute value (`[title=">"]`)
+// still reports as a child combinator. That is harmless: such a selector is
+// dropped for the attribute selector regardless, so this only picks which of two
+// true statements to print, and the fix would be a tokenizer this parser does not
+// otherwise need.
+func unsupportedConstructIn(src string) string {
+	depth := 0
+	for i := 0; i < len(src); i++ {
+		switch c := src[i]; c {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case '>', '+', '~', '[', '|':
+			if depth > 0 {
+				continue // inside a functional pseudo's argument, e.g. :nth-child(2n+1)
+			}
+			return map[byte]string{
+				'>': unsupportedChild,
+				'+': unsupportedAdjacent,
+				'~': unsupportedGeneralSibling,
+				'[': unsupportedAttribute,
+				'|': unsupportedNamespace,
+			}[c]
+		}
+	}
+	return ""
+}
+
+// parseOneSelector parses one comma-free selector: simple selectors joined by
+// whitespace (the descendant combinator). ok is false when the selector cannot
+// be represented and must be dropped, so its rule never matches — never a
+// partial or approximate parse, which could mis-apply.
+//
+// The unimplemented combinators (>, +, ~) are rejected HERE rather than falling
+// through to parseSimple, which would take ">" for a type selector named ">" and
+// build a part that silently never matches. The observable result is the same
+// (an inert rule, since no element is named ">"), but rejecting explicitly is
+// what lets parseSelectorListDiag tell the difference between "dropped because
+// unimplemented" and "dropped because malformed", and so say something useful.
 func parseOneSelector(src string) (Selector, bool) {
 	fields := strings.Fields(src) // descendant combinator = whitespace
 	if len(fields) == 0 {
@@ -252,6 +342,9 @@ func parseOneSelector(src string) (Selector, bool) {
 	}
 	var sel Selector
 	for _, f := range fields {
+		if isCombinatorToken(f) {
+			return Selector{}, false
+		}
 		ss, ok := parseSimple(f)
 		if !ok {
 			return Selector{}, false
@@ -259,6 +352,15 @@ func parseOneSelector(src string) (Selector, bool) {
 		sel.parts = append(sel.parts, ss)
 	}
 	return sel, true
+}
+
+// isCombinatorToken reports whether a whitespace-delimited field is one of the
+// unimplemented CSS combinators standing alone (`div > p`). An unspaced form
+// (`div>p`) does not reach here as its own field; parseSimple takes it for a type
+// name containing '>' and fails to match, and unsupportedConstructIn still names
+// it correctly from the raw text.
+func isCombinatorToken(f string) bool {
+	return f == ">" || f == "+" || f == "~"
 }
 
 // parseSimple parses one compound simple selector like "div.intro#lead", "a:link", or
@@ -272,6 +374,15 @@ func parseSimple(f string) (simpleSelector, bool) {
 		return ss, true
 	}
 	if f == "" {
+		return simpleSelector{}, false
+	}
+	// Reject a compound carrying an unimplemented construct BEFORE parsing it.
+	// Without this, an unspaced `div>p` or a `[data-x]` qualifier would be
+	// swallowed into the type name (none of '>', '+', '~', '[', '|' is a marker
+	// below), producing a part with a nonsense tag that no element can ever match.
+	// The rule was already inert; dropping it explicitly changes nothing an author
+	// can observe, and is what makes the drop REPORTABLE rather than silent.
+	if unsupportedConstructIn(f) != "" {
 		return simpleSelector{}, false
 	}
 	// A '(' also ends a name fragment so a functional pseudo (:not(...), :nth-child(...))

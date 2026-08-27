@@ -1,6 +1,9 @@
 package css
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Declaration is one property: value pair from a rule body, with the !important
 // flag. Value is the raw value text (trimmed); typed interpretation happens in
@@ -28,6 +31,29 @@ type Stylesheet struct {
 	Rules     []Rule
 	FontFaces []FontFace
 	Pages     []PageRule
+	// Unsupported names the CSS selector constructs this parser does not
+	// implement and that caused a selector to be DROPPED from this sheet,
+	// deduplicated in first-seen order (see UnsupportedSelector). A dropped
+	// selector fails safe — its rule never matches, so it can never mis-apply —
+	// but it fails SILENTLY, and an author whose `.icon > path` rule was ignored
+	// has nothing to go on. This is the record that lets a caller with a logger
+	// say so.
+	//
+	// It is carried as DATA rather than reported through a logf parameter because
+	// Parse has none and cannot gain one: html.UAStylesheet is a package-level
+	// var initialized by Parse, so there is no caller at that point to hold a
+	// logger. NewResolver drains this for the HTML/DOCX path; pkg/svg's index
+	// drains it for SVG-internal <style>.
+	Unsupported []UnsupportedSelector
+}
+
+// UnsupportedSelector records one selector this parser could not represent, and
+// therefore dropped. Construct is a short stable name for the CSS feature (see
+// the unsupported* constants); Selector is the offending source text, trimmed,
+// so a diagnostic can quote what the author actually wrote.
+type UnsupportedSelector struct {
+	Construct string
+	Selector  string
 }
 
 // Parse parses a CSS stylesheet. It is total: malformed rules and unsupported
@@ -71,10 +97,12 @@ func Parse(src string) Stylesheet {
 				}
 				sheet.FontFaces = append(sheet.FontFaces, inner.FontFaces...)
 				sheet.Pages = append(sheet.Pages, inner.Pages...)
+				sheet.addUnsupported(inner.Unsupported)
 			}
 			continue // any other at-rule: block already consumed by the scanner
 		}
-		sels := parseSelectorList(prelude)
+		sels, diag := parseSelectorListDiag(prelude)
+		sheet.addUnsupported(diag)
 		if len(sels) == 0 {
 			continue
 		}
@@ -84,6 +112,29 @@ func Parse(src string) Stylesheet {
 		})
 	}
 	return sheet
+}
+
+// maxUnsupportedSelectors caps how many dropped-selector records one sheet
+// retains. A caller logs at most one line per distinct construct, so the list is
+// a diagnostic aid, not data anyone iterates in full; the cap keeps a
+// machine-generated sheet with thousands of `>` rules from retaining a slice
+// proportional to the source.
+const maxUnsupportedSelectors = 64
+
+// addUnsupported appends dropped-selector records, skipping any whose (construct,
+// selector) pair is already recorded and stopping at maxUnsupportedSelectors. The
+// dedupe is quadratic in the retained count, which the cap bounds to a trivial
+// amount of work.
+func (s *Stylesheet) addUnsupported(diag []UnsupportedSelector) {
+	for _, d := range diag {
+		if len(s.Unsupported) >= maxUnsupportedSelectors {
+			return
+		}
+		if slices.Contains(s.Unsupported, d) {
+			continue
+		}
+		s.Unsupported = append(s.Unsupported, d)
+	}
 }
 
 // ruleScanner walks the source returning (prelude, body) pairs for each top-level

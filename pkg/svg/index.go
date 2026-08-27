@@ -135,7 +135,17 @@ func indexStyleSheet(el *element, idx *docIndex, warn func(key, msg string)) {
 	if hasImportRule(src) {
 		warn("svg-style-import", "svg: <style> @import is not supported (skipped)")
 	}
-	idx.sheets = append(idx.sheets, css.Parse(src))
+	sheet := css.Parse(src)
+	// An SVG's own <style> is exactly where the selector gap bites hardest:
+	// design-tool exports lean on `[class^="cls-"]` and `.icon > path`, and a rule
+	// the parser cannot represent is dropped — safely, but silently. Say so once
+	// per construct, reusing the index's existing warn-once so an SVG with fifty
+	// such rules produces one line.
+	for _, u := range sheet.Unsupported {
+		warn("svg-selector:"+u.Construct,
+			fmt.Sprintf("svg: <style> %s is not supported; rules using it are ignored (first: %q)", u.Construct, u.Selector))
+	}
+	idx.sheets = append(idx.sheets, sheet)
 }
 
 // isCSSType reports whether a <style> element's type attribute (possibly
