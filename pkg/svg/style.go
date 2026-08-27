@@ -66,6 +66,30 @@ type Style struct {
 	// document-index dependency, so it is fully resolved here rather than
 	// deferred to the scene builder.
 	maskType string
+
+	// overflow is the CSS overflow property, non-inherited, meaningful only
+	// on a viewport-establishing element (<marker>, <symbol>, <svg>,
+	// <pattern>). SVG's UA stylesheet gives those elements the initial value
+	// "hidden" — the OPPOSITE of CSS's general "visible" default — so this
+	// defaults to "hidden" and only an explicit "visible"/"scroll" turns the
+	// viewport clip off. It is a plain enum with no document-index
+	// dependency, so it resolves here (like maskType) rather than in the
+	// scene builder; going through the cascade rather than reading the raw
+	// attribute is what makes style="overflow:visible" and an `overflow`
+	// sheet rule work, not just the presentation attribute.
+	overflow string
+
+	// markerStartRef, markerMidRef, markerEndRef are the raw, unresolved
+	// marker-start/-mid/-end property values ("none", "url(#id)", or an
+	// invalid/unrecognized value). Resolved against the document index by
+	// the scene builder (see resolveMarkerRef in marker.go), not here — same
+	// reason as clipPathRef/maskRef. UNLIKE clipPathRef/maskRef, these ARE
+	// inherited (SVG marker properties inherit like an ordinary presentation
+	// property — see the resvg inheritance-1/inheritance-2 fixtures), so
+	// apply() does not reset them to "" on every call.
+	markerStartRef string
+	markerMidRef   string
+	markerEndRef   string
 }
 
 // defaultStyle returns the SVG initial presentation state: black fill, no
@@ -95,6 +119,9 @@ func defaultStyle() Style {
 		clipPathRef:   "", // not inherited; reset every apply() call below
 		maskRef:       "", // not inherited; reset every apply() call below
 		maskType:      "luminance",
+		overflow:      "hidden", // not inherited; reset every apply() call below
+		// markerStartRef/markerMidRef/markerEndRef default to "" (no
+		// marker) and, being inherited, are NOT reset in apply() below.
 	}
 }
 
@@ -116,6 +143,7 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s.clipPathRef = ""       // not inherited; may be overridden below
 	s.maskRef = ""           // not inherited; may be overridden below
 	s.maskType = "luminance" // not inherited; may be overridden below
+	s.overflow = "hidden"    // not inherited; may be overridden below
 
 	if el == nil {
 		return s
@@ -153,6 +181,18 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyClipPathProp(&s, attr, logf)
 	applyMaskProp(&s, attr, logf)
 	applyMaskType(&s, attr, logf)
+	applyOverflow(&s, attr, logf)
+	// There is deliberately no applyMarkerShorthand here: the "marker"
+	// shorthand is expanded into these three longhands inside the cascade
+	// (see setResolved in cascade.go), which is the only place with the
+	// origin and source-order information needed to rank a shorthand
+	// against its own longhands correctly in both directions. By the time
+	// attr() is readable here the cascade has already collapsed to one
+	// value per property, so any shorthand handling at this layer could
+	// only impose a fixed, and therefore sometimes wrong, precedence.
+	applyMarkerProp("marker-start", &s.markerStartRef, attr, logf)
+	applyMarkerProp("marker-mid", &s.markerMidRef, attr, logf)
+	applyMarkerProp("marker-end", &s.markerEndRef, attr, logf)
 
 	return s
 }
@@ -365,6 +405,28 @@ func applyMaskProp(s *Style, attr func(string) (string, bool), logf func(string,
 	s.maskRef = val
 }
 
+// applyMarkerProp records the raw value of one marker-start/-mid/-end
+// longhand for the scene builder to resolve against the document index,
+// mirroring applyClipPathProp/applyMaskProp's recording shape exactly
+// ("none"/absent clear *dst, "inherit" keeps the parent's value, anything
+// else — including a syntactically invalid url() — is recorded verbatim).
+// The key difference from clip-path/mask: markers ARE inherited, so *dst is
+// never reset to "" at the top of apply() the way clipPathRef/maskRef are —
+// this function is the ONLY place a marker-*-ref field changes, and it only
+// runs when the attribute is actually present on this element.
+func applyMarkerProp(name string, dst *string, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr(name)
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		*dst = ""
+		return
+	}
+	*dst = val
+}
+
 // applyMaskType resolves mask-type (SVG2: luminance|alpha), non-inherited.
 // An unrecognized value is logged and ignored, keeping the default
 // (luminance) — matching applyFillRule's error-handling shape for an
@@ -379,6 +441,26 @@ func applyMaskType(s *Style, attr func(string) (string, bool), logf func(string,
 		s.maskType = val
 	default:
 		logf("svg: ignoring %s=%q: unparseable", "mask-type", val)
+	}
+}
+
+// applyOverflow resolves the overflow property, non-inherited. The value is
+// trimmed and lowercased first: overflow reaches here from a presentation
+// attribute as well as CSS, and both are whitespace-tolerant while CSS
+// keywords are ASCII case-insensitive — the raw-attribute read this
+// replaced honored neither. An unrecognized value is logged and ignored,
+// keeping SVG's "hidden" default for a viewport-establishing element,
+// matching applyMaskType's error-handling shape.
+func applyOverflow(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("overflow")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch val = strings.ToLower(strings.TrimSpace(val)); val {
+	case "visible", "scroll", "hidden", "auto":
+		s.overflow = val
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "overflow", val)
 	}
 }
 
@@ -585,6 +667,19 @@ func (s Style) StrokePaint() (render.StrokePaint, bool) {
 	}, true
 }
 
+// StrokeWidthValue returns the element's resolved (inherited) stroke-width
+// property value in user units, REGARDLESS of whether the element has a
+// paintable stroke (stroke="none", or no stroke color set at all — unlike
+// StrokePaint, which reports ok=false in exactly those cases). A
+// markerUnits="strokeWidth" marker scales by this raw property value per
+// SVG2 §11.6.7 ("the value of the stroke-width property"), not by whether a
+// stroke actually gets painted — see with-a-large-stroke.svg, which sets
+// stroke-width="10" with no stroke color at all and still expects markers
+// scaled by 10, not by StrokePaint's zero-stroke fallback.
+func (s Style) StrokeWidthValue() float64 {
+	return s.strokeWidth
+}
+
 // Opacity returns the element's own (non-inherited) opacity in [0,1].
 func (s Style) Opacity() float64 {
 	return s.opacity
@@ -615,4 +710,36 @@ func (s Style) MaskRef() (string, bool) {
 // value: "luminance" (default) or "alpha".
 func (s Style) MaskTypeValue() string {
 	return s.maskType
+}
+
+// WantsViewportClip reports whether a viewport-establishing element's
+// resolved overflow clips its content to that viewport: true for the SVG
+// default "hidden" (and for "auto"), false only for "visible"/"scroll".
+// Callers are <marker> and <symbol>, which share the identical default.
+func (s Style) WantsViewportClip() bool {
+	switch s.overflow {
+	case "visible", "scroll":
+		return false
+	default:
+		return true
+	}
+}
+
+// MarkerStartRef returns the element's raw, unresolved (INHERITED) marker-start
+// property value ("url(#id)" or an invalid value) and whether one is present
+// ("" / absent / "none" report ok=false).
+func (s Style) MarkerStartRef() (string, bool) {
+	return s.markerStartRef, s.markerStartRef != ""
+}
+
+// MarkerMidRef returns the element's raw, unresolved (INHERITED) marker-mid
+// property value, mirroring MarkerStartRef.
+func (s Style) MarkerMidRef() (string, bool) {
+	return s.markerMidRef, s.markerMidRef != ""
+}
+
+// MarkerEndRef returns the element's raw, unresolved (INHERITED) marker-end
+// property value, mirroring MarkerStartRef.
+func (s Style) MarkerEndRef() (string, bool) {
+	return s.markerEndRef, s.markerEndRef != ""
 }

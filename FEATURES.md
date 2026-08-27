@@ -698,8 +698,56 @@ read+write vocabulary for the tinycld text adoption path):
   corpus's `mask/on-group-with-transform.svg` and `mask/half-width-region-with-rotation.svg`, both of
   which render blank under this engine (a graceful degradation, not a crash) versus resvg's correctly
   bbox-relative result.
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, filters,
-  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices in
+- **`<use>` and `<symbol>` instantiation.** A `<use>` instantiates its href target as if it were a
+  deep clone spliced in at the `<use>`'s own position: the clone inherits from the USE SITE, not from
+  the target's document parent, so the target's own attributes win where it sets them and the
+  `<use>`'s cascade shows through everywhere else (`style-inheritance-1.svg` and
+  `complex-style-resolving-order.svg` pin this down). Instantiation is therefore deliberately NEVER
+  memoized by target id — two `<use>`s of one target under different inherited style must produce
+  genuinely different `Shape`s, the opposite of `clipMemo`/`maskMemo`'s idempotent by-id caching. The
+  `<use>`'s `x`/`y` and its own `transform` compose under the target's, and its element `opacity`
+  composites on the wrapper Group exactly like a `<g opacity>`'s does. A `<symbol>` target
+  additionally establishes a real second viewport (SVG2 §5.6): sized from the `<use>`'s own
+  `width`/`height` (lacuna 100% of the current viewport), mapped through the symbol's `viewBox`/
+  `preserveAspectRatio` with the same machinery as the root `<svg>`, with `userSpaceOnUse`
+  percentages inside resolving against the symbol's extent. Its default `overflow:hidden` clips to
+  the viewport rect via a cheap axis-aligned `Group.ViewportClip` (a plain `PushClip`, no offscreen
+  compositing pass) — resolved through the cascade, so `style="overflow:visible"` disables it. A
+  `<symbol>`'s own `transform` is ignored per SVG 1.1. `<use>` also works as a `<clipPath>` child.
+  Both cycle shapes terminate: an href chain (`#u1` → `#u2` → `#u1`) and tree recursion (a `<use>`
+  targeting its own DOM ancestor, or a descendant `<use>` targeting an enclosing one) — the latter is
+  unreachable by href-following alone and is caught by a `buildingUse` "id currently on the call
+  stack" guard keyed on BOTH the `<use>`'s own id and its target's. A long ACYCLIC chain of distinct
+  targets is bounded separately by `maxUseDepth` (64).
+- **`<marker>` painting** on `path`, `line`, `polyline`, and `polygon` — the SVG 1.1 markerable set.
+  `marker-start`/`-mid`/`-end` and the `marker` shorthand all resolve through the cascade and
+  inherit, so a marker set on a `<g>` reaches its shapes. Markers place at every vertex with correct
+  per-vertex tangents (including a synthesized vertex for a closed subpath, per SVG 1.1 §11.6.3),
+  honor `orient="auto"`/`orient="auto-start-reverse"`/an explicit angle, `refX`/`refY`, `markerWidth`/
+  `markerHeight`, `markerUnits` (`strokeWidth` default vs. `userSpaceOnUse`), and their own
+  `viewBox`/`preserveAspectRatio`. A marker clips to its viewport BY DEFAULT (`overflow:hidden` is
+  the initial value for a marker, the opposite of most SVG elements). Markers are memoized by id
+  (`markerMemo`, like `clipMemo`/`maskMemo` — resolution is idempotent here), and a marker whose own
+  content carries a `marker-*` property is guarded against self-reference by `buildingMarker` and
+  against a long acyclic chain by `maxMarkerChainDepth` (64).
+- Known scope limits of `<use>`/`<symbol>`/`<marker>`, each degrading rather than failing: **a nested
+  `<svg>` as a `<use>` target is not supported** — it establishes its own viewport, which this slice
+  does not implement, so the reference resolves to nothing SILENTLY (no `WithLogf` line, unlike most
+  degradations here), deferring the corpus's seven `xlink-to-svg-element*.svg` fixtures. **Markers
+  paint only on `path`/`line`/`polyline`/`polygon`** — SVG 2 extends the markerable set to the
+  remaining shapes and this engine does not follow it, so a `marker-*` property reaching a
+  `<circle>`/`<rect>`/`<ellipse>` by inheritance paints nothing (the corpus's `marker-on-circle.svg`,
+  `marker-on-rect.svg`, and `marker-on-rounded-rect.svg` assert exactly that). **A `<use>` inside a
+  `<clipPath>` may not itself target another `<use>`.** **Total `<use>`/`<symbol>` instantiations per
+  document are capped at `maxUseNodes` (100,000)**, logged once via `WithLogf` when exhausted: this
+  is a build-time DoS bound, since `maxUseDepth` limits recursion depth but not breadth, and a graph
+  where each level references the previous level twice expands ~4× per level entirely inside `Parse`
+  — where `pkg/svg/draw`'s draw-time `maxDrawCalls` can never fire. The budget is a monotonic
+  whole-document total (a per-subtree counter would reset on every sibling and let such a graph
+  through) and sits about an order of magnitude above the largest realistic icon sprite sheet, so
+  legitimate documents are never truncated.
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: text, filters,
+  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 6–8 slices in
   `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
 - 74 curated fixtures from the resvg test suite's `masking/**` tranche (MIT, commit
   `d8e064337faf01bc5a9579187a56dbdbe3eacc72`; see `testdata/svg/resvg/README.md` for the earlier

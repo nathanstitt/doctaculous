@@ -55,3 +55,43 @@ func TestParseTransform(t *testing.T) {
 		t.Errorf("empty = %+v,%v", m, ok)
 	}
 }
+
+// TestParseAngle covers every unit form the resvg marker corpus's
+// orient="<angle>" fixtures exercise: orient=-45 (bare number, degrees),
+// orient=0.25turn, orient=1.5rad, orient=30, orient=40grad, orient=9999
+// (an out-of-[0,360)-range but still valid angle — no wraparound is
+// expected of the parser itself, only of whatever renders the result).
+func TestParseAngle(t *testing.T) {
+	tests := []struct {
+		in   string
+		want float64
+	}{
+		{"-45", -45 * math.Pi / 180},
+		{"30", 30 * math.Pi / 180},
+		{"9999", 9999 * math.Pi / 180},
+		{"0deg", 0},
+		{"180deg", math.Pi},
+		{"40grad", 40 * math.Pi / 200},
+		{"1.5rad", 1.5},
+		{"0.25turn", 0.5 * math.Pi},
+		{"1turn", 2 * math.Pi},
+	}
+	for _, tc := range tests {
+		got, ok := parseAngle(tc.in)
+		if !ok {
+			t.Errorf("parseAngle(%q) failed", tc.in)
+			continue
+		}
+		if math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("parseAngle(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestParseAngleInvalid(t *testing.T) {
+	for _, in := range []string{"", "auto", "45xyz", "deg", "  "} {
+		if _, ok := parseAngle(in); ok {
+			t.Errorf("parseAngle(%q) succeeded, want failure", in)
+		}
+	}
+}

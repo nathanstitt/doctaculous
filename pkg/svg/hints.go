@@ -35,6 +35,34 @@ import (
 // apply()) so `style="mask-type:alpha"` and a `mask-type` sheet rule both
 // reach it — see the resvg mask-type-in-style fixture, which this hint
 // entry is what makes pass.
+//
+// marker-start/marker-mid/marker-end are resolved out-of-band exactly like
+// clip-path and mask (see resolveMarkerRef in marker.go), for the same
+// document-index reason: Style.apply only ever sees the cascade, never
+// docIndex. Unlike clip-path/mask, markers ARE an inherited property group
+// per SVG (a marker-start set on a <g> reaches every descendant path that
+// doesn't set its own — see the resvg inheritance-1/inheritance-2 fixtures),
+// so applyMarkerProp does NOT reset them to "" on every apply() call the way
+// applyClipPathProp/applyMaskProp do for their own non-inherited refs.
+//
+// "marker" (the shorthand setting all three longhands at once) is
+// DELIBERATELY NOT in this list, unlike every other property with a
+// consuming applyXxx call: the resvg corpus's the-marker-property.svg
+// (title: "Should be ignored") asserts that marker="url(#m)" as a bare XML
+// PRESENTATION ATTRIBUTE must NOT apply markers, while
+// the-marker-property-in-CSS.svg and recursive-4.svg assert that the exact
+// same shorthand DOES apply when written as `style="marker:url(#m)"` or a
+// `{ marker: url(#m) }` sheet rule — i.e. resvg (and this engine, matching
+// it) only recognizes "marker" as a CSS property, never as a presentation
+// attribute. The cascade's setResolved expands the "marker" shorthand into
+// the three longhands as it resolves style=""/sheet-rule declarations, which
+// runs independently of this list and reaches them regardless; only the
+// bare-XML-attribute promotion this list drives is skipped. This is the ONE
+// intentional exception to the "every applyXxx call must be listed here"
+// rule the rest of this comment block documents — see the sync test's own
+// carve-out list (svgPresentationAttrsNotConsumedByApply covers the reverse
+// direction; this is forward: consumed by apply, but not a listed
+// attribute).
 var svgPresentationAttrs = []string{
 	"color",
 	"fill",
@@ -57,6 +85,10 @@ var svgPresentationAttrs = []string{
 	"clip-rule",
 	"mask",
 	"mask-type",
+	"overflow",
+	"marker-start",
+	"marker-mid",
+	"marker-end",
 }
 
 // svgPresentationHints maps an element's SVG presentation attributes to CSS

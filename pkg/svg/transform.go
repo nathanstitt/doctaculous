@@ -78,3 +78,44 @@ func parseTransform(s string) (render.Matrix, bool) {
 	}
 	return m, true
 }
+
+// parseAngle parses a CSS <angle> (used by marker's orient="<angle>" form,
+// SVG2 §11.6.7): a number followed by one of deg/grad/rad/turn, or a bare
+// number (no unit), which SVG's own <angle> grammar (unlike CSS's, which
+// requires a unit except for zero) allows and treats as degrees — the same
+// bare-number-means-degrees convention parseTransform already uses for
+// rotate()/skewX()/skewY(). Returns radians and ok=false for an empty,
+// unparseable, or unrecognized-unit string; no existing parser in this
+// package handles anything but degrees, so this is the first angle-unit
+// parser in the package (see the design's task list for why: orient is the
+// only property with grad/rad/turn units anywhere in the corpus this engine
+// targets).
+func parseAngle(s string) (radians float64, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	unit := ""
+	num := s
+	for _, u := range [...]string{"deg", "grad", "rad", "turn"} {
+		if strings.HasSuffix(s, u) {
+			unit, num = u, s[:len(s)-len(u)]
+			break
+		}
+	}
+	v, ok := parseNumber(num)
+	if !ok {
+		return 0, false
+	}
+	switch unit {
+	case "", "deg":
+		return v * math.Pi / 180, true
+	case "grad":
+		return v * math.Pi / 200, true
+	case "rad":
+		return v, true
+	case "turn":
+		return v * 2 * math.Pi, true
+	}
+	return 0, false
+}
