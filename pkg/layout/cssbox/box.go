@@ -160,6 +160,17 @@ type ReplacedContent struct {
 	Text    string            // control's display text; empty for <img>
 }
 
+// InlineSVGAttr is the Attrs key under which box generation stores the
+// re-serialized markup of an inline <svg> subtree. It is not an HTML attribute —
+// the leading "-" makes it unmatchable by any real attribute name — so a document
+// cannot forge it, and existing replaced content is unaffected.
+//
+// The markup is carried rather than a parsed document because ReplacedContent is
+// deliberately source-facts-only: parsing belongs to layout time, where the
+// engine holds the context, the logger, and the memo cache. This mirrors how a
+// raster <img> carries a src rather than an image.Image.
+const InlineSVGAttr = "-inline-svg"
+
 // Box is a node of the recursive box tree. It is read-only after construction.
 type Box struct {
 	Kind     BoxKind

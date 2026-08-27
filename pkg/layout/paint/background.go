@@ -19,7 +19,10 @@ const maxBackgroundTiles = 100000
 // every tile to the clip box (background-clip). It mirrors paintImage's matrix recipe
 // (unit square → tile rect, Y-flipped for DrawImage's bottom-up convention).
 func paintBackgroundImage(dev render.Device, it *layout.BackgroundImageItem, mat render.Matrix) {
-	if it.Img == nil || it.IntrinsicW <= 0 || it.IntrinsicH <= 0 {
+	if it.Img == nil && it.Scene == nil {
+		return
+	}
+	if it.IntrinsicW <= 0 || it.IntrinsicH <= 0 {
 		return
 	}
 	if it.ClipW <= 0 || it.ClipH <= 0 || it.OriginW <= 0 || it.OriginH <= 0 {
@@ -52,41 +55,39 @@ func paintBackgroundImage(dev render.Device, it *layout.BackgroundImageItem, mat
 				dev.Restore()
 				return
 			}
-			mImg := render.Scale(tw, -th).Mul(render.Translate(tx, ty+th))
-			dev.DrawImage(it.Img, mImg.Mul(mat), 1, "")
+			paintBackgroundTile(dev, it, tx, ty, tw, th, mat)
 			drawn++
 		}
 	}
 	dev.Restore()
 }
 
-// backgroundTileSize computes the painted size of one background tile from the size
-// mode and the intrinsic size, scaling against the origin box for cover/contain/%.
-func backgroundTileSize(it *layout.BackgroundImageItem) (w, h float64) {
-	iw, ih := it.IntrinsicW, it.IntrinsicH
-	switch it.SizeKind {
-	case layout.BgSizeCover:
-		s := scaleRatio(it.OriginW/iw, it.OriginH/ih, false) // larger ratio
-		return iw * s, ih * s
-	case layout.BgSizeContain:
-		s := scaleRatio(it.OriginW/iw, it.OriginH/ih, true) // smaller ratio
-		return iw * s, ih * s
-	case layout.BgSizeExplicit:
-		w, h = it.SizeW, it.SizeH
-		switch {
-		case w <= 0 && h <= 0: // both auto → intrinsic
-			return iw, ih
-		case w <= 0: // width auto → preserve intrinsic ratio from the height
-			return h * (iw / ih), h
-		case h <= 0: // height auto → preserve intrinsic ratio from the width
-			return w, w * (ih / iw)
-		default:
-			return w, h
+// paintBackgroundTile draws one tile of a background image at page-space top-left
+// (tx,ty) at size tw x th. A RASTER source goes through DrawImage with the usual
+// unit-square → tile-rect matrix (Y-flipped for DrawImage's bottom-up convention);
+// a VECTOR source is handed a ctm that maps its authored viewport onto the tile
+// rect, so the backend receives path operators rather than pixels.
+func paintBackgroundTile(dev render.Device, it *layout.BackgroundImageItem, tx, ty, tw, th float64, mat render.Matrix) {
+	if it.Scene != nil {
+		if it.SceneW <= 0 || it.SceneH <= 0 {
+			return
 		}
-	default: // BgSizeAuto → intrinsic
-		return iw, ih
+		// Scene coordinates are Y-DOWN from its own viewport top-left (see
+		// layout.VectorScene), the same convention as page space, so this is a plain
+		// scale-then-translate with no flip — unlike the raster branch below.
+		ctm := render.Scale(tw/it.SceneW, th/it.SceneH).Mul(render.Translate(tx, ty)).Mul(mat)
+		it.Scene.DrawVector(dev, ctm)
+		return
 	}
+	mImg := render.Scale(tw, -th).Mul(render.Translate(tx, ty+th))
+	dev.DrawImage(it.Img, mImg.Mul(mat), 1, "")
 }
+
+// backgroundTileSize computes the painted size of one background tile. The
+// computation is pure geometry over the item, so it lives on the item itself
+// (layout.BackgroundImageItem.TileSize) and this is a thin alias kept for the
+// painter's local reading order.
+func backgroundTileSize(it *layout.BackgroundImageItem) (w, h float64) { return it.TileSize() }
 
 // bgAxisOffset resolves a background-position component to the tile's leading-edge
 // offset within the origin box on one axis. A percentage positions the tile so its

@@ -3,7 +3,9 @@
 // documents' body markup in reading order plus their stylesheets — the pieces
 // the HTML pipeline lays out (EPUB content IS XHTML, so the reflow engine does
 // the real work). EPUB 2 and 3 both resolve through the spine; the NCX is not
-// consulted (it duplicates the spine's order). DRM-protected books
+// consulted (it duplicates the spine's order). The manifest's cover image is
+// surfaced too (Book.CoverHref), under both the EPUB 3 and EPUB 2 conventions,
+// since a cover is not otherwise reachable from the spine. DRM-protected books
 // (META-INF/encryption.xml) are refused with ErrEncrypted.
 package epub
 
@@ -43,6 +45,24 @@ type Book struct {
 	StylesheetRefs []string
 	// InlineCSS holds the chapters' <style> block contents in order.
 	InlineCSS []string
+	// CoverHref is the OPF manifest's cover-image href (content-dir-relative, so
+	// it resolves through Resource like any chapter reference), or "" when the
+	// book declares no cover. Both conventions are honored: the EPUB 3
+	// properties="cover-image" manifest property, and the EPUB 2 de-facto
+	// <meta name="cover" content="itemID"> metadata entry. The image may be any
+	// format the renderer handles, SVG included.
+	//
+	// The href is reported even when the referenced part is missing from the
+	// container; callers that need the bytes should go through Resource, which
+	// reports whether it resolved.
+	CoverHref string
+	// CoverMediaType is the manifest media-type declared for CoverHref, or "".
+	CoverMediaType string
+	// CoverInSpine reports that the cover image is ALSO reachable from the
+	// reading order — the manifest item is itself a spine document, or a spine
+	// document references it. A renderer that prepends a cover page uses this to
+	// avoid showing the same image twice.
+	CoverInSpine bool
 
 	parts      map[string][]byte
 	contentDir string
@@ -126,12 +146,24 @@ func parseBook(parts map[string][]byte) (*Book, error) {
 	var opf struct {
 		Metadata struct {
 			Title []string `xml:"title"`
+			// Metas carries the EPUB 2 de-facto cover convention,
+			// <meta name="cover" content="itemID">. EPUB 3 replaced it with a
+			// manifest property but did not forbid it, and real EPUB 3 files in
+			// the wild still ship both, so both are read.
+			Metas []struct {
+				Name    string `xml:"name,attr"`
+				Content string `xml:"content,attr"`
+			} `xml:"meta"`
 		} `xml:"metadata"`
 		Manifest struct {
 			Items []struct {
 				ID        string `xml:"id,attr"`
 				Href      string `xml:"href,attr"`
 				MediaType string `xml:"media-type,attr"`
+				// Properties is the EPUB 3 manifest-item property list; a
+				// space-separated token set whose "cover-image" token names the
+				// book's cover.
+				Properties string `xml:"properties,attr"`
 			} `xml:"item"`
 		} `xml:"manifest"`
 		Spine struct {
@@ -157,6 +189,45 @@ func parseBook(parts map[string][]byte) (*Book, error) {
 	for _, item := range opf.Manifest.Items {
 		hrefByID[item.ID] = item.Href
 	}
+
+	// The cover-image item, by whichever convention the book uses. EPUB 3's
+	// manifest property wins over the EPUB 2 <meta> when a book carries both,
+	// because it is the normative one; a book carrying only the <meta> (every
+	// EPUB 2, and plenty of EPUB 3) still resolves.
+	coverID := ""
+	for _, item := range opf.Manifest.Items {
+		if hasProperty(item.Properties, "cover-image") {
+			coverID = item.ID
+			break
+		}
+	}
+	if coverID == "" {
+		for _, m := range opf.Metadata.Metas {
+			if strings.EqualFold(strings.TrimSpace(m.Name), "cover") && m.Content != "" {
+				coverID = m.Content
+				break
+			}
+		}
+	}
+	if href, ok := hrefByID[coverID]; ok && coverID != "" {
+		book.CoverHref = href
+		for _, item := range opf.Manifest.Items {
+			if item.ID == coverID {
+				book.CoverMediaType = item.MediaType
+				break
+			}
+		}
+	}
+	// A cover that is ITSELF a spine document would render twice if a caller also
+	// prepended it; flag that here, where the spine is in hand. (The other
+	// duplicate route — a spine chapter that <img>s the cover — is detected below,
+	// against each chapter's markup.)
+	for _, ref := range opf.Spine.ItemRefs {
+		if ref.IDRef == coverID && coverID != "" {
+			book.CoverInSpine = true
+		}
+	}
+
 	seenCSS := map[string]bool{}
 	for _, ref := range opf.Spine.ItemRefs {
 		if ref.Linear == "no" {
@@ -172,6 +243,9 @@ func parseBook(parts map[string][]byte) (*Book, error) {
 		}
 		body, links, styles := extractChapter(string(data))
 		book.Chapters = append(book.Chapters, body)
+		if book.CoverHref != "" && !book.CoverInSpine && chapterReferencesCover(body, href, book.CoverHref) {
+			book.CoverInSpine = true
+		}
 		for _, l := range links {
 			// Stylesheet hrefs are chapter-relative; chapters live under the
 			// content dir, so resolve against it like every other resource.
@@ -192,7 +266,52 @@ func parseBook(parts map[string][]byte) (*Book, error) {
 	return book, nil
 }
 
+// hasProperty reports whether a space-separated EPUB property list contains
+// token, compared case-insensitively (the tokens are defined lowercase, but a
+// producer that shouts them should not lose its cover). An empty list never
+// matches.
+func hasProperty(list, token string) bool {
+	for _, f := range strings.Fields(list) {
+		if strings.EqualFold(f, token) {
+			return true
+		}
+	}
+	return false
+}
+
+// chapterReferencesCover reports whether a spine document's body markup points
+// any src/href at the cover image, so a caller prepending a cover page can skip
+// doing so when the book already shows it. chapterHref is the chapter's own
+// content-dir-relative href, needed because the chapter's references are
+// CHAPTER-relative while coverHref is content-dir-relative.
+//
+// The scan is a plain attribute-value comparison over the raw markup: it does
+// not parse, so a cover reference built by script or hidden behind a redirect is
+// missed. That is the safe direction to be wrong in — a missed match prepends a
+// cover page the book also shows inline, which is redundant but correct, whereas
+// a false match would DROP a cover the reader should see.
+func chapterReferencesCover(body, chapterHref, coverHref string) bool {
+	want := path.Clean(coverHref)
+	base := path.Dir(chapterHref)
+	for _, m := range srcOrHrefRe.FindAllStringSubmatch(body, -1) {
+		ref := m[2]
+		if i := strings.IndexAny(ref, "#?"); i >= 0 {
+			ref = ref[:i]
+		}
+		if ref == "" {
+			continue
+		}
+		if path.Clean(path.Join(base, ref)) == want || path.Clean(ref) == want {
+			return true
+		}
+	}
+	return false
+}
+
 var (
+	// srcOrHrefRe captures the value of any src= or href= attribute in raw markup.
+	srcOrHrefRe = regexp.MustCompile(`(?is)\b(src|href)\s*=\s*["']([^"']*)["']`)
+
 	bodyOpenRe  = regexp.MustCompile(`(?is)<body[^>]*>`)
 	bodyCloseRe = regexp.MustCompile(`(?is)</body\s*>`)
 	linkRe      = regexp.MustCompile(`(?is)<link[^>]*>`)

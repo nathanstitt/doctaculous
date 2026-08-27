@@ -815,6 +815,114 @@ line area</textarea></div>
   <p>A <font color="#cc0000">red word</font> via the obsolete font element.</p>
 </body></html>`,
 	},
+	{
+		// <img src="*.svg">: an SVG fetched through the resource loader, drawn as
+		// VECTORS (never rasterized — see TestHTMLImgSVGEmitsVectorNotImageXObject
+		// for the structural proof on the PDF side). Three sizings side by side, all
+		// from ONE 100x50 viewBox-only source, exercising the intrinsic-sizing rules:
+		// intrinsic (the viewBox extent, 100x50), a CSS width alone (the height
+		// derives from the 2:1 ratio, 160x80), and both axes pinned (non-uniform).
+		// Eyeball: three blue rounded rectangles with an orange circle and a red
+		// diagonal stroke, at 100x50, 160x80, and 120x40 — the artwork scaling
+		// smoothly with the box, staying crisp.
+		name:       "img-svg",
+		viewportPx: 420,
+		loader: resource.MapLoader{"art.svg": {
+			ContentType: "image/svg+xml",
+			Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+  <rect x="1" y="1" width="98" height="48" rx="6" fill="#cce5ff" stroke="#003366" stroke-width="2"/>
+  <circle cx="28" cy="25" r="14" fill="#cc8822"/>
+  <path d="M52 40 L92 10" stroke="#cc3333" stroke-width="4" fill="none"/>
+</svg>`),
+		}},
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  img { display: block; margin-bottom: 6px; }
+  .w   { width: 160px; }
+  .wh  { width: 120px; height: 40px; }
+</style></head><body>
+  <img src="art.svg">
+  <img class="w" src="art.svg">
+  <img class="wh" src="art.svg">
+</body></html>`,
+	},
+	{
+		// Inline <svg> markup, parsed by pkg/svg after pkg/html re-serializes the
+		// foreign-content subtree. The camelCase names the HTML parser REPAIRS
+		// (linearGradient, clipPath, gradientUnits) are load-bearing here: if the
+		// re-serialization lost them, the gradient and the clip would both silently
+		// vanish and this golden would go flat. It also proves box generation stops
+		// at <svg> — no HTML boxes are generated for <circle>/<path>, so the shapes
+		// appear only once, inside the SVG. Eyeball: a red-to-blue gradient bar
+		// clipped to its left two-thirds, a green circle, and the text "vector"
+		// beside it — all inside one 200x80 SVG, followed by an HTML paragraph
+		// proving the SVG is a normal replaced element in flow.
+		name:       "inline-svg",
+		viewportPx: 320,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; font: 14px sans-serif; }
+</style></head><body>
+  <svg width="200" height="80" viewBox="0 0 200 80">
+    <defs>
+      <linearGradient id="g" gradientUnits="objectBoundingBox" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#cc3333"/>
+        <stop offset="1" stop-color="#3355cc"/>
+      </linearGradient>
+      <clipPath id="c"><rect x="0" y="0" width="130" height="30"/></clipPath>
+    </defs>
+    <rect x="0" y="0" width="200" height="30" fill="url(#g)" clip-path="url(#c)"/>
+    <circle cx="24" cy="58" r="16" fill="#33aa33"/>
+    <path d="M48 58 L92 58" stroke="#003366" stroke-width="4"/>
+  </svg>
+  <p>An inline SVG is a replaced element in normal flow.</p>
+</body></html>`,
+	},
+	{
+		// background-image: url(*.svg) — the third SVG route into HTML, and like the
+		// other two it stays VECTOR (TestSVGBackgroundEmitsVectorNotImageXObject is
+		// the structural proof). Four boxes over ONE 100x50 viewBox-only source,
+		// covering every background-size mode against the SVG's intrinsic ratio, plus
+		// the tiling deferral.
+		//
+		// Eyeball, top to bottom:
+		//   1. cover    — the 2:1 artwork fills the 200x60 box and overflows
+		//                 horizontally, clipped: the circle is large and cut off.
+		//   2. contain  — the whole artwork fits inside the box, letterboxed with
+		//                 the pink background colour showing above and below it.
+		//   3. explicit — 80x40, positioned at the box's right edge.
+		//   4. repeat   — DEGRADES to a single paint at intrinsic size in the
+		//                 top-left corner (see the background-repeat deferral). It
+		//                 must be visible and correctly placed, NOT blank and NOT
+		//                 tiled; the pink shows everywhere it does not cover.
+		name:       "bg-svg",
+		viewportPx: 240,
+		loader: resource.MapLoader{"bg.svg": {
+			ContentType: "image/svg+xml",
+			Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+  <rect x="0" y="0" width="100" height="50" fill="#cce5ff"/>
+  <circle cx="25" cy="25" r="18" fill="#cc8822"/>
+  <path d="M55 42 L95 8" stroke="#cc3333" stroke-width="5" fill="none"/>
+</svg>`),
+		}},
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  div {
+    width: 200px; height: 60px; margin-bottom: 6px;
+    background-color: #ffd9e6;
+    background-image: url(bg.svg);
+    background-repeat: no-repeat;
+  }
+  .cover    { background-size: cover; }
+  .contain  { background-size: contain; }
+  .explicit { background-size: 80px 40px; background-position: 100% 0; }
+  .tiled    { background-repeat: repeat; }
+</style></head><body>
+  <div class="cover"></div>
+  <div class="contain"></div>
+  <div class="explicit"></div>
+  <div class="tiled"></div>
+</body></html>`,
+	},
 }
 
 // webfontGoldenLoader serves the committed Pacifico WOFF2 fixture as web.woff2 for

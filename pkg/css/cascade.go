@@ -52,6 +52,24 @@ type ComputedStyle struct {
 	Color           color.RGBA
 	BackgroundColor color.RGBA // zero-alpha means transparent / not set
 
+	// NOT PRESENT, deliberately, and recorded here because this struct is
+	// where a maintainer would look for them:
+	//
+	//   - filter: the CSS filter shorthand is parsed by pkg/filtereffects
+	//     (built dependency-free for exactly this reuse) and the offscreen
+	//     primitives are already on render.Device, but a filtered box must
+	//     BRACKET its subtree's emitted items the way Clips does with
+	//     ClipPushKind/ClipPopKind. That is a change to the flat
+	//     layout.Page.Items interchange format, not to SVG, so it was kept
+	//     out of the SVG series rather than mixed into it.
+	//
+	//   - letter-spacing / word-spacing: implemented for SVG only (see
+	//     pkg/svg/style.go). An SVG-internal declaration works; inheriting
+	//     one from an enclosing HTML ancestor does not, because there is no
+	//     field here to inherit from. Wiring them into reflow means facing
+	//     line-breaking and justification, which is why PR 6 scoped them to
+	//     SVG.
+	//
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
 	BackgroundImage    string
@@ -265,7 +283,38 @@ func NewResolver(sheets []OriginSheet, logf func(string, ...any)) *Resolver {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	reportUnsupportedSelectors(sheets, logf)
 	return &Resolver{sheets: sheets, logf: logf, media: MediaScreen}
+}
+
+// reportUnsupportedSelectors logs ONE line per distinct unimplemented selector
+// construct found across the AUTHOR sheets, quoting the first selector that used
+// it. Parse itself cannot log (see Stylesheet.Unsupported); this is the first
+// point where every sheet and a logger are in hand at once.
+//
+// UA sheets are skipped: the engine ships those, they are written to what the
+// selector parser supports, and a diagnostic about them would blame the author
+// for the engine's own stylesheet.
+//
+// Warn-once per construct, not per selector, is the whole point. A design-tool
+// SVG export or a framework stylesheet can contain hundreds of `>` rules; one
+// line naming the construct tells the author everything the hundred would, and a
+// warning on every valid stylesheet — or a hundred on one invalid one — would be
+// worse than the silence it replaces.
+func reportUnsupportedSelectors(sheets []OriginSheet, logf func(string, ...any)) {
+	seen := map[string]bool{}
+	for _, os := range sheets {
+		if os.Origin != OriginAuthor {
+			continue
+		}
+		for _, u := range os.Sheet.Unsupported {
+			if seen[u.Construct] {
+				continue
+			}
+			seen[u.Construct] = true
+			logf("css: %s is not supported; rules using it are ignored (first: %q)", u.Construct, u.Selector)
+		}
+	}
 }
 
 // SetMedia sets the active media context (MediaScreen or MediaPrint). Rules tagged

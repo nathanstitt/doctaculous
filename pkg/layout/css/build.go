@@ -18,7 +18,29 @@ import (
 
 // replacedTags are elements treated as replaced content (leaf boxes carrying
 // their attributes; no decoded media in this sub-project).
+//
+// <svg> is NOT listed here: an element is only replaced content when it is the
+// root of a real foreign-content subtree (html.Element.ForeignSource), which the
+// HTML parser decides, not the tag name alone. See isReplaced.
 var replacedTags = map[string]bool{"img": true}
+
+// isReplaced reports whether e generates a replaced (leaf) box, and returns the
+// attribute snapshot the box carries. An inline <svg> is replaced content for the
+// same reason an <img> is: its subtree is SVG, not HTML, so box generation must
+// stop there rather than lowering <circle>/<path> into meaningless HTML boxes.
+// Its re-serialized markup rides along under cssbox.InlineSVGAttr and is parsed
+// by pkg/svg at layout time.
+func isReplaced(e *html.Element) (map[string]string, bool) {
+	if src, ok := e.ForeignSource(); ok {
+		attrs := attrSnapshot(e)
+		attrs[cssbox.InlineSVGAttr] = src
+		return attrs, true
+	}
+	if replacedTags[e.Tag()] {
+		return attrSnapshot(e), true
+	}
+	return nil, false
+}
 
 // Build generates a cssbox tree from a parsed HTML document (see BuildWithFonts;
 // this form discards the collected @font-face table for callers that do not need
@@ -206,9 +228,9 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running 
 		return b // controls are leaves — no child boxes (prevents text leakage)
 	}
 
-	if replacedTags[e.Tag()] {
+	if attrs, ok := isReplaced(e); ok {
 		b.Kind = cssbox.BoxReplaced
-		b.Replaced = &cssbox.ReplacedContent{Tag: e.Tag(), Attrs: attrSnapshot(e)}
+		b.Replaced = &cssbox.ReplacedContent{Tag: e.Tag(), Attrs: attrs}
 		return b // replaced elements are leaves
 	}
 

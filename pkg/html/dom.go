@@ -22,6 +22,32 @@ type Element struct {
 	attrs    map[string]string
 	parent   *Element
 	children []DOMNode
+
+	// foreignSrc is the re-serialized markup of a foreign-content (SVG) subtree,
+	// set only on the root <svg> element of one. See ForeignSource.
+	foreignSrc string
+}
+
+// ForeignSource returns the re-serialized markup of an inline foreign-content
+// subtree — today, an inline <svg> — and whether this element is the root of one.
+// It is "" and false for every ordinary HTML element.
+//
+// An inline <svg> is NOT lowered into HTML boxes. Its content is SVG, and pkg/svg
+// is the single source of truth for parsing it; bridging x/net/html's node type
+// into pkg/svg's AST would duplicate that package's whole element and attribute
+// construction against a second node type, and every future SVG parser fix would
+// then have to land twice. So the subtree is handed back as markup and re-parsed
+// by pkg/svg. The extra serialize/reparse is negligible next to parsing the host
+// document at all.
+//
+// The returned markup preserves the camelCase names the HTML parser REPAIRED
+// (clipPath, linearGradient, gradientUnits, viewBox, ...): HTML5 foreign content
+// lower-cases tag and attribute names during tokenization and then restores the
+// SVG spellings via its adjustment tables, and x/net/html's renderer writes back
+// the restored names. Losing them would silently break every gradient and clip in
+// inline SVG, so it is pinned by a test.
+func (e *Element) ForeignSource() (string, bool) {
+	return e.foreignSrc, e.foreignSrc != ""
 }
 
 func (e *Element) node() {}
