@@ -123,6 +123,7 @@ func WriteDocument(ctx context.Context, out io.Writer, pages *layout.Pages, opts
 	for i := range bands {
 		collectBandGlyphs(&bands[i], embed)
 	}
+	logFilterDegradation(bands, opts.Logf)
 	// Assign every face's resource name now, so the parallel render only READS the
 	// name map (resourceName mutates on first sight — doing it here keeps the shared
 	// embedder read-only during the concurrent phase).
@@ -156,6 +157,37 @@ func collectBandGlyphs(b *band, embed *fontEmbedder) {
 			continue
 		}
 		embed.use(it.Glyph.Face, it.Glyph.GID, it.Glyph.Runes)
+	}
+}
+
+// logFilterDegradation reports, ONCE per document, that a CSS `filter` in the
+// input will paint UNFILTERED in this PDF.
+//
+// This writer emits vector operators and has no pixel buffer to read back, so
+// RenderOffscreen declines (see softmask.go) and there is no way to run a
+// filter's pixel math — PDF has no filter operator, and a blur has no vector
+// representation. The filter's group is still opened and closed, so the
+// content is present and correctly placed; only the effect is missing. That is
+// the deliberate trade: a PDF that stays vector-native beats one that
+// rasterizes a page region into an image XObject to fake an effect.
+//
+// It scans the already-flattened item stream rather than asking the device,
+// because the decision is a property of the OUTPUT FORMAT, not of any one
+// band, and this runs in the sequential pre-pass where a single log is
+// guaranteed (the render phase is concurrent).
+func logFilterDegradation(bands []band, logf func(string, ...any)) {
+	if logf == nil {
+		return
+	}
+	for i := range bands {
+		for j := range bands[i].page.Items {
+			if bands[i].page.Items[j].Kind != layout.FilterPushKind {
+				continue
+			}
+			logf("pdfwrite: CSS filter painted UNFILTERED (a PDF writer has no offscreen " +
+				"raster surface to run the pixel math on); the content is present and correctly placed")
+			return
+		}
 	}
 }
 
