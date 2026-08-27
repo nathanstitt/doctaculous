@@ -670,3 +670,69 @@ a.seen:visited { color: #6a9a3a; }
   font-size: 12px;
   color: #3a4a5a;
 }
+
+/* ----- CSS filter ------------------------------------------------------------ */
+
+/* Each swatch is the SAME source rendering — a bordered tile with a label and two
+   colour bands — under a different `filter` declaration, so the grid reads as a
+   direct comparison of the ten shorthand functions against an unfiltered control. */
+.fxgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
+  margin: 16px 0 22px 0;
+}
+
+/* Each swatch is tall enough for the tile PLUS a two-line caption, so the widest
+   captions (drop-shadow, the three-function chain) do not overlap the row below.
+   The two spatial filters also need room around the tile: blur() and drop-shadow()
+   both spread OUTSIDE the border box, which is exactly what the section shows. */
+.fx {
+  width: 112px;
+  height: 116px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* The filtered surface itself: a deliberately saturated tile with two contrasting
+   bands, so a hue rotation, a saturation change and a luminance change are each
+   visible on it. */
+.fx .fxtile {
+  height: 74px;
+  border: 3px solid #1a1a18;
+  background: #2f6fb0;
+  color: #f4f0e6;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 12px;
+  font-weight: bold;
+  padding: 5px;
+  margin-bottom: 6px;
+}
+
+.fx .fxtile .fxband {
+  height: 11px;
+  background: #d9a521;
+  margin-top: 5px;
+}
+
+.fx .fxtile .fxband.alt {
+  background: #b03030;
+}
+
+/* The ten shorthand functions, one per swatch. A filtered box also establishes a
+   BFC and a stacking context, so each tile composites as an isolated group. */
+.f-gray      .fxtile { filter: grayscale(1); }
+.f-sepia     .fxtile { filter: sepia(1); }
+.f-saturate  .fxtile { filter: saturate(2.5); }
+.f-hue       .fxtile { filter: hue-rotate(140deg); }
+.f-invert    .fxtile { filter: invert(1); }
+.f-bright    .fxtile { filter: brightness(1.6); }
+.f-contrast  .fxtile { filter: contrast(2.2); }
+.f-opacity   .fxtile { filter: opacity(0.4); }
+.f-blur      .fxtile { filter: blur(2px); }
+.f-shadow    .fxtile { filter: drop-shadow(5px 5px 3px #7a6a2a); }
+/* Composition: the list applies LEFT TO RIGHT, each function consuming the
+   previous one's output. */
+.f-chain     .fxtile { filter: grayscale(1) brightness(1.5) contrast(1.4); }
