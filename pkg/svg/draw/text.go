@@ -29,6 +29,24 @@ type placedGlyph struct {
 	// rotateRad is the per-character rotation about the glyph's own origin.
 	rotateRad float64
 
+	// xScale horizontally scales the glyph OUTLINE, for
+	// lengthAdjust="spacingAndGlyphs". It is 1 for every other case, and the
+	// scale is applied in the glyph's own em space (before the rotation and
+	// the translation to the pen), so a stretched glyph stays anchored at its
+	// own origin rather than sliding.
+	xScale float64
+
+	// advance is the glyph's EFFECTIVE advance: the shaped advance plus any
+	// letter-spacing/word-spacing, then scaled or padded by a textLength.
+	// It is what the anchor measurement and the decoration extents read, so
+	// they see the same widths the pen actually walked.
+	advance float64
+
+	// charIndex is the index in Text.Chars of the source character, kept so a
+	// textLength (which addresses a CHARACTER range) can select the glyphs it
+	// governs after shaping has already collapsed the two apart.
+	charIndex int
+
 	// chunk indexes the text chunk this glyph belongs to, so the anchor shift
 	// resolved for that chunk is applied to exactly its own glyphs.
 	chunk int
@@ -69,9 +87,16 @@ type placedGlyph struct {
 //
 // Painting and clip-geometry extraction share this so the outlines a
 // <clipPath> gets are provably the same ones a fill would have drawn.
+// The horizontal glyph scale for lengthAdjust="spacingAndGlyphs" folds into
+// step 1, multiplying the X size only: it is defined in the glyph's own space
+// about its origin, so it must compose innermost of all.
 func (p *placedGlyph) matrix(tm render.Matrix) render.Matrix {
 	size := p.glyph.SizePt
-	m := render.Scale(size, -size)
+	xs := p.xScale
+	if xs == 0 {
+		xs = 1 // defensive: a zero-initialised placedGlyph must still paint
+	}
+	m := render.Scale(size*xs, -size)
 	if p.rotateRad != 0 {
 		m = m.Mul(render.Rotate(p.rotateRad))
 	}
@@ -127,8 +152,267 @@ func (r *Renderer) paintText(dev render.Device, t *svg.Text, m render.Matrix, al
 		r.paintTextGrouped(dev, t, placed, tm, alpha, warned)
 		return
 	}
+	// Underline and overline paint UNDER the glyphs, line-through OVER them —
+	// SVG2 §11.11's painting order, and the only order that keeps a
+	// line-through visible on text with a heavy stroke.
+	r.paintDecorations(dev, placed, tm, alpha, warned, decorationsUnder)
 	r.paintTextRuns(dev, placed, tm, alpha, warned)
+	r.paintDecorations(dev, placed, tm, alpha, warned, decorationsOver)
 }
+
+// decorationsUnder and decorationsOver name the two decoration painting
+// passes: the lines drawn beneath the glyphs and those drawn on top. See
+// paintDecorations.
+const (
+	decorationsUnder = false
+	decorationsOver  = true
+)
+
+// paintDecorations draws the text-decoration lines for placed, as filled (and
+// optionally stroked) rectangles.
+//
+// The subtlety this implements, and the reason a decoration is not just a
+// boolean on a glyph: SVG resolves a decoration's PAINT and its
+// position/thickness from the element that DECLARED it, never from the
+// descendant characters it happens to cover. So
+//
+//	<text fill="red" text-decoration="underline"><tspan fill="blue">x</tspan></text>
+//
+// draws blue text under a RED underline. resvg's style-resolving-1..4 and
+// indirect-with-multiple-colors fixtures assert every corner of this,
+// including that the declaring element's FONT-SIZE — not the covered text's —
+// sets the line's thickness and offset (style-resolving-4 draws a 200px-scaled
+// rule under 48px text).
+//
+// Extent: a decoration spans the whole contiguous run of glyphs that inherited
+// the SAME declaration, so it crosses <tspan> boundaries inside the declaring
+// element and stops where the declaration does. Runs are keyed by the
+// declaring style POINTER, which svg.Style.DecorationLines hands back per
+// declaration, so two different elements declaring the same line keyword still
+// draw two separate rules (indirect-with-multiple-colors).
+//
+// over selects the pass: false draws underline and overline, true draws
+// line-through.
+func (r *Renderer) paintDecorations(dev render.Device, placed []placedGlyph, tm render.Matrix, alpha float64, warned *warnFlags, over bool) {
+	for i := 0; i < len(placed); {
+		lines, styles := placed[i].style.DecorationLines()
+		if len(lines) == 0 {
+			i++
+			continue
+		}
+		// Extend the run while the decoration SET is identical. Comparing the
+		// styles by value would merge two sibling tspans that each declared
+		// their own identical underline into one rule — visually the same
+		// here, but wrong the moment their paint differs, so the whole set is
+		// compared instead.
+		j := i + 1
+		for j < len(placed) && sameDecorations(placed[i].style, placed[j].style) {
+			j++
+		}
+		run := placed[i:j]
+		for k, line := range lines {
+			if (line == "line-through") != over {
+				continue
+			}
+			if warned.drawCalls >= maxDrawCalls {
+				r.logDrawBudgetCapOnce(warned)
+				return
+			}
+			r.paintDecorationLine(dev, run, line, styles[k], tm, alpha, warned)
+		}
+		i = j
+	}
+}
+
+// sameDecorations reports whether two styles carry the identical decoration
+// declarations — same lines, in the same order, declared by the same elements.
+func sameDecorations(a, b svg.Style) bool {
+	al, as := a.DecorationLines()
+	bl, bs := b.DecorationLines()
+	if len(al) != len(bl) {
+		return false
+	}
+	for i := range al {
+		if al[i] != bl[i] || !sameDecorationPaint(as[i], bs[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameDecorationPaint reports whether two declaring styles would draw an
+// identical rule: same fill, same stroke, same font size. Those are the only
+// properties paintDecorationLine reads, so comparing more would split runs for
+// differences that cannot show.
+func sameDecorationPaint(a, b svg.Style) bool {
+	af, aok := a.FillPaint()
+	bf, bok := b.FillPaint()
+	if aok != bok || af != bf {
+		return false
+	}
+	as, aok := a.StrokePaint()
+	bs, bok := b.StrokePaint()
+	if aok != bok {
+		return false
+	}
+	if aok && (as.Color != bs.Color || as.Width != bs.Width) {
+		return false
+	}
+	return a.FontSizePt() == b.FontSizePt()
+}
+
+// paintDecorationLine draws one decoration rule across run, as a filled
+// rectangle per contiguous group of glyphs that share a baseline FRAME.
+//
+// It is not one rectangle across the whole run, and that is load-bearing.
+// SVG's per-character y/dy/rotate lists move each glyph independently, and a
+// decoration follows them: resvg's underline-with-dy-list-1 staircases its
+// underline down with the text, and underline-with-rotate-list-3 tilts each
+// segment to its glyph's own angle. Splitting at every change of pen Y or
+// rotation reproduces both, and collapses to the single rectangle of the
+// ordinary flat case because a flat run never changes frame.
+//
+// Geometry comes from the DECLARING style's font size (so style-resolving-4's
+// 200px-scaled rule under 48px text is thick and far below) and the covered
+// glyphs' face metrics for the overline's ascent. pkg/font parses no `post`
+// table, so a face's own underlinePosition/underlineThickness are unavailable
+// and the em fractions below are the conventional fallbacks.
+//
+// Each segment is a rectangle, not a stroked line, so it fills and strokes
+// through the same device calls a glyph outline does — which is what makes a
+// decoration honour stroke width, dashes, and opacity without a second paint
+// path.
+func (r *Renderer) paintDecorationLine(dev render.Device, run []placedGlyph, line string, declaring svg.Style, tm render.Matrix, alpha float64, warned *warnFlags) {
+	size := declaring.FontSizePt()
+	if len(run) == 0 || size <= 0 {
+		return
+	}
+	for i := 0; i < len(run); {
+		j := i + 1
+		// A ROTATED glyph is never merged with its neighbour, even one at the
+		// same angle: SVG rotates each glyph about its OWN origin, so two
+		// glyphs sharing an angle still sit on two different (parallel but
+		// offset) baselines, and one rectangle spanning both would drift away
+		// from the second. resvg's underline-with-rotate-list-3.svg draws four
+		// separate tilted segments under a uniform rotate="15" for exactly
+		// this reason.
+		if run[i].rotateRad == 0 {
+			for j < len(run) && run[j].penY == run[i].penY && run[j].rotateRad == 0 {
+				j++
+			}
+		}
+		if warned.drawCalls >= maxDrawCalls {
+			r.logDrawBudgetCapOnce(warned)
+			return
+		}
+		r.paintDecorationSegment(dev, run[i:j], line, declaring, size, tm, alpha, warned)
+		i = j
+	}
+}
+
+// paintDecorationSegment draws one rule segment: the glyphs in seg all share a
+// pen Y and a rotation, so one rectangle in their common frame covers them.
+//
+// The rectangle is built in the segment's UNROTATED frame — x from the first
+// glyph's pen to the last glyph's advance edge, y offset from their shared
+// baseline — and then rotated about the segment's own start, exactly as
+// placedGlyph.matrix rotates a glyph about its origin. That keeps a rotated
+// underline parallel to the glyphs it sits under instead of staying axis
+// aligned.
+func (r *Renderer) paintDecorationSegment(dev render.Device, seg []placedGlyph, line string, declaring svg.Style, size float64, tm render.Matrix, alpha float64, warned *warnFlags) {
+	x0, x1 := math.Inf(1), math.Inf(-1)
+	for i := range seg {
+		x0 = math.Min(x0, seg[i].penX)
+		x1 = math.Max(x1, seg[i].penX+seg[i].advance)
+	}
+	if !(x1 > x0) {
+		return // an all-zero-advance segment has no extent to decorate
+	}
+	baseY := seg[0].penY
+
+	thickness := size * decorationThicknessEm
+	var top float64
+	switch line {
+	case "underline":
+		top = size * underlineOffsetEm
+	case "overline":
+		// One ascent above the baseline. The declaring element resolves no
+		// face of its own (it may have covered no characters directly), so the
+		// segment's ascent, rescaled from its size to the declaring size, is
+		// the closest available reading.
+		top = -ascentFor(&seg[0].glyph, size) - thickness
+	case "line-through":
+		top = -size * strikeOffsetEm
+	default:
+		return
+	}
+
+	rect := &render.Path{}
+	rect.MoveTo(x0-seg[0].penX, top)
+	rect.LineTo(x1-seg[0].penX, top)
+	rect.LineTo(x1-seg[0].penX, top+thickness)
+	rect.LineTo(x0-seg[0].penX, top+thickness)
+	rect.Close()
+
+	m := render.Identity
+	if rot := seg[0].rotateRad; rot != 0 {
+		m = m.Mul(render.Rotate(rot))
+	}
+	m = m.Mul(render.Translate(seg[0].penX, baseY)).Mul(tm)
+
+	dp := render.TransformPath(rect, m)
+	if dp == nil {
+		return
+	}
+	warned.drawCalls++
+	a := alpha * clamp01(declaring.Opacity())
+	if fp, ok := declaring.FillPaint(); ok {
+		fp.Color.A = scaleAlpha(fp.Color.A, a)
+		dev.Fill(dp, fp)
+	}
+	if sp, ok := declaring.StrokePaint(); ok {
+		sf := tm.ScaleFactor()
+		if sf == 0 {
+			return
+		}
+		sp.Color.A = scaleAlpha(sp.Color.A, a)
+		sp.Width *= sf
+		sp.DashPhase *= sf
+		if sp.DashArray != nil {
+			scaled := make([]float64, len(sp.DashArray))
+			for i, d := range sp.DashArray {
+				scaled[i] = d * sf
+			}
+			sp.DashArray = scaled
+		}
+		dev.Stroke(dp, sp)
+	}
+}
+
+// ascentFor returns a glyph's ascent rescaled to size points, falling back to
+// the 0.8em approximation when the face exposed no extents.
+func ascentFor(g *inline.Glyph, size float64) float64 {
+	if g.SizePt > 0 && g.AscentPt > 0 {
+		return g.AscentPt / g.SizePt * size
+	}
+	return size * 0.8
+}
+
+// The em fractions a text-decoration rule uses for its position and weight.
+// pkg/font parses no `post` table, so a face's own underlinePosition and
+// underlineThickness are unavailable; these are the conventional fallbacks,
+// and they are what every fixture in resvg's text-decoration/ tranche is
+// compared against.
+const (
+	// underlineOffsetEm is how far BELOW the baseline the underline's top edge
+	// sits.
+	underlineOffsetEm = 0.09
+	// strikeOffsetEm is how far ABOVE the baseline the line-through's top edge
+	// sits — roughly the middle of the lowercase x-height.
+	strikeOffsetEm = 0.26
+	// decorationThicknessEm is every rule's height.
+	decorationThicknessEm = 0.07
+)
 
 // paintTextRuns paints placed in maximal runs of glyphs sharing the same
 // per-<tspan> clip-path/mask pair: a run with neither paints directly, a run
@@ -218,7 +502,9 @@ func (r *Renderer) paintTextGrouped(dev render.Device, t *svg.Text, placed []pla
 		// degrade to painting without isolation, clip, or mask rather than
 		// dropping the text entirely.
 		r.logGroupDepthCapOnce(warned)
+		r.paintDecorations(dev, placed, tm, alpha, warned, decorationsUnder)
 		r.paintTextRuns(dev, placed, tm, alpha, warned)
+		r.paintDecorations(dev, placed, tm, alpha, warned, decorationsOver)
 		return
 	}
 	dev.Save()
@@ -227,7 +513,13 @@ func (r *Renderer) paintTextGrouped(dev render.Device, t *svg.Text, placed []pla
 	// Through paintTextRuns, not a bare glyph loop: a <tspan> INSIDE a
 	// clipped/masked <text> carries its own clip/mask, which must still
 	// apply, nested one level inside this group.
+	//
+	// Decorations join the same group so the <text>'s clip-path/mask cuts
+	// them alongside the glyphs, which is what makes a clipped underline
+	// stop at the clip boundary rather than running past it.
+	r.paintDecorations(dev, placed, tm, 1.0, warned, decorationsUnder)
 	r.paintTextRuns(dev, placed, tm, 1.0, warned)
+	r.paintDecorations(dev, placed, tm, 1.0, warned, decorationsOver)
 	warned.groupDepth--
 
 	bbox := textUserBounds(placed)
@@ -260,7 +552,7 @@ func textUserBounds(placed []placedGlyph) func() (float64, float64, float64, flo
 			p := &placed[i]
 			size := p.glyph.SizePt
 			x0, y0 := p.penX, p.penY-size*0.8
-			x1, y1 := p.penX+p.glyph.Advance, p.penY+size*0.2
+			x1, y1 := p.penX+p.advance, p.penY+size*0.2
 			if !ok {
 				minX, minY, maxX, maxY, ok = x0, y0, x1, y1, true
 				continue
@@ -290,6 +582,14 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 	if len(glyphs) == 0 {
 		return nil
 	}
+
+	// textLength governs a CHARACTER range and needs each glyph's natural
+	// advance, so it is resolved into a per-glyph correction BEFORE the pen
+	// walk and consumed inside it. Spacing is folded in first, because SVG
+	// measures the natural width a textLength corrects WITH the element's
+	// letter/word-spacing already applied.
+	r.applyTextSpacing(glyphs, t)
+	gaps := r.applyTextLengths(glyphs, t)
 
 	// Place every glyph, threading the pen through the character list.
 	placed := make([]placedGlyph, 0, len(glyphs))
@@ -326,12 +626,19 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 		penY += c.DY
 
 		placed = append(placed, placedGlyph{
-			glyph:          g.glyph,
-			penX:           penX,
-			penY:           penY,
-			rotateRad:      c.RotateDeg * math.Pi / 180,
-			chunk:          chunk,
-			style:          c.Style,
+			glyph:     g.glyph,
+			penX:      penX,
+			penY:      penY + r.baselineOffset(c.Style, &g.glyph),
+			rotateRad: c.RotateDeg * math.Pi / 180,
+			chunk:     chunk,
+			style:     c.Style,
+			xScale:    g.xScale,
+			// The glyph's EFFECTIVE advance, which every later pass (anchor
+			// measurement, decoration extent, bidi re-lay) must read instead
+			// of glyph.Advance so they see the spacing and textLength the pen
+			// actually walked.
+			advance:        g.advance,
+			charIndex:      g.charIndex,
 			fillGradient:   asGradient(c.FillGradient()),
 			strokeGradient: asGradient(c.StrokeGradient()),
 			fillPattern:    asPattern(c.FillPattern()),
@@ -339,12 +646,273 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 			clip:           c.ClipPath(),
 			mask:           c.Mask(),
 		})
-		penX += g.glyph.Advance
+		// The gap a textLength="spacing" request opened (or closed) sits
+		// BETWEEN this glyph and the next, so it is added after the advance —
+		// which is precisely why it never introduces a leading or trailing
+		// space, and why the last glyph's index carries no gap.
+		penX += g.advance + gaps[i]
 	}
 
 	reorderVisually(placed)
 	applyAnchors(placed, t)
 	return placed
+}
+
+// baselineOffset returns how far DOWN (SVG's +Y) a character's baseline moves
+// from the text's own, resolving dominant-baseline / alignment-baseline
+// against the face's real metrics and then subtracting the accumulated
+// baseline-shift.
+//
+// The two baseline-SELECTION properties answer one question — "which of the
+// font's baselines does this box sit on?" — and alignment-baseline wins when
+// it is set, deferring to dominant-baseline only at its "auto" initial value
+// (CSS Inline §5.2; resvg's dominant-baseline/different-alignment-baseline-on-
+// tspan.svg is what pins the precedence).
+//
+// Every offset is expressed against the ALPHABETIC baseline, which is where
+// the shaper already put the glyph, so "auto"/"alphabetic" is zero and costs
+// nothing. The metrics come from the glyph's own face rather than from the
+// style, since a per-rune script fallback can hand different characters of one
+// run different faces and each must hang from its own font's metrics.
+//
+// baseline-shift is SUBTRACTED because it is defined positive-UP while SVG's
+// Y axis points DOWN.
+func (r *Renderer) baselineOffset(st svg.Style, g *inline.Glyph) float64 {
+	kind := st.AlignmentBaseline()
+	if kind == "auto" || kind == "baseline" {
+		// "baseline" is alignment-baseline's spelling of "use my parent box's
+		// dominant baseline", NOT of "alphabetic" — it DEFERS, exactly like
+		// "auto". resvg's dominant-baseline/alignment-baseline=baseline-on-
+		// tspan.svg is the discriminating case: a tspan carrying it inside a
+		// <text dominant-baseline="middle"> renders FLUSH with its siblings,
+		// which only happens if it inherits their middle baseline rather than
+		// resetting itself to alphabetic.
+		kind = st.DominantBaseline()
+	}
+	return baselineKeywordOffset(kind, g) - st.BaselineShiftPt()
+}
+
+// baselineKeywordOffset resolves one baseline keyword to a downward offset in
+// points, using the glyph's face metrics.
+//
+// ascent and descent arrive from Face.Metrics() in EM units with ascent
+// positive above the baseline and descent a positive magnitude below it;
+// inline.Glyph carries them already scaled to points (AscentPt/DescentPt), so
+// no unit conversion happens here.
+//
+//   - "hanging" and "text-before-edge" put the box's TOP edge on the reference
+//     line, so the baseline moves DOWN by the ascent.
+//   - "text-after-edge" puts the BOTTOM edge there, so the baseline moves UP by
+//     the descent.
+//   - "middle" centres the X-HEIGHT, so the baseline moves down by half of it.
+//     pkg/font parses no OS/2 sxHeight, so the x-height is the conventional
+//     0.5em substitute — which lands "middle" slightly ABOVE "central", the
+//     relationship resvg's two reference renderings show.
+//   - "central" centres the full ascent-to-descent box.
+//
+// Anything else — including the keywords that degraded to "auto" back in the
+// cascade — is the alphabetic baseline, i.e. no offset.
+func baselineKeywordOffset(kind string, g *inline.Glyph) float64 {
+	ascent, descent := g.AscentPt, g.DescentPt
+	if ascent <= 0 && descent <= 0 {
+		// A face that exposes no extents at all: the 0.8/0.2 em fallback
+		// pkg/font uses, so a baseline keyword still lands somewhere sane
+		// instead of collapsing to alphabetic.
+		ascent, descent = g.SizePt*0.8, g.SizePt*0.2
+	}
+	switch kind {
+	case "hanging", "text-before-edge", "before-edge":
+		return ascent
+	case "text-after-edge", "after-edge":
+		return -descent
+	case "middle":
+		return g.SizePt * xHeightEmFallback / 2
+	case "central":
+		return (ascent - descent) / 2
+	default:
+		return 0
+	}
+}
+
+// xHeightEmFallback is the x-height, as a fraction of the em, that
+// baselineKeywordOffset's "middle" uses. pkg/font parses no OS/2 table, so
+// there is no real sxHeight to read; 0.5em is CSS's own stated fallback for
+// the `ex` unit and is what applyFontSize/parseLength already assume.
+const xHeightEmFallback = 0.5
+
+// applyTextSpacing folds letter-spacing and word-spacing into each glyph's
+// effective advance.
+//
+// SVG/CSS put these at DIFFERENT places, and the difference is visible:
+//
+//   - word-spacing is added AT each space character, so it widens the space
+//     glyph itself. A run with no spaces is unaffected no matter how large the
+//     value.
+//   - letter-spacing is added BETWEEN glyphs, and — despite SVG 1.1's wording
+//     suggesting it applies after every glyph including the last — resvg
+//     follows CSS Text 3 and adds NO trailing space. Its own
+//     letter-spacing/filter-bbox.svg fixture states this in a <desc> and
+//     asserts it with a filter region: the flood rectangle ends flush with the
+//     final glyph's right edge, not a spacing-width past it. Since resvg's
+//     reference PNGs are the ground truth for this corpus, that is the
+//     behavior implemented here.
+//
+// Both come from the SOURCE CHARACTER's style, not from a single run-wide
+// value, so a <tspan letter-spacing="10"> inside a <text letter-spacing="3">
+// spaces only its own characters (resvg's mixed-spacing.svg).
+//
+// The "between glyphs" rule is applied per STYLE SPAN, not once across the
+// whole text: the boundary between two differently-spaced tspans is the
+// TRAILING edge of the outer span's last glyph, and adding the outer value
+// there would reintroduce exactly the trailing space filter-bbox rules out.
+func (r *Renderer) applyTextSpacing(glyphs []shapedChar, t *svg.Text) {
+	for i := range glyphs {
+		g := &glyphs[i]
+		if g.charIndex < 0 || g.charIndex >= len(t.Chars) {
+			continue // defensive; mapGlyphsToChars always produces a valid index
+		}
+		st := t.Chars[g.charIndex].Style
+
+		if ws := st.WordSpacingPt(); ws != 0 && isWordSpace(g) {
+			g.advance += ws
+		}
+
+		ls := st.LetterSpacingPt()
+		if ls == 0 {
+			continue
+		}
+		// Not after the LAST glyph of this letter-spacing run — see the doc
+		// comment. A run ends at the end of the text or where the resolved
+		// letter-spacing changes.
+		if i+1 >= len(glyphs) {
+			continue
+		}
+		nextIdx := glyphs[i+1].charIndex
+		if nextIdx < 0 || nextIdx >= len(t.Chars) {
+			continue
+		}
+		if t.Chars[nextIdx].Style.LetterSpacingPt() != ls {
+			continue
+		}
+		g.advance += ls
+	}
+}
+
+// isWordSpace reports whether a shaped glyph is a word-separator that
+// word-spacing applies to. CSS Text 3 defines the set as U+0020 and U+00A0;
+// SVG's whitespace processing has already collapsed tabs and newlines into
+// U+0020 by the time lowering finishes, so only those two can appear.
+func isWordSpace(g *shapedChar) bool {
+	for _, r := range g.glyph.Runes {
+		if r == ' ' || r == ' ' {
+			return true
+		}
+	}
+	return false
+}
+
+// applyTextLengths resolves every textLength request against the glyphs it
+// covers, returning the per-glyph inter-glyph GAP the pen walk must insert
+// after each glyph (len(glyphs) entries; the last is always zero).
+//
+// The two lengthAdjust modes differ in what absorbs the difference:
+//
+//   - "spacing" (the default) leaves every glyph exactly as shaped and puts
+//     the whole difference into the n-1 gaps between them. This is the mode
+//     that must not touch the leading or trailing edge: the range still starts
+//     at its own pen position and ends one natural advance past the last
+//     glyph's origin, so the TOTAL width lands on the target exactly.
+//   - "spacingAndGlyphs" scales advances AND outlines by target/natural, so
+//     the glyphs themselves stretch or squeeze. No gaps are opened at all.
+//
+// Requests arrive outermost-first (see svg.textBuilder.trimLengths), so
+// applying them in slice order lets an inner <tspan>'s request overwrite the
+// outer one for the characters they share — SVG's nesting rule.
+//
+// Edge cases the corpus exercises, all handled without a special case leaking
+// into the caller: a target SMALLER than natural (every gap goes negative and
+// the glyphs overlap — resvg's zero.svg), a target of exactly zero, and a
+// SINGLE-glyph range, where "spacing" has no gap to distribute into and is
+// therefore a no-op rather than a division by zero.
+func (r *Renderer) applyTextLengths(glyphs []shapedChar, t *svg.Text) []float64 {
+	gaps := make([]float64, len(glyphs))
+	if len(t.Lengths) == 0 || len(glyphs) == 0 {
+		return gaps
+	}
+	for _, l := range t.Lengths {
+		lo, hi := glyphRangeFor(glyphs, l.Start, l.End)
+		if lo >= hi {
+			continue
+		}
+		natural := 0.0
+		for i := lo; i < hi; i++ {
+			natural += glyphs[i].advance
+		}
+		if l.Glyphs {
+			// spacingAndGlyphs: uniform horizontal scale. A zero natural width
+			// (an all-whitespace or all-zero-advance range) has no scale that
+			// reaches the target, so it degrades to leaving the range alone
+			// rather than dividing by zero.
+			if natural <= 0 {
+				continue
+			}
+			scale := l.Target / natural
+			for i := lo; i < hi; i++ {
+				glyphs[i].advance *= scale
+				glyphs[i].xScale = scale
+			}
+			// Any gap an OUTER spacing request opened inside this range is
+			// superseded: the range's width is now exactly the target.
+			for i := lo; i < hi; i++ {
+				gaps[i] = 0
+			}
+			continue
+		}
+		// spacing: distribute the difference evenly into the interior gaps.
+		n := hi - lo - 1
+		if n <= 0 {
+			// A single glyph has no interior gap. SVG leaves it at its natural
+			// width rather than scaling it (that is what lengthAdjust=
+			// "spacingAndGlyphs" is for), so there is nothing to do.
+			continue
+		}
+		per := (l.Target - natural) / float64(n)
+		for i := lo; i < hi; i++ {
+			if i == hi-1 {
+				gaps[i] = 0 // never past the last glyph: no trailing space
+				continue
+			}
+			gaps[i] = per
+		}
+	}
+	return gaps
+}
+
+// glyphRangeFor maps a CHARACTER range [start,end) onto the contiguous glyph
+// indices whose source characters fall inside it.
+//
+// It scans rather than indexes because shaping is not one-to-one: a ligature
+// covers several characters with one glyph and a decomposition does the
+// reverse, so there is no arithmetic relation between the two index spaces.
+// The result is a half-open [lo,hi) glyph range, empty when the character
+// range produced no glyphs (an all-whitespace tspan, or one whose font-size
+// resolved to zero).
+func glyphRangeFor(glyphs []shapedChar, start, end int) (lo, hi int) {
+	lo, hi = -1, -1
+	for i := range glyphs {
+		c := glyphs[i].charIndex
+		if c < start || c >= end {
+			continue
+		}
+		if lo < 0 {
+			lo = i
+		}
+		hi = i + 1
+	}
+	if lo < 0 {
+		return 0, 0
+	}
+	return lo, hi
 }
 
 // reorderVisually applies UAX#9 bidi reordering to the already-PLACED glyphs,
@@ -486,7 +1054,7 @@ func reorderChunk(run []placedGlyph) {
 	// leading one, which is exactly the start captured here.
 	leads := make([]float64, len(run))
 	for l := 1; l < len(run); l++ {
-		if gap := run[l].penX - (run[l-1].penX + run[l-1].glyph.Advance); gap > 0 {
+		if gap := run[l].penX - (run[l-1].penX + run[l-1].advance); gap > 0 {
 			leads[l] = gap
 		}
 	}
@@ -494,7 +1062,7 @@ func reorderChunk(run []placedGlyph) {
 	for s := range reordered {
 		pen += leads[order[s]]
 		reordered[s].penX = pen
-		pen += reordered[s].glyph.Advance
+		pen += reordered[s].advance
 	}
 	copy(run, reordered)
 }
@@ -558,7 +1126,7 @@ func applyAnchors(placed []placedGlyph, t *svg.Text) {
 		minX, maxX := math.Inf(1), math.Inf(-1)
 		for j < len(placed) && placed[j].chunk == chunk {
 			minX = math.Min(minX, placed[j].penX)
-			maxX = math.Max(maxX, placed[j].penX+placed[j].glyph.Advance)
+			maxX = math.Max(maxX, placed[j].penX+placed[j].advance)
 			j++
 		}
 		width := maxX - minX
@@ -602,6 +1170,16 @@ func applyAnchors(placed []placedGlyph, t *svg.Text) {
 type shapedChar struct {
 	glyph     inline.Glyph
 	charIndex int
+
+	// advance starts as glyph.Advance and is then adjusted in place, first by
+	// letter-spacing/word-spacing and then by any textLength correction. The
+	// pen walk reads THIS, never glyph.Advance, so the two adjustment passes
+	// compose without either needing to know about the other.
+	advance float64
+
+	// xScale is the horizontal outline scale a lengthAdjust="spacingAndGlyphs"
+	// request imposed; 1 otherwise.
+	xScale float64
 }
 
 // shapeChars shapes the character list, one inline.Run per maximal span of
@@ -745,7 +1323,12 @@ func mapGlyphsToChars(glyphs []inline.Glyph, span []svg.TextChar, spanStart int)
 			}
 		}
 		next = idx + 1
-		out = append(out, shapedChar{glyph: g, charIndex: spanStart + idx})
+		out = append(out, shapedChar{
+			glyph:     g,
+			charIndex: spanStart + idx,
+			advance:   g.Advance,
+			xScale:    1,
+		})
 	}
 	return out
 }
