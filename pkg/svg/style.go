@@ -1700,33 +1700,61 @@ func applyFontShorthand(s *Style, parentPt float64, parentWeight int, attr func(
 	}
 
 	fields := strings.Fields(val)
-	italic, bold := s.fontItalic, s.fontBold
-	weight := parentWeight
+
+	// A shorthand RESETS every longhand it covers to that longhand's INITIAL
+	// value, whether or not the shorthand names it (CSS Cascade §3). So these
+	// start at the initial values — NOT at the inherited ones — and only a
+	// keyword actually present in the value moves them. Seeding from s/parent
+	// instead made `font="40px Verdana"` inside a <g font-weight="bold"
+	// font-style="italic"> come out bold and italic, where CSS requires
+	// upright regular.
+	//
+	// The four longhands `font` covers besides size and family are
+	// font-style, font-variant, font-weight, and font-stretch; the two this
+	// engine only tracks as degradation flags reset alongside the two it
+	// really resolves, so a shorthand cannot leave a stale diagnostic behind
+	// either. (line-height is the fifth, and is discarded below — SVG text
+	// does not wrap.)
+	// The two degradation flags are accumulated LOCALLY rather than written
+	// straight onto s, because the shorthand may still turn out to be invalid
+	// below (no size, or no family), and an invalid shorthand must apply
+	// nothing at all — including neither a reset nor a fresh diagnostic.
+	italic := false
+	bold := false
+	weight := 400
+	variantIgnored := false
+	stretchIgnored := false
+
 	i := 0
 	// Leading optional keywords, in any order.
 	for ; i < len(fields); i++ {
 		switch strings.ToLower(fields[i]) {
 		case "normal":
-			// Ambiguous across style/variant/weight/stretch; CSS says it sets
-			// whichever slots are still unset, and all three of ours default
-			// to the non-normal-free value already.
+			// Ambiguous across style/variant/weight/stretch, but every slot it
+			// could name is already AT its initial value thanks to the reset
+			// above, so it is a no-op however it is meant.
 		case "italic", "oblique":
 			italic = true
 		case "small-caps":
 			// Recorded only as a diagnostic: see applyFontVariant.
-			s.fontVariantIgnored = true
+			variantIgnored = true
 			logf("svg: font shorthand's small-caps ignored: no small-caps face is bundled")
 		case "bold":
 			weight, bold = 700, true
-		case "bolder":
-			weight = stepWeight(parentWeight, +1)
-			bold = weight >= boldWeightThreshold
-		case "lighter":
-			weight = stepWeight(parentWeight, -1)
+		case "bolder", "lighter":
+			// Relative weights still step from the INHERITED weight — CSS
+			// defines bolder/lighter against the parent's computed value, and
+			// the shorthand reset governs the slot's starting point, not what
+			// an explicitly-named relative keyword measures against.
+			dir := +1
+			if strings.EqualFold(fields[i], "lighter") {
+				dir = -1
+			}
+			weight = stepWeight(parentWeight, dir)
 			bold = weight >= boldWeightThreshold
 		case "ultra-condensed", "extra-condensed", "condensed", "semi-condensed",
 			"semi-expanded", "expanded", "extra-expanded", "ultra-expanded":
-			s.fontStretchIgnored = true
+			stretchIgnored = true
 			logf("svg: font shorthand's stretch keyword %q ignored: no condensed/expanded face is bundled", fields[i])
 		default:
 			goto size
@@ -1755,11 +1783,16 @@ size:
 		return
 	}
 
+	// Commit, now that the whole value is known valid. Every longhand `font`
+	// covers is written unconditionally — that assignment IS the reset for the
+	// slots the value never named.
 	s.fontSizePt = sizePt
 	s.fontFamily = family
 	s.fontItalic = italic
 	s.fontWeight = weight
 	s.fontBold = bold
+	s.fontVariantIgnored = variantIgnored
+	s.fontStretchIgnored = stretchIgnored
 }
 
 // resolveFontSizeToken resolves one font-size token (a keyword or a length)
