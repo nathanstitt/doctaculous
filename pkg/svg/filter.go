@@ -31,6 +31,21 @@ const (
 	PrimitiveFlood PrimitiveKind = iota
 	// PrimitiveOffset is <feOffset>: translate the input by dx/dy.
 	PrimitiveOffset
+	// PrimitiveGaussianBlur is <feGaussianBlur>: blur the input by
+	// stdDeviation on each axis.
+	PrimitiveGaussianBlur
+	// PrimitiveComposite is <feComposite>: combine `in` and `in2` under a
+	// Porter-Duff operator, or the arithmetic rule.
+	PrimitiveComposite
+	// PrimitiveBlend is <feBlend>: composite `in` over `in2` through a CSS
+	// blend mode.
+	PrimitiveBlend
+	// PrimitiveColorMatrix is <feColorMatrix>: apply a 5x4 matrix to each
+	// pixel's straight-alpha channels.
+	PrimitiveColorMatrix
+	// PrimitiveMerge is <feMerge>: composite its <feMergeNode> inputs in
+	// document order with source-over.
+	PrimitiveMerge
 )
 
 // InputKind identifies what a primitive's `in`/`in2` attribute names.
@@ -66,10 +81,20 @@ type FilterInput struct {
 type FilterPrimitive struct {
 	Kind PrimitiveKind
 
-	// In is the primitive's first input. Every primitive this engine
-	// implements takes at most one input today; in2 arrives with the
-	// primitives (feComposite, feBlend) that need it.
+	// In is the primitive's first input.
 	In FilterInput
+
+	// In2 is the second input, used by feComposite and feBlend. It resolves
+	// by exactly the same rules as In (see resolveFilterInput), including the
+	// "an undefined name falls back to the previous primitive's output"
+	// fallback, so a graph never has to special-case it.
+	In2 FilterInput
+
+	// MergeInputs are feMerge's <feMergeNode> inputs in DOCUMENT ORDER, which
+	// is PAINTING order: the first node is the bottom of the stack. An feMerge
+	// with no nodes has an empty slice and produces transparent black, which
+	// is distinct from a merge of one node.
+	MergeInputs []FilterInput
 
 	// HasSubregion reports whether any of X/Y/W/H was specified. A
 	// primitive with no subregion of its own defaults to the filter region
@@ -95,6 +120,36 @@ type FilterPrimitive struct {
 	// Dx, Dy are feOffset's translation, in the units PrimitiveUnits
 	// selects.
 	Dx, Dy float64
+
+	// StdDevX, StdDevY are feGaussianBlur's per-axis standard deviations, in
+	// the units PrimitiveUnits selects. Zero on an axis means no blur there.
+	//
+	// A NEGATIVE or otherwise invalid stdDeviation is resolved to zero rather
+	// than recorded: per SVG a negative value is an error that disables the
+	// PRIMITIVE, and the corpus's negative-stdDeviation fixture confirms the
+	// element still renders (unblurred) rather than disappearing. Carrying the
+	// negative through to the renderer would invite it to be read as a blur
+	// radius.
+	StdDevX, StdDevY float64
+
+	// Operator is feComposite's operator.
+	Operator CompositeOperator
+	// K1..K4 are feComposite's arithmetic coefficients, meaningful only when
+	// Operator is CompositeArithmetic.
+	K1, K2, K3, K4 float64
+
+	// BlendMode is feBlend's mode as a PDF /BM name (see
+	// pkg/svg/filter.BlendModeName), or "" for normal/source-over. Storing the
+	// canonical name rather than the SVG spelling keeps the renderer free of
+	// the vocabulary mapping.
+	BlendMode string
+
+	// Matrix is feColorMatrix's resolved 5x4 matrix, row-major. Every
+	// shorthand type (saturate, hueRotate, luminanceToAlpha) is expanded into
+	// a matrix HERE, at parse time, so the renderer implements exactly one
+	// operation and the shorthand formulas are unit-testable without a
+	// renderer.
+	Matrix [20]float64
 
 	// Space is the color-interpolation-filters value in effect at THIS
 	// primitive. It is per-primitive, not per-filter: the property is an
@@ -154,6 +209,23 @@ type Filter struct {
 	// so a caller must never treat an empty graph as "no filtering".
 	Primitives []FilterPrimitive
 
+	// Unbounded marks a filter that has NO filter region: the CSS
+	// filter-function shorthand (`filter="blur(4)"`, `drop-shadow(...)`).
+	//
+	// This is not a nicety. A <filter> element's region defaults to
+	// -10%/120% of the bounding box, but a filter FUNCTION has no <filter>
+	// element and therefore no region at all — the corpus states it outright
+	// in drop-shadow-function-filter-region's <desc> ("Filter function doesn't
+	// have a filter region, like the `filter` element") and shows a
+	// stdDeviation=30 shadow spreading across the whole canvas. Applying the
+	// element region's default here clips every CSS drop-shadow to a box
+	// barely larger than the element, which looks like a too-small blur rather
+	// than like a clip and is easy to misdiagnose.
+	//
+	// The renderer substitutes the visible canvas, which is both unbounded in
+	// the sense that matters and still bounded for allocation.
+	Unbounded bool
+
 	// Unsupported names the first primitive this engine does not implement,
 	// or "" when every primitive in the graph is supported. The renderer
 	// paints the element UNFILTERED and logs this name: a visible
@@ -183,15 +255,6 @@ var unsupportedPrimitives = map[string]bool{
 	"feTile":              true,
 	"feComponentTransfer": true,
 	"feDisplacementMap":   true,
-	// Shipped in a later task; recognized here so a document using one
-	// degrades with an accurate name rather than being mistaken for an
-	// unknown element.
-	"feGaussianBlur": true,
-	"feBlend":        true,
-	"feComposite":    true,
-	"feColorMatrix":  true,
-	"feMerge":        true,
-	"feDropShadow":   true,
 }
 
 // resolveFilterRef resolves a filter property's raw value (as recorded by
@@ -205,20 +268,36 @@ var unsupportedPrimitives = map[string]bool{
 // reference degrades to "no restriction", so the two must not be modeled the
 // same way: returning (nil, false) here means "drop the element", while
 // (nil, true) means "no filter applies".
-func (b *sceneBuilder) resolveFilterRef(ref string) (*Filter, bool) {
+// el and st are the referencing element and its resolved style, needed only
+// for the CSS filter-FUNCTION path (`filter="blur(4)"`), where a length may be
+// font-relative and drop-shadow()'s omitted colour comes from the element's
+// own `color`. A bare url() reference ignores both.
+func (b *sceneBuilder) resolveFilterRef(ref string, el *element, st Style) (*Filter, bool) {
+	if isSVGFilterFunctionList(ref) {
+		// A CSS filter function list (`blur(4)`, `grayscale() opacity(.5)`,
+		// or a mix of functions and url()s) rather than a single reference.
+		// It lowers into a synthetic <filter> graph; see
+		// resolveFilterFunctions for why an invalid list renders the element
+		// UNFILTERED rather than dropping it, unlike an invalid url().
+		f, ok := b.resolveFilterFunctions(ref, &cascadeCtx{idx: b.idx, logf: b.logf}, el, st, 0)
+		if !ok {
+			return nil, true // invalid list: no filter, element still renders
+		}
+		return f, true
+	}
 	return b.resolveFilterRefAt(ref, 0)
 }
 
-// resolveFilterRefAt is resolveFilterRef with an explicit chain depth.
+// resolveFilterRefAt resolves a bare url(#id) filter reference with an
+// explicit chain depth.
 func (b *sceneBuilder) resolveFilterRefAt(ref string, depth int) (*Filter, bool) {
 	ref = strings.TrimSpace(ref)
 	if !strings.HasPrefix(strings.ToLower(ref), "url(") {
-		// Not a url() reference (e.g. a CSS filter function like blur(2px),
-		// which is a later task): unresolvable. Per the spec's error
-		// handling this makes the element not render, but degrading a
-		// filter FUNCTION to "unfiltered" is far friendlier than making the
-		// element vanish, so this reports "no filter" and logs.
-		b.warnOnceMsg("svg-filter-not-funciri", "svg: ignoring filter: only url(#id) references are supported")
+		// Not a url() reference and not a recognized function list: per the
+		// spec's error handling this makes the element not render, but
+		// degrading to "unfiltered" is far friendlier, so this reports "no
+		// filter" and logs.
+		b.warnOnceMsg("svg-filter-not-funciri", "svg: ignoring filter: only url(#id) references and CSS filter functions are supported")
 		return nil, true
 	}
 	id, _, ok := parsePaintServerRef(ref)
@@ -270,7 +349,7 @@ func (b *sceneBuilder) resolveFilter(id string, depth int) (*Filter, bool) {
 		return f, true
 	}
 
-	f.Primitives, f.Unsupported = b.buildFilterPrimitives(el, ctx)
+	f.Primitives, f.Unsupported = b.buildFilterPrimitives(el, ctx, f.PrimitiveUnits)
 	b.filterMemo[id] = f
 	return f, true
 }
@@ -284,7 +363,7 @@ func (b *sceneBuilder) resolveFilter(id string, depth int) (*Filter, bool) {
 // forward reference simply is not in the table yet and falls back like any
 // other undefined name, so a cycle can never be constructed. Verify this
 // invariant holds before adding a primitive that wires inputs differently.
-func (b *sceneBuilder) buildFilterPrimitives(el *element, ctx *cascadeCtx) ([]FilterPrimitive, string) {
+func (b *sceneBuilder) buildFilterPrimitives(el *element, ctx *cascadeCtx, primitiveUnits string) ([]FilterPrimitive, string) {
 	var prims []FilterPrimitive
 	results := map[string]int{}
 	unsupported := ""
@@ -299,12 +378,57 @@ func (b *sceneBuilder) buildFilterPrimitives(el *element, ctx *cascadeCtx) ([]Fi
 			}
 			continue
 		}
+		if kid.local == "feDropShadow" {
+			// feDropShadow is the SVG 2 SHORTHAND for a five-primitive chain,
+			// and it is expanded into that chain here rather than implemented
+			// as its own primitive. Doing it this way is what makes it
+			// inherit every behavior the chain already has — the blur's
+			// premultiplication, the offset's fractional resampling, the
+			// flood's colour-space conversion, the composite's Porter-Duff —
+			// instead of being a second, subtly-different implementation of
+			// all four.
+			if len(prims)+dropShadowChainLength > maxFilterPrimitives {
+				b.warnOnceMsg("svg-filter-primitive-cap",
+					"svg: <filter> exceeded the primitive cap; the rest were dropped")
+				break
+			}
+			in := resolveFilterInput(kid.attrs["in"], results, len(prims))
+			space := primitiveColorSpace(kid, ctx)
+			var sub FilterPrimitive
+			b.readPrimitiveSubregion(&sub, kid, primitiveUnits)
+			if sub.SubregionInvalid {
+				// The subregion error is a property of the SHORTHAND element,
+				// so it must reach the renderer on a primitive rather than
+				// being lost in the expansion.
+				prims = append(prims, FilterPrimitive{Kind: PrimitiveOffset, In: in, SubregionInvalid: true})
+				continue
+			}
+			expanded := expandDropShadow(kid, ctx, in, space, sub, len(prims))
+			if name := strings.TrimSpace(kid.attrs["result"]); name != "" {
+				// The shorthand's `result` names the LAST primitive of the
+				// expansion (the merge), which is the shorthand's own output.
+				results[name] = len(prims) + len(expanded) - 1
+			}
+			prims = append(prims, expanded...)
+			continue
+		}
+
 		var kind PrimitiveKind
 		switch kid.local {
 		case "feFlood":
 			kind = PrimitiveFlood
 		case "feOffset":
 			kind = PrimitiveOffset
+		case "feGaussianBlur":
+			kind = PrimitiveGaussianBlur
+		case "feComposite":
+			kind = PrimitiveComposite
+		case "feBlend":
+			kind = PrimitiveBlend
+		case "feColorMatrix":
+			kind = PrimitiveColorMatrix
+		case "feMerge":
+			kind = PrimitiveMerge
 		default:
 			// Not a filter primitive at all (a <desc>, a comment element, or
 			// a genuinely unknown name): ignored, per SVG's forgiving
@@ -321,7 +445,7 @@ func (b *sceneBuilder) buildFilterPrimitives(el *element, ctx *cascadeCtx) ([]Fi
 		p := FilterPrimitive{Kind: kind}
 		p.In = resolveFilterInput(kid.attrs["in"], results, len(prims))
 		p.Space = primitiveColorSpace(kid, ctx)
-		b.readPrimitiveSubregion(&p, kid)
+		b.readPrimitiveSubregion(&p, kid, primitiveUnits)
 
 		switch kind {
 		case PrimitiveFlood:
@@ -329,6 +453,18 @@ func (b *sceneBuilder) buildFilterPrimitives(el *element, ctx *cascadeCtx) ([]Fi
 		case PrimitiveOffset:
 			p.Dx = plainNumberAttr(kid, "dx", 0)
 			p.Dy = plainNumberAttr(kid, "dy", 0)
+		case PrimitiveGaussianBlur:
+			readGaussianBlur(&p, kid)
+		case PrimitiveComposite:
+			p.In2 = resolveFilterInput(kid.attrs["in2"], results, len(prims))
+			readComposite(&p, kid)
+		case PrimitiveBlend:
+			p.In2 = resolveFilterInput(kid.attrs["in2"], results, len(prims))
+			readBlend(&p, kid)
+		case PrimitiveColorMatrix:
+			readColorMatrix(&p, kid)
+		case PrimitiveMerge:
+			readMergeNodes(&p, kid, results, len(prims))
 		}
 
 		if name := strings.TrimSpace(kid.attrs["result"]); name != "" {
@@ -376,8 +512,21 @@ func resolveFilterInput(raw string, results map[string]int, index int) FilterInp
 // which were specified (an unspecified one inherits a default the renderer
 // computes from the inputs) and flagging a negative width/height as the
 // rendering-disabling error SVG defines it to be.
-func (b *sceneBuilder) readPrimitiveSubregion(p *FilterPrimitive, el *element) {
-	userSpace := true // primitiveUnits is resolved by the caller's matrix
+func (b *sceneBuilder) readPrimitiveSubregion(p *FilterPrimitive, el *element, units string) {
+	// A PERCENTAGE means different things under the two primitiveUnits
+	// values, and the difference is a factor of the viewport:
+	//
+	//   userSpaceOnUse:     50% of the viewport, an absolute user-unit length
+	//                       the caller's matrix then maps as-is.
+	//   objectBoundingBox:  the fraction 0.5, which the caller's units matrix
+	//                       multiplies by the target's bounding box.
+	//
+	// Resolving objectBoundingBox percentages against the viewport (as an
+	// earlier revision did) makes width="50%" mean 100 BBOX WIDTHS rather than
+	// half of one — the subregion then covers everything and clips nothing,
+	// which the subregion-and-primitiveUnits=objectBoundingBox-2 fixture shows
+	// as a missing clip rather than an obviously wrong number.
+	userSpace := units != "objectBoundingBox"
 	if v, ok := el.attrs["x"]; ok {
 		if n, ok := parseFilterLength(v, b.vp.w, userSpace); ok {
 			p.X, p.HasX, p.HasSubregion = n, true, true

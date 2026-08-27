@@ -374,8 +374,6 @@ func TestUnsupportedPrimitivesDegradeUnfiltered(t *testing.T) {
 	deferred := []string{
 		"feTurbulence", "feConvolveMatrix", "feDiffuseLighting", "feSpecularLighting",
 		"feMorphology", "feImage", "feTile", "feComponentTransfer", "feDisplacementMap",
-		// Shipping in a later task, recognized now so they degrade by name.
-		"feGaussianBlur", "feBlend", "feComposite", "feColorMatrix", "feMerge", "feDropShadow",
 	}
 	for _, name := range deferred {
 		t.Run(name, func(t *testing.T) {
