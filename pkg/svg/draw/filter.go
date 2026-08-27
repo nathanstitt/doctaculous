@@ -15,19 +15,29 @@ import (
 // and every primitive in the graph allocates its own buffer over that region
 // (16 bytes per pixel in float32 RGBA), so an enormous region is a direct
 // memory-amplification path from a tiny input file — the same class of
-// build-time DoS a prior PR found in this parser. This caps ONE region at
-// roughly 64 MB per buffer, comfortably above any legitimate page (a 300 DPI
-// A4 page is ~8.7 M pixels) while stopping a crafted `width="1e9"` from
-// asking for terabytes. Exceeding it degrades to painting the element
-// unfiltered, with a log — never to a crash or a blank.
+// build-time DoS a prior PR found in this parser. Exceeding this degrades to
+// painting the element unfiltered, with a log — never a crash or a blank.
+//
+// The cap is meaningful only because filterSpace SHIFTS the region's origin
+// to (0,0) before allocating: RenderOffscreen always allocates from the
+// origin, so without that shift a small region far from it would allocate up
+// to its far corner (a 50x50 region at (5900,5900) cost 35M pixels) while
+// this check measured the region's own 2500. The two must stay in agreement
+// — if the origin shift is ever removed, this stops bounding anything.
+//
+// 4M pixels is roughly 64 MB per float32 RGBA buffer, comfortably above any
+// legitimate page (a 300 DPI A4 page is ~8.7M pixels, and the region is
+// additionally clipped to the visible canvas before reaching here) while
+// stopping a crafted `width="1e9"`.
 const maxFilterPixels = 4 << 20
 
 // maxFilterNestingDepth bounds how many filters may be applied at once (a
 // filtered element inside another filter's source content). Each level holds
-// a full-canvas offscreen RGBA alive while its graph runs, so unbounded
-// nesting is unbounded live memory — the same hazard maxGroupNestingDepth
-// guards, at a lower limit because a filter's buffers are far larger than a
-// compositing group's. Real documents never nest filters at all.
+// an offscreen RGBA alive while its graph runs, plus that graph's own
+// per-primitive buffers, so unbounded nesting is unbounded live memory — the
+// same hazard maxGroupNestingDepth guards, at a lower limit because a
+// filter's buffers are far larger than a compositing group's. Real documents
+// never nest filters at all.
 const maxFilterNestingDepth = 4
 
 // paintFiltered renders node's content through its SVG filter and composites
@@ -78,12 +88,12 @@ func (r *Renderer) paintFilteredAlpha(dev render.Device, f *svg.Filter, m render
 		}
 	}
 	if warned.filterDepth >= maxFilterNestingDepth {
-		// Every level holds a full-canvas offscreen RGBA plus the graph's
-		// own float32 buffers live at once, so this bounds concurrently-live
-		// memory rather than merely CPU time — the same rationale as
+		// Every level holds an offscreen RGBA plus the graph's own float32
+		// buffers live at once, so this bounds concurrently-live memory
+		// rather than merely CPU time — the same rationale as
 		// maxGroupNestingDepth. Degrade to unfiltered rather than dropping
 		// the subtree.
-		r.logFilterRegionCapOnce(warned)
+		r.logFilterNestingCapOnce(warned)
 		paintUnfiltered(dev, outAlpha, paintSource)
 		return true
 	}
@@ -432,8 +442,28 @@ func filterSpace(f *svg.Filter, m render.Matrix, target boundsFunc, dev render.D
 		fs.size = image.Point{}
 		return fs, true
 	}
-	// RenderOffscreen allocates from the origin, so the surface must span
-	// from (0,0) to the buffer's far corner.
+	// SHIFT THE ORIGIN so the buffer starts at (0,0). RenderOffscreen always
+	// allocates from the origin, so without this a region far from it costs
+	// Max.X x Max.Y pixels rather than its own area — a 50x50 region at
+	// (5900,5900) on a 6000x6000 canvas allocated 35M pixels (135 MB)
+	// instead of 2500, silently, because the pixel cap below measures the
+	// REGION while the allocation is driven by the far corner. Translating
+	// filterM by -min makes the two agree, so the cap actually bounds the
+	// allocation and the waste disappears at the same time.
+	//
+	// The shift folds into filterM (which the source is painted through) and
+	// is undone by postM (which places the result), keeping the pair's
+	// product equal to m so nothing downstream moves.
+	shift := render.Translate(float64(-fs.buffer.Min.X), float64(-fs.buffer.Min.Y))
+	fs.filterM = fs.filterM.Mul(shift)
+	unshift := render.Translate(float64(fs.buffer.Min.X), float64(fs.buffer.Min.Y))
+	fs.postM = unshift.Mul(fs.postM)
+	fs.deviceToFilter, ok = fs.postM.Invert()
+	if !ok {
+		return fs, false
+	}
+	fs.buffer = fs.buffer.Sub(fs.buffer.Min)
+
 	fs.size = image.Point{X: fs.buffer.Max.X, Y: fs.buffer.Max.Y}
 	if fs.size.X <= 0 || fs.size.Y <= 0 {
 		fs.buffer = image.Rectangle{}
@@ -552,11 +582,28 @@ func primitiveSubregion(p *svg.FilterPrimitive, f *svg.Filter, region image.Rect
 // objectBoundingBox, so the common case depends on it, whereas a clip-path
 // or mask on a group usually names userSpaceOnUse explicitly.
 //
+// A <text> descendant contributes its REAL placed-glyph extent, laid out
+// through the same layoutText/textUserBounds path paintText uses. Measuring
+// it matters more than it looks: a <g> holding a shape AND text would
+// otherwise size its region to the shape alone and SILENTLY CLIP the text
+// away — output that looks like it worked, which is worse than the
+// text-only case (a blank, visibly wrong). The layout cost is real but paid
+// only for an objectBoundingBox filter on a group containing text, and the
+// alternative is wrong pixels.
+//
 // ok=false for a group with no drawable descendant (an empty <g>), which per
 // SVG means an objectBoundingBox filter cannot be applied and the element is
 // not rendered — the resvg on-an-empty-group-2 behavior.
-func groupUserBounds(node *svg.Group, warned *warnFlags) boundsFunc {
+func (r *Renderer) groupUserBounds(node *svg.Group, warned *warnFlags) boundsFunc {
 	return func() (minX, minY, maxX, maxY float64, ok bool) {
+		add := func(x0, y0, x1, y1 float64) {
+			if !ok {
+				minX, minY, maxX, maxY, ok = x0, y0, x1, y1, true
+				return
+			}
+			minX, minY = math.Min(minX, x0), math.Min(minY, y0)
+			maxX, maxY = math.Max(maxX, x1), math.Max(maxY, y1)
+		}
 		var walk func(n svg.Node, m render.Matrix, depth int)
 		walk = func(n svg.Node, m render.Matrix, depth int) {
 			if depth > maxGroupNestingDepth {
@@ -582,29 +629,39 @@ func groupUserBounds(node *svg.Group, warned *warnFlags) boundsFunc {
 				if dp == nil {
 					return
 				}
-				x0, y0, x1, y1, got := dp.Bounds()
+				if x0, y0, x1, y1, got := dp.Bounds(); got {
+					add(x0, y0, x1, y1)
+				}
+			case *svg.Text:
+				if k == nil || len(k.Chars) == 0 {
+					return
+				}
+				placed := r.layoutText(k)
+				if len(placed) == 0 {
+					return
+				}
+				// textUserBounds measures in the text's own user space, so
+				// the result is mapped through the text's transform and the
+				// accumulated walk matrix to reach node's space — the same
+				// composition the Shape case applies to its path.
+				x0, y0, x1, y1, got := textUserBounds(placed)()
 				if !got {
 					return
 				}
-				if !ok {
-					minX, minY, maxX, maxY, ok = x0, y0, x1, y1, true
+				tm := k.M.Mul(m)
+				box := &render.Path{}
+				box.MoveTo(x0, y0)
+				box.LineTo(x1, y0)
+				box.LineTo(x1, y1)
+				box.LineTo(x0, y1)
+				box.Close()
+				dp := render.TransformPath(box, tm)
+				if dp == nil {
 					return
 				}
-				minX, minY = math.Min(minX, x0), math.Min(minY, y0)
-				maxX, maxY = math.Max(maxX, x1), math.Max(maxY, y1)
-			case *svg.Text:
-				// A <text> descendant contributes NOTHING to the union
-				// today: its extent is only known after layoutText places
-				// the glyphs (see textUserBounds), which this measurement
-				// pass has no cheap access to. The consequence is narrow and
-				// documented rather than silent: an objectBoundingBox filter
-				// on a group whose ONLY content is text resolves to no
-				// bounding box and the element is not rendered. A filter on
-				// the <text> element ITSELF — the overwhelmingly common
-				// authoring form, and the one the spec's text-and-filters
-				// case is about — goes through paintText's own
-				// textUserBounds seam and is exact.
-				_ = k
+				if bx0, by0, bx1, by1, gotB := dp.Bounds(); gotB {
+					add(bx0, by0, bx1, by1)
+				}
 			}
 		}
 		for _, kid := range node.Kids {
@@ -632,6 +689,19 @@ func (r *Renderer) logFilterNoRasterOnce(warned *warnFlags) {
 	}
 	warned.filterNoRaster = true
 	r.Logf("svg: this backend cannot rasterize offscreen; filtered elements were rendered unfiltered")
+}
+
+// logFilterNestingCapOnce emits the filter-nesting-too-deep notice the first
+// time it is needed for the current DrawVector call. It is deliberately
+// SEPARATE from logFilterRegionCapOnce: the two degradations have entirely
+// different causes, and reporting a nesting overflow as "region exceeded N
+// pixels" sends a reader looking at a region that was perfectly fine.
+func (r *Renderer) logFilterNestingCapOnce(warned *warnFlags) {
+	if warned.filterNestingCap || r.Logf == nil {
+		return
+	}
+	warned.filterNestingCap = true
+	r.Logf("svg: filter nesting exceeded %d levels; the element was rendered unfiltered", maxFilterNestingDepth)
 }
 
 // logFilterRegionCapOnce emits the filter-region-too-large notice the first

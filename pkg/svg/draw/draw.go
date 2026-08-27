@@ -66,6 +66,7 @@ type warnFlags struct {
 	filterUnsupported bool
 	filterNoRaster    bool
 	filterRegionCap   bool
+	filterNestingCap  bool
 
 	// filterDepth counts filters currently being applied on the stack: a
 	// filtered element inside another filter's source content. Each level
@@ -231,7 +232,7 @@ func (r *Renderer) paintGroupBody(dev render.Device, node *svg.Group, gm render.
 		unfiltered.Filter = nil
 		unfiltered.Opacity = 1
 		outAlpha := alpha * clamp01(node.Opacity)
-		r.paintFilteredAlpha(dev, node.Filter, gm, groupUserBounds(node, warned), warned, outAlpha, func(target render.Device) {
+		r.paintFilteredAlpha(dev, node.Filter, gm, r.groupUserBounds(node, warned), warned, outAlpha, func(target render.Device) {
 			r.paintGroupBody(target, &unfiltered, gm, 1, warned)
 		})
 		return
