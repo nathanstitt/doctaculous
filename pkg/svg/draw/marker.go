@@ -162,10 +162,10 @@ func (r *Renderer) paintOneMarker(dev render.Device, m *svg.Marker, pos render.P
 	if m.ClipToViewport {
 		// Markers clip to their viewport BY DEFAULT (SVG2: overflow:hidden
 		// is the initial value for a marker, the opposite of most SVG
-		// elements) — see default-clip.svg. The clip rect lives in the SAME
-		// pre-ViewBoxM... no: the rect is [0,Width]x[0,Height], the marker's
-		// OWN viewport, which content reaches AFTER ViewBoxM (viewBox maps
-		// INTO [0,Width]x[0,Height], not out of it) — so the clip composes
+		// elements) — see default-clip.svg. The clip rect is
+		// [0,Width]x[0,Height], the marker's OWN viewport, which content
+		// reaches AFTER ViewBoxM (viewBox maps INTO [0,Width]x[0,Height], not
+		// out of it) — so the clip composes
 		// under placementM MINUS the leading ViewBoxM term, i.e. under
 		// everything from the ref-point translation onward. Composing
 		// against placementM directly (which already has ViewBoxM baked in
