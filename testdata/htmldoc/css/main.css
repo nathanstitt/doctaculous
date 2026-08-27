@@ -736,3 +736,85 @@ a.seen:visited { color: #6a9a3a; }
 /* Composition: the list applies LEFT TO RIGHT, each function consuming the
    previous one's output. */
 .f-chain     .fxtile { filter: grayscale(1) brightness(1.5) contrast(1.4); }
+
+/* --- 19 / COLOUR: alpha-bearing values ------------------------------------
+   Every swatch is the SAME brand blue, written a different way, painted over a
+   two-tone backdrop so a wrong alpha is visible rather than merely plausible:
+   over the pale half a too-opaque fill reads far darker than its neighbours,
+   and over the dark half a dropped alpha reads far lighter. A value the parser
+   REJECTS paints nothing at all, so the backdrop shows through unchanged —
+   that is the failure this section exists to catch. */
+.colgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin: 16px 0 22px 0;
+}
+
+.col {
+  width: 118px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* The backdrop: a pale field with a dark block at its right, so one swatch
+   composites against both extremes at once. */
+.col .colback {
+  height: 46px;
+  background: #eceff3;
+  border: 1px solid #c4ccd6;
+  margin-bottom: 5px;
+  position: relative;
+}
+
+.col .colback .dark {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 58px;
+  height: 46px;
+  background: #24313f;
+}
+
+/* The swatch itself straddles the light/dark boundary. */
+.col .colback .sw {
+  position: absolute;
+  left: 22px;
+  top: 9px;
+  width: 74px;
+  height: 28px;
+}
+
+/* One declaration per swatch. The first is the opaque reference; the rest are
+   the alpha-bearing and CSS Color 4 spellings that the engine's older colour
+   parser dropped outright. */
+.c-opaque   .sw { background: #4f9cff; }
+.c-rgba     .sw { background: rgba(79, 156, 255, 0.35); }
+.c-hex8     .sw { background: #4f9cff59; }
+.c-hex4     .sw { background: #4bf6; }
+.c-hsl      .sw { background: hsl(214, 100%, 65%); }
+.c-hsla     .sw { background: hsla(214, 100%, 65%, 0.35); }
+.c-slash    .sw { background: rgb(79 156 255 / 35%); }
+.c-hslslash .sw { background: hsl(214deg 100% 65% / 35%); }
+.c-named    .sw { background: rebeccapurple; }
+/* transparent is a COLOUR, not a parse failure: it paints nothing while still
+   counting as a valid value, so it overrides the red before it. */
+.c-trans    .sw { background-color: #b03030; background-color: transparent; }
+/* A malformed value must DROP, leaving the previous declaration standing — this
+   swatch must therefore render solid red, not blank.
+
+   NOTE the longhand. Through the `background` SHORTHAND this case behaves
+   differently: applyBackground resets every sub-property to its initial value
+   before classifying components, and it deliberately tolerates a component it
+   cannot classify, so an unparseable colour there leaves the reset transparent
+   rather than restoring the previous declaration. That is a known divergence
+   from CSS whole-declaration error handling in the shorthand, not in the colour
+   grammar, so this swatch demonstrates the grammar's contract on the longhand
+   where it actually holds rather than implying a behaviour the engine lacks. */
+.c-bad      .sw { background-color: #b03030; background-color: rgb(nope, 0, 0); }
+/* Alpha is not only a background concern: the same one grammar feeds borders
+   and text colour too. */
+.c-border   .sw { border: 7px solid rgba(176, 48, 48, 0.5); }
+.c-text     .sw { color: rgba(20, 30, 45, 0.4); font-family: "TeX Gyre Heros", sans-serif; font-size: 19px; font-weight: bold; }

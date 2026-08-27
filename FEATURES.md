@@ -142,6 +142,23 @@ bullet's design rationale is in its PR:
   synthetic bullet outlines.
 - **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
   `url(..)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
+- **CSS Color 4 colour values — ONE grammar for the whole engine** (`pkg/css/color.go`; `pkg/svg`
+  delegates to it): the full 148-keyword named table (via `golang.org/x/image/colornames` +
+  `rebeccapurple` + `transparent`), all four hex forms (`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`), and
+  `rgb()`/`rgba()`/`hsl()`/`hsla()` in both the legacy comma syntax and the modern space syntax with
+  `/` alpha, with integer or percentage channels. Alpha is LIVE end to end — parsing yields a
+  `color.RGBA` the painter hands to the device unchanged and the rasteriser composites (verified by
+  pixel: `background:rgba(0,0,0,0.9)` on an 80×80 box went from 0 painted pixels to 6400).
+  Previously `pkg/css` had a hand-written parser covering only `#rgb`/`#rrggbb`/`rgb()` and eight
+  keywords while `pkg/svg` carried a complete implementation, so any alpha-bearing value failed the
+  cascade, the declaration was dropped per CSS error handling, and the element painted *nothing*.
+  Merged into `pkg/css` (not the reverse) because `pkg/svg` already depends on it and `pkg/css`
+  depends on no internal package. Malformed values still yield `ok=false` so the declaration drops
+  and the prior value stands. **Known divergence:** through the `background` SHORTHAND an
+  unparseable colour leaves the sub-property at its reset value rather than restoring the previous
+  declaration — `applyBackground` resets every longhand before classifying components and
+  deliberately tolerates ones it cannot classify. That is a shorthand-expander gap, not a colour-
+  grammar one; the longhands (`background-color`, `color`, `border-*-color`) drop correctly.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
