@@ -72,9 +72,11 @@ func TestFilteredContentStaysVectorInPDF(t *testing.T) {
 	}
 }
 
-// TestFilteredAndUnfilteredPaintTheSameGeometry: because the chain is a pass-through
-// at this stage, the filtered page's painted geometry must match the unfiltered one's
-// exactly — the bracket adds a group wrapper, never a coordinate shift.
+// TestFilteredAndUnfilteredPaintTheSameGeometry: the chain never RUNS on this
+// backend (RenderOffscreen declines), so the filtered page's painted geometry must
+// match the unfiltered one's exactly — the bracket adds a group wrapper, never a
+// coordinate shift. This is what makes "the content is present and correctly
+// placed" in the degradation log a checked claim rather than an assurance.
 func TestFilteredAndUnfilteredPaintTheSameGeometry(t *testing.T) {
 	plain := newPageDevice(100, 50)
 	paint.PaintPage(plain, filteredRectPage(false), render.Scale(1, 1))
