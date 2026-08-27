@@ -748,23 +748,18 @@ const xHeightEmFallback = 0.5
 //   - word-spacing is added AT each space character, so it widens the space
 //     glyph itself. A run with no spaces is unaffected no matter how large the
 //     value.
-//   - letter-spacing is added BETWEEN glyphs, and — despite SVG 1.1's wording
-//     suggesting it applies after every glyph including the last — resvg
-//     follows CSS Text 3 and adds NO trailing space. Its own
-//     letter-spacing/filter-bbox.svg fixture states this in a <desc> and
-//     asserts it with a filter region: the flood rectangle ends flush with the
-//     final glyph's right edge, not a spacing-width past it. Since resvg's
-//     reference PNGs are the ground truth for this corpus, that is the
-//     behavior implemented here.
+//   - letter-spacing widens the gap AFTER each glyph except the last one in
+//     the whole <text>. Despite SVG 1.1's wording suggesting it applies after
+//     every glyph including the final one, resvg follows CSS Text 3 and adds
+//     NO trailing space: its own letter-spacing/filter-bbox.svg states this in
+//     a <desc> and asserts it with a filter region whose flood rectangle ends
+//     flush with the final glyph's right edge. resvg's reference PNGs are this
+//     corpus's ground truth, so that is what is implemented.
 //
 // Both come from the SOURCE CHARACTER's style, not from a single run-wide
 // value, so a <tspan letter-spacing="10"> inside a <text letter-spacing="3">
-// spaces only its own characters (resvg's mixed-spacing.svg).
-//
-// The "between glyphs" rule is applied per STYLE SPAN, not once across the
-// whole text: the boundary between two differently-spaced tspans is the
-// TRAILING edge of the outer span's last glyph, and adding the outer value
-// there would reintroduce exactly the trailing space filter-bbox rules out.
+// widens only the gaps after its own characters (resvg's mixed-spacing.svg)
+// and the character after it reverts to the enclosing 3.
 func (r *Renderer) applyTextSpacing(glyphs []shapedChar, t *svg.Text) {
 	for i := range glyphs {
 		g := &glyphs[i]
@@ -777,24 +772,14 @@ func (r *Renderer) applyTextSpacing(glyphs []shapedChar, t *svg.Text) {
 			g.advance += ws
 		}
 
-		ls := st.LetterSpacingPt()
-		if ls == 0 {
-			continue
+		// The gap AFTER this glyph takes THIS character's value — never the
+		// next character's — so a <tspan letter-spacing="10"> widens the gap
+		// after each of its own characters and the one following it reverts to
+		// the enclosing value. The very last glyph of the whole <text> is the
+		// only one skipped, which is what keeps the trailing edge flush.
+		if i+1 < len(glyphs) {
+			g.advance += st.LetterSpacingPt()
 		}
-		// Not after the LAST glyph of this letter-spacing run — see the doc
-		// comment. A run ends at the end of the text or where the resolved
-		// letter-spacing changes.
-		if i+1 >= len(glyphs) {
-			continue
-		}
-		nextIdx := glyphs[i+1].charIndex
-		if nextIdx < 0 || nextIdx >= len(t.Chars) {
-			continue
-		}
-		if t.Chars[nextIdx].Style.LetterSpacingPt() != ls {
-			continue
-		}
-		g.advance += ls
 	}
 }
 

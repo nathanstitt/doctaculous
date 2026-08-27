@@ -991,8 +991,17 @@ func applyFontSize(s *Style, parentPt float64, attr func(string) (string, bool),
 		s.fontSizePt = parentPt * f
 		return
 	}
-	v, unit, ok := splitLengthUnit(val)
-	if !ok {
+	// splitLengthUnit reports ok only for a bare number or a FONT-RELATIVE
+	// unit; on "40px" its parseNumber fails and it returns ok=false. That is
+	// not an error — it means "not font-relative", which is exactly what the
+	// default branch below delegates to parseLength. Bailing on !ok here (as
+	// this did before) silently dropped every absolute-unit font-size,
+	// including the very common font-size="40px", back to the inherited value.
+	v, unit, numOK := splitLengthUnit(val)
+	if unit != "" && !numOK {
+		// A font-relative unit whose NUMBER did not parse ("xem", "%"): the
+		// value is genuinely invalid, and falling through to parseLength would
+		// only fail again after silently computing against a zero v.
 		logf("svg: ignoring %s=%q: unparseable", "font-size", val)
 		return
 	}
@@ -1511,6 +1520,15 @@ func (s Style) rebaseDecorations() Style {
 		out[i] = decoration{line: d.line, style: &self}
 	}
 	s.decorations = out
+	return s
+}
+
+// resetBaselineShift returns s with the accumulated baseline-shift cleared.
+// It is called once, on the <text> element, so the accumulation begins at zero
+// and only a <tspan> inward can contribute — see buildText's call site for the
+// three resvg fixtures that pin this.
+func (s Style) resetBaselineShift() Style {
+	s.baselineShiftPt = 0
 	return s
 }
 
