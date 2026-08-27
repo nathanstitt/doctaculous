@@ -1,0 +1,21 @@
+<svg id="svg1" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <title>gradientTransform on a non-square bounding box</title>
+    <desc>Regression fixture: every resvg-sourced gradientTransform fixture
+    uses a 160x160 (square) bbox, under which composing bboxM.Mul(gradM)
+    instead of gradM.Mul(bboxM) differs only by a small translation and is
+    hard to see. This 200x50 wide rect makes the two orders diverge in
+    ANGLE, not just position: rotate(30) must appear to rotate the gradient
+    axis about the gradient's own local origin, THEN map into the rect's
+    bounding box -- not rotate about the user-space origin after the bbox
+    mapping has already sheared local space non-uniformly.</desc>
+
+    <linearGradient id="lg1" gradientTransform="rotate(30)">
+        <stop offset="0" stop-color="white"/>
+        <stop offset="1" stop-color="black"/>
+    </linearGradient>
+
+    <rect id="rect1" x="20" y="75" width="160" height="50" fill="url(#lg1)" stroke="darkblue"/>
+
+    <!-- image frame -->
+    <rect id="frame" x="1" y="1" width="198" height="198" fill="none" stroke="black"/>
+</svg>

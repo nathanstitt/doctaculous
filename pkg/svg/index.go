@@ -13,9 +13,11 @@ import (
 // resolve through. Built by one pre-order walk before scene building; owned
 // by sceneBuilder and discarded when Parse returns.
 //
-// PRs 3-5 (gradients, <use>, clipPath) all resolve url(#...) references and
-// extend this structure as their consumers; buildIndex itself stays
-// agnostic about what a caller does with ids/defs beyond looking them up.
+// PR 3 (gradients/patterns) resolves url(#...) references through ids (see
+// the ids field doc comment on why a paint server is NOT restricted to
+// living inside a <defs>); later PRs (<use>, clipPath) extend this structure
+// as their own consumers. buildIndex itself stays agnostic about what a
+// caller does with ids/defs beyond looking them up.
 type docIndex struct {
 	// sheets holds every usable author stylesheet, in document order. The
 	// cascade (a later PR) applies them in this order so later sheets win
@@ -32,14 +34,19 @@ type docIndex struct {
 	// defs maps an id to the element that carries it, restricted to
 	// elements that are descendants of a <defs>, and always agreeing with
 	// ids: an element appears here only if it is also the ids winner for
-	// that id, so url(#x) resolves identically through either table. PRs
-	// 3-5 use this table (not ids) to resolve references that are only
-	// meaningful when the referenced node lives in a <defs> subtree (e.g. a
-	// <linearGradient> or <clipPath> definition), so a same-id element
-	// painted directly into the visible tree cannot be mistaken for a
-	// definition. A later element that reuses an id already claimed by an
-	// earlier, non-defs element is the ids duplicate case: it is warned
-	// about once and left out of both tables, never just this one.
+	// that id, so url(#x) resolves identically through either table. Not
+	// used by paint-server resolution (pkg/svg/paintserver.go's
+	// paintServerResolver.resolve looks up idx.ids directly): a
+	// <linearGradient>/<pattern> is referenceable from anywhere in the
+	// document, not only from inside a <defs> subtree — the resvg corpus
+	// has fixtures that place a gradient as a direct sibling of the shape
+	// painting with it — so restricting the lookup to defs would wrongly
+	// fail to resolve those. This table exists for a future consumer (e.g.
+	// clipPath) whose semantics genuinely differ depending on whether the
+	// referenced node lives in a <defs> subtree. A later element that
+	// reuses an id already claimed by an earlier, non-defs element is the
+	// ids duplicate case: it is warned about once and left out of both
+	// tables, never just this one.
 	defs map[string]*element
 }
 

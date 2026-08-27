@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -21,6 +22,22 @@ type pageDevice struct {
 	embed    *fontEmbedder
 	images   []pendingImage // images referenced this page (assembled later)
 	logf     func(string, ...any)
+
+	// clipStack tracks each Save()'s clip rectangle so Restore can pop back to it.
+	// clipRect is the current clip's device-space bounding box (not the exact
+	// path shape — PDF's own W/W* operators still enforce the precise clip at
+	// view time). It exists only so FillShading knows how large a region to
+	// rasterize; every other device method ignores it. A nil rect means
+	// "unclipped" (bounds fall back to the full page box).
+	clipRect  *clipBounds
+	clipStack []*clipBounds
+
+	shadingLogged bool // true once a fidelity note has been logged for this device
+}
+
+// clipBounds is an axis-aligned device-space rectangle in PDF points.
+type clipBounds struct {
+	minX, minY, maxX, maxY float64
 }
 
 type pendingImage struct {
@@ -197,11 +214,82 @@ func (d *pageDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64
 	d.buf.WriteString("Q\n")
 }
 
+// FillShading rasterizes shader into an RGBA image over the current clip's
+// bounding box and draws it through DrawImage. render.Shader is an opaque
+// ColorAt-only interface, so pdfwrite cannot recover a gradient's coordinates,
+// stops, or spread method to emit a native PDF /Shading dictionary (that needs
+// either a richer Shader interface or a parallel paint description — deferred
+// to when transparency groups reopen this backend). Rasterizing at 1 image
+// pixel per PDF point (this device's own unit; pdfwrite carries no other DPI
+// notion) keeps the image sized to the shape rather than the whole page, and
+// is sharp enough that a gradient does not visibly band once placed back into
+// vector page space.
 func (d *pageDevice) FillShading(s render.Shader, ctm render.Matrix, blend string) {
-	// The HTML/DOCX layout engines do not emit shadings; log and skip.
-	if d.logf != nil {
-		d.logf("pdfwrite: FillShading not supported; skipped")
+	if s == nil {
+		return
 	}
+	inv, ok := invertMatrix(ctm)
+	if !ok {
+		return // singular CTM: shading space is degenerate, nothing to sample
+	}
+	b := d.clipRect
+	if b == nil {
+		// No active clip: fall back to the page box (the sh operator is normally
+		// clipped first, so this is the rare/defensive case, not the common path).
+		b = &clipBounds{0, 0, d.wPt, d.hPt}
+	}
+	b = intersectClipBounds(b, &clipBounds{0, 0, d.wPt, d.hPt})
+	minX, minY := int(math.Floor(b.minX)), int(math.Floor(b.minY))
+	maxX, maxY := int(math.Ceil(b.maxX)), int(math.Ceil(b.maxY))
+	w, h := maxX-minX, maxY-minY
+	if w <= 0 || h <= 0 {
+		return
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	any := false
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			// Sample at the pixel center in page space, then map back through the
+			// inverse CTM into shading space — the same convention the raster
+			// backend uses (pkg/render/raster/shading.go).
+			px, py := float64(minX+x)+0.5, float64(minY+y)+0.5
+			ux, uy := inv.Apply(px, py)
+			c, paint := s.ColorAt(ux, uy)
+			if !paint {
+				continue
+			}
+			img.SetRGBA(x, y, c)
+			any = true
+		}
+	}
+	if !any {
+		return
+	}
+	if d.logf != nil && !d.shadingLogged {
+		d.shadingLogged = true
+		d.logf("pdfwrite: shading rasterized into an image (no vector /Shading output yet)")
+	}
+	// DrawImage maps the image's unit square [0,1]x[0,1] into device space; place
+	// it exactly over [minX,maxX]x[minY,maxY] in page space.
+	place := render.Scale(float64(w), float64(h)).Mul(render.Translate(float64(minX), float64(minY)))
+	d.DrawImage(img, place, 1, blend)
+}
+
+// invertMatrix returns the inverse of an affine matrix, ok=false if singular.
+// pkg/render/raster has its own private copy of this same math; pdfwrite needs
+// its own because Matrix carries no Invert method and the two packages do not
+// share an internal geometry helper package.
+func invertMatrix(m render.Matrix) (render.Matrix, bool) {
+	det := m.A*m.D - m.B*m.C
+	if det > -1e-12 && det < 1e-12 {
+		return render.Matrix{}, false
+	}
+	id := 1 / det
+	return render.Matrix{
+		A: m.D * id, B: -m.B * id, C: -m.C * id, D: m.A * id,
+		E: (m.C*m.F - m.D*m.E) * id, F: (m.B*m.E - m.A*m.F) * id,
+	}, true
 }
 
 func (d *pageDevice) PushClip(p *render.Path, rule render.FillRule) {
@@ -214,10 +302,49 @@ func (d *pageDevice) PushClip(p *render.Path, rule render.FillRule) {
 	} else {
 		d.buf.WriteString("W n\n")
 	}
+	// Track the intersected bounding box (not the exact shape) so FillShading
+	// knows how large a region to rasterize; the PDF W/W* operators above still
+	// enforce the precise clip at view time regardless of this approximation.
+	if minX, minY, maxX, maxY, ok := p.Bounds(); ok {
+		d.clipRect = intersectClipBounds(d.clipRect, &clipBounds{minX, minY, maxX, maxY})
+	}
 }
 
-func (d *pageDevice) Save()    { d.buf.WriteString("q\n") }
-func (d *pageDevice) Restore() { d.buf.WriteString("Q\n") }
+// intersectClipBounds intersects two clip rectangles; a nil operand means
+// "unclipped" and is ignored. Returns nil if the result is empty.
+func intersectClipBounds(a, b *clipBounds) *clipBounds {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	r := &clipBounds{
+		minX: max(a.minX, b.minX),
+		minY: max(a.minY, b.minY),
+		maxX: min(a.maxX, b.maxX),
+		maxY: min(a.maxY, b.maxY),
+	}
+	if r.minX >= r.maxX || r.minY >= r.maxY {
+		return &clipBounds{} // empty
+	}
+	return r
+}
+
+func (d *pageDevice) Save() {
+	d.buf.WriteString("q\n")
+	d.clipStack = append(d.clipStack, d.clipRect)
+}
+
+func (d *pageDevice) Restore() {
+	d.buf.WriteString("Q\n")
+	if n := len(d.clipStack); n > 0 {
+		d.clipRect = d.clipStack[n-1]
+		d.clipStack = d.clipStack[:n-1]
+	} else {
+		d.clipRect = nil
+	}
+}
 
 // writePath emits path construction operators (m/l/c/h) in raw page-space
 // coordinates. The page-level Y-flip CTM (prepended by the assembler) maps these to

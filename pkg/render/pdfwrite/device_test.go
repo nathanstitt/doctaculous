@@ -9,6 +9,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/doctaculous/pkg/render/raster"
 )
 
 // TestDeviceEmitsFillAndGlyphOps feeds a fill and a glyph, then asserts the content
@@ -135,6 +136,127 @@ func TestDeviceStrokeDefaultMiterLimit(t *testing.T) {
 type stubFace struct{ o *render.Path }
 
 func (s stubFace) Outline(uint16) *render.Path { return s.o }
+
+// rampFunc is a minimal function.Func implementing a straight-line red (t=0) to
+// blue (t=1) ramp, fully opaque, so tests can build a render.Shader without
+// depending on PDF function-dictionary parsing.
+type rampFunc struct{}
+
+func (rampFunc) NumOutputs() int { return 4 }
+
+func (rampFunc) Eval(in []float64) []float64 {
+	t := 0.0
+	if len(in) > 0 {
+		t = in[0]
+	}
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return []float64{1 - t, 0, t, 1} // R,G,B,A straight alpha
+}
+
+// TestDeviceFillShadingRasterizesIntoImageXObject proves FillShading (once
+// implemented) samples the shader into an RGBA image and draws it via
+// DrawImage, so the page records an image XObject where today it records none.
+func TestDeviceFillShadingRasterizesIntoImageXObject(t *testing.T) {
+	dev := newPageDevice(100, 50)
+
+	clip := &render.Path{}
+	clip.MoveTo(0, 0)
+	clip.LineTo(100, 0)
+	clip.LineTo(100, 50)
+	clip.LineTo(0, 50)
+	clip.Close()
+	dev.Save()
+	dev.PushClip(clip, render.NonZero)
+
+	shader := raster.NewAxialShader(0, 0, 100, 0, rampFunc{}, raster.SpreadPad)
+	dev.FillShading(shader, render.Matrix{A: 1, D: 1}, "")
+	dev.Restore()
+
+	if len(dev.images) == 0 {
+		t.Fatal("FillShading did not record an image XObject")
+	}
+	content := decompress(t, dev.contentStream())
+	if !bytes.Contains(content, []byte(" Do\n")) {
+		t.Errorf("content stream missing image Do operator:\n%s", content)
+	}
+}
+
+// TestDeviceFillShadingPlacesImageAtClipOrigin proves the rasterized shading
+// image is placed at the clip's own (minX,minY) origin, not warped by
+// composing the placement Translate and Scale in the wrong order. Composing
+// Translate(minX,minY).Mul(Scale(w,h)) instead of
+// Scale(w,h).Mul(Translate(minX,minY)) scales the translation by (w,h) too
+// (Matrix.Mul applies its LEFT operand first), which is invisible whenever
+// the clip happens to start at the page origin (Translate(0,0) is inert
+// either way) — exactly like TestDeviceFillShadingRasterizesIntoImageXObject's
+// clip does. This test pins a clip away from the origin so that regression
+// fails loudly instead of only manifesting on off-origin shapes.
+func TestDeviceFillShadingPlacesImageAtClipOrigin(t *testing.T) {
+	dev := newPageDevice(100, 100)
+
+	clip := &render.Path{}
+	clip.MoveTo(20, 30)
+	clip.LineTo(70, 30)
+	clip.LineTo(70, 80)
+	clip.LineTo(20, 80)
+	clip.Close()
+	dev.Save()
+	dev.PushClip(clip, render.NonZero)
+
+	shader := raster.NewAxialShader(20, 30, 70, 30, rampFunc{}, raster.SpreadPad)
+	dev.FillShading(shader, render.Matrix{A: 1, D: 1}, "")
+	dev.Restore()
+
+	if len(dev.images) == 0 {
+		t.Fatal("FillShading did not record an image XObject")
+	}
+	ctm := dev.images[len(dev.images)-1].ctm
+	// The image's unit square [0,1]x[0,1] must map to exactly the clip
+	// bounds [20,70]x[30,80]: apply(0,0) -> (20,30), apply(1,1) -> (70,80).
+	x0, y0 := ctm.A*0+ctm.C*0+ctm.E, ctm.B*0+ctm.D*0+ctm.F
+	x1, y1 := ctm.A*1+ctm.C*1+ctm.E, ctm.B*1+ctm.D*1+ctm.F
+	const tol = 1e-6
+	if abs(x0-20) > tol || abs(y0-30) > tol {
+		t.Errorf("image origin = (%v,%v), want (20,30)", x0, y0)
+	}
+	if abs(x1-70) > tol || abs(y1-80) > tol {
+		t.Errorf("image far corner = (%v,%v), want (70,80)", x1, y1)
+	}
+}
+
+func abs(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// TestDeviceSolidFillHasNoImageXObject proves a solid fill (no shading involved)
+// never records an image, so documents that don't use gradients stay
+// byte-identical to before this feature existed.
+func TestDeviceSolidFillHasNoImageXObject(t *testing.T) {
+	dev := newPageDevice(100, 50)
+	p := &render.Path{}
+	p.MoveTo(0, 0)
+	p.LineTo(100, 0)
+	p.LineTo(100, 50)
+	p.LineTo(0, 50)
+	p.Close()
+	dev.Fill(p, render.FillPaint{Color: color.RGBA{R: 255, A: 255}})
+
+	if len(dev.images) != 0 {
+		t.Fatalf("solid fill recorded %d image(s), want 0", len(dev.images))
+	}
+	content := decompress(t, dev.contentStream())
+	if bytes.Contains(content, []byte(" Do\n")) {
+		t.Errorf("solid fill content stream should not contain an image Do operator:\n%s", content)
+	}
+}
 
 func decompress(t *testing.T, data []byte) []byte {
 	t.Helper()

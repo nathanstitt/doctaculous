@@ -33,10 +33,26 @@ func (*Group) isNode() {}
 
 // Shape is one paintable path with its resolved style (an SVG basic shape:
 // rect, circle, ellipse, line, polyline, polygon, or path).
+//
+// FillGradient/StrokeGradient/FillPattern/StrokePattern carry an
+// ALREADY-RESOLVED paint server (a render.Shader, or a tile Group plus
+// placement, together with the matrix mapping its local coordinate space
+// into this Shape's own user space, i.e. composed before M) rather than a
+// url() id: the document index a gradient/pattern id resolves through is
+// discarded when Parse returns, and Document must stay a read-only,
+// side-table-free value so it can be shared lock-free across the engine's
+// parallel page-render fan-out. A field is nil when the corresponding
+// fill/stroke does not reference a (successfully resolved) paint server of
+// that kind — see Style.FillServer/StrokeServer for why a Style may still
+// carry a server id even when resolution fails.
 type Shape struct {
-	M     render.Matrix // local transform
-	Path  *render.Path  // user-space geometry, pre-transform
-	Style Style
+	M              render.Matrix // local transform
+	Path           *render.Path  // user-space geometry, pre-transform
+	Style          Style
+	FillGradient   *paintServer  // resolved fill="url(#...)" gradient, or nil
+	StrokeGradient *paintServer  // resolved stroke="url(#...)" gradient, or nil
+	FillPattern    *patternPaint // resolved fill="url(#...)" pattern, or nil
+	StrokePattern  *patternPaint // resolved stroke="url(#...)" pattern, or nil
 }
 
 func (*Shape) isNode() {}
@@ -84,8 +100,16 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		doc.rootM = render.Identity
 	}
 
-	b := &sceneBuilder{logf: logf, warned: map[string]bool{}}
+	b := &sceneBuilder{logf: logf, warned: map[string]bool{}, vp: viewport{w: doc.WidthPt, h: doc.HeightPt}, buildingPattern: map[string]bool{}}
+	if hasVB {
+		// Gradient userSpaceOnUse coordinates live in the same user-unit
+		// space as the element geometry they paint — i.e. viewBox space when
+		// a viewBox is present, not the post-rootM viewport pixel space — so
+		// percentage resolution must use the viewBox extent in that case.
+		b.vp = viewport{w: vb.W, h: vb.H}
+	}
 	b.idx = buildIndex(root, b.warnOnceMsg)
+	b.servers = newPaintServerResolver(b.idx, logf)
 	ctx := &cascadeCtx{idx: b.idx, logf: logf}
 	doc.root = b.buildGroup(root, defaultStyle(), ctx)
 
@@ -188,16 +212,13 @@ func hasPercentSuffix(s string) bool {
 // not yet implement. Each is skipped with one debug log line per element
 // name per document (see sceneBuilder.warned) rather than being silently
 // dropped or treated as an unknown forgiving container, since silently
-// recursing into e.g. <linearGradient>'s <stop> children would misrender
+// recursing into e.g. an unsupported container's children would misrender
 // them as shapes/groups.
 var unsupportedElements = map[string]bool{
 	"use":              true,
 	"symbol":           true,
 	"text":             true,
 	"image":            true,
-	"linearGradient":   true,
-	"radialGradient":   true,
-	"pattern":          true,
 	"clipPath":         true,
 	"mask":             true,
 	"filter":           true,
@@ -229,12 +250,27 @@ var unsupportedElements = map[string]bool{
 // reason: buildIndex's pre-pass already consumed every <style> element's
 // text into docIndex.sheets, so by the time the scene walk reaches one,
 // there is nothing left for it to do but produce zero Nodes.
+//
+// linearGradient, radialGradient, and pattern are paint servers: fully
+// supported (Style.FillServer/StrokeServer + the document index resolve
+// them out-of-band), but they contribute nothing to the scene walk
+// themselves — a shape that references one is painted using the resolved
+// paint server, not by the gradient/pattern element appearing as a node.
+// stop is a gradient's child and must be skipped for the same reason:
+// without an explicit entry here it would fall to buildNode's forgiving
+// "unknown element" default and get painted directly into the visible
+// scene at document coordinates, since Go map membership provides no
+// transitive "skip my children too" behavior.
 var skippedElements = map[string]bool{
-	"defs":     true,
-	"style":    true,
-	"title":    true,
-	"desc":     true,
-	"metadata": true,
+	"defs":           true,
+	"style":          true,
+	"title":          true,
+	"desc":           true,
+	"metadata":       true,
+	"linearGradient": true,
+	"radialGradient": true,
+	"pattern":        true,
+	"stop":           true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -256,9 +292,34 @@ var shapeElements = map[string]bool{
 // walk begins, and is discarded along with the sceneBuilder when Parse
 // returns — it never reaches Document.
 type sceneBuilder struct {
-	logf   func(string, ...any)
-	warned map[string]bool
-	idx    *docIndex
+	logf    func(string, ...any)
+	warned  map[string]bool
+	idx     *docIndex
+	servers *paintServerResolver // gradient/pattern href-chain resolver, built once from idx
+	vp      viewport             // current viewport size, for userSpaceOnUse percentage resolution
+
+	// buildingPattern guards against a pattern tile's content referencing
+	// (directly, or via its own href chain, or indirectly through a chain of
+	// OTHER patterns that eventually loops back to it) the pattern currently
+	// being built into a tile Group. This is a SEPARATE cycle-prone graph
+	// from followHrefChain's href-chain walk (Task 4): here the cycle runs
+	// through buildShape -> resolvePattern -> buildGroup -> buildShape again
+	// for a shape inside the tile, not through a single element's href
+	// attribute. A pattern id present in this set is currently "in
+	// progress" one call further up the Go call stack; resolvePattern
+	// treats resolving it again as a cycle and stops, exactly like SVG's own
+	// "an indirect cycle must be treated as an error (ignore the
+	// fill/stroke)" rule for patternful tiles.
+	//
+	// This set only fires when a pattern id repeats somewhere on the
+	// current chain — it does NOT bound a chain of entirely DISTINCT
+	// patterns (p0's tile fills with p1, p1's with p2, p2's with p3, ...),
+	// since no id ever recurs there and the membership test never trips.
+	// Each level of such a chain multiplies draw calls by its own tile cell
+	// count, so left unchecked it is exponential in chain depth. That case
+	// is bounded separately, at draw time, by pkg/svg/draw's per-DrawVector
+	// pattern-nesting-depth counter (maxPatternNestingDepth) — not here.
+	buildingPattern map[string]bool
 }
 
 // buildGroup converts el's children into a Group, threading inherited style
@@ -268,8 +329,17 @@ type sceneBuilder struct {
 // carries the cascade (stylesheets + logger) that apply resolves each
 // child's attributes against.
 func (b *sceneBuilder) buildGroup(el *element, parentStyle Style, ctx *cascadeCtx) *Group {
+	return b.buildKidsGroup(el.kids, parentStyle, ctx)
+}
+
+// buildKidsGroup is buildGroup's loop body, factored out so a caller that
+// already has a []*element slice not sourced from a single element's own
+// kids field — a <pattern>'s inherited tile content (patternTileKids), which
+// may come from a DIFFERENT element in the href chain than the one being
+// resolved — can build a Group from it directly.
+func (b *sceneBuilder) buildKidsGroup(kids []*element, parentStyle Style, ctx *cascadeCtx) *Group {
 	g := &Group{M: render.Identity}
-	for _, kid := range el.kids {
+	for _, kid := range kids {
 		if n := b.buildNode(kid, parentStyle, ctx); n != nil {
 			g.Kids = append(g.Kids, n)
 		}
@@ -308,6 +378,16 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style, ctx *cascadeCtx
 		return b.buildGroupElement(el, st, ctx)
 	case shapeElements[el.local]:
 		return b.buildShape(el, st)
+	case el.local == "linearGradient", el.local == "radialGradient", el.local == "pattern", el.local == "stop":
+		// Paint servers (and a gradient's <stop> children) are fully
+		// supported, but resolved out-of-band through the document index —
+		// see Style.FillServer/StrokeServer — not by appearing as scene
+		// nodes. This case is listed explicitly, ahead of and independent of
+		// skippedElements table membership, so a <pattern>'s tile children
+		// (e.g. <rect>) can NEVER fall through to the forgiving default
+		// below and get painted directly into the visible scene at document
+		// coordinates.
+		return nil
 	case skippedElements[el.local]:
 		return nil
 	case unsupportedElements[el.local]:
@@ -348,7 +428,12 @@ const groupOpacityWarnKey = " group-opacity"
 
 // buildShape converts a basic-shape element into a Shape, or nil when
 // shapePath reports the shape degenerate (zero/negative extent) or
-// visibility:hidden drops it.
+// visibility:hidden drops it. A fill or stroke that references a gradient
+// (Style.FillServer/StrokeServer) is resolved here, against path's
+// PRE-TRANSFORM geometry (the objectBoundingBox definition), and the result
+// is stored on the Shape rather than the "#id" alone — see the Shape doc
+// comment on why resolution must happen now, before Parse discards the
+// document index.
 func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	if !st.visible {
 		// visibility:hidden drops the shape outright in this PR: visibility
@@ -360,10 +445,43 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	if path == nil {
 		return nil
 	}
-	return &Shape{
+	s := &Shape{
 		M:     elementTransform(el, b.logf),
 		Path:  path,
 		Style: st,
+	}
+	if ref, ok := st.FillServer(); ok {
+		if id, ok := fragmentID(ref); ok {
+			b.resolvePaint(id, path, &s.FillGradient, &s.FillPattern)
+		}
+	}
+	if ref, ok := st.StrokeServer(); ok {
+		if id, ok := fragmentID(ref); ok {
+			b.resolvePaint(id, path, &s.StrokeGradient, &s.StrokePattern)
+		}
+	}
+	return s
+}
+
+// resolvePaint resolves id (a fill/stroke url() reference) against b.servers
+// and stores the result into *gradOut or *patOut, whichever kind id names.
+// Both out-pointers are left nil if id does not resolve to a paintable
+// server (unknown id, no stops, a pattern with no usable tile, or a
+// degenerate objectBoundingBox) — see resolveGradient/resolvePattern for the
+// exact conditions. path is the shape's own PRE-TRANSFORM geometry.
+func (b *sceneBuilder) resolvePaint(id string, path *render.Path, gradOut **paintServer, patOut **patternPaint) {
+	ps, ok := b.servers.resolve(id)
+	if !ok {
+		return
+	}
+	if ps.kind == "pattern" {
+		if pp, ok := b.resolvePattern(id, ps, path); ok {
+			*patOut = pp
+		}
+		return
+	}
+	if g, ok := resolveGradient(id, b.servers, path, b.vp, b.logf); ok {
+		*gradOut = &g
 	}
 }
 

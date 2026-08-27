@@ -19,13 +19,15 @@ import (
 // resolved paint via FillPaint/StrokePaint/Opacity; its fields stay
 // unexported since only those three accessors are part of the contract.
 type Style struct {
-	hasFill     bool // false: fill="none" (or an unsupported url() ref)
+	hasFill     bool // false: fill="none" (or a url() ref with no fallback color)
 	fill        color.RGBA
+	fillServer  string // "#id" fragment from fill="url(#id)"; "" = none referenced
 	fillOpacity float64
 	fillRule    render.FillRule
 
 	hasStroke     bool
 	stroke        color.RGBA
+	strokeServer  string // "#id" fragment from stroke="url(#id)"; "" = none referenced
 	strokeOpacity float64
 	strokeWidth   float64 // user units
 	cap           render.LineCap
@@ -70,12 +72,14 @@ func defaultStyle() Style {
 // cascade: with a nil ctx (or one built from a document with no stylesheets
 // or style="" attributes anywhere) attr resolution falls back to el's
 // presentation attributes alone, exactly PR 1's behavior — every one of PR
-// 1's 148 golden fixtures uses no CSS and so exercises only this path. ctx's
-// logf receives a debug line for a url() paint reference (gradients land in
-// a later PR) and for any attribute value that fails to parse — the
-// attribute is then ignored, per SVG's error-handling model, and the
-// inherited value is kept. opacity is not inherited: it resets to el's own
-// value (default 1) on every call. Every other listed property is inherited.
+// 1's 148 golden fixtures uses no CSS and so exercises only this path. A
+// url() paint reference is recorded (not resolved: apply has no index to
+// resolve it against — see Style.FillServer/StrokeServer and the scene
+// builder). ctx's logf receives a debug line for any attribute value that
+// fails to parse — the attribute is then ignored, per SVG's error-handling
+// model, and the inherited value is kept. opacity is not inherited: it
+// resets to el's own value (default 1) on every call. Every other listed
+// property is inherited.
 func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s := parent
 	s.opacity = 1 // not inherited; may be overridden below
@@ -96,11 +100,11 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	// element's own (already-updated) color, not the parent's.
 	applyColorProp(&s, attr, logf)
 
-	applyPaint("fill", &s.hasFill, &s.fill, s.color, attr, logf)
+	applyPaint("fill", &s.hasFill, &s.fill, &s.fillServer, s.color, attr, logf)
 	applyOpacityProp("fill-opacity", &s.fillOpacity, attr, logf)
 	applyFillRule(&s, attr, logf)
 
-	applyPaint("stroke", &s.hasStroke, &s.stroke, s.color, attr, logf)
+	applyPaint("stroke", &s.hasStroke, &s.stroke, &s.strokeServer, s.color, attr, logf)
 	applyOpacityProp("stroke-opacity", &s.strokeOpacity, attr, logf)
 	applyStrokeWidth(&s, attr, logf)
 	applyLineCap(&s, attr, logf)
@@ -149,11 +153,20 @@ func applyColorProp(s *Style, attr func(string) (string, bool), logf func(string
 }
 
 // applyPaint resolves a fill/stroke-like paint attribute: "none" clears
-// *has, "currentColor" resolves against cur, "url(...)" degrades to none
-// plus a log line (paint servers land in a later PR), "inherit" keeps the
-// parent's value, and anything else is parsed as a color or logged and
-// ignored.
-func applyPaint(name string, has *bool, c *color.RGBA, cur color.RGBA, attr func(string) (string, bool), logf func(string, ...any)) {
+// *has and *server, "currentColor" resolves against cur, "url(#id)" (with
+// SVG's optional fallback-color syntax, "url(#id) red") records the
+// referenced fragment id in *server for the scene builder to resolve
+// against the document index — plus the fallback color, if given, applied
+// exactly as an ordinary color would be so *has/*c reflect it. A url() with
+// NO fallback clears *has (mirroring the "none" case): per SVG, the
+// fallback is only ever the explicit color written in the attribute value
+// itself, never the inherited fill/stroke, so FillPaint/StrokePaint must
+// not paint the parent's solid color for a still-unresolved reference — the
+// scene builder (buildShape) is the one place with the document index to
+// resolve *server into an actual gradient/pattern, and does so entirely
+// independently of *has/*c. "inherit" keeps the parent's value, and
+// anything else is parsed as a color or logged and ignored.
+func applyPaint(name string, has *bool, c *color.RGBA, server *string, cur color.RGBA, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr(name)
 	if !ok {
 		return
@@ -164,16 +177,39 @@ func applyPaint(name string, has *bool, c *color.RGBA, cur color.RGBA, attr func
 		return
 	case val == "none":
 		*has = false
+		*server = ""
 		return
 	case val == "currentColor":
 		*has = true
+		*server = ""
 		*c = cur
 		return
 	case strings.HasPrefix(strings.ToLower(val), "url("):
-		logf("svg: ignoring %s=%q: paint servers are not supported", name, val)
-		*has = false
+		id, fallback, ok := parsePaintServerRef(val)
+		if !ok {
+			logf("svg: ignoring %s=%q: unparseable url() reference", name, val)
+			return
+		}
+		if fallback == "" {
+			*server = id
+			*has = false
+			return
+		}
+		parsed, ok := parseColorValue(fallback)
+		if !ok {
+			// The whole value is invalid per SVG/CSS error handling: neither
+			// the reference nor a fallback commits, and the property keeps
+			// whatever it already had (inherited *has/*c/*server), not "no
+			// paint" — mirroring the unparseable-plain-color branch below.
+			logf("svg: ignoring %s=%q: unparseable fallback color", name, val)
+			return
+		}
+		*server = id
+		*has = true
+		*c = parsed
 		return
 	}
+	*server = ""
 	parsed, ok := parseColorValue(val)
 	if !ok {
 		logf("svg: ignoring %s=%q: unparseable", name, val)
@@ -181,6 +217,23 @@ func applyPaint(name string, has *bool, c *color.RGBA, cur color.RGBA, attr func
 	}
 	*has = true
 	*c = parsed
+}
+
+// parsePaintServerRef splits an SVG paint value beginning with "url(" into
+// the referenced fragment id (with its leading "#", e.g. "#g") and the
+// optional trailing fallback color text (SVG's "url(#g) red" syntax, empty
+// when absent). ok is false when the "url(" is not closed by a matching
+// ")", which degrades safely (the caller ignores the whole value) rather
+// than panicking or guessing at a truncated id.
+func parsePaintServerRef(val string) (id, fallback string, ok bool) {
+	end := strings.IndexByte(val, ')')
+	if end < 0 {
+		return "", "", false
+	}
+	id = strings.TrimSpace(val[len("url("):end])
+	id = strings.Trim(id, `"'`)
+	fallback = strings.TrimSpace(val[end+1:])
+	return id, fallback, true
 }
 
 // applyOpacityProp resolves an opacity-like attribute (fill-opacity,
@@ -366,13 +419,30 @@ func applyVisibility(s *Style, attr func(string) (string, bool), logf func(strin
 	}
 }
 
+// FillServer returns the "#id" fragment of a fill="url(#id)" (or
+// "url(#id) fallback") reference, and whether one is present. The scene
+// builder resolves id against the document index; applyPaint never does,
+// since it only has the element's attributes, not the index.
+func (s Style) FillServer() (id string, ok bool) {
+	return s.fillServer, s.fillServer != ""
+}
+
+// StrokeServer returns the "#id" fragment of a stroke="url(#id)" (or
+// "url(#id) fallback") reference, and whether one is present. The scene
+// builder resolves id against the document index; applyPaint never does,
+// since it only has the element's attributes, not the index.
+func (s Style) StrokeServer() (id string, ok bool) {
+	return s.strokeServer, s.strokeServer != ""
+}
+
 // FillPaint returns the element's composed fill paint (color with
 // fill-opacity folded into alpha, plus the fill rule). ok is false when
-// there is no fill to paint: fill="none", an unsupported url() paint-server
-// reference (which applyPaint already degrades to hasFill=false), or the
-// element is invisible (visibility:hidden). display:none is not checked
-// here — the scene builder never reaches this far for a display:none
-// subtree; see the tree-walker's subtree skip.
+// there is no fill to paint: fill="none", a url() paint-server reference
+// with no fallback color (FillServer reports that case so the scene
+// builder can still resolve and paint it), or the element is invisible
+// (visibility:hidden). display:none is not checked here — the scene
+// builder never reaches this far for a display:none subtree; see the
+// tree-walker's subtree skip.
 func (s Style) FillPaint() (render.FillPaint, bool) {
 	if !s.hasFill || !s.visible {
 		return render.FillPaint{}, false
@@ -384,8 +454,10 @@ func (s Style) FillPaint() (render.FillPaint, bool) {
 // DashArray, and DashPhase are not yet scaled into device space, since only
 // the caller (pkg/svg/draw) knows the local→device transform in effect for
 // this shape. ok is false when there is no stroke to paint: stroke="none",
-// an unsupported url() reference, the element is invisible, or the resolved
-// stroke-width is <= 0 (a zero-width stroke paints nothing, per SVG).
+// a url() paint-server reference with no fallback color (StrokeServer
+// reports that case so the scene builder can still resolve and paint it),
+// the element is invisible, or the resolved stroke-width is <= 0 (a
+// zero-width stroke paints nothing, per SVG).
 func (s Style) StrokePaint() (render.StrokePaint, bool) {
 	if !s.hasStroke || !s.visible || s.strokeWidth <= 0 {
 		return render.StrokePaint{}, false

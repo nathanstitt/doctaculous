@@ -613,10 +613,9 @@ read+write vocabulary for the tinycld text adoption path):
   `layout.VectorKind` item rather than rasterizing to an embedded image (an SVG circle → PDF has no
   image XObject). Landed with a cross-cutting fix in the shared rasterizer: an unclosed subpath used
   to fill incorrectly (also affecting the PDF content interpreter's `f` operator on unclosed paths).
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: paint servers
-  (gradients/patterns), `<use>`, text, `clip-path`/`mask`, filters, `<image>`, and inline `<svg>`
-  inside HTML/`<img src=*.svg>` — tracked as the PR 3–8 slices in
-  `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text,
+  `clip-path`/`mask`, filters, `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked
+  as the PR 4–8 slices in `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
 - 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
   with committed goldens.
 
@@ -637,9 +636,55 @@ read+write vocabulary for the tinycld text adoption path):
 - Known gaps that fail safe rather than mismatch: attribute selectors (`[foo]`) and the
   combinators (`>`, `+`, `~`) parse without erroring but never match (the selector engine has no
   handling for either, so they parse into an inert simple selector); `@import` is recognized and
-  skipped with a debug log rather than fetched.
+  skipped with a debug log rather than fetched. The selector gaps are shared with HTML (`pkg/css`)
+  and are tracked as planned work — see CLAUDE.md's roadmap item 8, "CSS selector coverage".
 - Landed two shared `pkg/css` fixes that also apply to HTML: `!important` is now recognized with no
   preceding whitespace (`red!important`), and `/* */` comments inside a `style=""` attribute value
   are stripped before parsing, matching what a `<style>` sheet's rule body already did.
 - 13 curated fixtures from the same resvg test suite covering selector kinds, specificity,
   `!important`, cascade order, and CDATA — with committed goldens.
+
+**SVG input — paint servers** (`pkg/svg` gradient/pattern resolution, `pkg/svg/draw` fill dispatch,
+`pkg/render/raster` shading, `pkg/render/pdfwrite` shading-to-image):
+
+- `<linearGradient>` and `<radialGradient>`, both `gradientUnits` (`objectBoundingBox` default and
+  `userSpaceOnUse`, including percentages in either), `gradientTransform`, and all three
+  `spreadMethod` values (`pad`/`reflect`/`repeat`). `<stop>` parsing: `offset` as a number or
+  percentage (clamped to `[0,1]`, non-decreasing across the list — an out-of-order stop clamps
+  forward rather than sorting), `stop-color` (full color grammar plus `currentColor`, resolved
+  against the stop's own `color`), and `stop-opacity` composed in as REAL alpha (a fading stop shows
+  whatever is behind the shape, not a black composite).
+- `xlink:href`/`href` reference chains: per-attribute inheritance (nearest element wins, walking
+  outward), all-or-nothing stop inheritance, cross-type href (a `linearGradient` hrefing a
+  `radialGradient` or vice versa) inheriting attributes/stops but painting as the referencing
+  element's own kind, and cycle-safe chain walking (2-cycle, 3-cycle, and self-referencing chains all
+  terminate and degrade to "own stops win" or "paints nothing" rather than looping).
+- `<pattern>`: `patternUnits`/`patternContentUnits` in both unit systems (with percentages), a
+  `viewBox` on the pattern (taking precedence over `patternContentUnits` when both are set, and
+  resolvable through an href chain), `preserveAspectRatio`, `patternTransform` composing correctly
+  with the referencing shape's own `transform`, `x`/`y` cell offset, and attribute/child inheritance
+  via href (including a pattern nested inside another pattern's tile). A self-referencing tile or a
+  mutual two-pattern cycle terminates via a build-time guard, degrading to "unpainted fill, the
+  tile's own stroke still shows" rather than recursing forever.
+- An unresolved `url(#id)` reference with no fallback color paints nothing (not the inherited solid
+  color) — a real bug fixed while building this: `Style.applyPaint` now clears `hasFill`/`hasStroke`
+  for a still-unresolved reference instead of leaving the previous cascade value in place.
+  `pkg/render/pdfwrite`'s `FillShading` was a no-op stub before this PR, so an SVG gradient converted
+  to PDF rendered as a blank fill; it now rasterizes the shading into an image XObject sampled at 1
+  device pixel per PDF point (see the gap below on why this isn't a native `/Shading` yet).
+- Known gaps, each verified by rendering rather than merely inferred, and excluded from the golden
+  corpus rather than locked in as correct: **gradient/pattern strokes** (`stroke="url(#g)")`) degrade
+  to the paint's fallback color (or no stroke) with a one-per-document warn-once log — no
+  stroke-to-outline conversion exists in `pkg/render/raster/stroke.go` to clip a shading or tile
+  against; **SVG2 `fr`** (radial focal radius) is not read at all; a radial gradient's focal point
+  is not projected onto the `r` circle boundary when `fx`/`fy` lies outside it, per spec; a radial
+  gradient with `r="0"` does not yet paint the spec-required solid fill of the last stop's color;
+  `<pattern overflow="visible">` is not honored (every tile clips to its own cell); and a `<stop>`'s
+  `currentColor`/`inherit` only ever resolves against the stop's own attributes, never a real
+  ancestor's `color`/`stop-color` (`pkg/svg/stops.go`'s `resolveStopColor` has no inherited-style walk
+  from a stop up through its parent gradient or an enclosing `<g>`).
+- PDF output rasterizes a shading into an image XObject rather than emitting a native PDF
+  `/Shading` dictionary — correct pixels, but not a resolution-independent vector gradient in the
+  PDF; deferred to the transparency-groups follow-up, which needs the same soft-mask/group plumbing.
+- 110 curated fixtures from the same resvg test suite covering both gradient types, patterns, stop
+  parsing, and the reference-chain/cycle machinery above — with committed goldens.

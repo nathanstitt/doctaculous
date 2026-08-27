@@ -93,6 +93,62 @@ func TestSVGPDFRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSVGGradientPDFRoundTrip proves an SVG linear gradient survives into PDF
+// output: FillShading used to be a no-op stub, so a gradient fill converted to
+// PDF rendered as nothing (worse than an honest "no fill", since it silently
+// swallowed the paint). It now rasterizes the shading into an image XObject, so
+// the reopened PDF's raster shows the gradient ramp: reddish on the left,
+// blueish on the right.
+func TestSVGGradientPDFRoundTrip(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+	  <defs>
+	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+	      <stop offset="0" stop-color="red"/>
+	      <stop offset="1" stop-color="blue"/>
+	    </linearGradient>
+	  </defs>
+	  <rect x="0" y="0" width="100" height="50" fill="url(#g1)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	re, err := OpenBytes(pdfBuf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if re.Format() != FormatPDF || re.PageCount() != 1 {
+		t.Fatalf("round-trip format/pages: %v/%d", re.Format(), re.PageCount())
+	}
+
+	img, err := re.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rgba := img.(*image.RGBA)
+
+	left := rgba.RGBAAt(2, 25)
+	right := rgba.RGBAAt(97, 25)
+	t.Logf("left pixel (near red stop): %+v", left)
+	t.Logf("right pixel (near blue stop): %+v", right)
+
+	if left.R <= left.B {
+		t.Errorf("left edge should be reddish (R>B), got %+v", left)
+	}
+	if right.B <= right.R {
+		t.Errorf("right edge should be blueish (B>R), got %+v", right)
+	}
+	if left == (color.RGBA{255, 255, 255, 255}) || right == (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("gradient rendered blank white: left=%+v right=%+v", left, right)
+	}
+}
+
 // gzipSVGWithFiller builds a gzip-compressed SVG document whose decompressed
 // size is exactly base + fillerLen: a valid <svg> root followed by an XML
 // comment padded with fillerLen bytes of a repeated character. Comment filler
