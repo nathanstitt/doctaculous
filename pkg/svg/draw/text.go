@@ -152,9 +152,23 @@ func (r *Renderer) paintText(dev render.Device, t *svg.Text, m render.Matrix, al
 		// built on that estimate would visibly clip the filtered result,
 		// which is exactly why the filter work owns this seam (see
 		// svg.Text.Filter).
+		//
+		// The <text> element's OWN opacity is stripped from the source pass
+		// and re-applied to the filtered RESULT, exactly as paintShape and
+		// paintGroupBody do for their node kinds — SVG applies a filter
+		// BEFORE opacity. Text needs this handled per CHARACTER rather than
+		// on a single node field: opacity reaches a glyph through its own
+		// TextChar style (see paintGlyph), so clearing it on the Text node
+		// alone would leave every glyph still dimming itself inside the
+		// filter's source buffer. That is invisible for most primitives but
+		// total for one that discards its input: an feFlood under
+		// opacity="0.5" comes out fully opaque.
+		elemOpacity := clamp01(t.Opacity)
 		unfiltered := *t
 		unfiltered.Filter = nil
-		r.paintFilteredAlpha(dev, t.Filter, tm, textUserBounds(placed), warned, alpha, func(target render.Device) {
+		unfiltered.Opacity = 1
+		unfiltered.Chars = charsWithoutElementOpacity(t.Chars, elemOpacity)
+		r.paintFilteredAlpha(dev, t.Filter, tm, textUserBounds(placed), warned, alpha*elemOpacity, func(target render.Device) {
 			r.paintText(target, &unfiltered, m, 1, warned)
 		})
 		return
@@ -1526,6 +1540,35 @@ func (r *Renderer) TextAdvances(chars []svg.TextChar) []float64 {
 	out := make([]float64, 0, len(shaped))
 	for _, s := range shaped {
 		out = append(out, s.glyph.Advance)
+	}
+	return out
+}
+
+// charsWithoutElementOpacity returns a copy of chars with any character
+// carrying exactly the <text> element's own opacity reset to fully opaque,
+// so a filter can paint its source at full strength and attenuate the
+// RESULT instead (SVG applies a filter before opacity).
+//
+// Only characters whose opacity EQUALS elem are reset. Opacity is
+// non-inherited and a <tspan opacity> REPLACES rather than multiplies the
+// element's value (see svg.Text.Opacity), so a character showing something
+// other than elem got it from its own tspan — that attenuation is not the
+// element's to hoist, and must keep applying inside the filter's source
+// exactly as it would unfiltered.
+//
+// The result is always a fresh slice: the scene is read-only after Parse and
+// shared lock-free across concurrent renders, so the characters themselves
+// must never be mutated.
+func charsWithoutElementOpacity(chars []svg.TextChar, elem float64) []svg.TextChar {
+	if elem >= 1 {
+		return chars // nothing to hoist; avoid the copy entirely
+	}
+	out := make([]svg.TextChar, len(chars))
+	copy(out, chars)
+	for i := range out {
+		if clamp01(out[i].Style.Opacity()) == elem {
+			out[i].Style = out[i].Style.SetOpacity(1)
+		}
 	}
 	return out
 }

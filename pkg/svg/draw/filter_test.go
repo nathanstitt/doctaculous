@@ -480,3 +480,184 @@ func TestFilterOnRotatedElementProducesRotatedOutput(t *testing.T) {
 		t.Errorf("(38,100) = %+v, want blue: the rotated region reaches further left than the unrotated one", c)
 	}
 }
+
+// TestFilterAppliesElementOpacityToResultForEveryNodeKind pins SVG's
+// filter-then-opacity order across ALL THREE element kinds at once.
+//
+// Each kind reaches the filter through its own branch (paintShape,
+// paintGroupBody, paintText) and each has to strip its own opacity from the
+// source pass, so the fix genuinely had to be made three times — and was
+// initially missed on <text>, which passed `alpha` straight through while its
+// per-character styles kept dimming the glyphs inside the filter's source
+// buffer.
+//
+// feFlood is the discriminating primitive: it DISCARDS its input, so an
+// opacity folded into the source vanishes completely and the element comes
+// out fully opaque. With a primitive that passes its input through, the bug
+// is invisible.
+func TestFilterAppliesElementOpacityToResultForEveryNodeKind(t *testing.T) {
+	const flood = `<filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="200" height="100">
+	    <feFlood flood-color="rgb(255,0,0)"/>
+	  </filter>`
+	cases := []struct{ name, body string }{
+		{"shape", `<rect x="10" y="10" width="80" height="40" opacity="0.5" filter="url(#f)"/>`},
+		{"group", `<g opacity="0.5" filter="url(#f)"><rect x="10" y="10" width="80" height="40"/></g>`},
+		{"text", `<text x="10" y="50" font-size="30" opacity="0.5" filter="url(#f)">Hello</text>`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			img, _ := renderFilterSVG(t, `<svg `+filterHdr+` width="200" height="100">`+flood+c.body+`</svg>`, 200, 100)
+			got := img.RGBAAt(100, 50)
+			// Half-opacity red over a white page: R stays 255, G and B land
+			// near 128. Fully opaque red (G=B=0) means the opacity was
+			// swallowed by the filter's source pass.
+			if got.R < 250 {
+				t.Fatalf("center = %+v, want red present", got)
+			}
+			if got.G < 100 || got.G > 155 {
+				t.Errorf("center = %+v: want G~128 (opacity applied to the FILTERED RESULT); "+
+					"G near 0 means the element's opacity was folded into the filter input and discarded by feFlood", got)
+			}
+		})
+	}
+}
+
+// TestFilterOnGroupMeasuresTextDescendants guards the silent-clipping bug in
+// groupUserBounds: an objectBoundingBox filter region on a <g> holding BOTH a
+// small shape and text used to be sized from the shape alone, clipping the
+// text away with no log and no visible sign anything went wrong.
+//
+// A group whose text extends well past its shape is the discriminating case —
+// measuring only the shape yields a region a fraction of the correct size.
+func TestFilterOnGroupMeasuresTextDescendants(t *testing.T) {
+	src := `<svg ` + filterHdr + ` width="300" height="120">
+	  <filter id="f"><feFlood flood-color="rgb(0,0,255)"/></filter>
+	  <g filter="url(#f)">
+	    <rect x="5" y="5" width="4" height="4" fill="green"/>
+	    <text x="60" y="80" font-family="sans-serif" font-size="30">Hello</text>
+	  </g>
+	</svg>`
+	img, _ := renderFilterSVG(t, src, 300, 120)
+
+	blue, maxX := 0, -1
+	for y := 0; y < 120; y++ {
+		for x := 0; x < 300; x++ {
+			if c := img.RGBAAt(x, y); c.B > 200 && c.R < 60 {
+				blue++
+				if x > maxX {
+					maxX = x
+				}
+			}
+		}
+	}
+	t.Logf("flood covers %d px, reaching x=%d", blue, maxX)
+
+	// The 4x4 rect alone gives a ~6x6 region (36 px was the measured
+	// pre-fix value). The text pushes the union out to roughly x=140, so
+	// both thresholds sit far above the shape-only result and comfortably
+	// below the correct one — they fail on the bug, not on font metrics
+	// shifting a few pixels.
+	if blue < 2000 {
+		t.Errorf("flood covers only %d px: the group's bbox was sized from the shape alone and the text was silently clipped", blue)
+	}
+	if maxX < 100 {
+		t.Errorf("flood reaches only x=%d: the text descendant did not contribute to the group's bounding box", maxX)
+	}
+}
+
+// sizeSpyDevice records every size RenderOffscreen is asked to allocate.
+type sizeSpyDevice struct {
+	render.Device
+	sizes []image.Point
+}
+
+func (d *sizeSpyDevice) RenderOffscreen(size image.Point, paint func(render.Device)) *image.RGBA {
+	d.sizes = append(d.sizes, size)
+	return d.Device.RenderOffscreen(size, paint)
+}
+
+// TestFilterAllocationIsProportionalToTheRegionNotTheCanvas is the
+// memory-bound test for a region far from the origin.
+//
+// RenderOffscreen always allocates from (0,0), so a small region at a large
+// offset used to cost Max.X x Max.Y pixels: a 50x50 region at (5900,5900) on
+// a 6000x6000 canvas allocated ~35M pixels (135 MB) while the pixel cap,
+// which measures the REGION's own area, saw 2500 and happily let it through.
+// filterSpace now shifts the region's origin to (0,0), which both makes the
+// cap meaningful and removes the waste.
+//
+// Asserting on the requested SIZE rather than on wall-clock or heap is what
+// makes this a real regression test: it fails deterministically the moment
+// the origin shift is removed, instead of merely getting slower.
+func TestFilterAllocationIsProportionalToTheRegionNotTheCanvas(t *testing.T) {
+	const canvas = 6000
+	src := `<svg ` + filterHdr + ` width="6000" height="6000">
+	  <filter id="f" filterUnits="userSpaceOnUse" x="5900" y="5900" width="50" height="50">
+	    <feFlood flood-color="rgb(255,0,0)"/>
+	  </filter>
+	  <rect x="5900" y="5900" width="50" height="50" filter="url(#f)"/>
+	</svg>`
+	doc, err := svg.Parse([]byte(src), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, canvas, canvas))
+	stddraw.Draw(img, img.Bounds(), image.NewUniform(color.White), image.Point{}, stddraw.Src)
+	dev := &sizeSpyDevice{Device: raster.New(img)}
+	New(doc).DrawVector(dev, render.Identity)
+
+	if len(dev.sizes) == 0 {
+		t.Fatal("the filter never ran")
+	}
+	for _, s := range dev.sizes {
+		t.Logf("RenderOffscreen allocated %dx%d = %d px (the region is 50x50)", s.X, s.Y, s.X*s.Y)
+		if px := s.X * s.Y; px > 100_000 {
+			t.Errorf("allocated %d px for a 2500 px region: the surface is sized from the CANVAS corner, "+
+				"so the pixel cap no longer bounds the allocation", px)
+		}
+	}
+	// The output must still land in the right place — a shift that loses the
+	// region is not a fix.
+	if c := img.RGBAAt(5925, 5925); c.R < 250 || c.G > 5 {
+		t.Errorf("flood pixel = %+v, want red at the region's own position", c)
+	}
+	if c := img.RGBAAt(100, 100); c.R != 255 || c.G != 255 || c.B != 255 {
+		t.Errorf("distant pixel = %+v, want untouched white", c)
+	}
+}
+
+// TestFilterNestingCapLogsItsOwnReason pins that a nesting overflow reports
+// NESTING rather than borrowing the region cap's message, which sent a reader
+// looking at a region that was never the problem.
+func TestFilterNestingCapLogsItsOwnReason(t *testing.T) {
+	// Nest filtered groups deeper than maxFilterNestingDepth.
+	body := `<rect x="10" y="10" width="60" height="60" fill="rgb(0,0,255)"/>`
+	for i := 0; i < maxFilterNestingDepth+2; i++ {
+		body = `<g filter="url(#f)">` + body + `</g>`
+	}
+	src := `<svg ` + filterHdr + ` width="100" height="100">
+	  <filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+	    <feOffset dx="0" dy="0"/>
+	  </filter>` + body + `</svg>`
+	img, logs := renderFilterSVG(t, src, 100, 100)
+
+	if c := img.RGBAAt(40, 40); c.B < 200 {
+		t.Errorf("center = %+v, want the content still painted (unfiltered) past the depth cap", c)
+	}
+	var nesting, region bool
+	for _, l := range logs {
+		if strings.Contains(l, "nesting exceeded") {
+			nesting = true
+		}
+		if strings.Contains(l, "region exceeded") {
+			region = true
+		}
+	}
+	t.Logf("logs = %v", logs)
+	if !nesting {
+		t.Error("the nesting cap did not log a nesting-specific message")
+	}
+	if region {
+		t.Error("the nesting cap logged the REGION cap's message; the region was never the problem")
+	}
+}

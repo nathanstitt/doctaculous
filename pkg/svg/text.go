@@ -70,6 +70,23 @@ type Text struct {
 	ClipPath *ClipPath
 	Mask     *Mask
 
+	// Opacity is the <text> ELEMENT's own (non-inherited) opacity in [0,1],
+	// defaulting to 1. It is also folded into each character's Style (that
+	// is how the ordinary, unfiltered paint path consumes it, per glyph), so
+	// this field is redundant for normal rendering and exists for the one
+	// case that cannot recover it from the characters: a FILTER.
+	//
+	// SVG applies a filter BEFORE opacity, so a filtered <text> must paint
+	// its source at full opacity and attenuate the RESULT. The element's own
+	// factor cannot be read back off the characters, because opacity is
+	// non-inherited: a <tspan opacity="0.25"> inside a <text opacity="0.5">
+	// gives its characters 0.25 outright (it REPLACES rather than multiplies
+	// — verified against the cascade), so a <text opacity="0.5">
+	// containing only that tspan is indistinguishable, character-wise, from
+	// a fully opaque <text> containing it. Recording the element's own value
+	// here is the only way to keep the two apart.
+	Opacity float64
+
 	// Filter is the resolved filter reference on the <text> element itself,
 	// or nil when absent. See Group.Filter.
 	//
@@ -306,6 +323,10 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 		Chars:   tb.chars,
 		Anchors: tb.anchors,
 		Lengths: tb.trimLengths(),
+		// st is the <text> element's own resolved style, so this is the
+		// element's own opacity — see Text.Opacity for why it is recorded
+		// separately from the per-character styles that already carry it.
+		Opacity: st.opacity,
 	}
 	if ref, ok := st.ClipPathRef(); ok {
 		t.ClipPath = b.resolveClipPathRef(ref)
