@@ -1240,7 +1240,11 @@ read+write vocabulary for the tinycld text adoption path):
   **byte-identical** to a document with no declaration, since an invalid declaration is ignored
   ENTIRELY rather than applying the entries that did parse.
 
-Honest degradations, each logged rather than implied away:
+Honest degradations. The first three log; the last two are **silent**, and that is
+stated rather than glossed — `pkg/layout/paint` has no logger to report through
+(`PaintPage` takes only a Device, a Page, and a Matrix), unlike the SVG side whose
+Renderer carries a `Logf`. Threading one in is a public API change, tracked
+separately:
 
 - **PDF output paints filtered content UNFILTERED.** `pkg/render/pdfwrite`'s `RenderOffscreen`
   declines by design — PDF has no filter operator and a blur has no vector representation — so the
@@ -1257,6 +1261,14 @@ Honest degradations, each logged rather than implied away:
   an HTML box tree cannot resolve. The surrounding shorthand functions still apply.
 - A degenerate, off-device, or over-cap region (`maxCSSFilterPixels`, 4M pixels — the same bound the
   SVG side uses, and meaningful for the same reason: the surface is clipped to the device and its
-  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered.
+  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered,
+  **silently**. Note 4M is NOT above every legitimate page: a 300 DPI A4 page is ~8.7M pixels, so a
+  full-page filter renders filtered at 72 and 150 DPI and unfiltered at 300. The surface also covers
+  the border box UNIONED with the bracketed content's extents (CSS does not clip a filter's input),
+  so one far-flung positioned descendant inflates the hull and can reach the cap on an otherwise
+  modest box.
+- Filters nested more than 4 deep degrade to unfiltered, **silently**, matching the SVG side's
+  nesting bound — each live level holds its own offscreen surface, so depth bounds concurrent memory
+  rather than just CPU.
 - Not implemented: `backdrop-filter` (it needs the backdrop, not the element's own pixels — a
   different mechanism entirely), and native PDF filter emulation via soft masks.

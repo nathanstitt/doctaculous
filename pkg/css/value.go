@@ -56,6 +56,18 @@ func parseLength(tok Token) (Length, bool) {
 			return Length{tok.Num, UnitPx}, true
 		case "pt":
 			return Length{tok.Num, UnitPt}, true
+		// KNOWN DIVERGENCE: rem is folded into em here, so it resolves against
+		// the ELEMENT's font size rather than the ROOT's. Measured: width:2rem
+		// under a 5pt font renders 10pt where the spec requires 40pt at a 20pt
+		// root. Correct only while the two happen to match.
+		//
+		// Modelling it properly needs a distinct UnitRem carried to the point
+		// where the root font size is known, which every consumer of Length
+		// would have to resolve. The CSS `filter` property does resolve rem
+		// correctly (see Engine.rootFontSizePt) because its lengths are
+		// resolved at paint time, where the root is reachable — so rem is
+		// currently right for filter and wrong for everything else, which is
+		// surprising enough to be worth stating at the fold itself.
 		case "em", "rem":
 			return Length{tok.Num, UnitEm}, true
 		default:

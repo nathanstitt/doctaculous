@@ -30,9 +30,21 @@ import (
 // anything.
 //
 // 4M pixels matches pkg/svg/draw's maxFilterPixels for the same reason: it is
-// roughly 64 MB per float32 buffer, comfortably above any legitimate page
-// region (a 300 DPI A4 page is ~8.7M pixels, and the region is additionally
-// clipped to the device before reaching here).
+// roughly 64 MB per float32 buffer.
+//
+// It is NOT above every legitimate page region, and an earlier version of this
+// comment wrongly claimed it was: a 300 DPI A4 page is ~8.7M pixels, i.e. more
+// than twice this cap. A full-page filter at print resolution therefore
+// degrades to unfiltered — measured: the same document renders filtered at 72
+// and 150 DPI and unfiltered at 300.
+//
+// That degradation is currently SILENT, because pkg/layout/paint has no logger
+// to report it through (PaintPage takes only a Device, a Page, and a Matrix).
+// The SVG side logs the equivalent caps (pkg/svg/draw/filter.go's
+// logFilterRegionCapOnce / logFilterNestingCapOnce) because a Renderer carries
+// a Logf. Threading one into the paint path is a public API change and is
+// tracked separately rather than smuggled in here; until then FEATURES.md must
+// say plainly that these two paths do not log, and it does.
 const maxCSSFilterPixels = 4 << 20
 
 // filterMargin is how far, in multiples of a blur's standard deviation, the
@@ -314,9 +326,16 @@ func applyCSSFilterChain(src *image.RGBA, funcs []filtereffects.Function, colors
 // affine per-channel map and evaluated through feColorMatrix — which computes
 // exactly `slope·v + intercept` per channel and is already corpus-tested. A
 // linear transfer function IS an affine map, so this is an exact
-// reformulation, not an approximation; it is also the same lowering pkg/svg's
-// own CSS-function path uses, so the two spellings of `filter: invert(1)`
-// cannot disagree.
+// reformulation, not an approximation.
+//
+// It is the same lowering pkg/svg/filterfunc.go uses, and the two agree today
+// across every function and argument (verified by rendering an HTML box and an
+// inline <svg> rect side by side: byte-identical). But they agree by being
+// KEPT IN STEP, not by construction — the matrix helpers below are duplicated
+// from that file rather than shared, so nothing structurally prevents drift.
+// An earlier version of this comment claimed the two "cannot disagree", which
+// overstated it. Moving the five helpers to a package both can import would
+// make the claim true; until then, a change to either side must be mirrored.
 func applyCSSFilterFunction(in *svgfilter.Buffer, f filtereffects.Function, shadow color.RGBA, region image.Rectangle, scale float64) *svgfilter.Buffer {
 	switch f.Kind {
 	case filtereffects.FuncURL:
