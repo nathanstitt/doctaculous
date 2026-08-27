@@ -886,6 +886,47 @@ func TestFontShorthandResetClearsStaleDegradationFlags(t *testing.T) {
 	}
 }
 
+// TestWritingModeDegradesWithADiagnostic pins the claim FEATURES.md makes:
+// writing-mode is listed among the scope limits that degrade WITH a log, so a
+// vertical value must actually produce one rather than being silently ignored.
+// Vertical text needs vhea/vmtx metrics the engine does not parse, so the text
+// still lays out horizontally — but the user has to be told.
+func TestWritingModeDegradesWithADiagnostic(t *testing.T) {
+	styleOf := func(src string) (svg.Style, []string) {
+		t.Helper()
+		doc, logs := parseSVG(t, src)
+		txt := firstText(t, doc)
+		if len(txt.Chars) == 0 {
+			t.Fatal("no characters lowered")
+		}
+		return txt.Chars[0].Style, logs
+	}
+
+	for _, mode := range []string{"tb", "tb-rl", "vertical-rl", "vertical-lr"} {
+		st, logs := styleOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+		  ><text x="10" y="100" writing-mode="` + mode + `">Text</text></svg>`)
+		if !st.WritingModeIgnored() {
+			t.Errorf("writing-mode=%q was honored or dropped silently; want it flagged as degraded", mode)
+		}
+		if !anyContains(logs, "writing-mode") {
+			t.Errorf("writing-mode=%q degraded without a diagnostic; logs = %v", mode, logs)
+		}
+	}
+
+	// horizontal-tb is the initial value, and lr/rl are SVG 1.1 spellings of
+	// it — none of them is a degradation, so none may log.
+	for _, mode := range []string{"horizontal-tb", "lr", "lr-tb", "rl", "rl-tb"} {
+		st, logs := styleOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+		  ><text x="10" y="100" writing-mode="` + mode + `">Text</text></svg>`)
+		if st.WritingModeIgnored() {
+			t.Errorf("writing-mode=%q is horizontal and must not be flagged as degraded", mode)
+		}
+		if anyContains(logs, "writing-mode") {
+			t.Errorf("writing-mode=%q is horizontal and must not log; logs = %v", mode, logs)
+		}
+	}
+}
+
 // TestSpacingAndLengthSurviveHostileInput is the adversarial sweep: enormous,
 // tiny, non-finite, and malformed values must degrade rather than producing a
 // non-finite pen position (which the rasterizer turns into unbounded work) or

@@ -98,6 +98,7 @@ var svgPresentationAttrs = []string{
 	"font-variant",
 	"kerning",
 	"font-kerning",
+	"writing-mode",
 	"text-anchor",
 	"direction",
 	"unicode-bidi",

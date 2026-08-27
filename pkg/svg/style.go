@@ -211,17 +211,19 @@ type Style struct {
 	// see addDecoration.
 	decorations []decoration
 
-	// fontStretchIgnored, fontVariantIgnored, and kerningIgnored record that a
-	// font-stretch / font-variant / kerning|font-kerning value reached the
-	// cascade and was DEGRADED (logged and dropped) rather than honored — see
-	// the three appliers for why none of them can do anything real with the
-	// bundled faces. Nothing in the render path reads them; they exist so a
-	// test can assert the degradation actually happened at the property that
-	// requested it, which a log line alone cannot pin down. Inherited, exactly
-	// like the properties they track.
+	// fontStretchIgnored, fontVariantIgnored, kerningIgnored, and
+	// writingModeIgnored record that a font-stretch / font-variant /
+	// kerning|font-kerning / writing-mode value reached the cascade and was
+	// DEGRADED (logged and dropped) rather than honored — see the four
+	// appliers for why none of them can do anything real with the bundled
+	// faces and the horizontal-only metrics. Nothing in the render path reads
+	// them; they exist so a test can assert the degradation actually happened
+	// at the property that requested it, which a log line alone cannot pin
+	// down. Inherited, exactly like the properties they track.
 	fontStretchIgnored bool
 	fontVariantIgnored bool
 	kerningIgnored     bool
+	writingModeIgnored bool
 }
 
 // decoration is one declared text-decoration line together with the resolved
@@ -375,6 +377,7 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyFontStretch(&s, attr, logf)
 	applyFontVariant(&s, attr, logf)
 	applyKerning(&s, attr, logf)
+	applyWritingMode(&s, attr, logf)
 	applyTextAnchor(&s, attr, logf)
 	applyDirection(&s, attr, logf)
 	applyUnicodeBidi(&s, attr, logf)
@@ -1629,6 +1632,37 @@ func applyFontStretch(s *Style, attr func(string) (string, bool), logf func(stri
 	logf("svg: font-stretch=%q ignored: no condensed/expanded face is bundled and no synthetic stretching exists", val)
 }
 
+// applyWritingMode resolves writing-mode. Every vertical value DEGRADES to
+// horizontal: vertical text needs the vertical metrics in a font's vhea/vmtx
+// tables, which pkg/font does not parse, plus a vertical advance model
+// throughout the inline core — every metric in the engine is horizontal-only
+// today (see the SVG text design doc, decision 3, which defers writing-mode
+// alongside <textPath> as a genuinely new subsystem rather than an
+// adaptation).
+//
+// Horizontal output for vertical text is wrong but legible, which is the
+// better failure here than dropping the text entirely. The log is what keeps
+// it honest: FEATURES.md lists writing-mode among the scope limits that
+// degrade WITH a diagnostic, so this must actually fire.
+//
+// Like font-stretch it goes through the cascade rather than being dropped at
+// the parser, so the diagnostic fires for a style="" or sheet rule too.
+func applyWritingMode(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("writing-mode")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	// horizontal-tb is the initial value and the only one the engine honors;
+	// lr/lr-tb/rl/rl-tb are the deprecated SVG 1.1 spellings of it.
+	switch val {
+	case "horizontal-tb", "lr", "lr-tb", "rl", "rl-tb":
+		return
+	}
+	s.writingModeIgnored = true
+	logf("svg: writing-mode=%q ignored: vertical text needs vhea/vmtx metrics and a vertical advance model; laying out horizontally", val)
+}
+
 // applyFontVariant resolves font-variant. Like font-stretch it degrades:
 // "small-caps" needs either a real small-caps face or the OpenType `smcp`
 // feature, and neither the bundled families nor the shaping path
@@ -1845,3 +1879,7 @@ func (s Style) FontVariantIgnored() bool { return s.fontVariantIgnored }
 // KerningIgnored reports whether a kerning or font-kerning value reached this
 // element and was degraded. See Style.kerningIgnored.
 func (s Style) KerningIgnored() bool { return s.kerningIgnored }
+
+// WritingModeIgnored reports whether a vertical writing-mode reached this
+// element and was degraded to horizontal. See Style.writingModeIgnored.
+func (s Style) WritingModeIgnored() bool { return s.writingModeIgnored }
