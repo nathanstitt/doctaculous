@@ -1082,3 +1082,57 @@ read+write vocabulary for the tinycld text adoption path):
   from a stop up through its parent gradient or an enclosing `<g>`).
 - 110 curated fixtures from the same resvg test suite covering both gradient types, patterns, stop
   parsing, and the reference-chain/cycle machinery above — with committed goldens.
+
+**SVG in HTML** (`pkg/html` foreign-content capture, `pkg/layout/css` vector carrier,
+`pkg/svg` intrinsic sizing):
+
+- **`<img src="*.svg">` and inline `<svg>` render as VECTORS end to end — never rasterized.** Both
+  route through the pre-existing `layout.VectorItem` / `layout.VectorScene` seam
+  (`pkg/layout/page.go`), which `paint.paintVector` hands straight to the `render.Device`. On
+  `pkg/render/pdfwrite` that emits real path operators, so a PDF built from an HTML page with an SVG
+  image contains **no image XObject at all** — asserted structurally on the emitted PDF bytes rather
+  than by a golden, since a golden alone would pass with a rasterized round trip. Deliberately NOT
+  routed through `imageCache`/`decodeImageBytes`/`ImageContent`, all of which carry an `image.Image`
+  and would force a bitmap round trip; `Fragment.Vector *VectorContent` is a parallel carrier that
+  keeps the scene itself, and `svgCache` is the parallel document cache.
+- **Intrinsic sizing takes the SVG's UN-DEFAULTED size** via the new `svg.Document.Intrinsic()`
+  (`svg.IntrinsicSize`: has-width / has-height / has-ratio). `resolveSize` has already applied CSS's
+  300×150 default and the viewBox-extent fallback by the time a `Document` exists — correct for a
+  standalone SVG, which is its own sizing authority, and wrong for an embedded one, where the outer
+  `<img>`'s CSS supplies an axis and the SVG must contribute only a ratio. All four cases ship:
+  explicit `width`/`height` honored; viewBox-only plus one CSS axis derives the other from the ratio
+  (`<img src="ratio.svg" style="width:600px">` on a 2:1 viewBox is 600×300, not 600×150); a `width`
+  attribute alone derives the height from the ratio; neither a size nor a ratio falls back to
+  300×150. The used size then drives the DRAWING as well as the box — a scene whose box differs from
+  its own viewport is scaled through the ctm, which stays vector (a coordinate transform, not a
+  resample), and is left entirely unwrapped when the box already matches.
+- **Inline `<svg>` re-serializes rather than bridging DOM to DOM.** `x/net/html` fully implements
+  HTML5 foreign content: the subtree arrives with `Namespace: "svg"` and its camelCase names already
+  REPAIRED by `svgTagNameAdjustments` (`clippath`→`clipPath`, `lineargradient`→`linearGradient`,
+  `gradientunits`→`gradientUnits`, …). `pkg/html` captures that subtree as markup
+  (`Element.ForeignSource`) and `pkg/svg` re-parses it, so the SVG parser stays the single source of
+  truth — a `x/net/html.Node` → `pkg/svg` AST bridge would duplicate that package's whole
+  element/attribute construction against a second node type and every future parser fix would have
+  to land twice. The camelCase round trip is load-bearing (losing it silently kills every gradient
+  and clip) and is pinned by a test. The serializer reinstates the `xmlns` declaration inline SVG is
+  allowed to omit, and `xmlns:xlink` when the subtree actually uses the legacy prefix — without
+  either, `pkg/svg`'s XML parser rejects the markup outright.
+- **`<svg>` is replaced content**, so box generation stops there: `<circle>`/`<path>` no longer
+  generate meaningless HTML block boxes, and an SVG-internal `<style>` no longer leaks into the HOST
+  document's cascade (its rules stay scoped to the SVG, where `pkg/svg` runs its own cascade). An
+  `<svg>` behaves as a normal atomic inline: it sits on a line with text, stacks in block flow, and
+  carries backgrounds/borders/margins like any replaced element.
+- **Untrusted-input bounds.** An SVG reached from an `<img>` is untrusted, and `pkg/svg`'s own
+  budgets (the `<use>` instantiation budget, the `<text>` character budget) bound EXPANSION, not the
+  size of the source document — so a 32 MB source cap is applied before parsing, logged when it
+  fires. Every degradation path (unfetchable, wrong content type, unparseable, over-cap, malformed
+  inline markup) reserves the box and paints nothing rather than panicking, and is covered by tests.
+- **The vector path is chosen by CONTENT TYPE, never by sniffing bytes**: an unknown/empty content
+  type falls through to the raster path, so an unrecognized binary blob is not fed to an XML parser.
+  A `data:` URI SVG works, carrying its own type and bypassing the loader entirely.
+- Known scope limits, each recorded rather than silently missing: `background-image: url(…svg)`,
+  EPUB cover images, and the unsupported-selector warn-once are a follow-up; CSS `filter:` on HTML
+  boxes is deferred because `layout.Page.Items` is a FLAT list and a filtered box needs to bracket
+  its subtree the way `Clips` does — a structural change to the reflow item format unrelated to SVG
+  (`pkg/filtereffects` is already shared and waiting); and `letter-spacing`/`word-spacing` do not
+  inherit across the HTML→SVG boundary, since `ComputedStyle` has no such fields.
