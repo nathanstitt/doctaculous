@@ -3,6 +3,7 @@ package doctaculous
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"io"
 	"strings"
@@ -15,14 +16,19 @@ import (
 //     report.txt is still a PDF: a PDF header (%PDF- within the first 1 KiB,
 //     where the spec allows it), PNG/JPEG signatures, and a ZIP whose central
 //     directory identifies a WordprocessingML package (DOCX). Other ZIPs
-//     (xlsx, epub, plain archives) fall through.
+//     (xlsx, epub, plain archives) fall through. A gzip signature decompresses
+//     a small prefix to check for SVG (.svgz); anything else gzipped is
+//     unknown.
 //  2. The hint's extension (FormatFromPath) — the only signal for Markdown and
 //     plain text, which have no magic. It runs before HTML sniffing so a
 //     README.md full of raw HTML blocks stays Markdown, and it rescues a
 //     binary file whose magic is damaged (e.g. a .pdf with more than 1 KiB of
 //     junk before the header, which the parser's object-scan rebuild can still
 //     open).
-//  3. An HTML tag sniff modeled on the WHATWG MIME-sniffing pattern table.
+//  3. An SVG root-element sniff, checked before HTML so an XML-prologed SVG
+//     (which also starts with "<?xml", an HTML sniff pattern) resolves to SVG
+//     rather than HTML; genuine XHTML still falls through to the HTML sniff.
+//  4. An HTML tag sniff modeled on the WHATWG MIME-sniffing pattern table.
 //
 // It returns FormatUnknown when nothing matches. There is deliberately no
 // "decodes as UTF-8 ⇒ plain text" fallback: random binary often decodes, and a
@@ -34,6 +40,9 @@ func DetectFormat(data []byte, hint string) Format {
 	}
 	if f := FormatFromPath(hint); f != FormatUnknown {
 		return f
+	}
+	if sniffSVG(data) {
+		return FormatSVG
 	}
 	if sniffHTML(data) {
 		return FormatHTML
@@ -57,6 +66,8 @@ func detectMagic(data []byte) Format {
 		return classifyOPC(data) // DOCX, XLSX, or Unknown (epub, plain archive)
 	case bytes.HasPrefix(data, []byte(`{\rtf`)):
 		return FormatRTF
+	case bytes.HasPrefix(data, []byte{0x1f, 0x8b}):
+		return detectGzip(data)
 	}
 	if f := classifyISOBMFF(data); f != FormatUnknown {
 		return f
@@ -67,6 +78,29 @@ func detectMagic(data []byte) Format {
 	}
 	if bytes.Contains(window, []byte("%PDF-")) {
 		return FormatPDF
+	}
+	return FormatUnknown
+}
+
+// detectGzip identifies a gzip-compressed document by sniffing its
+// decompressed prefix: only .svgz (a gzipped SVG) is recognized today. A
+// generic .gz says nothing about its content on its own — mirroring the plain
+// zip/octet-stream refusals in mimeFormats — so anything else, or a
+// corrupt/truncated stream, returns FormatUnknown rather than guessing. The
+// read is capped at 4 KiB, comfortably more than sniffSVG needs and small
+// enough that a maliciously crafted gzip bomb can't force unbounded work.
+func detectGzip(data []byte) Format {
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return FormatUnknown
+	}
+	defer func() { _ = zr.Close() }()
+	prefix, err := io.ReadAll(io.LimitReader(zr, 4096))
+	if err != nil && len(prefix) == 0 {
+		return FormatUnknown
+	}
+	if sniffSVG(prefix) {
+		return FormatSVG
 	}
 	return FormatUnknown
 }
@@ -177,6 +211,67 @@ var htmlSniffPatterns = []string{
 	"<BODY",
 	"<BR",
 	"<P",
+}
+
+// sniffSVG reports whether data's first element is an SVG root: after an
+// optional BOM, whitespace, XML prolog, comments, and doctype, the next tag is
+// "<svg" followed by a name-ending byte. It looks only at the first element,
+// so HTML documents containing inline <svg> do not match.
+func sniffSVG(data []byte) bool {
+	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
+	for {
+		data = bytes.TrimLeft(data, "\t\n\f\r ")
+		switch {
+		case bytes.HasPrefix(data, []byte("<?")):
+			i := bytes.Index(data, []byte("?>"))
+			if i < 0 {
+				return false
+			}
+			data = data[i+2:]
+		case bytes.HasPrefix(data, []byte("<!--")):
+			i := bytes.Index(data, []byte("-->"))
+			if i < 0 {
+				return false
+			}
+			data = data[i+3:]
+		case bytes.HasPrefix(data, []byte("<!")):
+			i := bytes.IndexByte(data, '>')
+			if i < 0 {
+				return false
+			}
+			data = data[i+1:]
+		default:
+			if len(data) < 5 || !bytes.EqualFold(data[:4], []byte("<svg")) {
+				return false
+			}
+			switch data[4] {
+			case ' ', '\t', '\n', '\f', '\r', '>', '/':
+				return true
+			case ':':
+				// A namespace-prefixed root, e.g. <svg:svg xmlns:svg="...">,
+				// is genuinely valid SVG and worth recognizing since "svg" is
+				// the near-universal prefix convention for that namespace.
+				// But byte-level sniffing can't resolve an arbitrary prefix
+				// bound to the SVG namespace (<s:svg>, <foo:svg>) without
+				// real namespace processing, so don't treat ':' alone as a
+				// terminator — that would match ANY element merely starting
+				// "svg:" (e.g. <svg:zzz>). Require the local name after the
+				// colon to actually be "svg" too.
+				rest := data[5:]
+				if len(rest) < 3 || !bytes.EqualFold(rest[:3], []byte("svg")) {
+					return false
+				}
+				if len(rest) == 3 {
+					return false
+				}
+				switch rest[3] {
+				case ' ', '\t', '\n', '\f', '\r', '>', '/':
+					return true
+				}
+			}
+			return false
+		}
+	}
 }
 
 // sniffHTML reports whether data begins (after an optional UTF-8 BOM and

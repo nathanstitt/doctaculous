@@ -597,3 +597,25 @@ read+write vocabulary for the tinycld text adoption path):
   byte-identical crop, which is what lets a caller persist a smart crop.
 - Golden crop rectangles over a committed CC0 photograph back the synthetic direction tests, which
   cannot catch a quality regression on real image statistics.
+
+**SVG input — core scene graph** (`pkg/svg` parse, `pkg/svg/draw` scene → `render.Device`;
+`OpenSVG*`, `convert in.svg..`):
+
+- Standalone `.svg` and gzipped `.svgz` documents open as a single vector page. Detection fixes a
+  pre-existing bug: an XML-prologed SVG (`<?xml ..?>` before the root) used to mis-sniff as HTML;
+  content sniffing, the `.svg`/`.svgz` extensions, and `image/svg+xml` MIME all now route correctly,
+  including a namespace-prefixed `<svg:svg>` root.
+- Full path `d` grammar (all commands, relative/absolute, implicit repeats) with arcs and quadratics
+  converted to cubics; the six basic shapes (`rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`);
+  transform lists; `viewBox` + `preserveAspectRatio`. Solid fill/stroke via inherited presentation
+  attributes with full CSS color syntax (`fill-rule`, opacities, dashes, caps, joins, miter limit).
+- Rasterization renders at device resolution; PDF output keeps REAL VECTORS via a new
+  `layout.VectorKind` item rather than rasterizing to an embedded image (an SVG circle → PDF has no
+  image XObject). Landed with a cross-cutting fix in the shared rasterizer: an unclosed subpath used
+  to fill incorrectly (also affecting the PDF content interpreter's `f` operator on unclosed paths).
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: CSS styling and paint
+  servers (gradients/patterns), `<use>`, text, `clip-path`/`mask`, filters, `<image>`, and inline
+  `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 2–8 slices in
+  `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
+  with committed goldens.

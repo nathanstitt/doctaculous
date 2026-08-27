@@ -44,3 +44,21 @@ func TestScaleFactor(t *testing.T) {
 		t.Errorf("ScaleFactor = %v, want 4 (sqrt(2*8))", got)
 	}
 }
+
+func TestRotateSkew(t *testing.T) {
+	m := Rotate(math.Pi / 2)
+	x, y := m.Apply(1, 0)
+	if math.Abs(x-0) > 1e-12 || math.Abs(y-1) > 1e-12 {
+		t.Errorf("Rotate(pi/2)(1,0) = (%g,%g), want (0,1)", x, y)
+	}
+	s := Skew(math.Tan(math.Pi/4), 0) // skewX(45deg)
+	x, y = s.Apply(0, 1)
+	if math.Abs(x-1) > 1e-12 || math.Abs(y-1) > 1e-12 {
+		t.Errorf("SkewX(45)(0,1) = (%g,%g), want (1,1)", x, y)
+	}
+	s = Skew(0, math.Tan(math.Pi/4)) // skewY(45deg)
+	x, y = s.Apply(1, 0)
+	if math.Abs(x-1) > 1e-12 || math.Abs(y-1) > 1e-12 {
+		t.Errorf("SkewY(45)(1,0) = (%g,%g), want (1,1)", x, y)
+	}
+}

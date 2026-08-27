@@ -8,6 +8,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -187,9 +188,35 @@ func (w *writer) serialize(out io.Writer) error {
 	return nil
 }
 
+// maxRealMagnitude bounds the magnitude of a PDF real this writer will emit.
+// The spec's own implementation limit (ISO 32000-1 Annex C.2) is ±3.403e38 (a
+// 32-bit float's range); many real-world readers are stricter still, but this
+// writer only needs a bound generous enough for any legitimate geometry while
+// ruling out the pathological case: a finite-but-astronomical input (e.g. an
+// SVG coordinate like 1.7e308, or an intermediate x+width overflow) formatted
+// with 'f' produces a 300+ digit token, which is needlessly bloated and a
+// plausible parser-choking vector even though it is technically finite.
+const maxRealMagnitude = 3.403e38
+
 // formatReal formats a float for PDF output: fixed-point with up to 4 decimals and
 // no trailing zeros or "-0", so numbers stay compact and deterministic.
+//
+// Non-finite input (NaN, +Inf, -Inf) is coerced to 0, and any finite magnitude
+// beyond maxRealMagnitude is clamped to it, before formatting. Without this, a
+// non-finite or astronomical value formats verbatim (literally "+Inf", "NaN",
+// or a 300+ digit number) into the content stream or object dictionary,
+// producing structurally invalid PDF that readers reject or mis-render. This
+// is the single choke point every numeric PDF output value passes through, so
+// guarding here covers all producers (SVG/HTML/DOCX input as well as the PDF
+// interpreter round-trip) without needing every caller to pre-validate.
 func formatReal(f float64) string {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		f = 0
+	} else if f > maxRealMagnitude {
+		f = maxRealMagnitude
+	} else if f < -maxRealMagnitude {
+		f = -maxRealMagnitude
+	}
 	s := strconv.FormatFloat(f, 'f', 4, 64)
 	if strings.ContainsRune(s, '.') {
 		s = strings.TrimRight(s, "0")

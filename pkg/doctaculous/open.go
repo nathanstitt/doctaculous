@@ -149,6 +149,9 @@ func openDetected(ctx context.Context, f Format, data []byte, dir string, opts [
 		// An image opens as a single page exactly its pixel size; the frontend
 		// stamps the format from the actual encoding.
 		return openReflowFrontend(ctx, OpenImageBytes, data, "", opts)
+	case FormatSVG:
+		// A standalone SVG opens as a single vector page exactly its viewport size.
+		return openReflowFrontend(ctx, OpenSVGBytes, data, dir, opts)
 	default:
 		return nil, fmt.Errorf("doctaculous: cannot detect the document format (open with an explicit format via OpenAs or OpenReaderAs, or use a recognizable file extension): %w", ErrUnknownFormat)
 	}

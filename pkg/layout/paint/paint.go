@@ -49,6 +49,8 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 			clipRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.XPt+it.Rule.WPt, it.Rule.YPt+it.Rule.HPt)
 		case layout.ClipPopKind:
 			dev.Restore()
+		case layout.VectorKind:
+			paintVector(dev, &it.Vector, mat)
 		}
 	}
 }
@@ -265,6 +267,19 @@ func paintImage(dev render.Device, it *layout.ImageItem, mat render.Matrix) {
 	if clip {
 		dev.Restore()
 	}
+}
+
+// paintVector draws a vector scene into its page-space box: clip to the box
+// (the SVG viewport clips), then let the scene draw with a ctm that maps its
+// viewport coordinates to device space. A nil Scene draws nothing.
+func paintVector(dev render.Device, v *layout.VectorItem, mat render.Matrix) {
+	if v.Scene == nil {
+		return
+	}
+	dev.Save()
+	clipRect(dev, mat, v.XPt, v.YPt, v.XPt+v.WPt, v.YPt+v.HPt)
+	v.Scene.DrawVector(dev, render.Translate(v.XPt, v.YPt).Mul(mat))
+	dev.Restore()
 }
 
 // epsilon guards the overflow comparison against float rounding so an

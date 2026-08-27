@@ -2,6 +2,8 @@ package pdfwrite
 
 import (
 	"bytes"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/pdf"
@@ -79,5 +81,37 @@ func TestSerializeStreamFlateRoundTrips(t *testing.T) {
 	// And it must still parse.
 	if _, err := pdf.Parse(buf.Bytes()); err != nil {
 		t.Fatalf("pkg/pdf failed to parse output with stream: %v", err)
+	}
+}
+
+// TestFormatRealRejectsNonFiniteAndExtreme proves formatReal never emits
+// "Inf"/"NaN" tokens or an unbounded-length number: a finite-but-astronomical
+// input (reachable today from e.g. an SVG coordinate like 1.7e308, or from
+// ordinary arithmetic like x+width overflowing) formats verbatim with 'f' into
+// a 300+ digit token, and a non-finite input formats as literally "+Inf" or
+// "NaN" — both are structurally invalid inside a PDF content stream or object
+// dictionary.
+func TestFormatRealRejectsNonFiniteAndExtreme(t *testing.T) {
+	cases := []struct {
+		name string
+		in   float64
+	}{
+		{"nan", math.NaN()},
+		{"+inf", math.Inf(1)},
+		{"-inf", math.Inf(-1)},
+		{"huge-finite", 1.7e308},
+		{"huge-finite-negative", -1.7e308},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := formatReal(c.in)
+			lower := strings.ToLower(s)
+			if strings.Contains(lower, "inf") || strings.Contains(lower, "nan") {
+				t.Fatalf("formatReal(%v) = %q, contains Inf/NaN", c.in, s)
+			}
+			if len(s) > 64 {
+				t.Fatalf("formatReal(%v) = %q, length %d exceeds sane bound", c.in, s, len(s))
+			}
+		})
 	}
 }

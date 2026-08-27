@@ -54,3 +54,16 @@ func (m Matrix) ScaleFactor() float64 {
 	det := m.A*m.D - m.B*m.C
 	return math.Sqrt(math.Abs(det))
 }
+
+// Rotate returns a rotation by theta radians. In the Y-down device space used
+// throughout, a positive theta rotates clockwise (matching SVG/CSS rotate()).
+func Rotate(theta float64) Matrix {
+	s, c := math.Sincos(theta)
+	return Matrix{A: c, B: s, C: -s, D: c}
+}
+
+// Skew returns a shear transform: tanX shears X by Y (CSS/SVG skewX), tanY
+// shears Y by X (skewY). Arguments are tangents of the skew angles.
+func Skew(tanX, tanY float64) Matrix {
+	return Matrix{A: 1, B: tanY, C: tanX, D: 1}
+}

@@ -63,8 +63,69 @@ func (d *pageDevice) Stroke(p *render.Path, paint render.StrokePaint) {
 	}
 	d.setStrokeColor(paint.Color.R, paint.Color.G, paint.Color.B)
 	fmt.Fprintf(&d.buf, "%s w\n", formatReal(paint.Width))
+	fmt.Fprintf(&d.buf, "%d J\n", capCode(paint.Cap))
+	fmt.Fprintf(&d.buf, "%d j\n", joinCode(paint.Join))
+	miter := paint.MiterLimit
+	if miter < 1 {
+		miter = 10 // PDF default miter limit; mirrors pkg/render/raster/stroke.go.
+	}
+	fmt.Fprintf(&d.buf, "%s M\n", formatReal(miter))
+	d.writeDash(paint.DashArray, paint.DashPhase)
 	d.writePath(p)
 	d.buf.WriteString("S\n")
+}
+
+// capCode maps a render.LineCap to the PDF line-cap style operand (PDF 1.7 §8.4.3.3).
+func capCode(c render.LineCap) int {
+	switch c {
+	case render.RoundCap:
+		return 1
+	case render.SquareCap:
+		return 2
+	default:
+		return 0 // ButtCap
+	}
+}
+
+// joinCode maps a render.LineJoin to the PDF line-join style operand (PDF 1.7 §8.4.3.4).
+func joinCode(j render.LineJoin) int {
+	switch j {
+	case render.RoundJoin:
+		return 1
+	case render.BevelJoin:
+		return 2
+	default:
+		return 0 // MiterJoin
+	}
+}
+
+// writeDash emits the "d" operator for a dash pattern. A nil/empty array, or one
+// whose entries are all non-positive, means a solid line: PDF represents that as an
+// empty dash array rather than an array of zeros (which is undefined per spec), so
+// either case is normalized to "[] 0 d".
+func (d *pageDevice) writeDash(dashes []float64, phase float64) {
+	solid := len(dashes) == 0
+	if !solid {
+		solid = true
+		for _, v := range dashes {
+			if v > 0 {
+				solid = false
+				break
+			}
+		}
+	}
+	if solid {
+		d.buf.WriteString("[] 0 d\n")
+		return
+	}
+	d.buf.WriteString("[")
+	for i, v := range dashes {
+		if i > 0 {
+			d.buf.WriteString(" ")
+		}
+		d.buf.WriteString(formatReal(v))
+	}
+	fmt.Fprintf(&d.buf, "] %s d\n", formatReal(phase))
 }
 
 func (d *pageDevice) DrawGlyph(g render.GlyphRef) {
