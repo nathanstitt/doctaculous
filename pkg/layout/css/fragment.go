@@ -133,6 +133,13 @@ type Fragment struct {
 	// W/H at flatten time, so it needs no separate shift and can never drift out of
 	// sync with the box after a pagination shift or a split.
 	Filter []filtereffects.Function
+
+	// FilterShadows carries each Filter entry's resolved drop-shadow() colour,
+	// positionally aligned with Filter (see layout.FilterItem.ShadowColors). It
+	// lives beside Filter rather than inside it because filtereffects.Function is
+	// the shared, document-agnostic parse result and deliberately leaves a colour
+	// token unparsed for its caller to resolve.
+	FilterShadows []color.RGBA
 }
 
 // PositionedInfo is one entry of a Fragment's PositionedInfo slice (parallel to
@@ -314,8 +321,9 @@ func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
 		return f.appendItemsUnfiltered(dst)
 	}
 	dst = append(dst, layout.Item{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
-		Funcs: f.Filter,
-		XPt:   f.X, YPt: f.Y, WPt: f.W, HPt: f.H,
+		Funcs:        f.Filter,
+		ShadowColors: f.FilterShadows,
+		XPt:          f.X, YPt: f.Y, WPt: f.W, HPt: f.H,
 	}})
 	dst = f.appendItemsUnfiltered(dst)
 	return append(dst, layout.Item{Kind: layout.FilterPopKind})

@@ -559,3 +559,112 @@ func TestFilterBracketsPositionedDescendants(t *testing.T) {
 		}
 	}
 }
+
+// findFiltered returns the first fragment in f's subtree carrying a filter chain.
+func findFiltered(f *Fragment) *Fragment {
+	if f == nil {
+		return nil
+	}
+	if len(f.Filter) > 0 {
+		return f
+	}
+	for _, c := range f.Children {
+		if g := findFiltered(c); g != nil {
+			return g
+		}
+	}
+	return nil
+}
+
+// TestFilterRemResolvesAgainstTheRoot: `rem` is the ROOT element's font size, per
+// CSS Values — NOT the box's own.
+//
+// The two bases differ by exactly the ratio between the sizes, so a wrong basis is
+// a plausible-looking wrong number rather than an obvious failure: on a
+// font-size:8px box under a 16px root, blur(2rem) resolves to std 16 against the
+// box and 32 against the root. Both render as a blur, only one is correct. The
+// paired em case is what proves the two units are actually distinguished rather
+// than both silently pointing at the root.
+func TestFilterRemResolvesAgainstTheRoot(t *testing.T) {
+	src := `<html style="font-size:16px"><body style="margin:0">` +
+		`<div style="font-size:8px;height:20px;filter:blur(2rem) blur(2em)">x</div></body></html>`
+	frag := layoutTreeFor(t, src, 200, nil)
+	got := findFiltered(frag)
+	if got == nil || len(got.Filter) != 2 {
+		t.Fatalf("expected a 2-function chain on the filtered box, got %v", got)
+	}
+	if want := 32.0; got.Filter[0].StdDeviation != want {
+		t.Errorf("blur(2rem) under a 16px root on an 8px box → std %g, want %g (2 x the ROOT font size)",
+			got.Filter[0].StdDeviation, want)
+	}
+	if want := 16.0; got.Filter[1].StdDeviation != want {
+		t.Errorf("blur(2em) on an 8px box → std %g, want %g (2 x the box's OWN font size)",
+			got.Filter[1].StdDeviation, want)
+	}
+}
+
+// TestFilterURLIsLoggedNotSilent: an HTML box cannot resolve `url(#id)` (that
+// references an SVG <filter> element, which pkg/svg owns and resolves against an
+// SVG document). The entry is dropped and the rest of the list still applies — but
+// dropping it must be LOGGED, since it is the one path here that silently produces
+// less filtering than the author wrote. Every other unsupported path in this engine
+// logs; this one used not to.
+func TestFilterURLIsLoggedNotSilent(t *testing.T) {
+	var msgs []string
+	logf := func(f string, a ...any) { msgs = append(msgs, fmt.Sprintf(f, a...)) }
+	src := `<html><body style="margin:0">` +
+		`<div style="height:20px;filter:grayscale(1) url(#f) opacity(0.5)">x</div>` +
+		`<div style="height:20px;filter:url(#g)">y</div></body></html>`
+	frag := layoutTreeFor(t, src, 200, logf)
+
+	n := 0
+	for _, m := range msgs {
+		if strings.Contains(m, "url(") && strings.Contains(m, "SVG <filter>") {
+			n++
+		}
+	}
+	// Warn-ONCE: two boxes each dropping a url() entry log a single line, not two.
+	if n != 1 {
+		t.Errorf("url() drop logged %d times, want exactly 1 (warn-once); messages: %v", n, msgs)
+	}
+
+	// The surrounding functions survive: a url() entry does not invalidate the list.
+	got := findFiltered(frag)
+	if got == nil || len(got.Filter) != 2 {
+		t.Fatalf("expected grayscale+opacity to survive alongside the dropped url(), got %v", got)
+	}
+	if got.Filter[0].Kind != filtereffects.FuncGrayscale || got.Filter[1].Kind != filtereffects.FuncOpacity {
+		t.Errorf("surviving chain = %v, want [grayscale, opacity]", got.Filter)
+	}
+}
+
+// TestFilterDropShadowColorResolved: drop-shadow()'s colour is resolved at LAYOUT
+// time and carried on the fragment, positionally aligned with the chain. An omitted
+// colour and `currentColor` both mean the element's own `color` property, which is
+// the reason the resolution cannot be deferred to the painter.
+func TestFilterDropShadowColorResolved(t *testing.T) {
+	red := color.RGBA{0xff, 0, 0, 0xff}
+	blue := color.RGBA{0, 0, 0xff, 0xff}
+	for _, tc := range []struct {
+		name string
+		decl string
+		want color.RGBA
+	}{
+		{"explicit colour first", "filter:drop-shadow(blue 2px 2px)", blue},
+		{"explicit colour last", "filter:drop-shadow(2px 2px blue)", blue},
+		{"omitted means currentColor", "color:#f00;filter:drop-shadow(2px 2px)", red},
+		{"currentColor keyword", "color:#f00;filter:drop-shadow(currentColor 2px 2px)", red},
+		{"unrecognized colour falls back to currentColor", "color:#f00;filter:drop-shadow(nonsuch 2px 2px)", red},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := `<html><body style="margin:0"><div style="height:20px;` + tc.decl + `">x</div></body></html>`
+			got := findFiltered(layoutTreeFor(t, src, 200, nil))
+			if got == nil || len(got.FilterShadows) != 1 {
+				t.Fatalf("expected one resolved shadow colour, got %v", got)
+			}
+			if got.FilterShadows[0] != tc.want {
+				t.Errorf("shadow colour = %v, want %v", got.FilterShadows[0], tc.want)
+			}
+		})
+	}
+}

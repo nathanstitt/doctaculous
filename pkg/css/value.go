@@ -89,6 +89,21 @@ var namedColors = map[string]color.RGBA{
 	"transparent": {0, 0, 0, 0},
 }
 
+// ParseColorValue parses one complete CSS colour value — a #hex hash, an
+// rgb(r,g,b) function, or a named colour — reporting ok=false for anything this
+// engine does not recognize.
+//
+// It is exported for consumers that must resolve a colour appearing INSIDE
+// another property's value rather than as a declaration of its own, where the
+// cascade's own parsing never sees it: `filter: drop-shadow(red 2px 2px)` is the
+// case that forced it. pkg/filtereffects deliberately leaves such a colour
+// unparsed (it has no colour grammar and no document), so the caller must resolve
+// it, and duplicating a second hex/rgb/named parser to do so would be a silent
+// divergence from what every other colour in the cascade accepts.
+func ParseColorValue(s string) (color.RGBA, bool) {
+	return parseColor(newTokenizer(s))
+}
+
 // parseColor reads a color value from the tokenizer: a #hex hash, an rgb(r,g,b)
 // function, or a named color. ok is false for anything unrecognized, so the
 // caller drops the declaration.

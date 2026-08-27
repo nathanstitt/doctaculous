@@ -188,7 +188,20 @@ type Item struct {
 // filterUnits/x/y/width/height of its own. The painter needs it to size the
 // offscreen surface the chain runs over.
 type FilterItem struct {
-	Funcs              []filtereffects.Function
+	Funcs []filtereffects.Function
+
+	// ShadowColors carries drop-shadow()'s already-resolved colour, one entry per
+	// Funcs entry (positionally aligned; the entry is unused for every other
+	// function kind). A shorter or nil slice means opaque black for the entries
+	// it does not cover.
+	//
+	// The colour is resolved at LAYOUT time rather than at paint time because
+	// drop-shadow()'s colour argument is optional and, when omitted, means the
+	// element's own `color` property — which only the cascade knows. Carrying the
+	// raw token here instead would force the painter to grow a CSS colour parser
+	// and a way to reach the box's computed style, neither of which it has.
+	ShadowColors []color.RGBA
+
 	XPt, YPt, WPt, HPt float64
 }
 
