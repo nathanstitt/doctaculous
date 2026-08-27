@@ -1,0 +1,676 @@
+package svg
+
+import (
+	"strings"
+
+	"github.com/nathanstitt/doctaculous/pkg/render"
+)
+
+// maxTspanDepth bounds <tspan> nesting inside one <text>. SVG text nests a
+// handful of levels at most in real documents; deeper input is hostile (or
+// broken) and is truncated with a log rather than recursed into, mirroring
+// maxUseDepth/maxMarkerChainDepth's rationale — the walk here is recursive,
+// so an unbounded depth is an unbounded Go stack.
+const maxTspanDepth = 64
+
+// maxTextChars bounds the total number of positioned characters one <text>
+// element may lower to. Each character costs a TextChar (position, rotation,
+// and a per-character style pointer) at build time and a shaped glyph plus a
+// transformed outline at paint time, so an adversarial document with a
+// multi-megabyte text node would otherwise allocate without limit before any
+// draw-call budget (which lives in pkg/svg/draw and never sees build-time
+// work) could intervene. Far above any legitimate document: a 200k-character
+// <text> is already three orders of magnitude past a plausible label.
+const maxTextChars = 200_000
+
+// Text is one <text> element lowered to a scene node: a flat, document-order
+// list of positioned characters, each carrying the style resolved at its own
+// point in the <text>/<tspan> tree.
+//
+// The flattening is what makes SVG's positioning model tractable. x/y/dx/dy/
+// rotate are per-CHARACTER lists that thread through the whole subtree in
+// document order (SVG2 §11.5): a <tspan> inherits the running cursor from its
+// parent, may reset it with its own absolute list, and hands the advanced
+// cursor back when it ends. Resolving that during the tree walk — here, once,
+// at build time — means pkg/svg/draw never has to walk a tree at all: it
+// shapes each style run, then places glyph i at Chars[i]'s resolved
+// adjustments.
+//
+// Like every other scene node, a Text is read-only after Parse and shared
+// lock-free across the engine's parallel page-render fan-out.
+type Text struct {
+	// M is the <text> element's own transform attribute.
+	M render.Matrix
+
+	// Chars is every character of the <text> subtree, in document order,
+	// after whitespace processing. A character with no ink (a space) is kept:
+	// it advances the cursor and can carry its own dx/dy.
+	Chars []TextChar
+
+	// Anchors marks the index of each text-chunk start. SVG's text-anchor
+	// applies per CHUNK, not per <text>: a chunk begins at the first
+	// character and at every character that carries an ABSOLUTE x (or y)
+	// reset, so <text x="10 50 90"> is three separately-anchored chunks. The
+	// slice is strictly increasing and always begins with 0 for a non-empty
+	// Chars.
+	Anchors []int
+
+	// ClipPath and Mask are the resolved clip-path/mask references on the
+	// <text> element itself, or nil when absent. See Group.ClipPath.
+	ClipPath *ClipPath
+	Mask     *Mask
+}
+
+func (*Text) isNode() {}
+
+// TextChar is one positioned character of a Text: its rune, the style in
+// effect where it appeared in the <text>/<tspan> tree, and its resolved
+// position adjustments.
+type TextChar struct {
+	// R is the character itself.
+	R rune
+
+	// Style is the fully resolved style at this character's position in the
+	// tree — its own <tspan>'s, not the <text>'s. Two adjacent characters
+	// with different styles start different shaping runs.
+	Style Style
+
+	// fillGradient/fillPattern/strokeGradient/strokePattern are the resolved
+	// paint servers for this character's style, mirroring Shape's identical
+	// fields (see that type's doc comment for why resolution must happen at
+	// build time, before Parse discards the document index). All nil for the
+	// common solid-color case.
+	//
+	// Unlike Shape's, these are UNEXPORTED and read through the four
+	// accessors below. Shape can expose its fields directly because
+	// paintServer/patternPaint are only ever reached from pkg/svg/draw
+	// through the `gradient`/`pattern` interfaces there; a struct FIELD of
+	// unexported type on an exported struct is a different matter — an
+	// out-of-package caller can see it but cannot name its type, which makes
+	// the field useless to everyone except by accident. Accessors returning
+	// the same interface-satisfying value keep the seam honest.
+	fillGradient   *paintServer
+	strokeGradient *paintServer
+	fillPattern    *patternPaint
+	strokePattern  *patternPaint
+
+	// AbsX/AbsY carry an ABSOLUTE position reset from an x=/y= list entry:
+	// HasAbsX means the pen's X jumps to AbsX before this character (and a
+	// new text chunk begins), independently of Y. A character with neither
+	// flag continues from the running pen position.
+	AbsX, AbsY       float64
+	HasAbsX, HasAbsY bool
+
+	// DX/DY are RELATIVE offsets from a dx=/dy= list entry, applied to the
+	// pen after any absolute reset and before the glyph is placed. They
+	// permanently shift the pen (they are not per-glyph-only decorations),
+	// which is what makes <text dx="20 6 10"> shift each successive
+	// character cumulatively.
+	DX, DY float64
+
+	// RotateDeg is the per-character rotation in DEGREES, applied about the
+	// character's own origin on the baseline. Note the SVG asymmetry this
+	// encodes: a rotate list SHORTER than the text repeats its LAST value
+	// for every remaining character (SVG2 §11.5), unlike x/y/dx/dy, whose
+	// short lists simply stop applying. Lowering resolves that here, so
+	// every character carries its own final angle.
+	RotateDeg float64
+}
+
+// GradientPaint is a resolved gradient paint server, as returned by
+// TextChar.FillGradient/StrokeGradient. It is an interface rather than the
+// concrete type so pkg/svg keeps paintServer unexported while a
+// TextChar's resolved paint still reaches pkg/svg/draw — the same
+// accessor-surface-only contract Style.FillPaint/StrokePaint follow, and the
+// exact method set pkg/svg/draw's own `gradient` interface requires.
+type GradientPaint interface {
+	// Shader returns the gradient's colour function, in the gradient's own
+	// local coordinate space.
+	Shader() render.Shader
+	// Matrix maps that local space into the painted element's user space
+	// (i.e. composed BEFORE the element's own transform).
+	Matrix() render.Matrix
+}
+
+// PatternPaint is a resolved pattern paint server, as returned by
+// TextChar.FillPattern/StrokePattern. See GradientPaint for why this is an
+// interface; the method set matches pkg/svg/draw's own `pattern` interface.
+type PatternPaint interface {
+	// Tile is the pattern's content, painted once per repeated cell.
+	Tile() *Group
+	// Matrix is the patternTransform, mapping pattern space into the painted
+	// element's user space.
+	Matrix() render.Matrix
+	// Cell reports the tile cell's origin and size in that user space.
+	Cell() (x, y, w, h float64)
+	// ContentMatrix maps the tile's own content space into cell space.
+	ContentMatrix() render.Matrix
+}
+
+// FillGradient returns the character's resolved fill gradient, or nil when
+// its fill is not a (successfully resolved) gradient reference.
+func (c TextChar) FillGradient() GradientPaint {
+	if c.fillGradient == nil {
+		return nil // typed-nil guard: see the field's doc comment
+	}
+	return c.fillGradient
+}
+
+// StrokeGradient returns the character's resolved stroke gradient, or nil.
+func (c TextChar) StrokeGradient() GradientPaint {
+	if c.strokeGradient == nil {
+		return nil
+	}
+	return c.strokeGradient
+}
+
+// FillPattern returns the character's resolved fill pattern, or nil.
+func (c TextChar) FillPattern() PatternPaint {
+	if c.fillPattern == nil {
+		return nil
+	}
+	return c.fillPattern
+}
+
+// StrokePattern returns the character's resolved stroke pattern, or nil.
+func (c TextChar) StrokePattern() PatternPaint {
+	if c.strokePattern == nil {
+		return nil
+	}
+	return c.strokePattern
+}
+
+// buildText converts a <text> element into a Text scene node, or nil when it
+// contributes nothing (invisible, or no characters after whitespace
+// processing). st is the <text>'s own already-resolved style.
+func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
+	if !st.visible {
+		// visibility:hidden on the <text> itself drops it outright, mirroring
+		// buildShape. A <tspan> that re-enables visibility inside a hidden
+		// <text> is handled per character below, not here.
+		return nil
+	}
+
+	tb := &textBuilder{b: b, ctx: ctx}
+	tb.walk(el, st, xmlSpaceOf(el, false), 0)
+	tb.flushPending()
+	if len(tb.chars) == 0 {
+		return nil
+	}
+	tb.resolvePositions()
+	// After resolvePositions: the objectBoundingBox approximation reads the
+	// first absolute x/y, which only exists once the position lists have been
+	// applied onto the characters.
+	tb.resolveTextPaints()
+
+	t := &Text{
+		M:       elementTransform(el, b.logf),
+		Chars:   tb.chars,
+		Anchors: tb.anchors,
+	}
+	if ref, ok := st.ClipPathRef(); ok {
+		t.ClipPath = b.resolveClipPathRef(ref)
+	}
+	if ref, ok := st.MaskRef(); ok {
+		t.Mask = b.resolveMaskRef(ref)
+	}
+	return t
+}
+
+// textBuilder accumulates one <text> element's characters during the subtree
+// walk, then resolves the per-character position lists over them.
+//
+// The two-phase split matters: the x/y/dx/dy/rotate lists on an element apply
+// to the characters of THAT element's subtree by index, but a character's
+// index is only known once its preceding siblings' text has been collapsed —
+// and whitespace collapsing itself depends on what came before across element
+// boundaries (a space at the start of a <tspan> collapses away if the
+// preceding <tspan> ended with one). So the walk collects characters and
+// records each element's lists against the character range it covered, and
+// resolvePositions applies them afterward.
+type textBuilder struct {
+	b   *sceneBuilder
+	ctx *cascadeCtx
+
+	// chars is the flat character list built so far.
+	chars []TextChar
+
+	// lists holds one entry per element in the subtree that carried at least
+	// one position list, paired with the character range it covers.
+	lists []charRangeLists
+
+	// anchors is the resolved text-chunk start indices; filled by
+	// resolvePositions.
+	anchors []int
+
+	// pendingSpace records that a collapsible whitespace run was seen and a
+	// single space must be emitted BEFORE the next non-space character —
+	// deferred rather than emitted eagerly so a trailing whitespace run at
+	// the very end of the <text> collapses away entirely (SVG's default
+	// xml:space handling strips leading and trailing space). pendingStyle is
+	// the style that space would carry.
+	pendingSpace bool
+	pendingStyle Style
+
+	// sawInk records whether any non-space character has been emitted yet, so
+	// a LEADING whitespace run is dropped rather than becoming a space.
+	sawInk bool
+
+	// truncated records that maxTextChars was hit, so the walk stops
+	// appending and logs once.
+	truncated bool
+}
+
+// charRangeLists pairs one element's position lists with the [start,end)
+// range of textBuilder.chars its subtree produced.
+type charRangeLists struct {
+	start, end int
+	x, y       []float64
+	dx, dy     []float64
+	rotate     []float64
+	hasRotate  bool
+}
+
+// walk descends one <text>/<tspan> subtree in document order, appending
+// characters and recording el's own position lists against the character
+// range it covers. parentStyle is the style resolved at el's parent; space
+// is the inherited xml:space preserve flag.
+func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int) {
+	if depth > maxTspanDepth {
+		tb.b.warnOnceMsg("text-depth", "svg: <tspan> nesting exceeded 64 levels; deeper content was dropped")
+		return
+	}
+
+	start := len(tb.chars)
+
+	for _, c := range el.content {
+		if tb.truncated {
+			break
+		}
+		if c.el == nil {
+			tb.appendText(c.text, st, preserveSpace)
+			continue
+		}
+		kid := c.el
+		if kid.space != svgNS {
+			continue // foreign-namespace child: skip silently, like buildNode
+		}
+		switch kid.local {
+		case "tspan":
+			kidStyle := st.apply(kid, tb.ctx)
+			if !kidStyle.display {
+				// display:none on a <tspan> removes its characters entirely —
+				// they do not advance the cursor either (the corpus's
+				// tspan/rotate-and-display-none.svg asserts the following
+				// text is NOT shifted by the hidden run).
+				continue
+			}
+			tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1)
+		case "tref":
+			// Removed from SVG 2 and unimplemented in every current browser
+			// (see the design's decision 4): dropped with a log, not deferred.
+			tb.b.warnOnce("tref")
+		case "textPath":
+			// Deferred to a later PR (design decision 3): render its text on
+			// the straight baseline rather than dropping it, so the content
+			// is still visible and the degradation is diagnosable.
+			tb.b.warnOnceMsg("textPath", "svg: <textPath> not yet supported; rendering its text on a straight baseline")
+			kidStyle := st.apply(kid, tb.ctx)
+			if kidStyle.display {
+				tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1)
+			}
+		case "title", "desc", "metadata":
+			// Metadata children of <text> are not rendered content.
+		default:
+			// Any other element inside <text> (an <a>, or something
+			// unrecognized) contributes its text content but nothing else.
+			// This mirrors buildNode's forgiving container default rather
+			// than silently dropping a wrapper's text.
+			kidStyle := st.apply(kid, tb.ctx)
+			if kidStyle.display {
+				tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1)
+			}
+		}
+	}
+
+	tb.recordLists(el, start, len(tb.chars))
+}
+
+// recordLists parses el's x/y/dx/dy/rotate attributes and records them
+// against the [start,end) character range el's subtree produced, if any list
+// is present at all. An unparseable list is ignored per SVG error handling
+// (parseNumberList already returns nil for a list with any bad token).
+func (tb *textBuilder) recordLists(el *element, start, end int) {
+	x := textCoordList(el, "x")
+	y := textCoordList(el, "y")
+	dx := textCoordList(el, "dx")
+	dy := textCoordList(el, "dy")
+	rotate, hasRotate := textRotateList(el)
+	if x == nil && y == nil && dx == nil && dy == nil && !hasRotate {
+		return
+	}
+	tb.lists = append(tb.lists, charRangeLists{
+		start: start, end: end,
+		x: x, y: y, dx: dx, dy: dy,
+		rotate: rotate, hasRotate: hasRotate,
+	})
+}
+
+// textCoordList parses one of the x/y/dx/dy list attributes into user units.
+// Unlike parseNumberList it accepts a UNIT on each entry (the corpus's
+// mm-coordinates.svg and em-and-ex-coordinates.svg use them), so each token
+// goes through parseLength. A list with any unparseable token is ignored
+// entirely, per SVG's error handling for list attributes.
+func textCoordList(el *element, name string) []float64 {
+	raw, ok := el.attrs[name]
+	if !ok {
+		return nil
+	}
+	fields := splitCoordList(raw)
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]float64, 0, len(fields))
+	for _, f := range fields {
+		v, ok := parseLength(f, 0)
+		if !ok {
+			return nil
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// textRotateList parses the rotate list. It reports hasRotate separately from
+// a nil slice so an ignored-because-unparseable rotate is distinguishable
+// from an absent one — the difference matters because a rotate list, unlike
+// x/y/dx/dy, keeps applying its LAST value past the end of the list, and an
+// element with rotate="" must not do that.
+//
+// A single unparseable entry invalidates the whole attribute, matching
+// parseNumberList's list-attribute error handling and the corpus's
+// rotate-with-an-invalid-angle.svg (which expects NO rotation at all rather
+// than a partially-applied list).
+func textRotateList(el *element) ([]float64, bool) {
+	raw, ok := el.attrs["rotate"]
+	if !ok {
+		return nil, false
+	}
+	list := parseNumberList(raw)
+	if list == nil {
+		return nil, false
+	}
+	return list, true
+}
+
+// splitCoordList splits a coordinate list on commas and whitespace, the same
+// separators parseNumberList accepts.
+func splitCoordList(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+	})
+}
+
+// appendText adds one character-data run's characters to the flat list,
+// applying whitespace processing.
+//
+// In the default (non-preserving) mode SVG collapses every run of whitespace —
+// including newlines and tabs, which is why the source indentation inside a
+// pretty-printed <text> does not become visible space — to a single space,
+// and strips leading and trailing whitespace across the WHOLE <text>, not per
+// run. That cross-run scope is why the pending-space deferral exists: whether
+// a space between two <tspan>s survives depends on what follows it, which is
+// not known until the next run arrives.
+//
+// With xml:space="preserve" every whitespace character is kept, except that
+// newlines and tabs still become spaces (SVG2 §11.5: "converted to space
+// characters") — only the collapsing and the leading/trailing strip are
+// disabled.
+func (tb *textBuilder) appendText(s string, st Style, preserveSpace bool) {
+	for _, r := range s {
+		if tb.truncated {
+			return
+		}
+		if isXMLSpace(r) {
+			if preserveSpace {
+				tb.emit(' ', st)
+				continue
+			}
+			// Collapsing mode: remember that a space is owed, but only emit
+			// it once an inked character follows (and never before the first
+			// one), so leading and trailing whitespace vanish.
+			if tb.sawInk {
+				tb.pendingSpace = true
+				tb.pendingStyle = st
+			}
+			continue
+		}
+		if tb.pendingSpace {
+			tb.pendingSpace = false
+			tb.emit(' ', tb.pendingStyle)
+			if tb.truncated {
+				return
+			}
+		}
+		tb.sawInk = true
+		tb.emit(r, st)
+	}
+}
+
+// flushPending is a no-op that documents the deliberate DROP of a trailing
+// collapsible space: in the default xml:space mode a whitespace run at the
+// very end of a <text> is stripped, so the pending space is discarded rather
+// than emitted when the walk finishes. It exists as a named call site so the
+// omission reads as intentional at buildText.
+func (tb *textBuilder) flushPending() { tb.pendingSpace = false }
+
+// emit appends one character with the given style, resolving that style's
+// paint servers, and trips the maxTextChars guard.
+func (tb *textBuilder) emit(r rune, st Style) {
+	if len(tb.chars) >= maxTextChars {
+		if !tb.truncated {
+			tb.truncated = true
+			tb.b.warnOnceMsg("text-budget", "svg: <text> character budget exhausted; remaining characters were dropped")
+		}
+		return
+	}
+	tb.chars = append(tb.chars, TextChar{R: r, Style: st})
+}
+
+// textBBox is the geometry a text character's paint servers resolve against.
+//
+// A paint server with the default gradientUnits/patternUnits of
+// objectBoundingBox needs the painted element's bounding box, and a text
+// chunk's box is not known until shaping has run — which happens in
+// pkg/svg/draw, a layer that by design cannot write back into the read-only
+// scene graph. Rather than resolve against nothing (which makes
+// resolveGradient report a degenerate box and drop the paint entirely,
+// leaving gradient-filled text unpainted), the box is approximated from the
+// text's own position and font size: a chunk starting at the pen origin,
+// one em tall and estimated wide.
+//
+// The approximation is only ever visible for an objectBoundingBox server on
+// text; userSpaceOnUse — the far more common authoring choice for text, and
+// the one every corpus fixture in this tranche uses — is exact, since it
+// ignores the box completely.
+func textBBox(originX, originY, advance, sizePt float64) *render.Path {
+	if advance <= 0 {
+		advance = sizePt
+	}
+	p := &render.Path{}
+	// One em above the baseline to the descender, the conventional em box.
+	p.MoveTo(originX, originY-sizePt*0.8)
+	p.LineTo(originX+advance, originY-sizePt*0.8)
+	p.LineTo(originX+advance, originY+sizePt*0.2)
+	p.LineTo(originX, originY+sizePt*0.2)
+	p.Close()
+	return p
+}
+
+// resolveTextPaints resolves the fill/stroke url() references for every
+// DISTINCT style in the character list, writing the result onto each
+// character that carries that style.
+//
+// It runs once after the whole subtree is walked, not per character, for two
+// reasons: resolving a gradient allocates (a shader plus its stop table), so
+// a 200-character <text> with one gradient fill would otherwise build 200
+// identical shaders; and the objectBoundingBox approximation above needs the
+// text's overall extent, which only exists once every character is known.
+func (tb *textBuilder) resolveTextPaints() {
+	if len(tb.chars) == 0 {
+		return
+	}
+	// Approximate the whole <text>'s extent for the objectBoundingBox case.
+	// Every character shares it: a per-chunk box would be marginally closer
+	// but is still an approximation, and one box keeps a gradient continuous
+	// across the text the way an author writing objectBoundingBox expects.
+	originX, originY := 0.0, 0.0
+	maxSize := 0.0
+	for _, c := range tb.chars {
+		if c.HasAbsX {
+			originX = c.AbsX
+			break
+		}
+	}
+	for _, c := range tb.chars {
+		if c.HasAbsY {
+			originY = c.AbsY
+			break
+		}
+	}
+	for _, c := range tb.chars {
+		if s := c.Style.fontSizePt; s > maxSize {
+			maxSize = s
+		}
+	}
+	// A crude advance estimate: half an em per character is close enough for
+	// a bounding box that is already an approximation, and never zero.
+	bbox := textBBox(originX, originY, float64(len(tb.chars))*maxSize*0.5, maxSize)
+
+	type resolved struct {
+		fillGrad   *paintServer
+		strokeGrad *paintServer
+		fillPat    *patternPaint
+		strokePat  *patternPaint
+	}
+	memo := map[[2]string]resolved{}
+	for i := range tb.chars {
+		c := &tb.chars[i]
+		fillRef, hasFill := c.Style.FillServer()
+		strokeRef, hasStroke := c.Style.StrokeServer()
+		if !hasFill && !hasStroke {
+			continue
+		}
+		key := [2]string{fillRef, strokeRef}
+		r, ok := memo[key]
+		if !ok {
+			if hasFill {
+				if id, ok := fragmentID(fillRef); ok {
+					tb.b.resolvePaint(id, bbox, &r.fillGrad, &r.fillPat)
+				}
+			}
+			if hasStroke {
+				if id, ok := fragmentID(strokeRef); ok {
+					tb.b.resolvePaint(id, bbox, &r.strokeGrad, &r.strokePat)
+				}
+			}
+			memo[key] = r
+		}
+		c.fillGradient, c.fillPattern = r.fillGrad, r.fillPat
+		c.strokeGradient, c.strokePattern = r.strokeGrad, r.strokePat
+	}
+}
+
+// resolvePositions applies every recorded element's position lists onto the
+// character range it covers, then computes the text-chunk anchor indices.
+//
+// The SVG rules this implements (SVG2 §11.5, "Text layout — the x, y, dx, dy
+// and rotate attributes"):
+//
+//   - Each list applies to the characters of its own element's subtree by
+//     INDEX: entry i goes to the (i+1)-th character in that subtree.
+//   - A list SHORTER than the subtree's text simply stops: the remaining
+//     characters get no adjustment from that list and continue from the
+//     running pen position. rotate is the one exception — its LAST value
+//     persists for every remaining character.
+//   - A list LONGER than the text has its surplus entries ignored.
+//   - x/y are absolute (they reset the pen); dx/dy are relative.
+//   - A nested element's own list wins over the ancestor's for the characters
+//     they both cover, which falls out of applying ancestors first: the walk
+//     appends a child's charRangeLists entry BEFORE its parent's (recordLists
+//     runs after the child recursion returns), so iterating in reverse
+//     applies outermost-first and lets the innermost write land last.
+func (tb *textBuilder) resolvePositions() {
+	for i := len(tb.lists) - 1; i >= 0; i-- {
+		l := tb.lists[i]
+		for j := l.start; j < l.end; j++ {
+			k := j - l.start
+			c := &tb.chars[j]
+			if k < len(l.x) {
+				c.AbsX, c.HasAbsX = l.x[k], true
+			}
+			if k < len(l.y) {
+				c.AbsY, c.HasAbsY = l.y[k], true
+			}
+			if k < len(l.dx) {
+				c.DX = l.dx[k]
+			}
+			if k < len(l.dy) {
+				c.DY = l.dy[k]
+			}
+			if l.hasRotate && len(l.rotate) > 0 {
+				// The last-value-persists rule: past the end of the list,
+				// every remaining character keeps the final angle.
+				if k < len(l.rotate) {
+					c.RotateDeg = l.rotate[k]
+				} else {
+					c.RotateDeg = l.rotate[len(l.rotate)-1]
+				}
+			}
+		}
+	}
+
+	// Text chunks: the first character always starts one, and so does every
+	// character carrying an absolute x or y reset (SVG2 §11.5 — "a new text
+	// chunk is started whenever an absolute position adjustment is made").
+	for i := range tb.chars {
+		if i == 0 || tb.chars[i].HasAbsX || tb.chars[i].HasAbsY {
+			tb.anchors = append(tb.anchors, i)
+		}
+	}
+}
+
+// xmlSpaceOf resolves el's xml:space attribute against the inherited value.
+// "preserve" turns preservation on, "default" turns it off, and anything else
+// (including the attribute's absence) inherits.
+//
+// The attribute arrives here under the plain "space" key: the XML decoder
+// reports xml:space in the XML namespace, and buildAttrs keys
+// no-namespace/SVG-namespace attributes by local name while dropping other
+// foreign-namespace ones — so "xml:space" is looked up as both, and whichever
+// the decoder produced is found.
+func xmlSpaceOf(el *element, inherited bool) bool {
+	v, ok := el.attrs["space"]
+	if !ok {
+		v, ok = el.attrs["xml:space"]
+	}
+	if !ok {
+		return inherited
+	}
+	switch strings.TrimSpace(v) {
+	case "preserve":
+		return true
+	case "default":
+		return false
+	default:
+		return inherited
+	}
+}
+
+// isXMLSpace reports whether r is one of the four whitespace characters SVG's
+// text-processing rules collapse: space, tab, carriage return, and line feed.
+// Deliberately narrower than unicode.IsSpace — SVG2 §11.5 names exactly these
+// four, and collapsing e.g. U+00A0 NO-BREAK SPACE would defeat its purpose.
+func isXMLSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\r' || r == '\n'
+}

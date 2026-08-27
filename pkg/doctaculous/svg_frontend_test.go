@@ -455,12 +455,12 @@ func TestOpenSVGFileMissing(t *testing.T) {
 }
 
 // TestOpenSVGBytesLogf proves WithLogf reaches svg.Parse's degradation
-// diagnostics (a <text> element is in pkg/svg's unsupportedElements set and
+// diagnostics (an <image> element is in pkg/svg's unsupportedElements set and
 // is skipped with one logged line), and that omitting WithLogf entirely
 // (the nil-logf path) still opens the same document without panicking.
 func TestOpenSVGBytesLogf(t *testing.T) {
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
-	  <text x="10" y="10">hello</text>
+	  <image href="nope.png" x="10" y="10" width="10" height="10"/>
 	  <rect x="10" y="10" width="80" height="30" fill="#0000ff"/>
 	</svg>`)
 
@@ -471,7 +471,7 @@ func TestOpenSVGBytesLogf(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(lines) == 0 {
-		t.Error("WithLogf captured no diagnostics for an unsupported <text> element")
+		t.Error("WithLogf captured no diagnostics for an unsupported <image> element")
 	}
 
 	// No options: the nil-logf path must still work.

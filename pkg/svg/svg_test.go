@@ -32,11 +32,11 @@ func TestParseAndSizing(t *testing.T) {
 	}
 
 	// Scene: g transform + inherited fill reach the shape; defs skipped;
-	// unsupported element logged once.
+	// unsupported element logged once (per element NAME, not per occurrence).
 	src := `<svg ` + hdr + ` width="100" height="100">
 	  <defs><rect id="d" width="5" height="5"/></defs>
 	  <g fill="red" transform="translate(10,0)"><rect width="20" height="20"/></g>
-	  <text>skip me</text><text>and me</text>
+	  <image href="a.png"/><image href="b.png"/>
 	</svg>`
 	var logs []string
 	d, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
@@ -45,7 +45,7 @@ func TestParseAndSizing(t *testing.T) {
 	}
 	_, root := d.Root()
 	if len(root.Kids) != 1 {
-		t.Fatalf("root kids = %d, want 1 (defs and text skipped)", len(root.Kids))
+		t.Fatalf("root kids = %d, want 1 (defs and image skipped)", len(root.Kids))
 	}
 	g, ok := root.Kids[0].(*Group)
 	if !ok || len(g.Kids) != 1 {
@@ -59,14 +59,14 @@ func TestParseAndSizing(t *testing.T) {
 	if !okf || fp.Color != (color.RGBA{255, 0, 0, 255}) {
 		t.Errorf("shape fill = %+v %v", fp, okf)
 	}
-	textLogs := 0
+	imageLogs := 0
 	for _, l := range logs {
-		if strings.Contains(l, "<text>") {
-			textLogs++
+		if strings.Contains(l, "<image>") {
+			imageLogs++
 		}
 	}
-	if textLogs != 1 {
-		t.Errorf("text logged %d times, want once per element name", textLogs)
+	if imageLogs != 1 {
+		t.Errorf("image logged %d times, want once per element name", imageLogs)
 	}
 }
 
