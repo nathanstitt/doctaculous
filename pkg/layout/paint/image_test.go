@@ -39,6 +39,10 @@ func (d *imageRecordDevice) BuildLuminanceMask(image.Point, bool, func(render.De
 	return image.NewAlpha(image.Rectangle{})
 }
 
+func (d *imageRecordDevice) RenderOffscreen(image.Point, func(render.Device)) *image.RGBA {
+	return nil
+}
+
 // fourCorner returns a 2x2 image with distinct corner colors so orientation is
 // observable: TL=red TR=green BL=blue BR=white.
 func fourCorner() *image.RGBA {

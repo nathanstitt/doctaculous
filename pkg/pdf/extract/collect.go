@@ -285,6 +285,14 @@ func (d *nullDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)) 
 	return image.NewAlpha(image.Rectangle{})
 }
 
+// RenderOffscreen returns nil: this device collects text, not pixels, so it
+// has no raster surface — the documented "cannot rasterize offscreen"
+// degradation (see render.Device). Text inside a filtered element is still
+// collected, because the caller falls back to painting unfiltered.
+func (d *nullDevice) RenderOffscreen(image.Point, func(render.Device)) *image.RGBA {
+	return nil
+}
+
 // Collect runs the content interpreter over one page with the capture sinks and
 // returns the recovered glyphs, ruling lines, and page size. It recovers at the
 // page boundary: a panic in the interpreter (a defect, or a malformed construct

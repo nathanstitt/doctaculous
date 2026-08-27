@@ -62,6 +62,10 @@ func (d *recordDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)
 	return image.NewAlpha(image.Rectangle{})
 }
 
+func (d *recordDevice) RenderOffscreen(image.Point, func(render.Device)) *image.RGBA {
+	return nil
+}
+
 // triangle returns a small closed outline in em units so a glyph is non-empty.
 func triangle() *render.Path {
 	p := &render.Path{}

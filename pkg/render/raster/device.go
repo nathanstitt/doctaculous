@@ -400,6 +400,31 @@ func (d *Device) BuildLuminanceMask(size image.Point, alphaOnly bool, paint func
 	return mask
 }
 
+// RenderOffscreen renders paint's content into a fresh, fully-transparent
+// scratch *image.RGBA the same size as size and returns it directly: see
+// render.Device's doc comment for why an SVG <filter> needs the pixels
+// themselves rather than the coverage mask BuildLuminanceMask derives.
+//
+// paint runs against a NEW *Device wrapping the scratch, not d itself, for
+// exactly the reason BuildLuminanceMask does the same: d's own clip/group
+// stacks must stay untouched by whatever the caller paints, and a throwaway
+// Device is the simplest way to guarantee that. The scratch device shares
+// d's logf so a degradation logged while painting filter content is still
+// surfaced.
+//
+// The returned image is freshly allocated and never aliased by this Device
+// afterward, so the caller may transform it in place — which every filter
+// primitive does.
+func (d *Device) RenderOffscreen(size image.Point, paint func(dev render.Device)) *image.RGBA {
+	if paint == nil || size.X <= 0 || size.Y <= 0 {
+		return nil
+	}
+	scratch := New(image.NewRGBA(image.Rectangle{Max: size}))
+	scratch.logf = d.logf
+	paint(scratch)
+	return scratch.img
+}
+
 // pixelMaskValue converts one premultiplied *image.RGBA pixel into a mask
 // coverage value: the pixel's own alpha directly for mask-type=alpha, or its
 // sRGB luminance (Rec. 709 coefficients, on sRGB — NOT linearRGB, see

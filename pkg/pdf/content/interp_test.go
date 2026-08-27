@@ -75,6 +75,10 @@ func (d *recDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)) r
 	return image.NewAlpha(image.Rectangle{})
 }
 
+func (d *recDevice) RenderOffscreen(image.Point, func(render.Device)) *image.RGBA {
+	return nil
+}
+
 func runContent(t *testing.T, src string, res Resources) *recDevice {
 	t.Helper()
 	dev := &recDevice{}
