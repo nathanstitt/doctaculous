@@ -53,6 +53,13 @@ func TestSVGPresentationHintsSyncedWithStyleApply(t *testing.T) {
 		"marker-start":      "url(#x)",
 		"marker-mid":        "url(#x)",
 		"marker-end":        "url(#x)",
+		"font-family":       "Verdana",
+		"font-size":         "42",
+		"font-weight":       "bold",
+		"font-style":        "italic",
+		"text-anchor":       "middle",
+		"direction":         "rtl",
+		"unicode-bidi":      "bidi-override",
 	}
 
 	for _, name := range svgPresentationAttrs {

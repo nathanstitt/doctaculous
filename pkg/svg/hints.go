@@ -89,6 +89,13 @@ var svgPresentationAttrs = []string{
 	"marker-start",
 	"marker-mid",
 	"marker-end",
+	"font-family",
+	"font-size",
+	"font-weight",
+	"font-style",
+	"text-anchor",
+	"direction",
+	"unicode-bidi",
 }
 
 // svgPresentationHints maps an element's SVG presentation attributes to CSS

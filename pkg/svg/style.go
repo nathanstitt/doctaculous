@@ -90,6 +90,55 @@ type Style struct {
 	markerStartRef string
 	markerMidRef   string
 	markerEndRef   string
+
+	// fontFamily is the resolved font-family list, verbatim from the cascade
+	// minus quoting (e.g. `"Noto Sans", sans-serif`). Inherited. It is passed
+	// straight to layout/font.FaceCache.Resolve, which does its own
+	// comma-splitting and per-candidate fallback, so no per-name resolution
+	// happens here.
+	fontFamily string
+
+	// fontSizePt is the resolved font-size in user units (= CSS px = layout
+	// pt in this engine). Inherited, and — unlike every other length property
+	// here — resolved RELATIVELY: em/% resolve against the PARENT's
+	// fontSizePt, ex against half of it, and the CSS absolute-size keywords
+	// (xx-small..xx-large) against the 16px medium. That is why font-size is
+	// applied before every other property in apply(): "1em" on any other
+	// property must see this element's own already-resolved size.
+	fontSizePt float64
+
+	// fontBold and fontItalic are the weight/slant request handed to
+	// pkgfont.Style. Both inherited. font-weight collapses to a boolean here
+	// because the bundled families ship regular/bold only (see
+	// pkg/font/standard) — a numeric weight >= 600 is bold, anything less is
+	// not, and bolder/lighter step one notch from the inherited numeric
+	// weight, which is why fontWeight below keeps the numeric value the CSS
+	// relative keywords need.
+	fontBold   bool
+	fontItalic bool
+
+	// fontWeight is the resolved numeric CSS font-weight (100..900),
+	// inherited, kept alongside fontBold because "bolder"/"lighter" are
+	// defined as a step relative to the INHERITED numeric weight, not to a
+	// boolean. Nothing outside applyFontWeight reads it.
+	fontWeight int
+
+	// textAnchor is "start" (initial) | "middle" | "end", inherited. It
+	// shifts a text chunk's whole advance about its start position; see
+	// pkg/svg/draw's paintText.
+	textAnchor string
+
+	// direction is "ltr" (initial) | "rtl", inherited: the base paragraph
+	// direction a <text>'s glyphs are bidi-reordered against (inline.DirLTR /
+	// DirRTL).
+	direction string
+
+	// unicodeBidi is "normal" (initial) | "embed" | "bidi-override",
+	// non-inherited per CSS. Only "bidi-override" changes behavior here: it
+	// suppresses the bidi reorder so glyphs stay in logical order (the
+	// override is applied by wrapping the text in the LRO/RLO control pair —
+	// see textRunsFor).
+	unicodeBidi string
 }
 
 // defaultStyle returns the SVG initial presentation state: black fill, no
@@ -122,8 +171,20 @@ func defaultStyle() Style {
 		overflow:      "hidden", // not inherited; reset every apply() call below
 		// markerStartRef/markerMidRef/markerEndRef default to "" (no
 		// marker) and, being inherited, are NOT reset in apply() below.
+		fontFamily:  "sans-serif",
+		fontSizePt:  defaultFontSizePt,
+		fontBold:    false,
+		fontItalic:  false,
+		fontWeight:  400,
+		textAnchor:  "start",
+		direction:   "ltr",
+		unicodeBidi: "normal", // not inherited; reset every apply() call below
 	}
 }
+
+// defaultFontSizePt is the initial font-size (CSS "medium"), in user units.
+// It is also the reference the CSS absolute-size keywords scale against.
+const defaultFontSizePt = 16.0
 
 // apply returns parent overridden by el's resolved style. ctx supplies the
 // cascade: with a nil ctx (or one built from a document with no stylesheets
@@ -144,6 +205,7 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s.maskRef = ""           // not inherited; may be overridden below
 	s.maskType = "luminance" // not inherited; may be overridden below
 	s.overflow = "hidden"    // not inherited; may be overridden below
+	s.unicodeBidi = "normal" // not inherited; may be overridden below
 
 	if el == nil {
 		return s
@@ -156,6 +218,19 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+
+	// font-size must resolve FIRST: its own em/ex/% values resolve against
+	// the PARENT's size (still in s at this point), and every other
+	// font-relative length on this element would want this element's own
+	// already-resolved size. Likewise applyFontWeight reads the inherited
+	// numeric weight for bolder/lighter before overwriting it.
+	applyFontSize(&s, parent.fontSizePt, attr, logf)
+	applyFontFamily(&s, attr, logf)
+	applyFontWeight(&s, parent.fontWeight, attr, logf)
+	applyFontStyle(&s, attr, logf)
+	applyTextAnchor(&s, attr, logf)
+	applyDirection(&s, attr, logf)
+	applyUnicodeBidi(&s, attr, logf)
 
 	// 'color' must resolve before fill/stroke so currentColor sees the
 	// element's own (already-updated) color, not the parent's.
@@ -743,3 +818,294 @@ func (s Style) MarkerMidRef() (string, bool) {
 func (s Style) MarkerEndRef() (string, bool) {
 	return s.markerEndRef, s.markerEndRef != ""
 }
+
+// absoluteFontSizes maps the CSS absolute-size keywords to their scale factor
+// against defaultFontSizePt ("medium"), per CSS Fonts §3.5's suggested
+// ratios. SVG's font-size accepts these keywords as well as lengths.
+var absoluteFontSizes = map[string]float64{
+	"xx-small": 3.0 / 5,
+	"x-small":  3.0 / 4,
+	"small":    8.0 / 9,
+	"medium":   1,
+	"large":    6.0 / 5,
+	"x-large":  3.0 / 2,
+	"xx-large": 2,
+}
+
+// relativeFontSizes maps the two CSS relative-size keywords to their factor
+// against the PARENT's computed size.
+var relativeFontSizes = map[string]float64{
+	"smaller": 5.0 / 6,
+	"larger":  6.0 / 5,
+}
+
+// applyFontSize resolves font-size into s.fontSizePt (user units), inherited.
+// parentPt is the parent's already-computed size, which em/ex/percentage and
+// the smaller/larger keywords all resolve against — s.fontSizePt still holds
+// it on entry, but taking it explicitly makes that dependency impossible to
+// break by reordering the appliers.
+//
+// A negative resolved size is invalid per SVG and is ignored (the inherited
+// value is kept); a resolved size of exactly zero IS valid and is kept, since
+// SVG's zero-size fixtures require the text to vanish rather than fall back
+// to the inherited size.
+func applyFontSize(s *Style, parentPt float64, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font-size")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	if f, ok := absoluteFontSizes[val]; ok {
+		s.fontSizePt = defaultFontSizePt * f
+		return
+	}
+	if f, ok := relativeFontSizes[val]; ok {
+		s.fontSizePt = parentPt * f
+		return
+	}
+	v, unit, ok := splitLengthUnit(val)
+	if !ok {
+		logf("svg: ignoring %s=%q: unparseable", "font-size", val)
+		return
+	}
+	var pt float64
+	switch unit {
+	case "em":
+		pt = v * parentPt
+	case "ex":
+		// No face is resolved at cascade time, so ex uses the conventional
+		// 0.5em approximation rather than the face's real x-height. Matching
+		// parseLength's own em/ex handling; a real x-height would need the
+		// resolved face, which lives a layer away in pkg/svg/draw.
+		pt = v * parentPt * 0.5
+	case "%":
+		pt = v / 100 * parentPt
+	default:
+		// An absolute unit (px/pt/pc/mm/cm/in) or none: reuse parseLength so
+		// the unit table stays in one place. ref is unused for these.
+		abs, ok := parseLength(val, 0)
+		if !ok {
+			logf("svg: ignoring %s=%q: unparseable", "font-size", val)
+			return
+		}
+		pt = abs
+	}
+	if pt < 0 {
+		logf("svg: ignoring %s=%q: negative size", "font-size", val)
+		return
+	}
+	s.fontSizePt = pt
+}
+
+// splitLengthUnit splits an already-trimmed, lowercased length into its
+// numeric part and unit suffix. ok is false when the numeric part does not
+// parse as a finite SVG number. It exists so applyFontSize can branch on the
+// FONT-RELATIVE units (em/ex/%) before delegating the absolute ones to
+// parseLength, which hardcodes its own em/ex approximation against the UA
+// default rather than against the parent's computed size.
+func splitLengthUnit(s string) (v float64, unit string, ok bool) {
+	for _, u := range [...]string{"em", "ex", "%"} {
+		if strings.HasSuffix(s, u) {
+			n, ok := parseNumber(strings.TrimSuffix(s, u))
+			return n, u, ok
+		}
+	}
+	n, ok := parseNumber(s)
+	return n, "", ok
+}
+
+// applyFontFamily resolves font-family into s.fontFamily, inherited. The value
+// is kept as a whole comma-separated list with per-name quoting stripped:
+// layout/font.FaceCache.Resolve splits and falls back through the list itself,
+// so splitting here would only duplicate that. An empty/whitespace-only value
+// is ignored (the inherited family is kept), matching SVG error handling.
+func applyFontFamily(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font-family")
+	if !ok || val == "inherit" {
+		return
+	}
+	cleaned := cleanFamilyList(val)
+	if cleaned == "" {
+		logf("svg: ignoring %s=%q: no usable family name", "font-family", val)
+		return
+	}
+	s.fontFamily = cleaned
+}
+
+// cleanFamilyList strips surrounding quotes from each comma-separated family
+// name and drops empty entries, returning the rejoined list ("" when nothing
+// usable remains). Quoting is CSS syntax the face cache does not expect.
+func cleanFamilyList(val string) string {
+	parts := strings.Split(val, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if len(p) >= 2 && (p[0] == '"' || p[0] == '\'') && p[len(p)-1] == p[0] {
+			p = strings.TrimSpace(p[1 : len(p)-1])
+		}
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// applyFontWeight resolves font-weight into s.fontWeight (numeric, 100..900)
+// and s.fontBold, inherited. parentWeight is the inherited numeric weight the
+// relative "bolder"/"lighter" keywords step from — CSS defines them against
+// the PARENT's computed weight, not against a boolean, which is why the
+// numeric value is carried on Style at all.
+//
+// The bundled families ship regular and bold only, so the numeric weight
+// collapses to a boolean at face-resolution time: >= 600 is bold. An invalid
+// number (out of 1..1000, or unparseable) is ignored per SVG error handling.
+func applyFontWeight(s *Style, parentWeight int, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font-weight")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	w := parentWeight
+	switch val {
+	case "normal":
+		w = 400
+	case "bold":
+		w = 700
+	case "bolder":
+		w = stepWeight(parentWeight, +1)
+	case "lighter":
+		w = stepWeight(parentWeight, -1)
+	default:
+		n, ok := parseNumber(val)
+		if !ok || n < 1 || n > 1000 {
+			logf("svg: ignoring %s=%q: unparseable", "font-weight", val)
+			return
+		}
+		w = int(n)
+	}
+	s.fontWeight = w
+	s.fontBold = w >= boldWeightThreshold
+}
+
+// boldWeightThreshold is the numeric font-weight at or above which a run
+// resolves to the bundled bold face. CSS 600 (semibold) is the conventional
+// cut: the bundled families have no semibold, so 600 must round to bold
+// rather than to regular (resvg's font-weight/650.svg asserts exactly this).
+const boldWeightThreshold = 600
+
+// stepWeight implements CSS font-weight's bolder/lighter as one step along
+// the 100..900 ladder from the inherited weight, CLAMPED at both ends
+// (bolder from 900 stays 900, lighter from 100 stays 100 — the corpus's
+// bolder-with-clamping/lighter-with-clamping fixtures). CSS's full relative
+// weight table is coarser than a strict ±100 step for the extremes; a single
+// clamped 100-unit step matches it across the whole range the bundled faces
+// can actually distinguish.
+func stepWeight(w, dir int) int {
+	w += dir * 100
+	if w < 100 {
+		return 100
+	}
+	if w > 900 {
+		return 900
+	}
+	return w
+}
+
+// applyFontStyle resolves font-style (normal|italic|oblique) into
+// s.fontItalic, inherited. "oblique" maps to the bundled italic face: no
+// synthetic obliquing exists (see the repo's base-14 residuals note), and an
+// italic face is a far closer match than upright.
+func applyFontStyle(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font-style")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "normal":
+		s.fontItalic = false
+	case "italic":
+		s.fontItalic = true
+	case "oblique":
+		s.fontItalic = true
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "font-style", val)
+	}
+}
+
+// applyTextAnchor resolves text-anchor (start|middle|end), inherited. An
+// unrecognized value is logged and ignored, keeping the inherited value —
+// which is what the corpus's invalid-value-on-text.svg asserts.
+func applyTextAnchor(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("text-anchor")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "start", "middle", "end":
+		s.textAnchor = strings.ToLower(strings.TrimSpace(val))
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "text-anchor", val)
+	}
+}
+
+// applyDirection resolves direction (ltr|rtl), inherited: the base paragraph
+// direction for bidi reordering.
+func applyDirection(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("direction")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "ltr", "rtl":
+		s.direction = strings.ToLower(strings.TrimSpace(val))
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "direction", val)
+	}
+}
+
+// applyUnicodeBidi resolves unicode-bidi (normal|embed|bidi-override),
+// non-inherited per CSS. "embed" is accepted and behaves as "normal" here: a
+// single <text> is one bidi paragraph, and an embedding that only restates
+// the paragraph direction changes no glyph order. "bidi-override" is the one
+// value that changes output — see Style.BidiOverride.
+func applyUnicodeBidi(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("unicode-bidi")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "normal", "embed", "bidi-override":
+		s.unicodeBidi = strings.ToLower(strings.TrimSpace(val))
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "unicode-bidi", val)
+	}
+}
+
+// FontFamily returns the element's resolved (inherited) font-family list, as
+// a comma-separated string ready for layout/font.FaceCache.Resolve.
+func (s Style) FontFamily() string { return s.fontFamily }
+
+// FontSizePt returns the element's resolved (inherited) font-size in user
+// units. It is never negative; zero is a legal value meaning "paint nothing".
+func (s Style) FontSizePt() float64 { return s.fontSizePt }
+
+// FontBold reports whether the element's resolved (inherited) font-weight
+// selects the bold face (numeric weight >= 600).
+func (s Style) FontBold() bool { return s.fontBold }
+
+// FontItalic reports whether the element's resolved (inherited) font-style is
+// italic or oblique.
+func (s Style) FontItalic() bool { return s.fontItalic }
+
+// TextAnchor returns the element's resolved (inherited) text-anchor:
+// "start" (initial), "middle", or "end".
+func (s Style) TextAnchor() string { return s.textAnchor }
+
+// DirectionRTL reports whether the element's resolved (inherited) direction
+// is rtl, i.e. whether bidi reordering uses an RTL base paragraph direction.
+func (s Style) DirectionRTL() bool { return s.direction == "rtl" }
+
+// BidiOverride reports whether unicode-bidi resolved (non-inherited) to
+// "bidi-override", which forces every character into the base direction's
+// order rather than letting the UAX#9 algorithm choose per character.
+func (s Style) BidiOverride() bool { return s.unicodeBidi == "bidi-override" }
