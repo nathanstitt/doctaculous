@@ -79,6 +79,14 @@ func htmlToPDF(t *testing.T, src string, opts ...HTMLOption) []byte {
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
 	}
+	return docToPDF(t, doc)
+}
+
+// docToPDF writes any already-opened Document to PDF and returns the raw bytes,
+// for the structural assertions (hasImageXObject / pdfStreams) that only the PDF
+// output can support.
+func docToPDF(t *testing.T, doc *Document) []byte {
+	t.Helper()
 	var buf bytes.Buffer
 	if err := doc.WritePDF(context.Background(), &buf, PDFOptions{}); err != nil {
 		t.Fatalf("WritePDF: %v", err)

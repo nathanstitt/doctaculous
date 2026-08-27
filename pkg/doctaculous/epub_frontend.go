@@ -63,15 +63,61 @@ func bookToHTML(b *epub.Book) string {
 		sb.WriteString("<style>\n" + css + "\n</style>\n")
 	}
 	sb.WriteString("</head>\n<body>\n")
+	cover := coverSection(b)
+	sb.WriteString(cover)
 	for i, chapter := range b.Chapters {
 		style := ""
-		if i > 0 {
+		if i > 0 || cover != "" {
 			style = ` style="break-before: page"`
 		}
 		sb.WriteString("<section" + style + ">\n" + chapter + "\n</section>\n")
 	}
 	sb.WriteString("</body>\n</html>\n")
 	return sb.String()
+}
+
+// coverSection renders the book's cover image as a leading section, or "" when
+// there is nothing to render.
+//
+// The cover goes FIRST, before the spine, because that is what a cover is — the
+// front of the book — and because it is the only place it can go: an EPUB's
+// cover-image manifest item is not part of the reading order, so it has no
+// position within the spine to occupy. Making it a section of its own means the
+// first chapter's break-before puts it alone on page 1 when paginated, which is
+// the printed-book behavior, while an unpaginated (single tall page) render
+// simply starts with the image.
+//
+// Two cases yield "": a book with no declared cover (nothing changes for it at
+// all), and a book whose cover is ALSO reachable from the spine — either as a
+// spine document or referenced by one — where prepending it would show the same
+// image twice.
+//
+// The image is constrained to the page width rather than placed at its intrinsic
+// size: a real cover is typically far larger than the page, and an unconstrained
+// one would overflow and be clipped to a corner crop. max-width: 100% scales it
+// down whole, preserving its aspect ratio through the replaced-element ratio
+// constraint, and works identically for a raster cover and an SVG one (an SVG
+// cover reaches the page through the same vector seam as any other
+// <img src="*.svg">, so it stays vector and stays sharp).
+//
+// Only the WIDTH is constrained. A height bound would be the more faithful fit
+// for a portrait cover on a short page, but the engine has no viewport-relative
+// unit (no vh), and a percentage height on a replaced element has no basis in its
+// single-axis model — both would be dropped, one of them silently. A cover taller
+// than the page overflows onto the next page instead of being cropped, which is
+// the better failure.
+func coverSection(b *epub.Book) string {
+	if b.CoverHref == "" || b.CoverInSpine {
+		return ""
+	}
+	alt := "Cover"
+	if b.Title != "" {
+		alt = b.Title + " cover"
+	}
+	return `<section class="epub-cover" style="text-align: center">` + "\n" +
+		`<img src="` + htmlEscaper.Replace(b.CoverHref) + `" alt="` + htmlEscaper.Replace(alt) + `"` +
+		` style="max-width: 100%">` + "\n" +
+		"</section>\n"
 }
 
 // epubLoader adapts the book's container to the resource loader seam.
