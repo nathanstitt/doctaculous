@@ -10,6 +10,7 @@ import (
 
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/render/raster"
+	"github.com/nathanstitt/doctaculous/pkg/svg"
 )
 
 // textExtent returns the placed run's total advance (last pen edge minus first
@@ -197,11 +198,18 @@ func TestTextLengthNegativeIsIgnored(t *testing.T) {
 	}
 }
 
-// TestTextLengthSingleCharacter is the division-by-zero guard, made
-// observable. A one-glyph range has NO interior gap for lengthAdjust="spacing"
-// to distribute into, so the request cannot be satisfied and the glyph keeps
-// its natural advance — the correct degradation, and specifically not a NaN or
-// an Inf pen position, which is what a naive (target-natural)/(n-1) would give.
+// TestTextLengthSingleCharacter covers the degenerate range. A one-glyph
+// range has NO interior gap for lengthAdjust="spacing" to distribute into, so
+// the request cannot be satisfied and the glyph keeps its natural advance.
+//
+// It asserts the OUTCOME, not the mechanism. Two things independently produce
+// it: applyTextLengths' explicit n <= 0 guard, and the loop below it, whose
+// i == hi-1 branch zeroes the only gap index a one-glyph range has before the
+// (target-natural)/0 value could ever be stored. So the guard is
+// defence-in-depth rather than the thing standing between this fixture and a
+// non-finite pen position — deleting it would leave this test passing. The
+// finiteness check stays because it is the property that actually matters, and
+// TestSpacingAndLengthSurviveHostileInput sweeps it far more widely.
 func TestTextLengthSingleCharacter(t *testing.T) {
 	natural, _ := textExtent(t, fmt.Sprintf(lengthTmpl, "", "T"))
 	got, placed := textExtent(t, fmt.Sprintf(lengthTmpl, ` textLength="150"`, "T"))
@@ -262,6 +270,58 @@ func TestLengthAdjustSpacingAndGlyphsScalesOutlines(t *testing.T) {
 	}
 	if math.Abs(both-base) < 1e-6 {
 		t.Error("lengthAdjust=spacingAndGlyphs left the outline untouched; it must scale the glyphs, not only the gaps")
+	}
+}
+
+// TestNestedSpacingAndGlyphsKeepsOutlineAndAdvanceInStep is the nesting case
+// the non-nested lengthAdjust test cannot reach.
+//
+// Requests are applied outermost-first, so an inner spacingAndGlyphs request
+// sees advances the outer one already scaled and its own factor composes on
+// top. Both the advance AND the outline scale must compound; assigning xScale
+// instead of multiplying it leaves the outline carrying only the inner factor
+// while the advance carries the product, and the glyphs then render several
+// times too narrow inside their own advance boxes.
+//
+// The assertion is the INVARIANT, not either number on its own: whatever the
+// two requests are, a glyph's outline must have been scaled by exactly the
+// same factor as its advance. That is what a desynchronized pair violates and
+// a correct one cannot.
+func TestNestedSpacingAndGlyphsKeepsOutlineAndAdvanceInStep(t *testing.T) {
+	const inner = "Text"
+	// The natural, unadjusted per-glyph advances, to derive the true factor.
+	refDoc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  font-family="sans-serif" font-size="20"><text x="10" y="100"><tspan>`+inner+`</tspan></text></svg>`)
+	ref := New(refDoc).layoutText(firstText(t, refDoc))
+	if len(ref) != len(inner) {
+		t.Fatalf("reference shaped %d glyphs, want %d", len(ref), len(inner))
+	}
+
+	doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  font-family="sans-serif" font-size="20"><text x="10" y="100" textLength="300"
+	  lengthAdjust="spacingAndGlyphs"><tspan textLength="20"
+	  lengthAdjust="spacingAndGlyphs">`+inner+`</tspan></text></svg>`)
+	got := New(doc).layoutText(firstText(t, doc))
+	if len(got) != len(ref) {
+		t.Fatalf("nested run shaped %d glyphs, want %d", len(got), len(ref))
+	}
+
+	for i := range got {
+		if ref[i].advance <= 0 {
+			continue // a zero-advance glyph cannot express a ratio
+		}
+		advanceRatio := got[i].advance / ref[i].advance
+		if math.Abs(got[i].xScale-advanceRatio) > 1e-9 {
+			t.Errorf("glyph %d: outline scaled %vx but its advance scaled %vx; the two must compound identically (an inner spacingAndGlyphs must MULTIPLY the outer scale, not replace it)",
+				i, got[i].xScale, advanceRatio)
+		}
+	}
+
+	// And the inner request still wins on the total, which is what proves the
+	// two requests were genuinely composed rather than one being dropped.
+	last := len(got) - 1
+	if total := got[last].penX + got[last].advance - got[0].penX; math.Abs(total-20) > 1e-6 {
+		t.Errorf("nested total advance = %v, want the inner tspan's 20", total)
 	}
 }
 
@@ -742,6 +802,87 @@ func TestFontShorthandSetsEveryLonghand(t *testing.T) {
 	  font-family="sans-serif"><text x="10" y="100" font="40px">Text</text></svg>`)
 	if math.Abs(partial-plain) > 1e-9 {
 		t.Errorf("incomplete font shorthand changed the advance (%v vs %v); an invalid shorthand must apply nothing", partial, plain)
+	}
+}
+
+// TestFontShorthandResetsUnspecifiedLonghands pins the CSS Cascade §3 rule
+// that makes a shorthand a shorthand: it sets EVERY longhand it covers, and a
+// slot the value does not name goes to that longhand's INITIAL value — not to
+// the inherited one.
+//
+// The fixture is discriminating because the surrounding <g> sets both weight
+// and style: an implementation that seeds from the inherited state (as this
+// one did) renders bold italic, where CSS requires upright regular. Both
+// vendored text/font/ fixtures spell style and weight out explicitly, which is
+// exactly why no golden reaches this.
+func TestFontShorthandResetsUnspecifiedLonghands(t *testing.T) {
+	// The wanted result, stated independently: a plain upright regular run at
+	// the shorthand's size and family.
+	want, _ := textExtent(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><text x="10" y="100" font-size="40px" font-family="sans-serif">Text</text></svg>`)
+
+	// The same shorthand, inside a <g> that sets the two longhands it must
+	// reset. The inherited bold/italic must NOT survive.
+	got, _ := textExtent(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><g font-weight="bold" font-style="italic"><text x="10" y="100"
+	  font="40px sans-serif">Text</text></g></svg>`)
+
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("font=\"40px sans-serif\" inside a bold italic <g> gave advance %v, want the upright regular %v (a shorthand resets every longhand it covers to its initial value)", got, want)
+	}
+
+	// Guard against a vacuous comparison: bold really must measure differently
+	// here, or the assertion above would hold for a broken implementation too.
+	boldRun, _ := textExtent(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><text x="10" y="100" font-size="40px" font-family="sans-serif"
+	  font-weight="bold" font-style="italic">Text</text></svg>`)
+	if math.Abs(boldRun-want) < 1e-9 {
+		t.Fatal("the bold italic face measures identically to the regular one; this test cannot discriminate")
+	}
+
+	// A keyword the shorthand DOES name still applies, so the reset is not
+	// just "ignore every keyword".
+	italicOnly, _ := textExtent(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><g font-weight="bold"><text x="10" y="100" font="italic 40px sans-serif">Text</text></g></svg>`)
+	italicRef, _ := textExtent(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><text x="10" y="100" font-size="40px" font-family="sans-serif" font-style="italic">Text</text></svg>`)
+	if math.Abs(italicOnly-italicRef) > 1e-9 {
+		t.Errorf("font=\"italic 40px sans-serif\" inside a bold <g> gave %v, want the italic-regular %v (the named keyword applies; the unnamed weight resets)", italicOnly, italicRef)
+	}
+}
+
+// TestFontShorthandResetClearsStaleDegradationFlags is the other half of the
+// reset: the two properties this engine tracks only as degradation flags
+// (font-variant, font-stretch) must reset alongside the ones it resolves, so a
+// shorthand cannot leave an ancestor's stale diagnostic attached to text that
+// no longer requests it. An INVALID shorthand must not reset them either,
+// since it applies nothing at all.
+func TestFontShorthandResetClearsStaleDegradationFlags(t *testing.T) {
+	styleOf := func(src string) svg.Style {
+		t.Helper()
+		doc, _ := parseSVG(t, src)
+		txt := firstText(t, doc)
+		if len(txt.Chars) == 0 {
+			t.Fatal("no characters lowered")
+		}
+		return txt.Chars[0].Style
+	}
+
+	cleared := styleOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><g font-stretch="condensed" font-variant="small-caps"><text x="10" y="100"
+	  font="40px sans-serif">Text</text></g></svg>`)
+	if cleared.FontStretchIgnored() || cleared.FontVariantIgnored() {
+		t.Errorf("a valid font shorthand left stale degradation flags (stretch=%v variant=%v); it must reset every longhand it covers",
+			cleared.FontStretchIgnored(), cleared.FontVariantIgnored())
+	}
+
+	// Invalid (no family): nothing applies, so the ancestor's flags survive.
+	kept := styleOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><g font-stretch="condensed" font-variant="small-caps"><text x="10" y="100"
+	  font="40px">Text</text></g></svg>`)
+	if !kept.FontStretchIgnored() || !kept.FontVariantIgnored() {
+		t.Errorf("an INVALID font shorthand reset the inherited degradation flags (stretch=%v variant=%v); it must apply nothing at all",
+			kept.FontStretchIgnored(), kept.FontVariantIgnored())
 	}
 }
 

@@ -843,8 +843,16 @@ func (r *Renderer) applyTextLengths(glyphs []shapedChar, t *svg.Text) []float64 
 			}
 			scale := l.Target / natural
 			for i := lo; i < hi; i++ {
+				// BOTH compound. Requests arrive outermost-first, so an inner
+				// <tspan textLength=... lengthAdjust="spacingAndGlyphs"> sees
+				// advances the outer request already scaled, and its own scale
+				// composes on top. Assigning xScale rather than multiplying it
+				// would leave the outline carrying only the INNER factor while
+				// the advance carried the product — the glyphs then render too
+				// narrow (or too wide) inside their own advance boxes, leaving
+				// gaps no gap value accounts for.
 				glyphs[i].advance *= scale
-				glyphs[i].xScale = scale
+				glyphs[i].xScale *= scale
 			}
 			// Any gap an OUTER spacing request opened inside this range is
 			// superseded: the range's width is now exactly the target.
@@ -859,6 +867,12 @@ func (r *Renderer) applyTextLengths(glyphs []shapedChar, t *svg.Text) []float64 
 			// A single glyph has no interior gap. SVG leaves it at its natural
 			// width rather than scaling it (that is what lengthAdjust=
 			// "spacingAndGlyphs" is for), so there is nothing to do.
+			//
+			// Defence-in-depth, not the only guard: the loop below zeroes the
+			// gap at i == hi-1, which for a one-glyph range is the ONLY index,
+			// so a non-finite `per` could never be stored even without this.
+			// Kept because it states the intent at the point the range size is
+			// known, rather than leaving it implicit in a branch further down.
 			continue
 		}
 		per := (l.Target - natural) / float64(n)
