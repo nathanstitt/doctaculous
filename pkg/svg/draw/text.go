@@ -145,6 +145,20 @@ func (r *Renderer) paintText(dev render.Device, t *svg.Text, m render.Matrix, al
 		return
 	}
 
+	if t.Filter != nil {
+		// The objectBoundingBox target is textUserBounds — the REAL placed-
+		// glyph extent — not pkg/svg's build-time textBBox, whose half-em-
+		// per-character estimate measures up to 2.25x off. A filter region
+		// built on that estimate would visibly clip the filtered result,
+		// which is exactly why the filter work owns this seam (see
+		// svg.Text.Filter).
+		unfiltered := *t
+		unfiltered.Filter = nil
+		r.paintFilteredAlpha(dev, t.Filter, tm, textUserBounds(placed), warned, alpha, func(target render.Device) {
+			r.paintText(target, &unfiltered, m, 1, warned)
+		})
+		return
+	}
 	if t.ClipPath != nil || t.Mask != nil {
 		// The <text>'s OWN clip-path/mask wrap everything as one unit, so the
 		// whole node goes into a single group. Any per-<tspan> clip/mask
