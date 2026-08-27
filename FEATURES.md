@@ -1195,9 +1195,68 @@ read+write vocabulary for the tinycld text adoption path):
   selector form records nothing, a drop for a non-construct reason (a pseudo-element, `:not`, `:is`)
   records nothing, and valid `An+B` syntax (`:nth-child(2n+1)`, and the spaced `:nth-last-child(2n +
   1)` the parser already could not handle) is never mis-reported as a sibling combinator.
-- Known scope limits, each recorded rather than silently missing: CSS `filter:` on HTML boxes is
-  deferred because `layout.Page.Items` is a FLAT list and a filtered box needs to bracket its subtree
-  the way `Clips` does — a structural change to the reflow item format unrelated to SVG
-  (`pkg/filtereffects` is already shared and waiting); `letter-spacing`/`word-spacing` do not inherit
-  across the HTML→SVG boundary, since `ComputedStyle` has no such fields; SVG background tiling
-  degrades to one paint (above); and the selector engine itself is NOT fixed — only the diagnostic.
+- Known scope limits, each recorded rather than silently missing: `letter-spacing`/`word-spacing` do
+  not inherit across the HTML→SVG boundary, since `ComputedStyle` has no such fields; SVG background
+  tiling degrades to one paint (above); and the selector engine itself is NOT fixed — only the
+  diagnostic. (CSS `filter:` on HTML boxes was listed here as deferred; it has since shipped —
+  see below.)
+
+**CSS `filter:` on HTML boxes** (`pkg/css` cascade, `pkg/layout/css` bracket emission,
+`pkg/layout/paint` the pixel chain; showcase section 18, `htmldoc-p18.png`):
+
+- **All ten shorthand functions render**: `blur()`, `drop-shadow()`, `grayscale()`, `sepia()`,
+  `saturate()`, `hue-rotate()`, `invert()`, `brightness()`, `contrast()`, `opacity()`. A list
+  composes **left to right**, each function consuming the previous one's output. The effect applies
+  to the element's WHOLE rendering — its background and border as well as its contents and
+  descendants — which is the one structural difference from the clip bracket, whose pair deliberately
+  excludes the box's own border box.
+- **No new pixel math.** Every function is lowered to the Filter Effects specification's own
+  equivalent primitive and run through **`pkg/svg/filter`**, the same corpus-tested code the
+  `<filter>` element uses, so the blur premultiplication, the colour-matrix arithmetic and the
+  colour-space handling are inherited rather than reimplemented and the two spellings of
+  `filter: invert(1)` cannot drift apart. The parser is the already-shared `pkg/filtereffects`.
+- `invert`/`brightness`/`contrast`/`opacity` are the four the spec expresses as an
+  **`feComponentTransfer` with LINEAR transfer functions** — a primitive the SVG series deliberately
+  deferred. Rather than reviving it, each is written as the equivalent affine per-channel map and
+  evaluated through `feColorMatrix`, which computes exactly `slope·v + intercept` per channel. A
+  linear transfer function IS an affine map, so this is an exact reformulation, not an approximation.
+- **The CSS functions run in sRGB**, not the linearRGB SVG's own primitives default to. Getting this
+  backwards makes every `blur()` and `drop-shadow()` visibly lighter than a browser's.
+- **`drop-shadow()`'s colour is resolved at LAYOUT time**, because an omitted colour (and
+  `currentColor`) means the element's own `color` property, which only the cascade knows. It rides on
+  the item as `layout.FilterItem.ShadowColors`.
+- **CSS does not clip a filter to a region** (unlike SVG's `filterUnits`/`x`/`y`/`width`/`height`), so
+  the offscreen surface covers the border box UNIONED with what the bracketed items actually paint,
+  grown by three standard deviations for a blur plus a drop-shadow's own offset. A border-box-sized
+  surface would crop a blur dead at the box edge and drop overflowing content outright.
+- **A filtered box establishes a BFC and a stacking context**, both spec-required and both
+  load-bearing: the BFC makes the box flatten through ONE `AppendItems` call (so one balanced bracket
+  wraps decorations and content together), and the stacking context stops a positioned descendant
+  bubbling past the bracket and rendering unfiltered.
+- **`rem` in a filter length resolves against the ROOT font size**, per CSS Values, via a root size
+  recorded once per layout at `layoutTree`. (The cascade's own `parseLength` still folds `rem` into
+  `em` for every other property — a separate, pre-existing approximation this does not change.)
+- Error handling matches CSS's: `filter: none` and **any** invalid value leave rendering
+  **byte-identical** to a document with no declaration, since an invalid declaration is ignored
+  ENTIRELY rather than applying the entries that did parse.
+
+Honest degradations, each logged rather than implied away:
+
+- **PDF output paints filtered content UNFILTERED.** `pkg/render/pdfwrite`'s `RenderOffscreen`
+  declines by design — PDF has no filter operator and a blur has no vector representation — so the
+  bracket degrades to a plain transparency group: the content is present, correctly placed, and
+  still **vector** (no image XObject is emitted, asserted directly on the operators). Rasterizing a
+  page region to fake the effect is deliberately refused. Logged once per document.
+- **The page-break approximation.** Brackets are page-local: pagination splits the fragment tree, not
+  the item list, so a box straddling a break emits its own balanced pair on each page. That is
+  **exact** for the eight per-pixel colour adjustments and an **approximation** for the two spatial
+  ones — a blur cannot sample content that fell on the other page, so the seam differs from an
+  unbroken render. Logged once per document for a split `blur()`/`drop-shadow()` only; a split
+  `grayscale()` stays silent.
+- **`filter: url(#id)` is dropped** with a warn-once: it references an SVG `<filter>` element, which
+  an HTML box tree cannot resolve. The surrounding shorthand functions still apply.
+- A degenerate, off-device, or over-cap region (`maxCSSFilterPixels`, 4M pixels — the same bound the
+  SVG side uses, and meaningful for the same reason: the surface is clipped to the device and its
+  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered.
+- Not implemented: `backdrop-filter` (it needs the backdrop, not the element's own pixels — a
+  different mechanism entirely), and native PDF filter emulation via soft masks.
