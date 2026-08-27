@@ -42,6 +42,14 @@ type placedGlyph struct {
 	// the same fill/stroke helpers a Shape uses.
 	fillGradient, strokeGradient gradient
 	fillPattern, strokePattern   pattern
+
+	// clip and mask are the clip-path/mask in effect for this glyph, set by a
+	// <tspan> that carries one (SVG 2). Glyphs sharing the same pair are
+	// composited together in one offscreen group — see paintTextRuns — rather
+	// than one group per glyph, which would both cost a scratch buffer each
+	// and break a mask whose effect spans the whole run.
+	clip *svg.ClipPath
+	mask *svg.Mask
 }
 
 // matrix returns the transform mapping this glyph's outline from em space
@@ -113,16 +121,87 @@ func (r *Renderer) paintText(dev render.Device, t *svg.Text, m render.Matrix, al
 	}
 
 	if t.ClipPath != nil || t.Mask != nil {
+		// The <text>'s OWN clip-path/mask wrap everything as one unit, so the
+		// whole node goes into a single group. Any per-<tspan> clip/mask
+		// inside it still applies, nested one level down.
 		r.paintTextGrouped(dev, t, placed, tm, alpha, warned)
 		return
 	}
-	for i := range placed {
+	r.paintTextRuns(dev, placed, tm, alpha, warned)
+}
+
+// paintTextRuns paints placed in maximal runs of glyphs sharing the same
+// per-<tspan> clip-path/mask pair: a run with neither paints directly, a run
+// with either goes through one offscreen group.
+//
+// Grouping by run rather than per glyph is not just an optimisation. A mask
+// is evaluated over the region it covers, so applying it separately to each
+// glyph would give every glyph its own independent mask evaluation instead of
+// one shared across the tspan — visibly wrong for any mask with a gradient or
+// a shape smaller than the text. Per-glyph grouping would also allocate a
+// full-canvas scratch buffer per character.
+func (r *Renderer) paintTextRuns(dev render.Device, placed []placedGlyph, tm render.Matrix, alpha float64, warned *warnFlags) {
+	for i := 0; i < len(placed); {
+		clip, mask := placed[i].clip, placed[i].mask
+		j := i
+		for j < len(placed) && placed[j].clip == clip && placed[j].mask == mask {
+			j++
+		}
+		run := placed[i:j]
+		if clip == nil && mask == nil {
+			for k := range run {
+				if warned.drawCalls >= maxDrawCalls {
+					r.logDrawBudgetCapOnce(warned)
+					return
+				}
+				r.paintGlyph(dev, &run[k], tm, alpha, warned)
+			}
+		} else {
+			r.paintGlyphRunGrouped(dev, run, clip, mask, tm, alpha, warned)
+		}
+		i = j
+	}
+}
+
+// paintGlyphRunGrouped paints one run of glyphs through an offscreen group so
+// a <tspan>'s clip-path and/or mask can be applied to the run as a unit —
+// EndGroup being the only place a GroupMask can be applied, exactly as in
+// paintShapeGrouped.
+func (r *Renderer) paintGlyphRunGrouped(dev render.Device, run []placedGlyph, clip *svg.ClipPath, mask *svg.Mask, tm render.Matrix, alpha float64, warned *warnFlags) {
+	if warned.groupDepth >= maxGroupNestingDepth {
+		// Bounds concurrently-live scratch memory, not just CPU: see
+		// paintShapeGrouped's matching guard. Degrade to painting the run
+		// unclipped and unmasked rather than dropping it.
+		r.logGroupDepthCapOnce(warned)
+		for k := range run {
+			r.paintGlyph(dev, &run[k], tm, alpha, warned)
+		}
+		return
+	}
+	dev.Save()
+	dev.BeginGroup()
+	warned.groupDepth++
+	for k := range run {
 		if warned.drawCalls >= maxDrawCalls {
 			r.logDrawBudgetCapOnce(warned)
-			return
+			break
 		}
-		r.paintGlyph(dev, &placed[i], tm, alpha, warned)
+		r.paintGlyph(dev, &run[k], tm, 1.0, warned)
 	}
+	warned.groupDepth--
+
+	bbox := textUserBounds(run)
+	var clipMask, softMask render.GroupMask
+	if clip != nil {
+		clipMask = r.buildClipMask(dev, clip, tm, bbox)
+	}
+	if mask != nil {
+		// Passed to EndGroup separately from clipMask, never pre-combined —
+		// see paintShapeGrouped for the pdfwrite regression that caused.
+		softMask = r.buildMask(dev, mask, tm, bbox)
+	}
+	dev.EndGroup(alpha, "", clipMask, softMask)
+	dev.Restore()
 }
 
 // paintTextGrouped paints text carrying a clip-path or mask, which — exactly
@@ -139,21 +218,16 @@ func (r *Renderer) paintTextGrouped(dev render.Device, t *svg.Text, placed []pla
 		// degrade to painting without isolation, clip, or mask rather than
 		// dropping the text entirely.
 		r.logGroupDepthCapOnce(warned)
-		for i := range placed {
-			r.paintGlyph(dev, &placed[i], tm, alpha, warned)
-		}
+		r.paintTextRuns(dev, placed, tm, alpha, warned)
 		return
 	}
 	dev.Save()
 	dev.BeginGroup()
 	warned.groupDepth++
-	for i := range placed {
-		if warned.drawCalls >= maxDrawCalls {
-			r.logDrawBudgetCapOnce(warned)
-			break
-		}
-		r.paintGlyph(dev, &placed[i], tm, 1.0, warned)
-	}
+	// Through paintTextRuns, not a bare glyph loop: a <tspan> INSIDE a
+	// clipped/masked <text> carries its own clip/mask, which must still
+	// apply, nested one level inside this group.
+	r.paintTextRuns(dev, placed, tm, 1.0, warned)
 	warned.groupDepth--
 
 	bbox := textUserBounds(placed)
@@ -262,6 +336,8 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 			strokeGradient: asGradient(c.StrokeGradient()),
 			fillPattern:    asPattern(c.FillPattern()),
 			strokePattern:  asPattern(c.StrokePattern()),
+			clip:           c.ClipPath(),
+			mask:           c.Mask(),
 		})
 		penX += g.glyph.Advance
 	}

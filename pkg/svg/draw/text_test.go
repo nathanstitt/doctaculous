@@ -521,6 +521,55 @@ func TestTextAsClipAndMaskGeometry(t *testing.T) {
 	})
 }
 
+// TestTspanClipPathAndMask covers SVG 2's clip-path and mask on a <tspan>
+// (the corpus's tspan/with-clip-path.svg and with-mask.svg). Both are
+// NON-inherited, so a character must carry one only when its own element — or
+// an enclosing tspan, whose region geometrically contains it — set it.
+func TestTspanClipPathAndMask(t *testing.T) {
+	doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"
+	  font-family="sans-serif" font-size="30">
+	  <clipPath id="c"><rect x="0" y="0" width="200" height="80"/></clipPath>
+	  <mask id="m"><rect x="0" y="0" width="200" height="200" fill="gray"/></mask>
+	  <text x="10" y="100">a<tspan clip-path="url(#c)">b</tspan><tspan mask="url(#m)">c</tspan>d</text>
+	</svg>`)
+	txt := firstText(t, doc)
+	if len(txt.Chars) != 4 {
+		t.Fatalf("lowered %d chars, want 4", len(txt.Chars))
+	}
+	if txt.Chars[0].ClipPath() != nil || txt.Chars[0].Mask() != nil {
+		t.Error("the character before the tspans picked up a clip or mask")
+	}
+	if txt.Chars[1].ClipPath() == nil {
+		t.Error("the clip-path on a <tspan> did not reach its character")
+	}
+	if txt.Chars[1].Mask() != nil {
+		t.Error("the clip-path tspan wrongly picked up a mask")
+	}
+	if txt.Chars[2].Mask() == nil {
+		t.Error("the mask on a <tspan> did not reach its character")
+	}
+	if txt.Chars[2].ClipPath() != nil {
+		t.Error("the mask tspan wrongly inherited the sibling tspan's clip-path (it is NOT inherited)")
+	}
+	if txt.Chars[3].ClipPath() != nil || txt.Chars[3].Mask() != nil {
+		t.Error("a clip or mask leaked past its tspan to the following character")
+	}
+
+	t.Run("an inner tspan inherits an enclosing one's clip", func(t *testing.T) {
+		doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" font-size="30">
+		  <clipPath id="c"><rect x="0" y="0" width="200" height="80"/></clipPath>
+		  <text x="10" y="100"><tspan clip-path="url(#c)">a<tspan>b</tspan></tspan></text>
+		</svg>`)
+		txt := firstText(t, doc)
+		if len(txt.Chars) != 2 {
+			t.Fatalf("lowered %d chars, want 2", len(txt.Chars))
+		}
+		if txt.Chars[1].ClipPath() != txt.Chars[0].ClipPath() || txt.Chars[1].ClipPath() == nil {
+			t.Error("an inner tspan lost the enclosing tspan's clip; the enclosing region still contains it")
+		}
+	})
+}
+
 // TestStrokedTextWithGradient proves text is ordinary geometry: a gradient
 // fill resolves onto its characters and a stroke paints alongside it, both
 // through the same helpers a <path> uses.

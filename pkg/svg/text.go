@@ -108,6 +108,21 @@ type TextChar struct {
 	// character cumulatively.
 	DX, DY float64
 
+	// clipPath and mask are the resolved clip-path/mask references on the
+	// <tspan> this character came from, or nil. Both are SVG 2 features on a
+	// tspan (the resvg corpus's tspan/with-clip-path.svg and with-mask.svg),
+	// and both are NON-inherited, so a character carries one only when its
+	// own innermost element set it — which is exactly what resolving them
+	// per character, off the style already resolved at that point in the
+	// tree, gives.
+	//
+	// The <text> element's OWN clip-path/mask live on Text, not here: they
+	// apply to the whole node as a unit, which is a different compositing
+	// shape (one group around everything, versus one group per run of
+	// characters sharing a reference).
+	clipPath *ClipPath
+	mask     *Mask
+
 	// RotateDeg is the per-character rotation in DEGREES, applied about the
 	// character's own origin on the baseline. Note the SVG asymmetry this
 	// encodes: a rotate list SHORTER than the text repeats its LAST value
@@ -180,6 +195,15 @@ func (c TextChar) StrokePattern() PatternPaint {
 	return c.strokePattern
 }
 
+// ClipPath returns the resolved clip-path in effect for this character (from
+// its own <tspan> or an enclosing one), or nil. It is a *ClipPath rather than
+// an interface because ClipPath is already an exported concrete type.
+func (c TextChar) ClipPath() *ClipPath { return c.clipPath }
+
+// Mask returns the resolved mask in effect for this character, or nil. See
+// ClipPath.
+func (c TextChar) Mask() *Mask { return c.mask }
+
 // buildText converts a <text> element into a Text scene node, or nil when it
 // contributes nothing (invisible, or no characters after whitespace
 // processing). st is the <text>'s own already-resolved style.
@@ -192,7 +216,7 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 	}
 
 	tb := &textBuilder{b: b, ctx: ctx}
-	tb.walk(el, st, xmlSpaceOf(el, false), 0)
+	tb.walk(el, st, xmlSpaceOf(el, false), 0, nil, nil)
 	tb.flushPending()
 	if len(tb.chars) == 0 {
 		return nil
@@ -251,6 +275,12 @@ type textBuilder struct {
 	// the style that space would carry.
 	pendingSpace bool
 	pendingStyle Style
+	// pendingClip/pendingMask are the deferred space's clip-path/mask, kept
+	// alongside pendingStyle for the same reason: the space belongs to the
+	// element that produced it, not to whichever element happens to supply
+	// the next inked character.
+	pendingClip *ClipPath
+	pendingMask *Mask
 
 	// sawInk records whether any non-space character has been emitted yet, so
 	// a LEADING whitespace run is dropped rather than becoming a space.
@@ -273,12 +303,27 @@ type charRangeLists struct {
 
 // walk descends one <text>/<tspan> subtree in document order, appending
 // characters and recording el's own position lists against the character
-// range it covers. parentStyle is the style resolved at el's parent; space
-// is the inherited xml:space preserve flag.
-func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int) {
+// range it covers. st is el's own resolved style; preserveSpace is the
+// inherited xml:space flag.
+//
+// clip and mask are the resolved clip-path/mask in effect for the characters
+// emitted here. They are threaded as parameters rather than read off st
+// because both are NON-inherited: an inner <tspan> that sets neither must
+// carry its ANCESTOR tspan's, since the ancestor's clip geometrically
+// contains everything inside it, while st has already reset them to "".
+func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int, clip *ClipPath, mask *Mask) {
 	if depth > maxTspanDepth {
 		tb.b.warnOnceMsg("text-depth", "svg: <tspan> nesting exceeded 64 levels; deeper content was dropped")
 		return
+	}
+
+	// A <tspan>'s own clip-path/mask (SVG 2) replace the inherited pair for
+	// its subtree; absent, the enclosing one still applies.
+	if ref, ok := st.ClipPathRef(); ok {
+		clip = tb.b.resolveClipPathRef(ref)
+	}
+	if ref, ok := st.MaskRef(); ok {
+		mask = tb.b.resolveMaskRef(ref)
 	}
 
 	start := len(tb.chars)
@@ -288,7 +333,7 @@ func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int
 			break
 		}
 		if c.el == nil {
-			tb.appendText(c.text, st, preserveSpace)
+			tb.appendText(c.text, st, preserveSpace, clip, mask)
 			continue
 		}
 		kid := c.el
@@ -305,7 +350,7 @@ func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int
 				// text is NOT shifted by the hidden run).
 				continue
 			}
-			tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1)
+			tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1, clip, mask)
 		case "tref":
 			// Removed from SVG 2 and unimplemented in every current browser
 			// (see the design's decision 4): dropped with a log, not deferred.
@@ -317,7 +362,7 @@ func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int
 			tb.b.warnOnceMsg("textPath", "svg: <textPath> not yet supported; rendering its text on a straight baseline")
 			kidStyle := st.apply(kid, tb.ctx)
 			if kidStyle.display {
-				tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1)
+				tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1, clip, mask)
 			}
 		case "title", "desc", "metadata":
 			// Metadata children of <text> are not rendered content.
@@ -328,7 +373,7 @@ func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int
 			// than silently dropping a wrapper's text.
 			kidStyle := st.apply(kid, tb.ctx)
 			if kidStyle.display {
-				tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1)
+				tb.walk(kid, kidStyle, xmlSpaceOf(kid, preserveSpace), depth+1, clip, mask)
 			}
 		}
 	}
@@ -426,14 +471,14 @@ func splitCoordList(s string) []string {
 // newlines and tabs still become spaces (SVG2 §11.5: "converted to space
 // characters") — only the collapsing and the leading/trailing strip are
 // disabled.
-func (tb *textBuilder) appendText(s string, st Style, preserveSpace bool) {
+func (tb *textBuilder) appendText(s string, st Style, preserveSpace bool, clip *ClipPath, mask *Mask) {
 	for _, r := range s {
 		if tb.truncated {
 			return
 		}
 		if isXMLSpace(r) {
 			if preserveSpace {
-				tb.emit(' ', st)
+				tb.emit(' ', st, clip, mask)
 				continue
 			}
 			// Collapsing mode: remember that a space is owed, but only emit
@@ -442,18 +487,19 @@ func (tb *textBuilder) appendText(s string, st Style, preserveSpace bool) {
 			if tb.sawInk {
 				tb.pendingSpace = true
 				tb.pendingStyle = st
+				tb.pendingClip, tb.pendingMask = clip, mask
 			}
 			continue
 		}
 		if tb.pendingSpace {
 			tb.pendingSpace = false
-			tb.emit(' ', tb.pendingStyle)
+			tb.emit(' ', tb.pendingStyle, tb.pendingClip, tb.pendingMask)
 			if tb.truncated {
 				return
 			}
 		}
 		tb.sawInk = true
-		tb.emit(r, st)
+		tb.emit(r, st, clip, mask)
 	}
 }
 
@@ -466,7 +512,7 @@ func (tb *textBuilder) flushPending() { tb.pendingSpace = false }
 
 // emit appends one character with the given style, resolving that style's
 // paint servers, and trips the maxTextChars guard.
-func (tb *textBuilder) emit(r rune, st Style) {
+func (tb *textBuilder) emit(r rune, st Style, clip *ClipPath, mask *Mask) {
 	if len(tb.chars) >= maxTextChars {
 		if !tb.truncated {
 			tb.truncated = true
@@ -474,7 +520,7 @@ func (tb *textBuilder) emit(r rune, st Style) {
 		}
 		return
 	}
-	tb.chars = append(tb.chars, TextChar{R: r, Style: st})
+	tb.chars = append(tb.chars, TextChar{R: r, Style: st, clipPath: clip, mask: mask})
 }
 
 // textBBox is the geometry a text character's paint servers resolve against.
