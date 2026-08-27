@@ -585,14 +585,29 @@ deliberate scope boundary rather than a defect:
   "(UB)": a mutually-cyclic mask reference has no spec-defined resolution,
   so implementations reasonably disagree. Kept: this engine's cycle guard
   terminates deterministically and produces sane (non-garbage) output.
-- **`mask/recursive-on-self.svg`** — the same class of genuinely-cyclic
-  mask reference (not marked "(UB)" by resvg, but inherently
-  implementation-defined for the same reason): two masks each reference the
-  other via `mask="url(#...)"`. This engine's `buildingMask` cycle guard
-  resolves the inner reference to "no Self" once the cycle is detected,
-  producing a fainter, more radial-looking result than resvg's; both are
-  plausible resolutions of an ambiguous cycle, verified sane (a smooth
-  gradient, not NaN/inverted/garbage pixels).
+- **`mask/recursive-on-self.svg`** — vendored and MATCHING. An earlier
+  revision of this file called it "inherently implementation-defined" and
+  kept a divergent golden on that basis. **That was wrong**, and it was
+  covering a real bug:
+  - resvg's suite scores this fixture `1` (passed) for Chrome, Firefox,
+    Safari, resvg, AND Inkscape (`results.csv`). Five independent
+    renderers agree, so the behavior is interoperable, not a coin flip.
+    Only `recursive-on-child.svg` is genuinely UB, and resvg's own `<desc>`
+    says so — this one carries no such marker.
+  - The engine used to resolve one level THROUGH the cycle and keep the
+    result as an extra attenuation, making the output the product of both
+    gradients: symmetric in x and y, and ~4x too faint. Dropping the cyclic
+    reference entirely (see `maskRefCycles` in `pkg/svg/mask.go`) matches
+    resvg, whose parser rewrites a cyclic `mask` attribute to `none` before
+    rendering (`usvg/src/parser/svgtree/parse.rs`, `fix_recursive_links`).
+
+  **Note on the committed reference PNG:** `recursive-on-self.png` in the
+  vendored suite is STALE. It shows a monotonic ramp (alpha 0→55 down the
+  image), but building resvg from source at `021d44b` and rendering the same
+  file gives a symmetric parabola peaking at alpha 64 — which is what this
+  engine now produces, to within 2/255. resvg's behavior changed after that
+  reference was generated. Compare against a current resvg build rather than
+  that PNG when auditing this fixture.
 
 ## Bugs found and fixed in this tranche
 

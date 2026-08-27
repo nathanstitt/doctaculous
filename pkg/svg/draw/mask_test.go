@@ -474,3 +474,67 @@ func TestGroupMaskWithClipUsesAttenuationEndToEnd(t *testing.T) {
 		t.Errorf("edge pixel G = %d, want strictly greater than inside pixel G = %d (the fractional clip coverage must further attenuate the mask's own ~50%%, showing MORE white / less green at the edge than deep inside the clip)", edge.G, inside.G)
 	}
 }
+
+// TestCyclicMaskReferenceDropsTheCyclicLink pins the resolution of a mutually
+// cyclic mask reference: the link that closes the cycle contributes NOTHING,
+// leaving the referenced mask's own content as the only attenuation.
+//
+// The engine used to resolve one level THROUGH the cycle instead — mask2's
+// Self became mask1 (whose own Self the guard had already nil'd), so both
+// gradients multiplied. That made the result symmetric in x as well as y and
+// roughly 4x too faint. This is not an ambiguous case: Chrome, Firefox,
+// Safari, resvg, and Inkscape all agree on the corpus fixture, and resvg's
+// parser rewrites a cyclic mask attribute to "none" before rendering.
+//
+// The assertion is on the SHAPE the two rules disagree about, not on absolute
+// coverage: with only mask2 (a gradient rotated 90 degrees, so it runs
+// vertically) the result must be CONSTANT along x. The buggy product with
+// mask1's horizontal gradient falls off toward both x edges, so sampling
+// three columns at the same y separates them without depending on the exact
+// coverage arithmetic.
+func TestCyclicMaskReferenceDropsTheCyclicLink(t *testing.T) {
+	src := `<svg ` + maskSVGHdr + ` width="200" height="200">
+	  <linearGradient id="lg1">
+	    <stop offset="0" stop-color="white" stop-opacity="0"/>
+	    <stop offset="1" stop-color="black"/>
+	  </linearGradient>
+	  <mask id="mask1" mask="url(#mask2)">
+	    <rect x="20" y="20" width="160" height="160" fill="url(#lg1)"/>
+	  </mask>
+	  <mask id="mask2" mask="url(#mask1)">
+	    <rect x="20" y="20" width="160" height="160" fill="url(#lg1)" transform="rotate(90 100 100)"/>
+	  </mask>
+	  <rect x="20" y="20" width="160" height="160" fill="green" mask="url(#mask2)"/>
+	</svg>`
+	img := renderSVG(t, src, 200, 200)
+
+	// Same row, three columns: a purely vertical gradient mask must give the
+	// same coverage at all three.
+	left := img.RGBAAt(40, 100)
+	mid := img.RGBAAt(100, 100)
+	right := img.RGBAAt(160, 100)
+	for _, c := range []struct {
+		name string
+		got  color.RGBA
+	}{{"x=40", left}, {"x=160", right}} {
+		if absU8Diff(c.got.G, mid.G) > 3 {
+			t.Errorf("%s green=%d but x=100 green=%d: coverage varies along x, so the cyclic mask1 is still attenuating (its gradient runs horizontally)",
+				c.name, c.got.G, mid.G)
+		}
+	}
+
+	// And it must genuinely vary along y — a mask that resolved to nothing at
+	// all would be uniformly opaque and would also pass the check above.
+	top := img.RGBAAt(100, 30)
+	if absU8Diff(top.G, mid.G) < 20 {
+		t.Errorf("green at y=30 (%d) is too close to y=100 (%d): the vertical gradient is not being applied at all", top.G, mid.G)
+	}
+}
+
+// absU8Diff is the absolute difference between two channel values.
+func absU8Diff(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
+}
