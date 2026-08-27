@@ -793,8 +793,9 @@ read+write vocabulary for the tinycld text adoption path):
   `lengthAdjust="spacing"` (the default) distributes the difference into the interior gaps only, so
   the leading and trailing edges are untouched; `lengthAdjust="spacingAndGlyphs"` scales the glyph
   OUTLINES horizontally as well. Both work on `<text>` and on `<tspan>`, and nest (innermost wins for
-  the characters they share). `textLength` is an XML attribute, not a presentation attribute: it
-  neither cascades nor inherits. Edge cases handled without a special case: a target smaller than the
+  the characters they share, and a nested `spacingAndGlyphs` COMPOUNDS its outline scale onto the
+  outer one so the outline and the advance never drift apart). `textLength` is an XML attribute, not
+  a presentation attribute: it neither cascades nor inherits. Edge cases handled without a special case: a target smaller than the
   natural width (the glyphs overlap), exactly zero (they collapse onto a point), negative (invalid,
   ignored), and a single-character range, which has no interior gap for `"spacing"` to use and is
   left at its natural width rather than dividing by zero.
@@ -830,10 +831,16 @@ read+write vocabulary for the tinycld text adoption path):
   thickness use conventional em fractions: `pkg/font` parses no `post` table, so a face's own
   `underlinePosition`/`underlineThickness` are unavailable.
 - **The `font` shorthand** — expands to `font-style`, `font-weight`, `font-size` (with an optional
-  `/line-height` that is discarded, since SVG text does not wrap), and `font-family`. A value that
-  does not yield BOTH a size and a family is invalid per CSS and applies nothing rather than half of
-  itself. The system-font keywords (`caption`, `icon`, …) name platform UI fonts this engine cannot
-  resolve and are logged and ignored.
+  `/line-height` that is discarded, since SVG text does not wrap), and `font-family`, and **RESETS
+  every longhand it covers to that longhand's initial value whether or not the value names it**
+  (CSS Cascade §3) — so `font="40px X"` inside a `<g font-weight="bold">` renders REGULAR, and
+  `font-variant`/`font-stretch` (tracked here only as degradation flags) clear alongside, so a
+  shorthand cannot leave an ancestor's stale diagnostic attached. `bolder`/`lighter` still step from
+  the inherited weight: the reset governs where a slot starts, not what an explicitly-named relative
+  keyword measures against. A value that does not yield BOTH a size and a family is invalid per CSS
+  and applies nothing rather than half of itself — not even the reset. The system-font keywords
+  (`caption`, `icon`, …) name platform UI fonts this engine cannot resolve and are logged and
+  ignored.
 - **`font-stretch`, `font-variant`, `kerning`, and `font-kerning` ship as honest no-ops**, each
   logged once. Stated plainly rather than approximated: the bundled families (`pkg/font/standard`)
   have no condensed, expanded, or small-caps variant, no synthetic stretching or obliquing exists
