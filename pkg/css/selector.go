@@ -109,7 +109,11 @@ func (s Selector) Matches(n Node) bool {
 
 // matches reports whether a single simple selector matches node n.
 func (ss simpleSelector) matches(n Node) bool {
-	if ss.tag != "" && ss.tag != n.Tag() {
+	// Type selectors match case-insensitively. HTML tags are already lowercased
+	// by the parser, so authored case never mattered there; SVG reports names
+	// verbatim (linearGradient, clipPath), and no two SVG element names differ
+	// only by case, so folding is safe for both formats.
+	if ss.tag != "" && !strings.EqualFold(ss.tag, n.Tag()) {
 		return false
 	}
 	if ss.id != "" && ss.id != n.ID() {
@@ -278,7 +282,7 @@ func parseSimple(f string) (simpleSelector, bool) {
 	for i < len(f) && !isMarker(f[i]) {
 		i++
 	}
-	ss.tag = strings.ToLower(f[:i])
+	ss.tag = f[:i]
 	if ss.tag == "*" {
 		ss.tag = "" // the universal type: matches any element, zero type specificity
 	}

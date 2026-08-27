@@ -166,3 +166,101 @@ opacity>` compositing is a documented, intentional PR-1 limitation (see
 `groupOpacityWarnKey` in `pkg/svg/svg.go`) — not a bug, but also not a
 feature this tranche ships, so locking a golden of the ignored-opacity
 render would assert the wrong thing.
+
+## What shipped in this tranche (PR 2)
+
+13 files vendored from `tests/structure/style/` (11) and
+`tests/structure/style-attribute/` (2), covering CSS styling of SVG:
+
+- `<style>` elements: plain, `type="text/css"` implied by omission, CDATA-
+  wrapped rule bodies, a sheet appearing textually after the element it
+  styles (sheets are indexed whole-document before the scene walk, so source
+  position relative to the styled element doesn't matter), and a sheet with
+  a non-CSS `type` (skipped, presentation/other attributes still apply).
+- Selectors: type (`rect { ... }`), class (`.fil { ... }`), ID (`#rect1
+  { ... }`), universal (`* { ... }`), and multi-part descendant-combinator
+  chains mixing id/type/universal parts (`g#g1 * g * * rect`) — specificity
+  compares correctly across a 5-ancestor chain (`rule-specificity.svg`).
+- Cascade mechanics: `!important` beating a later higher-source-order plain
+  declaration; the presentation-attribute < sheet-rule < inline-`style`
+  precedence ladder (`resolve-order.svg`: an inline `style="fill:green"`
+  beats a `.fil{fill:blue}` sheet rule); an unresolved class selector (no
+  matching rule) falling back to the element's own presentation attribute;
+  a `class` attribute with no `<style>` sheet at all doing nothing.
+- `style=""` inline attribute: a plain declaration, and one wrapped in
+  `/* */` comments on both sides.
+
+## Notable exclusions (this tranche)
+
+- **`@import`** (`external-CSS.svg`) — no loader; per pkg/svg's
+  `indexStyleSheet`, an `@import` inside a `<style>` sheet is warned and
+  skipped, the rest of the sheet still parses, but this fixture's whole
+  point is the imported rule's effect, so excluding it is correct rather
+  than a workaround.
+- **Attribute selectors** (`attribute-selector.svg`, `[x] { fill: green }`)
+  — `pkg/css/selector.go`'s `parseSimple` has no `[` handling; `[x]` parses
+  as a literal type selector (tag `"[x]"`) that can never match a real
+  element name, so the rule is silently inert. Including this fixture would
+  lock in a blank/default-black golden as if it were the intended green —
+  excluded per the task brief's explicit warning about this exact case.
+- **Child combinator `>`** (`combined-selectors.svg`, `svg > rect`) —
+  `parseOneSelector` splits only on whitespace (`strings.Fields`), so `>`
+  becomes its own bogus simple selector (tag `">"`) that never matches;
+  same "locks in a wrong golden" hazard as the attribute selector. Excluded.
+- **CSS `transform` property**, both as a sheet rule
+  (`structure/style/transform.svg`, `#rect1 { transform:scale(2) }`) and as
+  an inline `style` (`structure/style-attribute/transform.svg`,
+  `style="transform:scale(2)"`) — `pkg/svg/svg.go`'s `elementTransform`
+  reads the `transform` XML *attribute* directly and never consults the
+  cascade; `pkg/svg/style.go`'s `Style.apply` has no transform property at
+  all. Verified: rendering either fixture produces the unscaled 80×80
+  square, not the intended scaled-up green fill. Excluded rather than
+  locking in a golden of a property this engine doesn't apply.
+- **CSS geometry properties** (`height`/`width`/`x`/`y` via `style=`/sheet) —
+  both `non-presentational-attribute.svg` fixtures (one under `style/`, one
+  under `style-attribute/`) set `height` through CSS to probe SVG-1-vs-2
+  behavior; `Style.apply` never reads geometry properties from the cascade
+  at all (shape geometry comes from `shapePath` reading XML attributes
+  directly), so these two would happen to render "correctly" by coincidence
+  (CSS geometry never applying, which matches the fixture's SVG-1
+  expectation) rather than by an implemented rule. Excluded as testing a
+  property category this cascade doesn't model, per the brief's guidance
+  not to lock in a golden for the wrong reason.
+- **`<marker>`-dependent fixtures** (`painting/marker/recursive-4.svg`,
+  `the-marker-property-in-CSS.svg`) — both need a working `<marker>`
+  element (out of scope) in addition to the CSS `marker:url(#...)`
+  property; excluded on the marker dependency alone.
+- **`<use>`-dependent fixture** (`structure/use/cSS-rules.svg`) — needs
+  `<use xlink:href="#rect1">` resolution (out of scope); excluded on the
+  `use` dependency alone, though the underlying "CSS resolves against the
+  referenced element's ID before `use` copies it" claim is itself something
+  our per-element `id` selector already gets right.
+- **Blend-mode / isolation / mask-type-via-style fixtures**
+  (`painting/mix-blend-mode/*.svg`, `painting/isolation/*.svg`,
+  `masking/mask/mask-type-in-style.svg`) — all found via the class/style
+  grep, but every one depends on a gradient paint (`fill="url(#lg1)"`) and/or
+  `<mask>`, both out of scope regardless of the CSS construct under test;
+  excluded on those grounds.
+- **Text/font `style=` fixtures** (`text/font-kerning/*.svg`,
+  `text/font-style/*.svg`, `text/font/font-shorthand.svg`) — all require
+  `<text>` rendering, out of scope; excluded on that dependency alone.
+
+No fixture was removed after generating goldens — all 13 curated files
+survived the eyeball pass unchanged. See "Bugs found" below for one fix the
+eyeball pass did prompt.
+
+## Bugs found and fixed in this tranche
+
+`structure/style-attribute/comments.svg` (`style="/*text*/fill:green/*text*/"`)
+initially rendered with the rect's default black fill instead of green:
+`pkg/css/parse.go`'s `ParseDeclarations` — the function backing both the
+SVG and HTML `style=""` inline-attribute cascades — never stripped `/* */`
+comments before splitting on `;` and `:`, so the whole declaration parsed
+as property `/*text*/fill`, which matches nothing. A `<style>` *sheet*
+body already had comments stripped by `ruleScanner.readBody` before
+reaching `ParseDeclarations`, so this only affected the `style=""`
+attribute path — an inconsistency between the two callers of the same
+function, not an unimplemented feature. Fixed by stripping comments inside
+`ParseDeclarations` itself (a new `stripComments` helper) so both callers
+get identical, correct behavior; covered by rerunning the existing
+`pkg/css` test suite (all passing) plus this golden.

@@ -228,3 +228,48 @@ func TestGroupOpacityLoggedOnce(t *testing.T) {
 		}
 	})
 }
+
+func TestStylesheetReachesTheScene(t *testing.T) {
+	const ns = `xmlns="http://www.w3.org/2000/svg"`
+	src := []byte(`<svg ` + ns + ` width="20" height="20">
+	  <style>.hot { fill: #00ff00 } rect { stroke-width: 3 }</style>
+	  <rect class="hot" width="10" height="10" fill="red" stroke="blue"/>
+	</svg>`)
+	doc, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, root := doc.Root()
+	if len(root.Kids) != 1 {
+		t.Fatalf("root kids = %d (the <style> element must not paint)", len(root.Kids))
+	}
+	sh, ok := root.Kids[0].(*Shape)
+	if !ok {
+		t.Fatalf("kid = %#v", root.Kids[0])
+	}
+	fp, okf := sh.Style.FillPaint()
+	if !okf || fp.Color != (color.RGBA{0, 255, 0, 255}) {
+		t.Errorf("fill = %+v, want the stylesheet's green over the attribute's red", fp.Color)
+	}
+	sp, oks := sh.Style.StrokePaint()
+	if !oks || sp.Width != 3 {
+		t.Errorf("stroke width = %v, want 3 from the sheet", sp.Width)
+	}
+	if sp.Color != (color.RGBA{0, 0, 255, 255}) {
+		t.Errorf("stroke color = %+v, want the attribute's blue (sheet did not set it)", sp.Color)
+	}
+}
+
+func TestStyleElementNoLongerLogsUnsupported(t *testing.T) {
+	var logs []string
+	_, err := Parse([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><style>rect{fill:red}</style><rect width="1" height="1"/></svg>`),
+		func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs {
+		if strings.Contains(l, "<style>") && strings.Contains(l, "not yet supported") {
+			t.Errorf("style is supported now but still logs unsupported: %q", l)
+		}
+	}
+}

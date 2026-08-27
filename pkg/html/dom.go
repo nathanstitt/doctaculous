@@ -42,7 +42,10 @@ func (e *Element) ParentElement() *Element { return e.parent }
 // Children returns the element's child nodes in document order.
 func (e *Element) Children() []DOMNode { return e.children }
 
-// Tag returns the lowercased element name. Implements css.Node.
+// Tag returns the element name. It is already lowercase because x/net/html
+// lowercases tag names at parse time, not because css.Node requires it (the
+// interface only promises the host format's own casing, matched
+// case-insensitively). Implements css.Node.
 func (e *Element) Tag() string { return e.tag }
 
 // ID returns the element's id attribute, or "". Implements css.Node.

@@ -150,7 +150,7 @@ func parsePageSelector(prelude string) (name string, pseudo PagePseudo) {
 // parsePageBody splits an @page rule body into its top-level declarations and its
 // nested margin-box rules. It re-scans the body with the shared ruleScanner so a
 // nested "@top-center { … }" block is recognized (and its braces not mistaken for a
-// declaration) — parseDeclarations alone splits on ';' and cannot see nested blocks.
+// declaration) — ParseDeclarations alone splits on ';' and cannot see nested blocks.
 // Text spans between nested blocks are parsed as declarations.
 func parsePageBody(body string) (decls []Declaration, boxes []MarginBoxRule) {
 	s := &ruleScanner{src: body}
@@ -166,7 +166,7 @@ func parsePageBody(body string) (decls []Declaration, boxes []MarginBoxRule) {
 		if !ok {
 			// Trailing text after the last block (or the whole body when there is no
 			// block at all): its declarations belong to the page box.
-			decls = append(decls, parseDeclarations(body[mark:])...)
+			decls = append(decls, ParseDeclarations(body[mark:])...)
 			break
 		}
 		// prelude holds: page-box declarations (terminated by ';') followed by an
@@ -176,13 +176,13 @@ func parsePageBody(body string) (decls []Declaration, boxes []MarginBoxRule) {
 			// No at-keyword before a '{' — a stray nested block (e.g. an unknown
 			// at-rule). Its declarations (if the prelude text is declarations) still
 			// count; the block body is dropped.
-			decls = append(decls, parseDeclarations(prelude)...)
+			decls = append(decls, ParseDeclarations(prelude)...)
 			continue
 		}
-		decls = append(decls, parseDeclarations(prelude[:at])...)
+		decls = append(decls, ParseDeclarations(prelude[:at])...)
 		name := strings.ToLower(strings.TrimSpace(prelude[at+1:]))
 		if slot, isBox := marginBoxNames[name]; isBox {
-			boxes = append(boxes, MarginBoxRule{Box: slot, Decls: parseDeclarations(inner)})
+			boxes = append(boxes, MarginBoxRule{Box: slot, Decls: ParseDeclarations(inner)})
 		}
 		// An unrecognized nested @-name inside @page: body already consumed, dropped.
 	}

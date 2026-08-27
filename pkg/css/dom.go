@@ -5,7 +5,11 @@ package css
 // not import pkg/html, so the layering stays one-directional. A nil Parent marks
 // the root.
 type Node interface {
-	// Tag is the lowercased element name (e.g. "div"). Empty for non-elements.
+	// Tag is the element name as the host format reports it: lowercase for HTML
+	// (the HTML parser lowercases tag names) and verbatim for SVG (e.g.
+	// "linearGradient", "clipPath"), which is case-sensitive. Empty for
+	// non-elements. Selector matching compares Tag case-insensitively, so
+	// callers need not normalize case themselves.
 	Tag() string
 	// ID is the element's id attribute, or "" if absent.
 	ID() string

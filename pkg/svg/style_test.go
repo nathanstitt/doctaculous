@@ -8,11 +8,16 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
+// applyAttrs applies attrs to base with no stylesheet context (presentation
+// attributes only), the shape every pre-cascade test used.
+func applyAttrs(base Style, attrs map[string]string) Style {
+	return base.apply(&element{attrs: attrs}, nil)
+}
+
 func TestStyleApply(t *testing.T) {
-	el := func(attrs map[string]string) *element { return &element{attrs: attrs} }
 	base := defaultStyle()
 
-	s := base.apply(el(map[string]string{"fill": "red", "stroke": "#00f", "stroke-width": "2"}), nil)
+	s := applyAttrs(base, map[string]string{"fill": "red", "stroke": "#00f", "stroke-width": "2"})
 	if !s.hasFill || s.fillRGBA() != (color.RGBA{255, 0, 0, 255}) {
 		t.Errorf("fill = %+v", s.fillRGBA())
 	}
@@ -21,8 +26,8 @@ func TestStyleApply(t *testing.T) {
 	}
 
 	// Inheritance: child without attrs keeps parent paint; opacity does NOT inherit.
-	parent := base.apply(el(map[string]string{"fill": "green", "opacity": "0.5"}), nil)
-	child := parent.apply(el(nil), nil)
+	parent := applyAttrs(base, map[string]string{"fill": "green", "opacity": "0.5"})
+	child := parent.apply(&element{}, nil)
 	if child.fillRGBA() != (color.RGBA{0, 128, 0, 255}) {
 		t.Errorf("inherited fill = %+v", child.fillRGBA())
 	}
@@ -31,8 +36,8 @@ func TestStyleApply(t *testing.T) {
 	}
 
 	// fill-opacity multiplies down the chain: 0.5 * 0.5 = 0.25 -> A=64.
-	p := base.apply(el(map[string]string{"fill-opacity": "0.5"}), nil)
-	c := p.apply(el(map[string]string{"fill-opacity": "0.5"}), nil)
+	p := applyAttrs(base, map[string]string{"fill-opacity": "0.5"})
+	c := p.apply(&element{attrs: map[string]string{"fill-opacity": "0.5"}}, nil)
 	// SVG fill-opacity is NOT multiplicative on inherit — the child's own value
 	// REPLACES the inherited one (it's an inherited property, not a compositing
 	// product). A=128 for both.
@@ -42,22 +47,23 @@ func TestStyleApply(t *testing.T) {
 
 	// currentColor follows color; none kills fill; url() degrades to none + log.
 	var logged bool
-	s = base.apply(el(map[string]string{"color": "teal", "fill": "currentColor"}), nil)
+	s = applyAttrs(base, map[string]string{"color": "teal", "fill": "currentColor"})
 	if s.fillRGBA() != (color.RGBA{0, 128, 128, 255}) {
 		t.Errorf("currentColor = %+v", s.fillRGBA())
 	}
-	s = base.apply(el(map[string]string{"fill": "none"}), nil)
+	s = applyAttrs(base, map[string]string{"fill": "none"})
 	if s.hasFill {
 		t.Error("fill none kept")
 	}
-	s = base.apply(el(map[string]string{"fill": "url(#g)"}), func(string, ...any) { logged = true })
+	s = base.apply(&element{attrs: map[string]string{"fill": "url(#g)"}},
+		&cascadeCtx{logf: func(string, ...any) { logged = true }})
 	if s.hasFill || !logged {
 		t.Errorf("url() fill: hasFill=%v logged=%v", s.hasFill, logged)
 	}
 
 	// Bad value ignored (parent kept), dasharray parsed, evenodd mapped.
-	s = base.apply(el(map[string]string{"fill": "notacolor", "fill-rule": "evenodd",
-		"stroke-dasharray": "4 2", "visibility": "hidden"}), nil)
+	s = applyAttrs(base, map[string]string{"fill": "notacolor", "fill-rule": "evenodd",
+		"stroke-dasharray": "4 2", "visibility": "hidden"})
 	if s.fillRGBA() != (color.RGBA{0, 0, 0, 255}) || s.fillRule != render.EvenOdd {
 		t.Errorf("bad fill / rule: %+v %v", s.fillRGBA(), s.fillRule)
 	}

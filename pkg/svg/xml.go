@@ -36,6 +36,27 @@ type element struct {
 	attrs        map[string]string
 	kids         []*element
 	text         string
+
+	// parent is the enclosing element, or nil for the document root. It is
+	// backfilled once a child is fully parsed and attached (both the normal
+	// end-tag path and the truncation-recovery unwind path set it), so CSS
+	// descendant/ancestor combinators can walk upward from any node without
+	// the caller having to thread a path down during traversal.
+	parent *element
+
+	// id is precomputed from attrs["id"] ("" when absent). CSS ID-selector
+	// matching runs once per candidate element per selector; precomputing
+	// avoids a map lookup on every match instead of just once at parse time.
+	id string
+
+	// classes is attrs["class"] split on runs of whitespace, precomputed for
+	// the same reason as id: class-selector matching is repeated per
+	// candidate element per selector, so splitting once here is cheaper than
+	// re-splitting on every match. nil (not an empty non-nil slice) whenever
+	// there are no usable class tokens — the attribute is absent, empty, or
+	// whitespace-only — so callers can distinguish "no classes" from having
+	// to compare a slice length.
+	classes []string
 }
 
 // parseXML parses an SVG document into a namespace-aware element tree and
@@ -100,10 +121,13 @@ func parseXML(data []byte, logf func(string, ...any)) (*element, error) {
 				unwind(&root, &stack)
 				return root, nil
 			}
+			attrs := buildAttrs(t.Attr)
 			el := &element{
-				space: t.Name.Space,
-				local: t.Name.Local,
-				attrs: buildAttrs(t.Attr),
+				space:   t.Name.Space,
+				local:   t.Name.Local,
+				attrs:   attrs,
+				id:      attrs["id"],
+				classes: splitClasses(attrs["class"]),
 			}
 			stack = append(stack, el)
 
@@ -118,8 +142,7 @@ func parseXML(data []byte, logf func(string, ...any)) (*element, error) {
 			if len(stack) == 0 {
 				root = el
 			} else {
-				parent := stack[len(stack)-1]
-				parent.kids = append(parent.kids, el)
+				attach(stack[len(stack)-1], el)
 			}
 
 		case xml.CharData:
@@ -176,11 +199,32 @@ func unwind(root **element, stack *[]*element) {
 	for len(s) > 1 {
 		child := s[len(s)-1]
 		parent := s[len(s)-2]
-		parent.kids = append(parent.kids, child)
+		attach(parent, child)
 		s = s[:len(s)-1]
 	}
 	if len(s) == 1 {
 		*root = s[0]
 	}
 	*stack = nil
+}
+
+// attach appends child to parent's kids and backfills child.parent. It is
+// the single attachment point used by both the normal EndElement pop and the
+// truncation-recovery unwind path, so every element that makes it into the
+// tree has a coherent parent chain regardless of which path attached it.
+func attach(parent, child *element) {
+	parent.kids = append(parent.kids, child)
+	child.parent = parent
+}
+
+// splitClasses splits a class attribute value on runs of whitespace,
+// returning nil when v has no usable tokens (empty or whitespace-only) so
+// callers can distinguish "no class attribute" from "class attribute
+// present but empty" — a whitespace-only value is the same case as an empty
+// one and must yield the same nil-ness.
+func splitClasses(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	return strings.Fields(v)
 }

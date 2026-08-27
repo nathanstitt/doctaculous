@@ -385,7 +385,7 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	//    normal rules; inline !important joins the important set with an outsized
 	//    specificity and author origin.
 	if styleAttr, ok := n.Attr("style"); ok {
-		for _, d := range parseDeclarations(styleAttr) {
+		for _, d := range ParseDeclarations(styleAttr) {
 			if d.Important {
 				important = append(important, matched{
 					decl: d, origin: OriginAuthor,

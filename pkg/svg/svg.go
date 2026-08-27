@@ -85,7 +85,9 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	}
 
 	b := &sceneBuilder{logf: logf, warned: map[string]bool{}}
-	doc.root = b.buildGroup(root, defaultStyle())
+	b.idx = buildIndex(root, b.warnOnceMsg)
+	ctx := &cascadeCtx{idx: b.idx, logf: logf}
+	doc.root = b.buildGroup(root, defaultStyle(), ctx)
 
 	return doc, nil
 }
@@ -189,7 +191,6 @@ func hasPercentSuffix(s string) bool {
 // recursing into e.g. <linearGradient>'s <stop> children would misrender
 // them as shapes/groups.
 var unsupportedElements = map[string]bool{
-	"style":            true,
 	"use":              true,
 	"symbol":           true,
 	"text":             true,
@@ -213,11 +214,24 @@ var unsupportedElements = map[string]bool{
 
 // skippedElements are SVG-namespace elements that are recognized structural
 // or metadata containers with no visual output of their own; they are
-// dropped without any log line. defs' children are only reachable via a
-// later <use> reference (not yet supported), so recursing into them here
-// would incorrectly paint them directly into the visible tree.
+// dropped without any log line.
+//
+// defs is walked but not emitted: buildIndex's pre-pass already descended
+// into it (and every other SVG-namespace element, regardless of "display")
+// to collect its <style> sheets and its ids into docIndex, so a
+// <defs><style>...</style></defs> stylesheet still reaches the cascade. The
+// scene walk handled here is the second, separate pass that turns elements
+// into paintable Nodes, and it must NOT recurse into defs' children: they
+// are only reachable via a later <use> reference (not yet supported), so
+// painting them directly into the visible tree here would be wrong.
+//
+// style is skipped here for the same "walked elsewhere, not painted here"
+// reason: buildIndex's pre-pass already consumed every <style> element's
+// text into docIndex.sheets, so by the time the scene walk reaches one,
+// there is nothing left for it to do but produce zero Nodes.
 var skippedElements = map[string]bool{
 	"defs":     true,
+	"style":    true,
 	"title":    true,
 	"desc":     true,
 	"metadata": true,
@@ -235,22 +249,28 @@ var shapeElements = map[string]bool{
 }
 
 // sceneBuilder walks the parsed element tree into a scene graph, tracking
-// per-document state: the log sink and the set of unsupported element names
+// per-document state: the log sink, the set of unsupported element names
 // already warned about (so ten <text> elements produce one log line, not
-// ten).
+// ten), and the whole-document index (stylesheets, ids, defs) that the
+// cascade resolves against. idx is built once in Parse, before buildGroup's
+// walk begins, and is discarded along with the sceneBuilder when Parse
+// returns — it never reaches Document.
 type sceneBuilder struct {
 	logf   func(string, ...any)
 	warned map[string]bool
+	idx    *docIndex
 }
 
 // buildGroup converts el's children into a Group, threading inherited style
-// from parentStyle through Task 8's apply. el itself is not represented in
+// from parentStyle through Style.apply. el itself is not represented in
 // the returned Group (its transform, for a <g> or <svg>, is applied by the
-// caller as the Group's M); this function only walks el's children.
-func (b *sceneBuilder) buildGroup(el *element, parentStyle Style) *Group {
+// caller as the Group's M); this function only walks el's children. ctx
+// carries the cascade (stylesheets + logger) that apply resolves each
+// child's attributes against.
+func (b *sceneBuilder) buildGroup(el *element, parentStyle Style, ctx *cascadeCtx) *Group {
 	g := &Group{M: render.Identity}
 	for _, kid := range el.kids {
-		if n := b.buildNode(kid, parentStyle); n != nil {
+		if n := b.buildNode(kid, parentStyle, ctx); n != nil {
 			g.Kids = append(g.Kids, n)
 		}
 	}
@@ -262,27 +282,30 @@ func (b *sceneBuilder) buildGroup(el *element, parentStyle Style) *Group {
 // (foreign namespace, display:none, a skipped/metadata element, or a
 // degenerate shape).
 //
-// display:none MUST short-circuit here, before any recursion: Task 8's
-// Style.apply copies the parent's display flag verbatim and never resets it
-// for a child that doesn't set its own "display" attribute, so a
+// display:none MUST short-circuit here, before any recursion: Style.apply
+// copies the parent's display flag verbatim and never resets it for a child
+// that doesn't set its own "display" (whether from a presentation attribute
+// or, now that the cascade is wired in, a stylesheet rule), so a
 // display:none *subtree* is only correctly hidden if the walker itself never
 // descends into it. Checking display only at the element where it was set,
 // and then still recursing into children (which would each report their
 // own, possibly "shown", display value) would incorrectly reveal a
-// display:none parent's descendants.
-func (b *sceneBuilder) buildNode(el *element, parentStyle Style) Node {
+// display:none parent's descendants — including a child that sets
+// display:inline on itself, which must stay hidden along with the rest of
+// the parent's subtree.
+func (b *sceneBuilder) buildNode(el *element, parentStyle Style, ctx *cascadeCtx) Node {
 	if el.space != svgNS {
 		return nil // foreign-namespace element: skip silently
 	}
 
-	st := parentStyle.apply(el, b.logf)
+	st := parentStyle.apply(el, ctx)
 	if !st.display {
 		return nil // display:none: drop the element and its entire subtree
 	}
 
 	switch {
 	case el.local == "g":
-		return b.buildGroupElement(el, st)
+		return b.buildGroupElement(el, st, ctx)
 	case shapeElements[el.local]:
 		return b.buildShape(el, st)
 	case skippedElements[el.local]:
@@ -295,7 +318,7 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style) Node {
 		// children as a plain container (the HTML-style forgiving default),
 		// so an unrecognized-but-benign wrapper doesn't hide its contents.
 		b.warnOnce(el.local)
-		return b.buildGroup(el, st)
+		return b.buildGroup(el, st, ctx)
 	}
 }
 
@@ -309,11 +332,11 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style) Node {
 // would each dim independently, causing seams/double-darkening) rather than
 // an honestly-flat one, so true compositing is deferred to a later PR. This
 // still must not fail silently: warn once per document instead.
-func (b *sceneBuilder) buildGroupElement(el *element, st Style) Node {
+func (b *sceneBuilder) buildGroupElement(el *element, st Style, ctx *cascadeCtx) Node {
 	if st.opacity < 1 {
 		b.warnOnceMsg(groupOpacityWarnKey, "svg: <g opacity> not yet composited; group opacity ignored")
 	}
-	g := b.buildGroup(el, st)
+	g := b.buildGroup(el, st, ctx)
 	g.M = elementTransform(el, b.logf)
 	return g
 }
