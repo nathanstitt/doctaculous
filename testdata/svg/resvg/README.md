@@ -740,3 +740,99 @@ Two bugs OUTSIDE `pkg/svg` were found the same way and fixed at the source:
 so every glyph's `Bounds` stretched back to the origin; and
 `inline.Reorder` emitted a multi-rune cluster glyph once per RUNE, so
 reordering Arabic returned more glyphs than it was given.
+
+## What shipped in the text tranche, part 2 (PR 6, task 2)
+
+98 more files vendored from `tests/text/`, covering the spacing, length,
+baseline, and decoration properties:
+
+- `letter-spacing/` (7) and `word-spacing/` (6) — the value forms (bare
+  number, `%`, `mm`, `normal`, negative) and `mixed-spacing`, which nests a
+  differently-spaced `<tspan>` inside a spaced `<text>`.
+- `textLength/` (10) — on `<text>` and on `<tspan>`, nested (innermost wins),
+  larger and smaller than the natural width, `%` and `mm`, and the three
+  error/edge cases: `zero`, `negative` (ignored), and `inherit` (not
+  inheritable, so also ignored). `lengthAdjust/` (2) — `spacingAndGlyphs`,
+  which scales the outlines, and `with-underline`.
+- `dominant-baseline/` (17) and `alignment-baseline/` (11) — every keyword
+  this engine can compute from `Face.Metrics()`, the precedence between the
+  two properties, the `baseline` keyword's DEFER-don't-reset behaviour, and
+  the two `inherit` scoping cases (see below).
+- `baseline-shift/` (22) — `sub`/`super`, lengths, percentages, the deep
+  nesting and mixed-sign accumulation cases, all five inheritance fixtures,
+  and `with-rotate`.
+- `text-decoration/` (20) — all three lines, the four `style-resolving`
+  fixtures that pin whose paint and whose font-size a rule takes, the
+  multi-colour indirect case, and the `dy`/`y`/`rotate` list fixtures that
+  make a rule staircase and tilt with its glyphs.
+- `font/` (2) — the `font` shorthand as a presentation attribute and as CSS.
+- `font-kerning/as-property` (1) — self-checking: the two overlaid `AVA`
+  strings must coincide, which they do because this engine ignores
+  `font-kerning` in both the attribute and the CSS form.
+
+### Deliberately NOT vendored in this tranche
+
+- **`kerning/0`, `kerning/10percent`, `font-kerning/none`** — resvg applies
+  GPOS kerning by default and these fixtures assert turning it OFF (or
+  replacing it with a length). This engine runs NO kerning-pair pass for
+  simple scripts at all, so there is nothing to disable: the two overlaid
+  strings coincide where resvg's diverge. A real difference, not a
+  substitution artifact.
+- **`dominant-baseline/ideographic`, `mathematical`, `use-script`,
+  `reset-size`, and `alignment-baseline/ideographic`, `mathematical`** —
+  these need OS/2 and BASE table metrics `pkg/font` does not parse. resvg
+  shifts the text; this engine degrades to the alphabetic baseline with a
+  warn-once. Committing a golden here would lock in the degradation as if it
+  were correct.
+- **`alignment-baseline/after-edge`, `baseline`, `text-after-edge`,
+  `letter-spacing/large-negative`, `word-spacing/large-negative`,
+  `dominant-baseline/reset-size`** — the suite marks each "(UB)" and its
+  reference PNG renders nothing but the letters "UB". There is no behaviour
+  to match.
+- **`font-stretch/` (3) and `font-variant/` (2)** — the bundled families ship
+  no condensed, expanded, or small-caps variant, and no synthetic stretching
+  or feature plumbing exists. resvg's references are visibly narrower /
+  small-capped; this engine logs and renders the normal face.
+- **`lengthAdjust/text-on-path`, `vertical`, `alignment-baseline/
+  hanging-on-vertical`, `middle-on-textPath`,
+  `two-textPath-with-middle-on-first`** — depend on `<textPath>` or
+  `writing-mode`, both deferred subsystems.
+- **`letter-spacing/filter-bbox`** — needs filters. Its `<desc>` is still
+  load-bearing evidence (see below), just not as a golden.
+- **`letter-spacing/on-Arabic`, `mixed-scripts`, `non-ASCII-character`,
+  `textLength/arabic`, `arabic-with-lengthAdjust`,
+  `dominant-baseline/hanging` (Devanagari)** — Amiri / Mplus 1p / Noto Sans
+  Devanagari are not bundled, and `on-Arabic` additionally asserts the
+  cursive-tracking rule (letter-spacing is IGNORED for joined scripts, CSS
+  Text 3 §8.2), which this engine does not implement.
+
+### What the reference sweep settled
+
+Four behaviours were read off resvg's reference PNGs rather than the spec,
+because the spec is ambiguous or the two disagree:
+
+1. **`letter-spacing` adds NO trailing space.** SVG 1.1's wording says after
+   every glyph; CSS Text 3 says between. `letter-spacing/filter-bbox.svg`
+   settles it with a filter region whose flood rectangle ends flush with the
+   final glyph, and says so in its own `<desc>`.
+2. **A `text-decoration` inherited from ABOVE the `<text>` adopts the
+   `<text>`'s paint,** not the declaring ancestor's.
+   `outside-the-text-element.svg` renders a BLACK underline under a
+   `fill="black"` `<text>` inside a `fill="green"` `<g>`;
+   `style-resolving-2.svg` repeats it with different colours.
+3. **A `baseline-shift` on the `<text>` element itself is inert.**
+   `inheritance-1`, `-3`, `-4` and `-5` each overlay an unshifted red
+   reference the black text must exactly cover.
+4. **`dominant-baseline` propagates inside a `<text>` but not into it, while
+   `alignment-baseline` is non-inherited with an explicit `inherit` that
+   reaches back.** `dominant-baseline/inherit.svg` and
+   `alignment-baseline/inherit.svg` are the same shape and render
+   OPPOSITELY; only that split model satisfies both.
+
+Two further behaviours came from the sweep as outright bugs, caught before
+any golden was committed: `alignment-baseline="baseline"` was resetting to
+the alphabetic baseline instead of deferring to the parent's dominant
+baseline (`alignment-baseline=baseline-on-tspan.svg` renders flush), and a
+decoration was drawn as ONE rectangle across the whole run instead of one per
+baseline frame, which flattened `underline-with-dy-list-1`'s staircase and
+merged `underline-with-rotate-list-3`'s four tilted segments into one.
