@@ -858,6 +858,38 @@ func TestTextCharacterBudget(t *testing.T) {
 	}
 }
 
+// TestTspanDepthGuard proves the <tspan> nesting guard fires with a
+// diagnostic rather than recursing without bound. The character budget is a
+// separate guard on a separate axis (total characters, not nesting), so a
+// document that nests deeply while staying well under the character budget
+// reaches this one alone.
+//
+// The nesting sits above maxTspanDepth but below the parser's own
+// maxElementDepth, so it is this guard being exercised and not the parser
+// rejecting the document before the text walk ever runs.
+func TestTspanDepthGuard(t *testing.T) {
+	const depth = 512
+	var b strings.Builder
+	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" font-size="10"><text x="1" y="1">`)
+	for i := 0; i < depth; i++ {
+		b.WriteString(`<tspan>`)
+	}
+	b.WriteString(`x`)
+	for i := 0; i < depth; i++ {
+		b.WriteString(`</tspan>`)
+	}
+	b.WriteString(`</text></svg>`)
+
+	_, logs := parseSVG(t, b.String())
+	// The single 'x' sits far deeper than maxTspanDepth, so the walk stops
+	// before reaching it and the <text> lowers to no characters at all —
+	// which is why this asserts on the diagnostic rather than on a Text node,
+	// as a text element with nothing in it is not emitted into the scene.
+	if !anyContains(logs, "<tspan> nesting exceeded") {
+		t.Errorf("the tspan depth guard fired without a diagnostic; logs = %v", logs)
+	}
+}
+
 // TestMalformedTextNeverPanics feeds structurally hostile or nonsensical text
 // markup through the whole parse-and-lay-out path. The contract is that
 // nothing panics and nothing returns a non-finite coordinate.

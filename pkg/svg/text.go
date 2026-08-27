@@ -435,6 +435,14 @@ func textCoordList(el *element, name string) []float64 {
 	if len(fields) == 0 {
 		return nil
 	}
+	// Entries past maxTextChars can never be consumed — the lowering walk
+	// stops at that many positioned characters — so parsing them would only
+	// allocate a slice no one reads. Capping here keeps a pathological list
+	// (a multi-million-entry x=) from a large transient allocation without
+	// changing behavior for any list a document can actually use.
+	if len(fields) > maxTextChars {
+		fields = fields[:maxTextChars]
+	}
 	out := make([]float64, 0, len(fields))
 	for _, f := range fields {
 		v, ok := parseLength(f, 0)
