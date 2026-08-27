@@ -4,7 +4,9 @@ package draw
 import (
 	"image/color"
 	"math"
+	"sync"
 
+	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 	"github.com/nathanstitt/doctaculous/pkg/svg"
 )
@@ -23,6 +25,18 @@ type Renderer struct {
 	// nesting/cell-count/draw-call-budget caps, each logged at most once per
 	// DrawVector call). nil means silent.
 	Logf func(string, ...any)
+
+	// faceOnce/faceCache lazily hold the font-face cache SVG text shaping
+	// resolves families through. This is the one exception to the "no mutable
+	// state on Renderer" rule above, and it is a safe one: FaceCache is
+	// itself mutex-protected and explicitly safe for concurrent use, the
+	// sync.Once guarantees exactly one is ever created, and the field is
+	// never reassigned afterward — so concurrent DrawVector calls share a
+	// single cache rather than racing on it. Sharing is the point: parsing a
+	// font program is the expensive step, and every <text> in a document
+	// resolves the same handful of families.
+	faceOnce  sync.Once
+	faceCache *layoutfont.FaceCache
 }
 
 // New returns a Renderer for doc.
@@ -175,6 +189,8 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 		r.paintGroupBody(dev, node, gm, alpha, warned)
 	case *svg.Shape:
 		r.paintShape(dev, node, m, alpha, warned)
+	case *svg.Text:
+		r.paintText(dev, node, m, alpha, warned)
 	}
 }
 

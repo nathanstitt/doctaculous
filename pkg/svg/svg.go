@@ -185,7 +185,7 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	b.idx = buildIndex(root, b.warnOnceMsg)
 	b.servers = newPaintServerResolver(b.idx, logf)
 	ctx := &cascadeCtx{idx: b.idx, logf: logf}
-	doc.root = b.buildGroup(root, defaultStyle(), ctx)
+	doc.root = b.buildGroup(root, rootStyle(root, ctx), ctx)
 	// The root <svg> element's own opacity attribute (e.g. <svg
 	// opacity="0.5">) applies to it just like any other element's, even
 	// though buildGroup only walks the root's CHILDREN (the root has no
@@ -197,6 +197,37 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	doc.root.Opacity = rootOpacity(root, ctx)
 
 	return doc, nil
+}
+
+// rootStyle returns the style the root <svg>'s CHILDREN inherit: the
+// defaults, plus the root element's own FONT and TEXT properties.
+//
+// The narrowness is deliberate. buildGroup walks the root's children with a
+// parent style, and historically that was defaultStyle() — the root's own
+// presentation attributes were never resolved at all, so `<svg fill="red">`
+// does not tint its children today. That is a genuine, pre-existing gap, but
+// widening it here would change the rendering of every existing document that
+// sets a paint property on its root, moving goldens for a reason unrelated to
+// text. The font properties have no such history: they did not exist before
+// this change, so making them inherit from the root is purely additive and
+// cannot alter any previously-rendered pixel.
+//
+// It is also not optional for text to work at all: the resvg corpus routinely
+// writes `<svg font-family="Noto Sans" font-size="48">` and expects every
+// <text> below to pick it up, which is the ordinary CSS inheritance a browser
+// performs. Fixing the general case is left as a separate, self-contained
+// change so its golden movement can be reviewed on its own.
+func rootStyle(root *element, ctx *cascadeCtx) Style {
+	full := defaultStyle().apply(root, ctx)
+	s := defaultStyle()
+	s.fontFamily = full.fontFamily
+	s.fontSizePt = full.fontSizePt
+	s.fontBold = full.fontBold
+	s.fontItalic = full.fontItalic
+	s.fontWeight = full.fontWeight
+	s.textAnchor = full.textAnchor
+	s.direction = full.direction
+	return s
 }
 
 // rootOpacity resolves the root <svg> element's own opacity attribute
@@ -312,7 +343,14 @@ func hasPercentSuffix(s string) bool {
 // recursing into e.g. an unsupported container's children would misrender
 // them as shapes/groups.
 var unsupportedElements = map[string]bool{
-	"text":             true,
+	// tref was REMOVED from SVG 2 and is unimplemented in every current
+	// browser, so it is dropped rather than deferred (see the SVG text
+	// design's decision 4). It is listed here — not in skippedElements —
+	// specifically so it logs: an author who wrote one gets a diagnostic
+	// instead of silently missing text. A <tref> INSIDE a <text> is handled
+	// separately (see textBuilder.walk), since the <text> walk never reaches
+	// buildNode for its children.
+	"tref":             true,
 	"image":            true,
 	"filter":           true,
 	"switch":           true,
@@ -610,6 +648,15 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style, ctx *cascadeCtx
 	switch {
 	case el.local == "g":
 		return b.buildGroupElement(el, st, ctx)
+	case el.local == "text":
+		return b.buildText(el, st, ctx)
+	case el.local == "tspan", el.local == "textPath":
+		// A <tspan>/<textPath> outside any <text> is not rendered (SVG2
+		// §11.2: they are only meaningful as <text> content). Inside a
+		// <text> the walk never reaches buildNode — see textBuilder.walk —
+		// so arriving here means the element is genuinely orphaned. The
+		// corpus's tspan/outside-the-text.svg asserts nothing is drawn.
+		return nil
 	case el.local == "use":
 		// st is the <use> element's OWN resolved style (parentStyle already
 		// applied above), threaded as the INSTANTIATED target's parentStyle

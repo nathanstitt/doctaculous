@@ -642,3 +642,197 @@ argument yet for vendoring a corpus with reference renders:
    circle) exposed this as a lopsided, asymmetric result instead of resvg's
    symmetric flower shape. Fixed by composing `kid.M.Mul(cpM)` for the
    nested resolve, matching the sibling `dp` composition.
+
+## What shipped in the text tranche (PR 6)
+
+100 files vendored from `tests/text/`, covering `<text>`, `<tspan>`,
+per-character positioning, `text-anchor`, and font resolution:
+
+- `text/` (25) — the per-character `x`/`y`/`dx`/`dy`/`rotate` LISTS in every
+  combination the suite exercises: shorter than the text, longer than it,
+  absolute mixed with relative, `dx`/`dy` standing in for `x`/`y`, units
+  (`mm`, `%`) on the coordinates, and the `rotate` asymmetry (its LAST value
+  persists past the end of the list, where `x`/`y`/`dx`/`dy` simply stop
+  applying). Plus `transform`, entity-escaped text, `xml:space`, and nesting.
+- `tspan/` (25) — inherited cursor, absolute vs relative override, style
+  override, nesting, `rotate` on a child, `display:none` inside a rotate list
+  (the hidden characters must still consume their entries), the `xml:space`
+  matrix, pseudo-multi-line via sibling tspans, and the SVG 2 `clip-path`,
+  `mask`, and `opacity` properties on a tspan.
+- `text-anchor/` (11) — `start`/`middle`/`end` on `<text>` and on `<tspan>`,
+  the three inheritance cases, an invalid value, a coordinates list (which
+  splits into separately-anchored chunks), and the rule that `text-anchor`
+  applies per CHUNK so a tspan changing it mid-chunk has no effect.
+- `font-size/` (16) — absolute, `em`, `ex`, percentage, nested/mixed relative
+  values, named keywords, and the zero/negative cases.
+- `font-weight/` (12) — `normal`/`bold`, numeric, and the relative
+  `bolder`/`lighter` keywords including both clamping ends and the
+  no-parent case.
+- `font-style/` (3), `font-family/` (6), `direction/` (1),
+  `unicode-bidi/` (1).
+
+### Font substitution: what this corpus can and cannot assert
+
+Most of the suite specifies **Noto Sans**, **Amiri**, or **Source Sans Pro**,
+none of which this repo bundles; they resolve to the bundled look-alikes. So
+**every** golden here differs from resvg's reference PNG in glyph SHAPE and
+advance. That is expected and is not what these fixtures assert.
+
+Each vendored file was chosen because its claim is GEOMETRIC — where a chunk
+is anchored, where a per-character list puts each glyph, which characters a
+whitespace rule keeps, whether a clip cuts the text — and that claim survives
+substitution. Every one was compared against resvg's reference PNG by eye
+before vendoring; the goldens committed here are OUR output (as everywhere
+else in this corpus), and they lock that geometry against regression.
+
+Several fixtures are self-checking, which makes them stronger than an eyeball
+comparison: `font-size/nested-percent-values-1/2` and `font-size/mixed-values`
+draw black text over red text that must be exactly covered, and the
+`font-weight` relative-keyword files draw two lines that must match. Those
+verify correctly under substitution regardless of which face is used.
+
+### Deliberately NOT vendored
+
+- **`textPath/` (44) and `writing-mode/` (25)** — deferred subsystems; both
+  degrade with a log today. `tref/` (11) is dropped, not deferred (removed
+  from SVG 2).
+- **`textLength`/`lengthAdjust` (16), `letter-spacing`/`word-spacing` (19),
+  the baseline attributes (62), `text-decoration`** — a later task.
+- **Emoji (`text/emojis`, `compound-emojis`, and the coordinate-list
+  variants)** — no emoji font is bundled, so these render nothing. Correct
+  graceful degradation, but there is no geometry left to assert.
+- **`font-family/cursive`, `fantasy`, `noto-sans`, `source-sans-pro`** — the
+  named family has no bundled analogue, so the fixture would only assert
+  which fallback was picked.
+- **`text/fill-rule=evenodd`** — the claim (even-odd inverts glyph counters)
+  is real and implemented, but the fixture is Amiri Arabic, whose substituted
+  shapes diverge far enough that the reference tells you nothing about
+  whether the fill rule applied. Covered by a unit test instead.
+- **`text/complex-graphemes*`, `ligatures-*`, `zalgo`, `xml-lang=ja`,
+  `real-text-height`, `filter-bbox`, `tspan/with-filter`, `tspan-bbox-2`** —
+  each depends on a font this repo does not bundle in a way that changes the
+  result qualitatively, or on an unshipped feature (filters).
+
+### Bugs found by the reference sweep (all fixed in the same PR)
+
+The comparison against resvg's references paid for itself five times over:
+
+1. **`clip-path`/`mask` on a `<tspan>` were ignored** — lowering only read
+   them off the `<text>` element. `tspan/with-clip-path.svg` rendered
+   completely unclipped.
+2. **Bidi text was reordered before the pen walk** — SVG's position lists
+   address characters in LOGICAL order, so reordering during shaping made an
+   absolute `x` land on whichever glyph reordering happened to put first.
+   `direction/rtl.svg` threw the tail of its Arabic 170 units away from the
+   rest of the string.
+3. **`text-anchor` was not direction-relative** — `start` means the RIGHT
+   edge in an rtl chunk. `direction/rtl.svg` ran off the right of its
+   viewport.
+4. **`unicode-bidi: bidi-override` did nothing to Latin** — the reference
+   renders "This is" as "sihT si".
+5. **Source indentation shifted an absolute position** — the collapsed space
+   between two sibling tspans landed inside the SECOND one and took its
+   `x="40"`. `tspan/pseudo-multi-line.svg` staggered its three lines instead
+   of left-aligning them.
+
+Two bugs OUTSIDE `pkg/svg` were found the same way and fixed at the source:
+`pkg/font`'s glyph outlines carried a leading drawing op before any move-to,
+so every glyph's `Bounds` stretched back to the origin; and
+`inline.Reorder` emitted a multi-rune cluster glyph once per RUNE, so
+reordering Arabic returned more glyphs than it was given.
+
+## What shipped in the text tranche, part 2 (PR 6, task 2)
+
+98 more files vendored from `tests/text/`, covering the spacing, length,
+baseline, and decoration properties:
+
+- `letter-spacing/` (7) and `word-spacing/` (6) — the value forms (bare
+  number, `%`, `mm`, `normal`, negative) and `mixed-spacing`, which nests a
+  differently-spaced `<tspan>` inside a spaced `<text>`.
+- `textLength/` (10) — on `<text>` and on `<tspan>`, nested (innermost wins),
+  larger and smaller than the natural width, `%` and `mm`, and the three
+  error/edge cases: `zero`, `negative` (ignored), and `inherit` (not
+  inheritable, so also ignored). `lengthAdjust/` (2) — `spacingAndGlyphs`,
+  which scales the outlines, and `with-underline`.
+- `dominant-baseline/` (17) and `alignment-baseline/` (11) — every keyword
+  this engine can compute from `Face.Metrics()`, the precedence between the
+  two properties, the `baseline` keyword's DEFER-don't-reset behaviour, and
+  the two `inherit` scoping cases (see below).
+- `baseline-shift/` (22) — `sub`/`super`, lengths, percentages, the deep
+  nesting and mixed-sign accumulation cases, all five inheritance fixtures,
+  and `with-rotate`.
+- `text-decoration/` (20) — all three lines, the four `style-resolving`
+  fixtures that pin whose paint and whose font-size a rule takes, the
+  multi-colour indirect case, and the `dy`/`y`/`rotate` list fixtures that
+  make a rule staircase and tilt with its glyphs.
+- `font/` (2) — the `font` shorthand as a presentation attribute and as CSS.
+- `font-kerning/as-property` (1) — self-checking: the two overlaid `AVA`
+  strings must coincide, which they do because this engine ignores
+  `font-kerning` in both the attribute and the CSS form.
+
+### Deliberately NOT vendored in this tranche
+
+- **`kerning/0`, `kerning/10percent`, `font-kerning/none`** — resvg applies
+  GPOS kerning by default and these fixtures assert turning it OFF (or
+  replacing it with a length). This engine runs NO kerning-pair pass for
+  simple scripts at all, so there is nothing to disable: the two overlaid
+  strings coincide where resvg's diverge. A real difference, not a
+  substitution artifact.
+- **`dominant-baseline/ideographic`, `mathematical`, `use-script`,
+  `reset-size`, and `alignment-baseline/ideographic`, `mathematical`** —
+  these need OS/2 and BASE table metrics `pkg/font` does not parse. resvg
+  shifts the text; this engine degrades to the alphabetic baseline with a
+  warn-once. Committing a golden here would lock in the degradation as if it
+  were correct.
+- **`alignment-baseline/after-edge`, `baseline`, `text-after-edge`,
+  `letter-spacing/large-negative`, `word-spacing/large-negative`,
+  `dominant-baseline/reset-size`** — the suite marks each "(UB)" and its
+  reference PNG renders nothing but the letters "UB". There is no behaviour
+  to match.
+- **`font-stretch/` (3) and `font-variant/` (2)** — the bundled families ship
+  no condensed, expanded, or small-caps variant, and no synthetic stretching
+  or feature plumbing exists. resvg's references are visibly narrower /
+  small-capped; this engine logs and renders the normal face.
+- **`lengthAdjust/text-on-path`, `vertical`, `alignment-baseline/
+  hanging-on-vertical`, `middle-on-textPath`,
+  `two-textPath-with-middle-on-first`** — depend on `<textPath>` or
+  `writing-mode`, both deferred subsystems.
+- **`letter-spacing/filter-bbox`** — needs filters. Its `<desc>` is still
+  load-bearing evidence (see below), just not as a golden.
+- **`letter-spacing/on-Arabic`, `mixed-scripts`, `non-ASCII-character`,
+  `textLength/arabic`, `arabic-with-lengthAdjust`,
+  `dominant-baseline/hanging` (Devanagari)** — Amiri / Mplus 1p / Noto Sans
+  Devanagari are not bundled, and `on-Arabic` additionally asserts the
+  cursive-tracking rule (letter-spacing is IGNORED for joined scripts, CSS
+  Text 3 §8.2), which this engine does not implement.
+
+### What the reference sweep settled
+
+Four behaviours were read off resvg's reference PNGs rather than the spec,
+because the spec is ambiguous or the two disagree:
+
+1. **`letter-spacing` adds NO trailing space.** SVG 1.1's wording says after
+   every glyph; CSS Text 3 says between. `letter-spacing/filter-bbox.svg`
+   settles it with a filter region whose flood rectangle ends flush with the
+   final glyph, and says so in its own `<desc>`.
+2. **A `text-decoration` inherited from ABOVE the `<text>` adopts the
+   `<text>`'s paint,** not the declaring ancestor's.
+   `outside-the-text-element.svg` renders a BLACK underline under a
+   `fill="black"` `<text>` inside a `fill="green"` `<g>`;
+   `style-resolving-2.svg` repeats it with different colours.
+3. **A `baseline-shift` on the `<text>` element itself is inert.**
+   `inheritance-1`, `-3`, `-4` and `-5` each overlay an unshifted red
+   reference the black text must exactly cover.
+4. **`dominant-baseline` propagates inside a `<text>` but not into it, while
+   `alignment-baseline` is non-inherited with an explicit `inherit` that
+   reaches back.** `dominant-baseline/inherit.svg` and
+   `alignment-baseline/inherit.svg` are the same shape and render
+   OPPOSITELY; only that split model satisfies both.
+
+Two further behaviours came from the sweep as outright bugs, caught before
+any golden was committed: `alignment-baseline="baseline"` was resetting to
+the alphabetic baseline instead of deferring to the parent's dominant
+baseline (`alignment-baseline=baseline-on-tspan.svg` renders flush), and a
+decoration was drawn as ONE rectangle across the whole run instead of one per
+baseline frame, which flattened `underline-with-dy-list-1`'s staircase and
+merged `underline-with-rotate-list-3`'s four tilted segments into one.
