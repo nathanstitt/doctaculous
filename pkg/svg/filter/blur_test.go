@@ -159,30 +159,40 @@ func TestGaussianBlurIsCentred(t *testing.T) {
 // assertion passes with the premultiplication removed. Mutation check: making
 // GaussianBlur operate on straight values fails this test and no other.
 func TestGaussianBlurOnSemiTransparentEdgeStaysPremultiplied(t *testing.T) {
+	// The fixture has to put TWO DIFFERENT COLOURS at TWO DIFFERENT ALPHAS on
+	// either side of the edge. A single colour fading to a transparent
+	// backdrop does NOT discriminate: un-premultiplying on the way out divides
+	// by exactly the alpha that was multiplied in, so a uniform colour is
+	// recovered perfectly whether or not the blur premultiplied. (Measured:
+	// opaque-red-to-transparent gives rgb=(1,0,0) at every partial pixel under
+	// both implementations.)
+	//
+	// Opaque red beside 10%-alpha green is the case that separates them. The
+	// green side must contribute to the average IN PROPORTION TO ITS COVERAGE,
+	// which is precisely what premultiplying encodes; averaging straight
+	// colour weights the barely-present green as heavily as the fully opaque
+	// red and pulls the blend far too green.
 	in := NewBuffer(image.Rect(0, 0, 41, 41), LinearRGB)
 	for y := 0; y < 41; y++ {
 		for x := 0; x < 20; x++ {
-			in.Set(x, y, 1, 1, 1, 1) // opaque white on the left half
+			in.Set(x, y, 1, 0, 0, 1.0) // opaque red
+		}
+		for x := 20; x < 41; x++ {
+			in.Set(x, y, 0, 1, 0, 0.1) // barely-there green
 		}
 	}
 
 	out := GaussianBlur(in, 3, 3, in.Bounds())
 
-	// Walk the transition and require the colour to stay white wherever there
-	// is any coverage at all.
-	sawPartial := false
-	for x := 12; x < 30; x++ {
-		r, g, b, a := out.At(x, 20)
-		if a <= 0.001 || a >= 0.999 {
-			continue
-		}
-		sawPartial = true
-		if r < 0.99 || g < 0.99 || b < 0.99 {
-			t.Fatalf("at x=%d alpha=%.3f colour=(%.3f,%.3f,%.3f): the blurred edge darkened, so the blur ran on STRAIGHT alpha — it must premultiply", x, a, r, g, b)
-		}
+	// Two pixels into the green side, coverage-weighted averaging still leaves
+	// red clearly dominant (measured r=0.741 g=0.259). Straight averaging
+	// discards the coverage weighting and lets green take over far sooner.
+	r, g, _, _ := out.At(22, 20)
+	if r <= g {
+		t.Fatalf("at x=22 colour=(%.3f,%.3f): a 10%%-alpha green outweighed an opaque red, so the blur averaged STRAIGHT colour — it must premultiply", r, g)
 	}
-	if !sawPartial {
-		t.Fatal("no partially-covered pixel in the transition; the test proves nothing")
+	if r < 0.70 || r > 0.78 {
+		t.Fatalf("at x=22 red=%.3f, want ~0.741: the coverage weighting is off", r)
 	}
 }
 
