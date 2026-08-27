@@ -26,9 +26,26 @@ inherits from the *use site*. Two `<use>`s of the same target with different
 `fill` must produce different shapes. Memoizing by id would break
 `style-inheritance-*.svg` and `complex-style-resolving-order.svg`.
 
-The cost is duplicated geometry in the scene graph, which is harmless — nothing
-mutates a `*Shape` after `Parse`, and the existing `maxDrawCalls` backstop was
-explicitly sized with `<use>` in mind.
+The cost is duplicated geometry in the scene graph. Nothing mutates a `*Shape`
+after `Parse`, so the duplication is safe — but it is **not** free, and an
+earlier revision of this document was wrong to claim `maxDrawCalls` covered it.
+
+`maxDrawCalls` is a **draw-time** backstop, counted per `DrawVector` call. The
+`<use>` expansion happens at **build** time, entirely inside `Parse`, and
+completes before the first paint operation is ever issued — so `maxDrawCalls`
+never gets the chance to fire. `maxUseDepth` does not close the gap either: it
+bounds recursion *depth*, and the cost lives in *breadth*. A graph where each
+level references the previous level twice stays well inside the depth cap,
+never repeats an id (so `buildingUse`'s cycle guard is silent), and still
+multiplies instantiated nodes by ~4 per level — under 1.5 KB of such markup
+allocated ~1.7 GB inside `svg.Parse`, and a few more levels reach hundreds of
+GB.
+
+That is closed by a build-time budget, `maxUseNodes` (see `pkg/svg/use.go`): a
+whole-document, monotonic cap on total `<use>`/`<symbol>` instantiations,
+degrading via `warnOnceMsg` once exhausted. It is deliberately *not*
+decremented as the recursion unwinds — a per-subtree counter would be reset by
+every sibling and would let exactly this graph through.
 
 ### 2. A new `buildingUse` guard — `followHrefChain` is NOT sufficient
 

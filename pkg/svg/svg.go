@@ -518,6 +518,18 @@ type sceneBuilder struct {
 	// separate draw-time depth counter for the exact same reason.
 	useDepth int
 
+	// useNodes counts <use>/<symbol> instantiations performed so far in this
+	// document's build, and is NEVER decremented — it is a whole-document
+	// budget, not a call-stack depth like useDepth. useDepth bounds how DEEP
+	// the instantiation recursion goes; this bounds how WIDE it gets, which
+	// is the dimension the cost actually lives in: a <use> graph where each
+	// level references the previous level twice stays comfortably inside
+	// maxUseDepth and still expands to millions of nodes. Decrementing on
+	// the way back out (the useDepth/buildingUse shape) would reset the
+	// count per subtree and let exactly that graph through, so the counter
+	// is monotonic for the lifetime of the sceneBuilder. See maxUseNodes.
+	useNodes int
+
 	// markerMemo memoizes resolveMarker by id, mirroring clipMemo/maskMemo
 	// exactly (see clipMemo's doc comment): several shapes can reference the
 	// same <marker>, and each reference resolves the identical *Marker

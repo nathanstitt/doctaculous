@@ -13,6 +13,51 @@ import (
 // maxHrefChainDepth/maxClipPathChainDepth's rationale exactly.
 const maxUseDepth = 64
 
+// maxUseNodes bounds the TOTAL number of <use>/<symbol> instantiations one
+// document's build may perform, across the whole scene walk — the
+// build-time counterpart to pkg/svg/draw's maxDrawCalls, placed at the layer
+// where the cost is actually incurred.
+//
+// maxUseDepth bounds recursion DEPTH but not BREADTH, and breadth is where
+// the blowup is: a <use> graph in which each level references the previous
+// level twice (<g id="uN"><use href="#uN-1"/><use href="#uN-1"/></g>)
+// multiplies instantiated nodes by ~4 per level while never exceeding
+// maxUseDepth or repeating an id, so neither the depth cap nor buildingUse's
+// cycle guard sees anything wrong. Under 1.5 KB of such markup expands to
+// gigabytes of *Group/*Shape, and it does so entirely inside Parse —
+// maxDrawCalls is a draw-time backstop and never gets the chance to fire,
+// because the allocation completes before the first paint operation.
+//
+// The budget is monotonic across the entire build (sceneBuilder.useNodes is
+// never decremented) rather than per-subtree: a counter that unwound with
+// the recursion would be reset by every sibling and would let the graph
+// above through unchanged.
+//
+// 100_000 is sized from the measured cost of an instantiation rather than
+// guessed: the doubling graph above allocates ~1.7 GB across ~524k
+// instantiations, i.e. on the order of 3 KB of *Group/*Shape per
+// instantiation, so this budget bounds worst-case build allocation at a few
+// hundred MB — large enough to never be reached by real content, small
+// enough that a bomb degrades in milliseconds instead of exhausting the
+// machine.
+//
+// Icon sprite sheets are the common heavy-<use> case and set the floor: a
+// large one carries a few thousand <use> elements, each instantiating a
+// small <symbol> whose own content contributes a handful more nodes — low
+// tens of thousands at the very top end. This leaves roughly an order of
+// magnitude of headroom above that, so a legitimate document is never
+// truncated.
+//
+// Exceeding it is not an error: buildUse logs once via warnOnceMsg and
+// resolves the offending reference to nothing, the same "degrade, never
+// fail" contract every other cap in this package keeps.
+//
+// A caller-supplied context.Context would be the more general answer to
+// "stop this build early", but that is a public API change to svg.Parse and
+// is deliberately not done here; the budget is self-contained and needs no
+// cooperation from callers.
+const maxUseNodes = 100_000
+
 // buildUse resolves a <use> element (el.local == "use") into a Group
 // instantiating its href target, or nil when the reference is absent,
 // unresolvable, targets an unsupported element (nested <svg> — see the
@@ -84,6 +129,15 @@ func (b *sceneBuilder) buildUse(el *element, useSiteStyle Style, ctx *cascadeCtx
 		b.warnOnceMsg("use-depth-cap", "svg: <use> reference chain exceeded depth limit; treating as unresolved")
 		return nil
 	}
+	// The breadth budget, checked (and charged) before any recursion so an
+	// exhausted budget short-circuits instead of instantiating one more
+	// subtree. See maxUseNodes for why this is monotonic and why it is
+	// separate from maxUseDepth.
+	if b.useNodes >= maxUseNodes {
+		b.warnOnceMsg("use-node-budget", "svg: <use>/<symbol> instantiation budget exhausted; treating further references as unresolved")
+		return nil
+	}
+	b.useNodes++
 	if el.id != "" && b.buildingUse[el.id] {
 		b.warnOnceMsg("use-cycle:"+el.id, "svg: <use> reference is cyclic; treating as unresolved")
 		return nil
@@ -107,6 +161,12 @@ func (b *sceneBuilder) buildUse(el *element, useSiteStyle Style, ctx *cascadeCtx
 
 	var content Node
 	if target.local == "symbol" {
+		// buildSymbolInstance is reachable ONLY from here, and this call has
+		// already charged its node against maxUseNodes above, so the symbol
+		// path needs no separate charge — every instantiation of either kind
+		// passes through exactly one buildUse frame. Its recursive content
+		// (a <use> inside the <symbol>) re-enters buildUse and is charged
+		// there, level by level, which is what bounds the breadth.
 		content = b.buildSymbolInstance(el, target, useSiteStyle, ctx)
 	} else {
 		content = b.buildNode(target, useSiteStyle, ctx)

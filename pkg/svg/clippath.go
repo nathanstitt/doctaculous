@@ -350,6 +350,17 @@ func (b *sceneBuilder) buildClipChildFromUse(el *element, useSiteStyle Style, ct
 		b.warnOnceMsg("use-cycle-clip:"+id, "svg: <use> inside <clipPath> is cyclic or too deep; treating as unresolved")
 		return ClipPathChild{}, false
 	}
+	// Share buildUse's whole-document instantiation budget (see maxUseNodes):
+	// this branch is a second entry point into <use> instantiation, so it must
+	// charge the same counter or a document could spend the budget here for
+	// free. Its own recursion is already bounded (a <use> targeting another
+	// <use> is declined above), but the charge keeps the budget a true
+	// document-wide total rather than a per-entry-point one.
+	if b.useNodes >= maxUseNodes {
+		b.warnOnceMsg("use-node-budget", "svg: <use>/<symbol> instantiation budget exhausted; treating further references as unresolved")
+		return ClipPathChild{}, false
+	}
+	b.useNodes++
 	if el.id != "" {
 		b.buildingUse[el.id] = true
 		defer delete(b.buildingUse, el.id)

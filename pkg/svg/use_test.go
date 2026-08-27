@@ -1,7 +1,9 @@
 package svg
 
 import (
+	"fmt"
 	"image/color"
+	"strings"
 	"testing"
 	"time"
 )
@@ -657,4 +659,188 @@ func findLastShape(n Node) (*Shape, bool) {
 	}
 	walk(n)
 	return last, last != nil
+}
+
+// buildUseBomb generates the exponential-expansion <use> graph maxUseNodes
+// guards against: n levels, each a <g> containing TWO <use>s of the level
+// below it. Nothing here is cyclic and nothing exceeds maxUseDepth — every
+// reference points strictly downward at a DISTINCT id — so neither
+// buildingUse's cycle guard nor maxUseDepth sees anything wrong, yet the
+// instantiated node count grows ~4x per level. Under 1.5 KB of markup
+// reaches gigabytes by n=18 and hundreds of GB by n=24 without the budget.
+func buildUseBomb(n int) []byte {
+	var sb strings.Builder
+	sb.WriteString(`<svg ` + useHdr + ` width="100" height="100"><defs>`)
+	sb.WriteString(`<rect id="u0" width="1" height="1"/>`)
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&sb, `<g id="u%d"><use xlink:href="#u%d"/><use xlink:href="#u%d"/></g>`, i, i-1, i-1)
+	}
+	fmt.Fprintf(&sb, `</defs><use xlink:href="#u%d"/></svg>`, n)
+	return []byte(sb.String())
+}
+
+// countSceneNodes returns the total number of Groups and Shapes reachable
+// from n, i.e. how much scene graph the build actually materialized.
+func countSceneNodes(n Node) int {
+	switch v := n.(type) {
+	case nil:
+		return 0
+	case *Group:
+		if v == nil {
+			return 0
+		}
+		c := 1
+		for _, k := range v.Kids {
+			c += countSceneNodes(k)
+		}
+		return c
+	default:
+		return 1
+	}
+}
+
+// TestUseExpansionBombIsBounded is the regression test for the build-time
+// exponential-expansion DoS: maxUseDepth bounds recursion DEPTH but not
+// BREADTH, and breadth is where the cost is. The whole blowup happens inside
+// Parse, so pkg/svg/draw's maxDrawCalls — a draw-time backstop — never gets
+// the chance to fire.
+//
+// The assertion is deliberately on the guard's OBSERVABLE EFFECT (the
+// warnOnceMsg line firing, and the materialized node count staying within
+// the budget), never on wall-clock duration: a timing assertion here would
+// be flaky on a loaded CI machine and would not actually prove the budget
+// was what stopped the expansion.
+//
+// The n sweep is the real proof. Without the budget each extra level
+// multiplies the work by ~4, so an unbounded build would blow up long before
+// n=30; with it, every n produces the same bounded node count.
+func TestUseExpansionBombIsBounded(t *testing.T) {
+	for _, n := range []int{18, 24, 30} {
+		t.Run(fmt.Sprintf("levels=%d", n), func(t *testing.T) {
+			var logged bool
+			logf := func(format string, args ...any) {
+				if strings.Contains(fmt.Sprintf(format, args...), "instantiation budget exhausted") {
+					logged = true
+				}
+			}
+			doc, err := Parse(buildUseBomb(n), logf)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if !logged {
+				t.Error("expected the instantiation-budget degradation to be logged; it never fired")
+			}
+			_, root := doc.Root()
+			// Each charged instantiation materializes a bounded, small
+			// number of nodes (the <use>'s wrapper Group plus the target's
+			// own content), so the scene stays within a small multiple of
+			// the budget rather than growing with n.
+			if got, limit := countSceneNodes(root), 4*maxUseNodes; got > limit {
+				t.Errorf("materialized %d scene nodes, want <= %d: the budget did not bound the expansion", got, limit)
+			}
+		})
+	}
+}
+
+// TestUseBudgetSurvivesAcrossSiblingSubtrees pins down that the budget is a
+// whole-document total and not a per-subtree one. Each top-level <use> below
+// is an independent subtree; a counter that unwound with the recursion (the
+// useDepth/buildingUse shape) would be reset by every sibling and would let
+// the bomb through, since the bomb's cost is spread across exactly such
+// sibling instantiations.
+func TestUseBudgetSurvivesAcrossSiblingSubtrees(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`<svg ` + useHdr + ` width="100" height="100"><defs>`)
+	sb.WriteString(`<rect id="u0" width="1" height="1"/>`)
+	// A moderately deep chain, instantiated repeatedly as siblings. No single
+	// sibling exhausts the budget; only their SUM does.
+	for i := 1; i <= 12; i++ {
+		fmt.Fprintf(&sb, `<g id="u%d"><use xlink:href="#u%d"/><use xlink:href="#u%d"/></g>`, i, i-1, i-1)
+	}
+	sb.WriteString(`</defs>`)
+	for i := 0; i < 64; i++ {
+		sb.WriteString(`<use xlink:href="#u12"/>`)
+	}
+	sb.WriteString(`</svg>`)
+
+	var logged bool
+	logf := func(format string, args ...any) {
+		if strings.Contains(fmt.Sprintf(format, args...), "instantiation budget exhausted") {
+			logged = true
+		}
+	}
+	doc, err := Parse([]byte(sb.String()), logf)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !logged {
+		t.Error("budget never fired across sibling subtrees: it is being reset per subtree, which would let the expansion bomb through")
+	}
+	_, root := doc.Root()
+	if got, limit := countSceneNodes(root), 4*maxUseNodes; got > limit {
+		t.Errorf("materialized %d scene nodes, want <= %d", got, limit)
+	}
+}
+
+// TestLegitimateSpriteSheetRendersCompletely is the other half of the
+// budget's contract: it must never silently truncate a valid document. This
+// models the common heavy-<use> case — an icon sprite sheet defining many
+// <symbol>s and instantiating each — at a scale comfortably under
+// maxUseNodes, and requires that EVERY instantiation produced its shape and
+// that no degradation was logged.
+func TestLegitimateSpriteSheetRendersCompletely(t *testing.T) {
+	const (
+		symbols  = 100
+		perIcon  = 20
+		wantUses = symbols * perIcon
+	)
+	var sb strings.Builder
+	sb.WriteString(`<svg ` + useHdr + ` width="1000" height="1000"><defs>`)
+	for i := 0; i < symbols; i++ {
+		fmt.Fprintf(&sb, `<symbol id="icon%d" viewBox="0 0 10 10"><rect width="10" height="10" fill="green"/></symbol>`, i)
+	}
+	sb.WriteString(`</defs>`)
+	for i := 0; i < symbols; i++ {
+		for j := 0; j < perIcon; j++ {
+			fmt.Fprintf(&sb, `<use xlink:href="#icon%d" x="%d" y="%d" width="10" height="10"/>`, i, j*10, i*10)
+		}
+	}
+	sb.WriteString(`</svg>`)
+
+	var degraded []string
+	logf := func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		if strings.Contains(msg, "budget") || strings.Contains(msg, "unresolved") {
+			degraded = append(degraded, msg)
+		}
+	}
+	doc, err := Parse([]byte(sb.String()), logf)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(degraded) != 0 {
+		t.Errorf("a legitimate %d-instantiation sprite sheet was degraded: %v", wantUses, degraded)
+	}
+
+	// Every <use> must have produced a real, painted <rect>.
+	var shapes int
+	var walk func(Node)
+	walk = func(n Node) {
+		switch v := n.(type) {
+		case *Group:
+			if v == nil {
+				return
+			}
+			for _, k := range v.Kids {
+				walk(k)
+			}
+		case *Shape:
+			shapes++
+		}
+	}
+	_, root := doc.Root()
+	walk(root)
+	if shapes != wantUses {
+		t.Errorf("sprite sheet rendered %d shapes, want %d: the budget truncated a legitimate document", shapes, wantUses)
+	}
 }
