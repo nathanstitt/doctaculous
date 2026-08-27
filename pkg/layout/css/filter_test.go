@@ -512,3 +512,50 @@ func TestClipBracketsAlsoBalancedAcrossPageBreak(t *testing.T) {
 		}
 	}
 }
+
+// TestFilterBracketsPositionedDescendants pins that a positioned child of a
+// filtered box paints INSIDE the filter bracket.
+//
+// A positioned descendant bubbles up to the nearest STACKING CONTEXT holder,
+// not merely the nearest BFC. filter != none was initially added only to
+// establishesNewBFC, so a filtered box consumed no positioned layer and its
+// positioned children escaped past the FilterPush/FilterPop pair entirely —
+// measured: a position:relative or position:absolute child painted OUTSIDE the
+// bracket while a static child painted inside. Once the pixel chain runs, an
+// escaped child renders completely UNFILTERED, not merely mis-ordered, and a
+// filtered box with a positioned child (badges, overlays, dropdowns) is an
+// everyday pattern.
+//
+// Counting the child's own background inside vs outside the bracket is what
+// discriminates: bracket counts alone stay balanced either way, so a
+// balance-only assertion passes with the bug present.
+func TestFilterBracketsPositionedDescendants(t *testing.T) {
+	for _, pos := range []string{"position:relative", "position:absolute", "position:relative;z-index:5", ""} {
+		src := `<html><body><div style="filter:grayscale(1);background:rgb(10,10,10);width:100px;height:60px">
+		  <div style="` + pos + `;background:rgb(20,20,20);width:50px;height:20px"></div>
+		</div></body></html>`
+		f := layoutHTML(t, src, 200)
+
+		depth, inside, outside := 0, 0, 0
+		for _, it := range f.AppendItems(nil) {
+			switch it.Kind {
+			case layout.FilterPushKind:
+				depth++
+			case layout.FilterPopKind:
+				depth--
+			case layout.BackgroundKind:
+				if it.Rule.Color.R == 20 {
+					if depth > 0 {
+						inside++
+					} else {
+						outside++
+					}
+				}
+			}
+		}
+		if inside != 1 || outside != 0 {
+			t.Errorf("child %q: painted inside=%d outside=%d, want inside=1 outside=0; a descendant of a filtered box must not escape the bracket",
+				pos, inside, outside)
+		}
+	}
+}

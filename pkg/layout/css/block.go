@@ -1131,11 +1131,23 @@ func establishesNewBFC(b *cssbox.Box) bool {
 }
 
 // establishesStackingContext reports whether b establishes a CSS stacking context.
-// In the supported subset: any positioned box (relative/absolute/fixed). The page
-// root is treated as a stacking context by layoutTree directly. (Full CSS also
-// includes opacity<1, transforms, etc. — none modeled yet.)
+// In the supported subset: any positioned box (relative/absolute/fixed), and any
+// filtered box. The page root is treated as a stacking context by layoutTree
+// directly. (Full CSS also includes opacity<1, transforms, etc. — none modeled yet.)
+//
+// filter != none MUST be here, not only in establishesNewBFC. A positioned
+// descendant bubbles up to the nearest STACKING CONTEXT holder (see
+// Fragment.appendItemsUnfiltered's IsStackingContext || IsBFC test and
+// sortedPositioned): a box that is a BFC but not a stacking context does not
+// consume its positioned layer, so the descendant escapes past it — and, for a
+// filtered box, past the FilterPush/FilterPop bracket entirely. Measured before
+// this was added: a position:relative or position:absolute child of a filtered
+// box painted OUTSIDE the bracket (a static child correctly painted inside), so
+// it would render completely unfiltered rather than merely mis-ordered. A
+// filtered box with a positioned child is an everyday pattern (badges, overlays,
+// dropdowns), so this is not an exotic case.
 func establishesStackingContext(b *cssbox.Box) bool {
-	return b.Position != cssbox.PosStatic
+	return b.Position != cssbox.PosStatic || filtered(b)
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous
