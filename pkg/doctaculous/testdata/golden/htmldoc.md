@@ -453,3 +453,23 @@ grayscale(1) brightness(1.5) contrast(1.4)
 Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach _outside_ the tile's border box — CSS, unlike SVG, does not clip a filter to a region — while the eight colour adjustments recolour each pixel in place. The last swatch chains three functions, which apply left to right: grey first, then brighten that result, then raise its contrast.
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
+
+**19 / MISSING GLYPHS**
+
+## Characters No Font Can Draw
+
+No bundled face covers emoji or Devanagari, and none ever will — the bundle is a handful of permissively‑licensed Latin, Hebrew and Arabic substitutes. A character none of them maps now draws `.notdef`, the “tofu” box, exactly as a browser does.
+
+Nine weather emoji. Every one is unmappable, so every one is a box:
+
+🌈🌤🌥🌦🌧🌨🌩🌪🌫
+
+The box is not a placeholder pasted over the line — it is a glyph, and it shapes like one. Below, unmappable characters sit inline with text that resolves normally, and the correct text keeps its own metrics on either side:
+
+Latin, then Devanagari कखग, then Latin again.
+
+Whether the mark is drawn by the font or by us depends on the font. A face that ships its own `.notdef` gets _its_ glyph — DejaVu draws a hollow box, Noto draws a box containing the code point's hex digits. The bundled TeX Gyre substitutes ship a `.notdef` that is _blank_, so for the boxes above the geometry is synthesized. Each distinct missing character is also reported once through the layout log, which is the half that makes a font gap diagnosable rather than merely visible.
+
+Invisible characters are deliberately excluded. A no‑break space, a zero‑width joiner or a variation selector draws no ink even in a font that maps it, so giving it a box would invent a mark the author never wrote. The sentence you are reading contains a U+202F NARROW NO‑BREAK SPACE that no bundled face maps; it renders as space, and nothing is logged, because nothing is wrong.
+
+Look for: the boxes have a side bearing, so they read as separate marks rather than one bar, and they sit on the baseline with the text around them. This matters more than it looks. Before `.notdef`, an unmappable character rendered as _nothing_ — and because the surrounding text was untouched, a page with a font gap looked like a page with a _layout_ bug. It is worse when only some characters of a set are missing: the report behind this section was a board carrying only DejaVu and Liberation, where three of nine weather emoji drew and six vanished.

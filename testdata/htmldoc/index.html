@@ -703,5 +703,46 @@ newline is kept.</p>
       picture of itself.</p>
   </section>
 
+  <!-- ===================== 19 · MISSING GLYPHS ===================== -->
+  <section class="section break">
+    <span class="kicker">19 / MISSING GLYPHS</span>
+    <h2>Characters No Font Can Draw</h2>
+    <p class="lede">No bundled face covers emoji or Devanagari, and none ever will
+      &mdash; the bundle is a handful of permissively&#8209;licensed Latin, Hebrew and
+      Arabic substitutes. A character none of them maps now draws
+      <code>.notdef</code>, the &ldquo;tofu&rdquo; box, exactly as a browser does.</p>
+
+    <p>Nine weather emoji. Every one is unmappable, so every one is a box:</p>
+    <p style="font-size: 22px;">&#127752;&#127780;&#127781;&#127782;&#127783;&#127784;&#127785;&#127786;&#127787;</p>
+
+    <p>The box is not a placeholder pasted over the line &mdash; it is a glyph, and it
+      shapes like one. Below, unmappable characters sit inline with text that resolves
+      normally, and the correct text keeps its own metrics on either side:</p>
+    <p>Latin, then Devanagari &#2325;&#2326;&#2327;, then Latin again.</p>
+
+    <p>Whether the mark is drawn by the font or by us depends on the font. A face that
+      ships its own <code>.notdef</code> gets <em>its</em> glyph &mdash; DejaVu draws a
+      hollow box, Noto draws a box containing the code point's hex digits. The bundled
+      TeX&nbsp;Gyre substitutes ship a <code>.notdef</code> that is <em>blank</em>, so
+      for the boxes above the geometry is synthesized. Each distinct missing character
+      is also reported once through the layout log, which is the half that makes a font
+      gap diagnosable rather than merely visible.</p>
+
+    <p>Invisible characters are deliberately excluded. A no&#8209;break space, a
+      zero&#8209;width joiner or a variation selector draws no ink even in a font that
+      maps it, so giving it a box would invent a mark the author never wrote. The
+      sentence you are reading contains a U+202F&#8239;NARROW NO&#8209;BREAK SPACE that
+      no bundled face maps; it renders as space, and nothing is logged, because nothing
+      is wrong.</p>
+    <p class="caption">Look for: the boxes have a side bearing, so they read as
+      separate marks rather than one bar, and they sit on the baseline with the text
+      around them. This matters more than it looks. Before <code>.notdef</code>, an
+      unmappable character rendered as <em>nothing</em> &mdash; and because the
+      surrounding text was untouched, a page with a font gap looked like a page with a
+      <em>layout</em> bug. It is worse when only some characters of a set are missing:
+      the report behind this section was a board carrying only DejaVu and Liberation,
+      where three of nine weather emoji drew and six vanished.</p>
+  </section>
+
 </body>
 </html>

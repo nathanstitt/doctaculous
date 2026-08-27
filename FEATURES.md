@@ -181,6 +181,23 @@ bullet's design rationale is in its PR:
   paragraph now shapes instead of being silently dropped. Results cache per (script, style); the
   fallback consults bundled faces only. A fallback glyph carries the face it resolved from, since a
   GID is only meaningful against its own face.
+- **`.notdef` for unmappable runes** (`pkg/font/notdef.go`, `pkg/layout/inline/shape.go`): a rune that
+  neither the run's family nor any script fallback can map now draws the tofu box instead of rendering
+  as NOTHING. `Face.NotdefGlyph` follows the browser order — the font's own glyph 0 when it has
+  geometry (DejaVu draws a hollow box, Noto a box of hex digits), a synthesized hollow rectangle when
+  it does not, which is the branch the bundled TeX Gyre substitutes take since all of them ship a
+  BLANK `.notdef`. The box carries a non-zero advance so line-breaking measures the text at its true
+  width, and `Glyph.Runes` is retained so bidi sees the character's real class and SVG's
+  glyph→character mapping still locates it; `Glyph.Face` is cleared so every backend fills the same
+  outline (handing a text backend GID 0 would emit the font's blank `.notdef`, making the box visible
+  in a raster and invisible in a PDF of the same page). **Each distinct missing rune is warned about
+  exactly once per `Shape` call** via the `logf` the CSS engine and the SVG text path already thread
+  in — the shaper is one of the degradation sites that genuinely has a logger, so this really does log
+  rather than only claiming to. Invisible characters are excluded (`invisibleRune`): a space variant,
+  format control, or variation selector draws no ink even where it IS mapped, so giving it a box would
+  invent a mark the author never wrote — this repo's own showcase carries a U+202F that regressed
+  exactly that way before the exclusion existed. Applies to the shared CSS/SVG text path; DOCX/PDF and
+  any page whose glyphs all resolve stay byte-identical. Showcase §19.
 - **Inline bidi reordering** (`pkg/layout/inline/bidi.go`) — RTL slice 3 of 5: shaping and breaking stay
   in LOGICAL order; `MakeVisualLine` applies UAX#9 rule L2 per line after the break is chosen, plus rule
   L4 bracket mirroring (`Glyph.Runes` keeps the ORIGINAL character so `/ToUnicode` recovers the authored
