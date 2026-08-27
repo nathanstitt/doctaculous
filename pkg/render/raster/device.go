@@ -116,8 +116,7 @@ func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64, bl
 	if alpha > 1 {
 		alpha = 1
 	}
-	sep, isSep := separableBlends[blendMode]
-	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	sep, isSep, nonsep, isNonsep := lookupBlend(blendMode)
 	inv, ok := invert(ctm)
 	if !ok {
 		return
@@ -302,8 +301,7 @@ func (d *Device) EndGroup(alpha float64, blendMode string, clipMask, softMask re
 	// once here (composite time), alongside the caller-supplied masks.
 	clip := g.outerClip
 
-	sep, isSep := separableBlends[blendMode]
-	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	sep, isSep, nonsep, isNonsep := lookupBlend(blendMode)
 	b := scratch.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {

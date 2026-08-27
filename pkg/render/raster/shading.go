@@ -35,8 +35,7 @@ func (d *Device) FillShading(shader render.Shader, ctm render.Matrix, blendMode 
 	if b.Empty() {
 		return
 	}
-	sep, isSep := separableBlends[blendMode]
-	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	sep, isSep, nonsep, isNonsep := lookupBlend(blendMode)
 
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {

@@ -97,8 +97,8 @@ func TestSeparableBlendMath(t *testing.T) {
 		{"Exclusion", 0.5, 0.5, 0.5},
 	}
 	for _, tc := range cases {
-		f := separableBlends[tc.mode]
-		if f == nil {
+		f, ok := render.SeparableBlendFunc(tc.mode)
+		if !ok || f == nil {
 			t.Fatalf("no blend func for %q", tc.mode)
 		}
 		if got := f(tc.cd, tc.cs); !approx(got, tc.want) {
