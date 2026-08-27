@@ -139,6 +139,103 @@ type Style struct {
 	// override is applied by wrapping the text in the LRO/RLO control pair —
 	// see textRunsFor).
 	unicodeBidi string
+
+	// letterSpacingPt and wordSpacingPt are the resolved letter-spacing /
+	// word-spacing in user units, inherited. Both are resolved eagerly here
+	// (em/ex/% against this element's own already-computed fontSizePt, which
+	// is why applyFontSize runs first) so pkg/svg/draw never has to re-resolve
+	// a length.
+	//
+	// DELIBERATE ASYMMETRY, not an oversight: these two properties exist
+	// NOWHERE ELSE in this engine — not in pkg/css, not in pkg/layout/css — so
+	// after this change letter-spacing works in SVG and silently does nothing
+	// in HTML/DOCX. SVG text applies them as a post-shaping advance adjustment
+	// on a flat glyph slice, which is self-contained; CSS reflow would have to
+	// thread them through line-breaking and justification, which is a
+	// materially larger job and is explicitly out of scope here. See the
+	// design's decision 2.
+	letterSpacingPt float64
+	wordSpacingPt   float64
+
+	// dominantBaseline is the resolved dominant-baseline keyword, inherited
+	// ("auto" initial). alignmentBaseline is the resolved alignment-baseline
+	// keyword, NOT inherited ("auto" initial) — CSS Inline defines it as a
+	// per-box property, and resvg's dominant-baseline/nested.svg depends on it
+	// not leaking into a grandchild tspan. Both are resolved to a physical
+	// baseline offset in pkg/svg/draw, where a resolved Face and its metrics
+	// exist.
+	dominantBaseline  string
+	alignmentBaseline string
+
+	// baselineShiftPt is the CUMULATIVE baseline shift in user units, positive
+	// = UP (away from the text's baseline). Unlike every other property here
+	// it does not simply replace the parent's value: a shift inside a shift
+	// ADDS (SVG2 §11.10.2 — the shifted baseline becomes the reference for a
+	// nested shift), which is what resvg's nested-super/mixed-nested fixtures
+	// assert. See applyBaselineShift.
+	baselineShiftPt float64
+
+	// decorations are the text-decoration lines DECLARED at this element,
+	// each paired with the paint and font metrics in effect where it was
+	// declared. SVG resolves a decoration's fill/stroke and its
+	// position/thickness from the DECLARING element, not from the descendant
+	// characters it happens to cover, so <text fill="red"
+	// text-decoration="underline"><tspan fill="blue">x</tspan></text>
+	// underlines in RED — resvg's style-resolving-1..4 fixtures assert exactly
+	// this. Carrying the declaration (rather than a bare keyword set) is what
+	// makes that possible.
+	//
+	// It is a slice rather than a bitmask because nested elements can declare
+	// DIFFERENT lines with DIFFERENT paint (indirect-with-multiple-colors.svg:
+	// a line-through from a <g> in the text's paint, plus an underline from a
+	// tspan in the tspan's). Sharing the backing array across a cascade is
+	// safe because apply() only ever appends through a fresh slice header —
+	// see addDecoration.
+	decorations []decoration
+
+	// fontStretchIgnored, fontVariantIgnored, and kerningIgnored record that a
+	// font-stretch / font-variant / kerning|font-kerning value reached the
+	// cascade and was DEGRADED (logged and dropped) rather than honored — see
+	// the three appliers for why none of them can do anything real with the
+	// bundled faces. Nothing in the render path reads them; they exist so a
+	// test can assert the degradation actually happened at the property that
+	// requested it, which a log line alone cannot pin down. Inherited, exactly
+	// like the properties they track.
+	fontStretchIgnored bool
+	fontVariantIgnored bool
+	kerningIgnored     bool
+}
+
+// decoration is one declared text-decoration line together with the resolved
+// presentation state of the element that declared it. See Style.decorations.
+type decoration struct {
+	// line is "underline", "overline", or "line-through".
+	line string
+
+	// style is the paint/metrics state at the DECLARING element, captured by
+	// value. It is a *Style rather than an embedded Style purely to keep the
+	// type acyclic (a Style cannot contain itself).
+	style *Style
+}
+
+// DecorationLines returns, for each text-decoration line declared at or above
+// this element (within the <text> subtree), the line keyword and the resolved
+// Style of the element that declared it — the style whose fill/stroke paints
+// the line and whose font-size positions it.
+//
+// The two slices are parallel and in declaration order (outermost first). The
+// returned styles are copies; mutating one cannot reach the scene graph.
+func (s Style) DecorationLines() (lines []string, styles []Style) {
+	if len(s.decorations) == 0 {
+		return nil, nil
+	}
+	lines = make([]string, 0, len(s.decorations))
+	styles = make([]Style, 0, len(s.decorations))
+	for _, d := range s.decorations {
+		lines = append(lines, d.line)
+		styles = append(styles, *d.style)
+	}
+	return lines, styles
 }
 
 // defaultStyle returns the SVG initial presentation state: black fill, no
@@ -179,6 +276,10 @@ func defaultStyle() Style {
 		textAnchor:  "start",
 		direction:   "ltr",
 		unicodeBidi: "normal", // not inherited; reset every apply() call below
+		// letterSpacingPt/wordSpacingPt/baselineShiftPt default to 0 and
+		// decorations to nil, all of which are the zero value.
+		dominantBaseline:  "auto",
+		alignmentBaseline: "auto", // not inherited; reset every apply() call below
 	}
 }
 
@@ -206,6 +307,11 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s.maskType = "luminance" // not inherited; may be overridden below
 	s.overflow = "hidden"    // not inherited; may be overridden below
 	s.unicodeBidi = "normal" // not inherited; may be overridden below
+	// alignment-baseline is a per-box property (CSS Inline §5.2), NOT
+	// inherited: resvg's dominant-baseline/nested.svg puts it on one tspan and
+	// expects a SIBLING tspan's own dominant-baseline to win, which only works
+	// if the value does not leak down.
+	s.alignmentBaseline = "auto"
 
 	if el == nil {
 		return s
@@ -224,13 +330,29 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	// font-relative length on this element would want this element's own
 	// already-resolved size. Likewise applyFontWeight reads the inherited
 	// numeric weight for bolder/lighter before overwriting it.
+	// The `font` SHORTHAND runs first of all, so an explicit longhand on the
+	// same element still wins (CSS shorthand-then-longhand order within one
+	// declaration block is source order, but the corpus only exercises the
+	// far more common "shorthand alone" case, and losing to a longhand is the
+	// safer of the two possible orders).
+	applyFontShorthand(&s, parent.fontSizePt, parent.fontWeight, attr, logf)
 	applyFontSize(&s, parent.fontSizePt, attr, logf)
 	applyFontFamily(&s, attr, logf)
 	applyFontWeight(&s, parent.fontWeight, attr, logf)
 	applyFontStyle(&s, attr, logf)
+	applyFontStretch(&s, attr, logf)
+	applyFontVariant(&s, attr, logf)
+	applyKerning(&s, attr, logf)
 	applyTextAnchor(&s, attr, logf)
 	applyDirection(&s, attr, logf)
 	applyUnicodeBidi(&s, attr, logf)
+	// letter-spacing/word-spacing resolve AFTER font-size: their em/ex/%
+	// values are relative to this element's own already-computed size.
+	applySpacing("letter-spacing", &s.letterSpacingPt, s.fontSizePt, attr, logf)
+	applySpacing("word-spacing", &s.wordSpacingPt, s.fontSizePt, attr, logf)
+	applyDominantBaseline(&s, attr, logf)
+	applyAlignmentBaseline(&s, attr, logf)
+	applyBaselineShift(&s, parent.baselineShiftPt, attr, logf)
 
 	// 'color' must resolve before fill/stroke so currentColor sees the
 	// element's own (already-updated) color, not the parent's.
@@ -268,6 +390,12 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyMarkerProp("marker-start", &s.markerStartRef, attr, logf)
 	applyMarkerProp("marker-mid", &s.markerMidRef, attr, logf)
 	applyMarkerProp("marker-end", &s.markerEndRef, attr, logf)
+
+	// text-decoration LAST: a decoration declared here is painted with THIS
+	// element's fill/stroke and positioned by THIS element's font metrics, so
+	// the snapshot it takes must see every paint and font property already
+	// resolved above.
+	applyTextDecoration(&s, attr, logf)
 
 	return s
 }
@@ -1109,3 +1237,488 @@ func (s Style) DirectionRTL() bool { return s.direction == "rtl" }
 // "bidi-override", which forces every character into the base direction's
 // order rather than letting the UAX#9 algorithm choose per character.
 func (s Style) BidiOverride() bool { return s.unicodeBidi == "bidi-override" }
+
+// applySpacing resolves letter-spacing or word-spacing into *dst, in user
+// units. "normal" is the initial value and means zero extra spacing. em/ex/%
+// resolve against sizePt, this element's OWN already-computed font-size —
+// which is why the caller runs this after applyFontSize.
+//
+// Negative values are legal and meaningful (they tighten). An unparseable
+// value is logged and ignored, keeping the inherited spacing, per SVG error
+// handling. The magnitude is clamped to maxSpacingPt: a hostile
+// letter-spacing="1e300" would otherwise push a glyph's pen position to a
+// coordinate that overflows to Inf inside the rasterizer's edge list, and the
+// resvg corpus itself labels its own letter-spacing="-10000" fixture
+// "undefined behaviour", so clamping costs no legitimate document anything.
+func applySpacing(name string, dst *float64, sizePt float64, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr(name)
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	if val == "normal" {
+		*dst = 0
+		return
+	}
+	v, ok := parseFontRelLength(val, sizePt)
+	if !ok {
+		logf("svg: ignoring %s=%q: unparseable", name, val)
+		return
+	}
+	*dst = clamp(v, -maxSpacingPt, maxSpacingPt)
+}
+
+// maxSpacingPt bounds the magnitude of a resolved letter-spacing,
+// word-spacing, or baseline-shift, in user units. It is a DoS guard, not a
+// fidelity choice: these values feed straight into a glyph's pen position, and
+// an unbounded one lets a 200-byte document place geometry at 1e300, where the
+// rasterizer's coordinate arithmetic overflows. A million user units is
+// already far outside any viewport a document can meaningfully address.
+const maxSpacingPt = 1e6
+
+// parseFontRelLength parses a length whose FONT-RELATIVE units (em, ex, %)
+// resolve against sizePt — the element's own computed font-size — rather than
+// against parseLength's hardcoded 16px/8px UA defaults. Absolute units
+// (px/pt/pc/mm/cm/in and a bare number) delegate to parseLength so the unit
+// table stays in one place.
+//
+// It exists because every property added in this tranche (letter-spacing,
+// word-spacing, baseline-shift, textLength) takes a length whose percentage
+// and em basis is the current font-size, and reading them through parseLength
+// would silently resolve "5%" against zero.
+func parseFontRelLength(s string, sizePt float64) (float64, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	// splitLengthUnit only reports ok for a bare number or a font-relative
+	// unit; an absolute unit ("42px") makes its parseNumber fail. So a false
+	// ok here is NOT an error — it means "not font-relative", which is
+	// precisely the case parseLength handles.
+	if v, unit, ok := splitLengthUnit(s); ok {
+		switch unit {
+		case "em":
+			return v * sizePt, true
+		case "ex":
+			// The same conventional 0.5em approximation applyFontSize uses: no
+			// face is resolved at cascade time, so a real x-height is
+			// unavailable here.
+			return v * sizePt * 0.5, true
+		case "%":
+			return v / 100 * sizePt, true
+		}
+	}
+	return parseLength(s, sizePt)
+}
+
+// baselineKeywords is the set of dominant-baseline/alignment-baseline values
+// this engine recognizes, mapped to whether it can compute the keyword from
+// Face.Metrics() alone.
+//
+// The false entries are the honest degradations: "ideographic" and
+// "mathematical" are defined against the font's OS/2 and BASE tables, which
+// pkg/font does not parse, so they resolve to "alphabetic" with a warn-once
+// rather than being guessed at. "no-change" and "reset-size" were DEPRECATED
+// in SVG 2 (the corpus labels reset-size "UB") and likewise degrade.
+var baselineKeywords = map[string]bool{
+	"auto":             true,
+	"alphabetic":       true,
+	"baseline":         true, // alignment-baseline's spelling of "alphabetic"
+	"middle":           true,
+	"central":          true,
+	"hanging":          true,
+	"text-before-edge": true,
+	"text-after-edge":  true,
+	"before-edge":      true, // alignment-baseline's shorter spellings
+	"after-edge":       true,
+	"ideographic":      false,
+	"mathematical":     false,
+	"no-change":        false,
+	"reset-size":       false,
+	"use-script":       false,
+}
+
+// applyDominantBaseline resolves dominant-baseline, inherited. A keyword this
+// engine cannot compute from Face.Metrics() degrades to "auto" (the alphabetic
+// baseline) rather than being approximated; an unrecognized value is ignored
+// entirely, keeping the inherited one.
+func applyDominantBaseline(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	applyBaselineKeyword("dominant-baseline", &s.dominantBaseline, attr, logf)
+}
+
+// applyAlignmentBaseline resolves alignment-baseline, NOT inherited (see
+// Style.alignmentBaseline). Same keyword handling as dominant-baseline.
+func applyAlignmentBaseline(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	applyBaselineKeyword("alignment-baseline", &s.alignmentBaseline, attr, logf)
+}
+
+// applyBaselineKeyword is the shared body of the two baseline-selection
+// properties, which take the identical keyword set.
+func applyBaselineKeyword(name string, dst *string, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr(name)
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	computable, known := baselineKeywords[val]
+	if !known {
+		logf("svg: ignoring %s=%q: unparseable", name, val)
+		return
+	}
+	if !computable {
+		logf("svg: %s=%q needs OS/2 or BASE table metrics pkg/font does not parse; using the alphabetic baseline", name, val)
+		*dst = "auto"
+		return
+	}
+	*dst = val
+}
+
+// applyBaselineShift resolves baseline-shift into s.baselineShiftPt, in user
+// units, positive = UP.
+//
+// It is the one property here that ACCUMULATES rather than replaces:
+// parentShift is the shift already in effect, and a nested <tspan>'s own value
+// adds to it (SVG2 §11.10.2 — a shift is measured from the baseline currently
+// in effect, which a parent shift has already moved). resvg's nested-super and
+// mixed-nested fixtures assert the sum; nested-with-baseline-1 asserts that
+// the "baseline" keyword contributes ZERO without RESETTING the accumulation,
+// so 20% + baseline + 20% still lands at 40%.
+//
+// "sub"/"super" use the conventional ∓0.2em / ±0.4em offsets — SVG defines
+// them against the font's OS/2 subscript/superscript offsets, which pkg/font
+// does not parse; the fractions are the widely-used substitutes and are the
+// same shape pkg/layout/inline already uses for vertical-align: super.
+// Percentages resolve against the element's own font-size, per spec.
+func applyBaselineShift(s *Style, parentShift float64, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("baseline-shift")
+	if !ok || val == "inherit" {
+		// "inherit" keeps the accumulated parent shift, which s already
+		// carries — resvg's inheritance-3.svg asserts exactly that (the
+		// explicitly-inheriting <text> renders identically to the one whose
+		// shift was ignored, because BOTH end up at zero).
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	var delta float64
+	switch val {
+	case "baseline":
+		delta = 0
+	case "sub":
+		delta = -subSuperFraction * s.fontSizePt
+	case "super":
+		delta = superFraction * s.fontSizePt
+	default:
+		v, ok := parseFontRelLength(val, s.fontSizePt)
+		if !ok {
+			logf("svg: ignoring %s=%q: unparseable", "baseline-shift", val)
+			return
+		}
+		delta = v
+	}
+	s.baselineShiftPt = clamp(parentShift+delta, -maxSpacingPt, maxSpacingPt)
+}
+
+// subSuperFraction and superFraction are the em fractions baseline-shift's
+// "sub" and "super" keywords resolve to. SVG defines them against the font's
+// OS/2 ySubscriptYOffset / ySuperscriptYOffset, which pkg/font does not parse;
+// these are the conventional substitutes.
+const (
+	subSuperFraction = 0.2
+	superFraction    = 0.4
+)
+
+// applyTextDecoration resolves text-decoration, capturing the DECLARING
+// element's fully-resolved style alongside each line keyword.
+//
+// The property is written as if inherited, but what actually propagates in SVG
+// is the decoration together with the paint and metrics of the element that
+// declared it (SVG2 §11.11): a decoration declared on a <text> keeps painting
+// in the <text>'s fill even over a differently-filled <tspan>. Carrying a
+// captured *Style per declaration is what expresses that; a plain inherited
+// keyword set could not.
+//
+// "none" clears every accumulated decoration for this subtree, which is how
+// an author turns an ancestor's decoration off. Multiple keywords in one value
+// ("underline overline line-through", in any order, comma- or space-separated)
+// all apply. An unrecognized keyword is skipped with a log; recognized ones in
+// the same value still apply, matching CSS's per-keyword tolerance for this
+// property.
+func applyTextDecoration(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("text-decoration")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	if val == "none" {
+		s.decorations = nil
+		return
+	}
+	// The snapshot is taken ONCE per declaring element and shared by every
+	// line it declares: they are the same element, so they have the same paint
+	// and metrics.
+	snapshot := *s
+	snapshot.decorations = nil // no self-reference; the snapshot only supplies paint/metrics
+	for _, f := range strings.FieldsFunc(val, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+	}) {
+		switch f {
+		case "underline", "overline", "line-through":
+			s.addDecoration(f, &snapshot)
+		case "blink", "none":
+			// "blink" has no static rendering; a stray "none" inside a list is
+			// contradictory. Both are skipped silently rather than logged —
+			// they are legal CSS, just inert here.
+		default:
+			logf("svg: ignoring text-decoration keyword %q: unsupported", f)
+		}
+	}
+}
+
+// addDecoration appends one declared line, replacing any same-line declaration
+// already inherited from an ancestor: a <tspan text-decoration="underline">
+// inside a <text text-decoration="underline"> must draw ONE underline, in the
+// tspan's paint, not two (resvg's indirect-with-multiple-colors.svg, whose
+// inner tspan3 re-declares the underline its parent already set).
+//
+// It always writes through a FRESH slice header rather than appending in
+// place, so a child's decoration can never be seen by a sibling that shares
+// the parent's backing array.
+func (s *Style) addDecoration(line string, declaring *Style) {
+	out := make([]decoration, 0, len(s.decorations)+1)
+	for _, d := range s.decorations {
+		if d.line != line {
+			out = append(out, d)
+		}
+	}
+	s.decorations = append(out, decoration{line: line, style: declaring})
+}
+
+// rebaseDecorations returns s with every accumulated decoration re-pointed at
+// s itself, so each line keeps its identity but adopts s's paint and font
+// metrics.
+//
+// It is called once, on the <text> element, to implement the rule that a
+// decoration inherited from an ANCESTOR of the <text> paints in the <text>'s
+// colours rather than the ancestor's — see buildText's call site for the two
+// resvg fixtures that pin this. A decoration declared on the <text> itself is
+// already anchored there, so rebasing it is a no-op, and a <tspan>'s own
+// declaration happens later in the walk and is unaffected.
+func (s Style) rebaseDecorations() Style {
+	if len(s.decorations) == 0 {
+		return s
+	}
+	self := s
+	self.decorations = nil // the snapshot supplies paint/metrics only
+	out := make([]decoration, len(s.decorations))
+	for i, d := range s.decorations {
+		out[i] = decoration{line: d.line, style: &self}
+	}
+	s.decorations = out
+	return s
+}
+
+// applyFontStretch resolves font-stretch. Every value DEGRADES: the bundled
+// families (see pkg/font/standard) ship regular/bold/italic only, with no
+// condensed or expanded variant and no synthetic horizontal scaling anywhere
+// in the engine, so there is nothing real a condensed request can resolve to.
+// Rather than pretend — a synthetic squeeze would change advances and glyph
+// shapes in a way no font designer sanctioned, and would silently diverge from
+// every other renderer — the property is logged once and ignored, leaving the
+// normal-width face.
+//
+// It still goes through the cascade (rather than being dropped at the parser)
+// so the diagnostic fires for a style="" or sheet rule too, not only for a
+// presentation attribute.
+func applyFontStretch(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font-stretch")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	if val == "normal" {
+		return // the only value the bundled faces can actually honor
+	}
+	s.fontStretchIgnored = true
+	logf("svg: font-stretch=%q ignored: no condensed/expanded face is bundled and no synthetic stretching exists", val)
+}
+
+// applyFontVariant resolves font-variant. Like font-stretch it degrades:
+// "small-caps" needs either a real small-caps face or the OpenType `smcp`
+// feature, and neither the bundled families nor the shaping path
+// (font-feature-settings is not plumbed through pkg/layout/inline) can supply
+// one. "normal" is honored trivially; anything else is logged and ignored.
+func applyFontVariant(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font-variant")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	if val == "normal" {
+		return
+	}
+	s.fontVariantIgnored = true
+	logf("svg: font-variant=%q ignored: no small-caps face is bundled and OpenType features are not plumbed through the shaper", val)
+}
+
+// applyKerning resolves the SVG 1.1 `kerning` property and its SVG 2 / CSS
+// successor `font-kerning`. Both only ever turn kerning OFF or adjust it, and
+// this engine applies NO GPOS kerning-pair pass to simple scripts in the first
+// place (complex scripts get kerning inside harfbuzz, which these properties
+// cannot reach) — so there is nothing to disable and the properties are inert.
+//
+// The SVG 1.1 form additionally accepts a LENGTH, which would replace the
+// inter-glyph spacing wholesale. That one is not inert in principle, but it was
+// removed from SVG 2 and is unimplemented in every current browser and in
+// resvg, so honoring it would make this engine the outlier. Logged and ignored.
+func applyKerning(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	for _, name := range [...]string{"kerning", "font-kerning"} {
+		val, ok := attr(name)
+		if !ok || val == "inherit" {
+			continue
+		}
+		val = strings.ToLower(strings.TrimSpace(val))
+		if val == "auto" || val == "normal" {
+			continue // the default behavior, which is what already happens
+		}
+		s.kerningIgnored = true
+		logf("svg: %s=%q ignored: no GPOS kerning-pair pass runs for simple scripts, so there is nothing to disable or override", name, val)
+	}
+}
+
+// applyFontShorthand expands the CSS `font` shorthand into the longhands this
+// engine reads: font-style, font-weight, font-size, and font-family. The CSS
+// grammar is `[ style || variant || weight || stretch ]? size [ / line-height ]?
+// family`, so the value is scanned left to right taking optional leading
+// keywords, then a size (with an optional /line-height this engine has no use
+// for), then everything remaining as the family list.
+//
+// A value that does not yield BOTH a size and a family is invalid per CSS and
+// is ignored wholesale — no partial application, which is what keeps
+// `font="bold"` from silently making text bold when the author wrote an
+// incomplete shorthand.
+//
+// The system-font keywords (caption, icon, menu, message-box, small-caption,
+// status-bar) name platform UI fonts this engine cannot resolve; they are
+// logged and ignored.
+func applyFontShorthand(s *Style, parentPt float64, parentWeight int, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("font")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	switch strings.ToLower(val) {
+	case "caption", "icon", "menu", "message-box", "small-caption", "status-bar":
+		logf("svg: ignoring font=%q: system font keywords name platform UI fonts this engine cannot resolve", val)
+		return
+	}
+
+	fields := strings.Fields(val)
+	italic, bold := s.fontItalic, s.fontBold
+	weight := parentWeight
+	i := 0
+	// Leading optional keywords, in any order.
+	for ; i < len(fields); i++ {
+		switch strings.ToLower(fields[i]) {
+		case "normal":
+			// Ambiguous across style/variant/weight/stretch; CSS says it sets
+			// whichever slots are still unset, and all three of ours default
+			// to the non-normal-free value already.
+		case "italic", "oblique":
+			italic = true
+		case "small-caps":
+			// Recorded only as a diagnostic: see applyFontVariant.
+			s.fontVariantIgnored = true
+			logf("svg: font shorthand's small-caps ignored: no small-caps face is bundled")
+		case "bold":
+			weight, bold = 700, true
+		case "bolder":
+			weight = stepWeight(parentWeight, +1)
+			bold = weight >= boldWeightThreshold
+		case "lighter":
+			weight = stepWeight(parentWeight, -1)
+			bold = weight >= boldWeightThreshold
+		case "ultra-condensed", "extra-condensed", "condensed", "semi-condensed",
+			"semi-expanded", "expanded", "extra-expanded", "ultra-expanded":
+			s.fontStretchIgnored = true
+			logf("svg: font shorthand's stretch keyword %q ignored: no condensed/expanded face is bundled", fields[i])
+		default:
+			goto size
+		}
+	}
+size:
+	if i >= len(fields) {
+		logf("svg: ignoring font=%q: no font-size in the shorthand", val)
+		return
+	}
+	// The size may carry a "/line-height" suffix, which this engine discards:
+	// SVG text does not wrap, so there is no line box for it to size.
+	sizeTok := fields[i]
+	if slash := strings.IndexByte(sizeTok, '/'); slash >= 0 {
+		sizeTok = sizeTok[:slash]
+	}
+	sizePt, ok := resolveFontSizeToken(sizeTok, parentPt)
+	if !ok {
+		logf("svg: ignoring font=%q: unparseable font-size %q", val, sizeTok)
+		return
+	}
+	i++
+	family := cleanFamilyList(strings.Join(fields[i:], " "))
+	if family == "" {
+		logf("svg: ignoring font=%q: no font-family in the shorthand", val)
+		return
+	}
+
+	s.fontSizePt = sizePt
+	s.fontFamily = family
+	s.fontItalic = italic
+	s.fontWeight = weight
+	s.fontBold = bold
+}
+
+// resolveFontSizeToken resolves one font-size token (a keyword or a length)
+// against parentPt, sharing applyFontSize's rules. It exists so the `font`
+// shorthand and the `font-size` longhand cannot drift apart on which keywords
+// and units they accept.
+func resolveFontSizeToken(tok string, parentPt float64) (float64, bool) {
+	tok = strings.ToLower(strings.TrimSpace(tok))
+	if f, ok := absoluteFontSizes[tok]; ok {
+		return defaultFontSizePt * f, true
+	}
+	if f, ok := relativeFontSizes[tok]; ok {
+		return parentPt * f, true
+	}
+	v, ok := parseFontRelLength(tok, parentPt)
+	if !ok || v < 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// LetterSpacingPt returns the element's resolved (inherited) letter-spacing in
+// user units. See Style.letterSpacingPt for why this exists in SVG only.
+func (s Style) LetterSpacingPt() float64 { return s.letterSpacingPt }
+
+// WordSpacingPt returns the element's resolved (inherited) word-spacing in
+// user units.
+func (s Style) WordSpacingPt() float64 { return s.wordSpacingPt }
+
+// DominantBaseline returns the element's resolved (inherited)
+// dominant-baseline keyword; "auto" means the alphabetic baseline.
+func (s Style) DominantBaseline() string { return s.dominantBaseline }
+
+// AlignmentBaseline returns the element's resolved (NON-inherited)
+// alignment-baseline keyword; "auto" means "defer to dominant-baseline".
+func (s Style) AlignmentBaseline() string { return s.alignmentBaseline }
+
+// BaselineShiftPt returns the element's CUMULATIVE baseline shift in user
+// units, positive = UP. See Style.baselineShiftPt.
+func (s Style) BaselineShiftPt() float64 { return s.baselineShiftPt }
+
+// FontStretchIgnored reports whether a non-normal font-stretch reached this
+// element and was degraded. See Style.fontStretchIgnored.
+func (s Style) FontStretchIgnored() bool { return s.fontStretchIgnored }
+
+// FontVariantIgnored reports whether a non-normal font-variant reached this
+// element and was degraded. See Style.fontVariantIgnored.
+func (s Style) FontVariantIgnored() bool { return s.fontVariantIgnored }
+
+// KerningIgnored reports whether a kerning or font-kerning value reached this
+// element and was degraded. See Style.kerningIgnored.
+func (s Style) KerningIgnored() bool { return s.kerningIgnored }
