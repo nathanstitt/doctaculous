@@ -178,6 +178,15 @@ func matchPseudoClass(p string, n Node) bool {
 	switch p {
 	case "link":
 		return isHyperlink(n)
+	case "root":
+		// The root element — <html> in an HTML document, <svg> in a standalone
+		// SVG. Node.Parent() is documented to return nil exactly there, so no
+		// interface extension is needed to answer this.
+		//
+		// This matters far beyond its own selector: `:root { --brand: … }` is the
+		// canonical place to declare custom properties, so without :root matching,
+		// a document's entire variable palette silently never applies.
+		return n.Parent() == nil
 	case "first-child":
 		pos, ok := structuralPos(n, false, false)
 		return ok && pos == 1

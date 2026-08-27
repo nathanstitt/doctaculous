@@ -703,5 +703,41 @@ newline is kept.</p>
       picture of itself.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">19 / CUSTOM PROPERTIES</span>
+    <h2>Custom properties and <code>var()</code></h2>
+    <p class="lede">The palette below is declared <em>once</em> on <code>:root</code> and
+      reached by every swatch through <code>var()</code>. Custom properties inherit, so a
+      value set at the document root is visible to any descendant without being
+      redeclared &mdash; the pattern almost every themed stylesheet is built on.</p>
+
+    <div class="vargrid">
+      <div class="vsw v-brand">var(--brand)</div>
+      <div class="vsw v-accent">var(--accent)</div>
+      <div class="vsw v-muted">var(--muted)</div>
+      <div class="vsw v-fallback">var(--absent, &#35;7a5cff)</div>
+      <div class="vsw v-indirect">var(--indirect)</div>
+      <div class="vsw v-override">scoped override</div>
+    </div>
+
+    <p class="caption">Look for: the last two swatches. <em>Indirect</em> resolves
+      <code>--indirect: var(--brand)</code> &mdash; a custom property whose own value is
+      another <code>var()</code>, substituted recursively. <em>Scoped override</em>
+      redeclares <code>--brand</code> on the swatch itself, so the same
+      <code>var(--brand)</code> reference resolves differently there than in the first
+      swatch: custom properties cascade and inherit exactly like any other property, and
+      the nearest declaration wins.</p>
+
+    <p>Substitution happens between the cascade and value parsing, so <code>var()</code>
+      works in <em>any</em> property, shorthands included &mdash; the rule below draws its
+      whole border from one variable. A reference that cannot be resolved is
+      <em>invalid at computed&#8209;value time</em>, which is not the same as a syntax
+      error: rather than leaving an earlier declaration showing, the property falls back
+      to its inherited or initial value, as though <code>unset</code> had been
+      specified.</p>
+
+    <div class="varbox">border: var(--rule)</div>
+  </section>
+
 </body>
 </html>

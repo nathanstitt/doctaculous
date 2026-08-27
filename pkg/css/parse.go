@@ -289,7 +289,14 @@ func ParseDeclarations(body string) []Declaration {
 		if val == "" {
 			continue
 		}
-		out = append(out, Declaration{Property: strings.ToLower(prop), Value: val, Important: important})
+		// Normal property names are ASCII case-insensitive and are normalized to
+		// lower case here so the cascade can switch on them directly. Custom
+		// property names are NOT: CSS Variables 1 §2 makes --Foo and --foo two
+		// distinct properties, so their case must survive parsing verbatim.
+		if !IsCustomProperty(prop) {
+			prop = strings.ToLower(prop)
+		}
+		out = append(out, Declaration{Property: prop, Value: val, Important: important})
 	}
 	return out
 }

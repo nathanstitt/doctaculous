@@ -736,3 +736,59 @@ a.seen:visited { color: #6a9a3a; }
 /* Composition: the list applies LEFT TO RIGHT, each function consuming the
    previous one's output. */
 .f-chain     .fxtile { filter: grayscale(1) brightness(1.5) contrast(1.4); }
+
+/* ----- custom properties & var() --------------------------------------------- */
+
+/* The palette is declared ONCE here and referenced by every swatch below. Custom
+   properties inherit, so a :root declaration reaches every descendant without
+   being redeclared — the pattern nearly every themed stylesheet is built on, and
+   the one whose absence collapses a dark theme to black-on-white.
+
+   --indirect holds another var(), which is substituted recursively at use time;
+   --rule is a whole shorthand value, proving substitution happens before value
+   parsing rather than per-property. */
+:root {
+  --brand: #2f5fbf;
+  --accent: #d9a521;
+  --muted: #6d6a63;
+  --indirect: var(--brand);
+  --rule: 4px solid var(--accent);
+}
+
+.vargrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
+  margin: 16px 0 22px 0;
+}
+
+.vsw {
+  width: 150px;
+  padding: 14px 10px;
+  color: #ffffff;
+  font-size: 12px;
+  text-align: center;
+}
+
+.v-brand    { background-color: var(--brand); }
+.v-accent   { background-color: var(--accent); }
+.v-muted    { background-color: var(--muted); }
+/* An undeclared property falls to the fallback rather than dropping the
+   declaration. */
+.v-fallback { background-color: var(--absent, #7a5cff); }
+.v-indirect { background-color: var(--indirect); }
+/* Redeclaring --brand on the element itself: the SAME var(--brand) reference
+   resolves differently here than in .v-brand, because custom properties cascade
+   and inherit like any other property. */
+.v-override {
+  --brand: #b03030;
+  background-color: var(--brand);
+}
+
+/* A shorthand built entirely from a variable. */
+.varbox {
+  border: var(--rule);
+  padding: 12px 14px;
+  margin: 6px 0 0 0;
+  font-size: 12px;
+}
