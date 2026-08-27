@@ -51,6 +51,26 @@ type Group struct {
 	// BEFORE Opacity in the composite order (clip -> mask -> opacity), per
 	// the design doc.
 	Mask *Mask
+
+	// ViewportClip is a plain axis-aligned [0,w]x[0,h] rect, in the SAME
+	// local space M maps FROM (i.e. composed under M exactly like a Shape's
+	// Path composes under Shape.M), clipping this group's content to a
+	// viewport rectangle — currently only produced for a <symbol>
+	// instantiated through <use> with default overflow:hidden (see
+	// buildSymbolInstance in use.go). nil means no viewport clip.
+	//
+	// This is deliberately NOT a *ClipPath: a <symbol>'s viewport is always
+	// exactly one axis-aligned rectangle with no units mapping, no unioned
+	// children, and no self-reference, so pkg/svg/draw can apply it with a
+	// plain Save/PushClip/.../Restore around the group's content — no
+	// offscreen BeginGroup/EndGroup compositing pass, and no
+	// Device.BuildClipMask rasterization, are needed the way ClipPath's
+	// general (arbitrary-geometry, unioned) semantics require. Kept
+	// orthogonal to ClipPath/Mask/Opacity (a group can carry any
+	// combination) rather than folded into ClipPath, so the common case —
+	// an SVG icon sprite sheet instantiating many <symbol>s — stays on the
+	// cheap PushClip-only path.
+	ViewportClip *render.Path
 }
 
 func (*Group) isNode() {}
@@ -141,6 +161,7 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		buildingClip:    map[string]bool{},
 		maskMemo:        map[string]*Mask{},
 		buildingMask:    map[string]bool{},
+		buildingUse:     map[string]bool{},
 	}
 	if hasVB {
 		// Gradient userSpaceOnUse coordinates live in the same user-unit
@@ -279,8 +300,6 @@ func hasPercentSuffix(s string) bool {
 // recursing into e.g. an unsupported container's children would misrender
 // them as shapes/groups.
 var unsupportedElements = map[string]bool{
-	"use":              true,
-	"symbol":           true,
 	"text":             true,
 	"image":            true,
 	"filter":           true,
@@ -341,6 +360,14 @@ var unsupportedElements = map[string]bool{
 // content, not a shape-only allowlist) — but that walk happens inside
 // resolveMask itself, not here, so the main scene walk must still never
 // descend into a <mask> a second time.
+//
+// symbol is likewise never rendered where it appears in the ordinary scene
+// walk: it is only ever instantiated through a <use> reference (see
+// buildSymbolInstance in use.go), which reaches it directly via idx.ids,
+// bypassing buildNode entirely — a bare, unreferenced <symbol> (the
+// unused-symbol.svg corpus fixture) must render nothing without logging
+// "not yet supported", which moving it here (from unsupportedElements)
+// achieves.
 var skippedElements = map[string]bool{
 	"defs":           true,
 	"style":          true,
@@ -353,6 +380,7 @@ var skippedElements = map[string]bool{
 	"stop":           true,
 	"clipPath":       true,
 	"mask":           true,
+	"symbol":         true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -439,6 +467,34 @@ type sceneBuilder struct {
 	// is bounded separately, at draw time, by pkg/svg/draw's per-DrawVector
 	// pattern-nesting-depth counter (maxPatternNestingDepth) — not here.
 	buildingPattern map[string]bool
+
+	// buildingUse guards a <use> against BOTH cycle shapes the design calls
+	// out (decision 2): an href chain (<use href="#u2"> where #u2 is itself
+	// a <use>, eventually looping back), AND tree recursion (a <use>
+	// containing, as a DESCENDANT, another <use> that targets the first —
+	// or targets any other ancestor of itself in the DOM). The href-chain
+	// case alone would be caught by a helper like followHrefChain; the
+	// tree-recursion case is NOT, since the second <use> has no href
+	// pointing at the first at all — it is reached by ordinary tree walk,
+	// and only "is this id currently being instantiated somewhere up the
+	// Go call stack" catches it. Entries are keyed by BOTH the <use>
+	// element's own id (if any) and its resolved target's id — see
+	// buildUse — mirroring buildingClip/buildingMask/buildingPattern's
+	// "id present here is in progress further up the stack" shape exactly,
+	// but keyed on two identities per level instead of one since a <use>
+	// has both an identity of its own (reachable via tree recursion) and a
+	// target identity (reachable via href chain).
+	buildingUse map[string]bool
+
+	// useDepth counts <use> instantiation nesting currently on the call
+	// stack (a <use> whose target — directly, or through a <symbol>'s
+	// content — contains another <use>). buildingUse's cycle guard only
+	// fires when an id repeats; a chain of entirely DISTINCT targets
+	// (#a uses #b uses #c uses ...) never repeats one, so useDepth is what
+	// bounds THAT case via maxUseDepth, mirroring buildingPattern's
+	// "cycle guard doesn't bound a distinct-chain" gap and pkg/svg/draw's
+	// separate draw-time depth counter for the exact same reason.
+	useDepth int
 }
 
 // buildGroup converts el's children into a Group, threading inherited style
@@ -495,6 +551,13 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style, ctx *cascadeCtx
 	switch {
 	case el.local == "g":
 		return b.buildGroupElement(el, st, ctx)
+	case el.local == "use":
+		// st is the <use> element's OWN resolved style (parentStyle already
+		// applied above), threaded as the INSTANTIATED target's parentStyle
+		// — see buildUse's doc comment for why this, not defaultStyle(), is
+		// what makes style-inheritance-1.svg/complex-style-resolving-
+		// order.svg resolve correctly.
+		return b.buildUse(el, st, ctx)
 	case shapeElements[el.local]:
 		return b.buildShape(el, st)
 	case el.local == "linearGradient", el.local == "radialGradient", el.local == "pattern", el.local == "stop":

@@ -74,17 +74,18 @@ type ClipPathChild struct {
 	Self *ClipPath
 }
 
-// clipPathChildKinds are the SVG-namespace element types buildClipChild
-// accepts as <clipPath> children: the basic shapes, plus <text> and <use>
-// (not yet implemented as of this task — see the design's "out of scope"
-// list — so they never actually contribute a Path today, but are named here
-// so a later PR can slot them in additively without restructuring this
-// allowlist). This is DELIBERATELY separate from buildNode's forgiving
-// "unknown element becomes a container" default: a <clipPath> must not
-// recurse into an invalid child (a <g>, <image>, <switch>, or any other
-// element not named here) as if it were a plain container — such a child is
-// simply dropped, per SVG's explicit restriction of clipPath content to
-// shapes/text/use.
+// clipPathChildKinds are the SVG-namespace element types buildClipChildren
+// accepts as <clipPath> children: the basic shapes, plus <text> (not yet
+// implemented — see the design's "out of scope" list, so it never actually
+// contributes a Path today, but is named here so a later PR can slot it in
+// additively without restructuring this allowlist) and <use> (implemented —
+// see buildClipChildFromUse; a <use> whose OWN target is not itself one of
+// these kinds, e.g. a <g> or <symbol>, is invalid and contributes nothing).
+// This is DELIBERATELY separate from buildNode's forgiving "unknown element
+// becomes a container" default: a <clipPath> must not recurse into an
+// invalid child (a <g>, <image>, <switch>, or any other element not named
+// here) as if it were a plain container — such a child is simply dropped,
+// per SVG's explicit restriction of clipPath content to shapes/text/use.
 var clipPathChildKinds = map[string]bool{
 	"rect":     true,
 	"circle":   true,
@@ -94,7 +95,7 @@ var clipPathChildKinds = map[string]bool{
 	"polygon":  true,
 	"path":     true,
 	"text":     true, // not yet implemented (PR 6): contributes no geometry today
-	"use":      true, // not yet implemented (PR 5): contributes no geometry today
+	"use":      true,
 }
 
 // resolveClipPathRef resolves a clip-path property's raw value (as recorded
@@ -168,9 +169,7 @@ func (b *sceneBuilder) resolveClipPath(id string, depth int) *ClipPath {
 	}
 
 	for _, kid := range el.kids {
-		if child, ok := b.buildClipChild(kid, selfStyle, ctx, depth); ok {
-			cp.Kids = append(cp.Kids, child)
-		}
+		cp.Kids = append(cp.Kids, b.buildClipChildren(kid, selfStyle, ctx, depth)...)
 	}
 
 	b.clipMemo[id] = cp
@@ -234,13 +233,25 @@ func clipPathUnits(el *element) string {
 	return "userSpaceOnUse"
 }
 
-// buildClipChild converts one <clipPath> child element into a ClipPathChild,
-// or ok=false when the child is not a valid clipPath child at all (a <g>,
-// <image>, <switch>, or any other element not in clipPathChildKinds), is
-// display:none, or is degenerate geometry. Unlike buildNode's forgiving
-// "unknown element becomes a container" default, an invalid child here is
-// simply dropped — a <clipPath> does not recurse into disallowed structural
-// elements, per SVG's explicit restriction to shapes/text/use.
+// buildClipChildren converts one <clipPath> child element into its
+// contribution(s) to the union: zero elements when the child is not a valid
+// clipPath child at all (a <g>, <image>, <switch>, or any other element not
+// in clipPathChildKinds, INCLUDING a <use> whose resolved target is itself
+// invalid — see buildClipChildFromUse), is display:none, or is degenerate
+// geometry; exactly one element for an ordinary shape OR a <use> that
+// resolves to one. Unlike buildNode's forgiving "unknown element becomes a
+// container" default, an invalid child here is simply dropped — a
+// <clipPath> does not recurse into disallowed structural elements, per
+// SVG's explicit restriction to shapes/text/use.
+//
+// This returns a SLICE (rather than the single ClipPathChild the
+// pre-<use> version of this function returned) because a <use> child
+// resolves to its TARGET's contribution, and threading that through the
+// same shape rather than inventing a separate nested-children variant on
+// ClipPathChild keeps buildClipMask's flat per-child loop
+// (pkg/svg/draw/clip.go) unchanged — every element this returns is already
+// exactly one ClipPathChild, whether it came from an ordinary shape or a
+// <use> indirection.
 //
 // Both display:none and visibility:hidden remove a child from the union
 // (verified against the corpus's invisible-child-1/invisible-child-2
@@ -250,31 +261,120 @@ func clipPathUnits(el *element) string {
 // region. This mirrors buildShape's ordinary painted-shape visibility gate;
 // clip-rule/fill/stroke/opacity on a clipPath child still have no rendering
 // effect and are simply never read here.
-func (b *sceneBuilder) buildClipChild(el *element, parentStyle Style, ctx *cascadeCtx, depth int) (ClipPathChild, bool) {
+func (b *sceneBuilder) buildClipChildren(el *element, parentStyle Style, ctx *cascadeCtx, depth int) []ClipPathChild {
 	if el == nil || el.space != svgNS {
-		return ClipPathChild{}, false
+		return nil
 	}
 	if !clipPathChildKinds[el.local] {
-		return ClipPathChild{}, false
+		return nil
 	}
 
 	st := parentStyle.apply(el, ctx)
 	if !st.display || !st.visible {
-		return ClipPathChild{}, false
+		return nil
+	}
+
+	if el.local == "use" {
+		child, ok := b.buildClipChildFromUse(el, st, ctx, depth)
+		if !ok {
+			return nil
+		}
+		return []ClipPathChild{child}
 	}
 
 	path := shapePath(el, b.logf)
 	if path == nil {
-		// Degenerate geometry, OR a not-yet-implemented kind (text/use):
+		// Degenerate geometry, OR a not-yet-implemented shape kind (text):
 		// either way this child contributes nothing to the union, which is
 		// exactly what "no Path" already means for the caller (append
 		// nothing, not "clip to everything").
-		return ClipPathChild{}, false
+		return nil
 	}
 
 	child := ClipPathChild{
 		Path: path,
 		M:    elementTransform(el, b.logf),
+		Rule: st.ClipRule(),
+	}
+	if ref, ok := st.ClipPathRef(); ok {
+		child.Self = b.resolveClipPathRefAt(ref, depth+1)
+	}
+	return []ClipPathChild{child}
+}
+
+// buildClipChildFromUse resolves a <use> clipPath child (el.local == "use")
+// into the ONE ClipPathChild its target contributes, or ok=false when the
+// reference is absent/unresolvable/cyclic, OR the target itself is not a
+// valid clipPath child kind — per SVG, a <use> inside a <clipPath> may only
+// reference a shape (or another <use> that eventually resolves to one); a
+// <use> referencing a <g> or a <symbol> is invalid and contributes nothing
+// (see the corpus's with-invalid-child-via-use.svg and
+// symbol-via-use-is-not-a-valid-child.svg — both must clip their green rect
+// target to NOTHING, matching an empty Kids union), never treated as the
+// forgiving "unknown element recurses as a container" default buildNode
+// uses for the ordinary scene walk.
+//
+// useSiteStyle is el's OWN resolved style (parentStyle already applied by
+// the caller): mirrors buildUse's contract exactly (the target's own
+// attributes override useSiteStyle, which reaches through where the target
+// is silent) — clip-rule is the only style property buildClipChildren
+// actually reads off the result, but the same inheritance chain governs it,
+// so a <use clip-rule="evenodd"> child sees its own clip-rule win over the
+// target's only if the target doesn't set its own.
+//
+// The <use>'s own x/y/transform compose under the target's, exactly like
+// buildUse's ordinary (non-clipPath) instantiation: the returned child's M
+// is the target's elementTransform composed under (translate(x,y) then the
+// <use>'s own transform), matching a real <use foo/> rendering the SAME
+// geometry with the SAME nesting order.
+func (b *sceneBuilder) buildClipChildFromUse(el *element, useSiteStyle Style, ctx *cascadeCtx, depth int) (ClipPathChild, bool) {
+	href, ok := el.attrs["href"]
+	if !ok {
+		return ClipPathChild{}, false
+	}
+	id, ok := fragmentID(href)
+	if !ok {
+		return ClipPathChild{}, false
+	}
+	target, ok := b.idx.ids[id]
+	if !ok || target.space != svgNS || !clipPathChildKinds[target.local] || target.local == "use" {
+		// Not a valid clipPath child kind (a <g>, <symbol>, or any other
+		// disallowed element), OR itself a <use> — a <use> chain inside a
+		// clipPath is not part of the corpus this PR ships and is declined
+		// rather than guessed at (buildingUse's cycle machinery is built for
+		// the ordinary scene walk's Group-returning shape, not a single flat
+		// ClipPathChild).
+		return ClipPathChild{}, false
+	}
+	if b.useDepth >= maxUseDepth || (el.id != "" && b.buildingUse[el.id]) || b.buildingUse[id] {
+		b.warnOnceMsg("use-cycle-clip:"+id, "svg: <use> inside <clipPath> is cyclic or too deep; treating as unresolved")
+		return ClipPathChild{}, false
+	}
+	if el.id != "" {
+		b.buildingUse[el.id] = true
+		defer delete(b.buildingUse, el.id)
+	}
+	b.buildingUse[id] = true
+	defer delete(b.buildingUse, id)
+	b.useDepth++
+	defer func() { b.useDepth-- }()
+
+	st := useSiteStyle.apply(target, ctx)
+	if !st.display || !st.visible {
+		return ClipPathChild{}, false
+	}
+	path := shapePath(target, b.logf)
+	if path == nil {
+		return ClipPathChild{}, false
+	}
+
+	x := gradientCoord(el.attrs, "x", 0, true, b.vp.w)
+	y := gradientCoord(el.attrs, "y", 0, true, b.vp.h)
+	useM := render.Translate(x, y).Mul(elementTransform(el, b.logf))
+
+	child := ClipPathChild{
+		Path: path,
+		M:    elementTransform(target, b.logf).Mul(useM),
 		Rule: st.ClipRule(),
 	}
 	if ref, ok := st.ClipPathRef(); ok {

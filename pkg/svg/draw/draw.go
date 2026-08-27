@@ -156,106 +156,133 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 			return
 		}
 		gm := node.M.Mul(m)
-		if node.Opacity >= 1 && node.ClipPath == nil && node.Mask == nil {
-			// The common case (a plain <g> with no opacity, clip-path, or
-			// mask): skip BeginGroup/EndGroup entirely. Opening a group
-			// allocates a full-page offscreen scratch buffer (see
-			// raster.Device.BeginGroup), so paying that cost for every plain
-			// <g> in a document would be a serious, needless performance
-			// regression — there is nothing for a group with no opacity,
-			// clip, or mask to composite that per-paint alpha (unchanged,
-			// alpha=alpha) doesn't already produce correctly.
-			for _, kid := range node.Kids {
-				r.paint(dev, kid, gm, alpha, warned)
-			}
+		if node.ViewportClip != nil {
+			// A <symbol> instantiation's default overflow:hidden (see
+			// svg.Group.ViewportClip's doc comment): a plain axis-aligned
+			// rect PushClip under gm (the SAME matrix the clip's own
+			// [0,w]x[0,h] local space composes under, exactly like a Shape's
+			// Path composes under its own accumulated matrix), wrapping
+			// EVERYTHING below — the opacity/clip-path/mask compositing
+			// paths included — rather than requiring its own BeginGroup/
+			// EndGroup pair. Save/Restore scope it to just this subtree so
+			// it cannot leak into a sibling painted afterward.
+			dev.Save()
+			dev.PushClip(render.TransformPath(node.ViewportClip, gm), render.NonZero)
+			r.paintGroupBody(dev, node, gm, alpha, warned)
+			dev.Restore()
 			return
 		}
-		if node.Opacity <= 0 {
-			return // fully transparent: nothing to paint at all
-		}
-		// True compositing: children paint at full (alpha=1) opacity into an
-		// isolated offscreen group, and the group's OWN opacity (and/or
-		// clip-path mask) is applied exactly once, to the flattened result,
-		// in EndGroup. This is what makes two overlapping opaque children
-		// under <g opacity="0.5"> come out identical at the overlap and
-		// elsewhere, instead of the overlap double-darkening the way
-		// per-paint alpha would produce; the same isolation is what lets a
-		// clip-path's union apply to the group as a unit rather than to each
-		// child's own paint calls separately.
-		//
-		// The incoming alpha (e.g. from an enclosing <pattern> tile's own
-		// fill alpha — see fillPattern) is folded into EndGroup's factor
-		// alongside node.Opacity, rather than threaded into the children as
-		// alpha=alpha: alpha is uniform across the whole group with no
-		// internal overlap to protect against (unlike node.Opacity, which is
-		// exactly what creates the overlap risk), so multiplying it in at
-		// composite time is equally correct and avoids yet another nested
-		// group just to carry it.
-		if warned.groupDepth >= maxGroupNestingDepth {
-			// Every open BeginGroup holds a full-canvas scratch RGBA alive
-			// until its EndGroup (see raster.Device.BeginGroup) — unlike
-			// maxPatternNestingDepth/maxDrawCalls, which bound total CPU
-			// work, this bounds concurrently-live MEMORY, so it must stop
-			// opening a NEW group rather than merely stop recursing further.
-			// Degrade like a backend that cannot composite offscreen (see
-			// render.Device.BeginGroup's doc comment): paint children
-			// directly, without the isolation this group would have given
-			// them, rather than drop the subtree's content entirely.
-			r.logGroupDepthCapOnce(warned)
-			for _, kid := range node.Kids {
-				r.paint(dev, kid, gm, alpha, warned)
-			}
-			return
-		}
-		dev.Save()
-		dev.BeginGroup()
-		warned.groupDepth++
-		for _, kid := range node.Kids {
-			r.paint(dev, kid, gm, 1.0, warned)
-		}
-		warned.groupDepth--
-		var clipMask, softMask render.GroupMask
-		if node.ClipPath != nil {
-			// gm (not m): clip-path applies in the clipped element's OWN
-			// user space, i.e. AFTER its own transform has been established
-			// (SVG's clip-path is defined relative to the referencing
-			// element's user coordinate system at the point of reference) —
-			// the same reason paintShapeGrouped below uses sm (post-M), not
-			// the pre-M matrix, for a Shape target.
-			//
-			// A Group has no single Path of its own, so an objectBoundingBox
-			// clipPathUnits target has no PRE-transform geometry to measure
-			// (unlike a Shape's Path — see paintShape below): degrade to
-			// userSpaceOnUse (Identity mapping) for a Group target, a
-			// documented, narrow approximation until a group-subtree bbox
-			// helper exists.
-			clipMask = r.buildClipMask(dev, node.ClipPath, gm, nil)
-		}
-		if node.Mask != nil {
-			// Composite order is clip -> mask -> opacity (see the design
-			// doc). clipMask and softMask are passed to EndGroup SEPARATELY,
-			// not pre-combined here (see render.Device's doc comment on
-			// EndGroup): a backend gets to decide how to apply both — the
-			// raster backend multiplies their per-pixel coverage at
-			// composite time (the correct product, not a min-based
-			// intersection — see pkg/render/raster/device.go's EndGroup),
-			// while pdfwrite represents each with its own native PDF
-			// construct (a `W n` clip vs. an ExtGState /SMask) rather than
-			// forcing one into the other. Pre-combining them into a single
-			// GroupMask here, as an earlier revision did, broke pdfwrite's
-			// sentinel-identity recognition of its own luminosity mask the
-			// moment a clip-path also applied — see EndGroup's doc comment
-			// in pkg/render/pdfwrite/group.go for the regression this
-			// caused and the fix. Same nil-target approximation as ClipPath
-			// just above: a Group has no single Path for an
-			// objectBoundingBox maskUnits/maskContentUnits target.
-			softMask = r.buildMask(dev, node.Mask, gm, nil)
-		}
-		dev.EndGroup(alpha*node.Opacity, "", clipMask, softMask)
-		dev.Restore()
+		r.paintGroupBody(dev, node, gm, alpha, warned)
 	case *svg.Shape:
 		r.paintShape(dev, node, m, alpha, warned)
 	}
+}
+
+// paintGroupBody paints node's opacity/clip-path/mask compositing and
+// children, given gm (node.M already composed with the caller's
+// accumulated matrix) — the part of paint's *svg.Group case that is common
+// to both the ViewportClip-wrapped and unwrapped paths, factored out so
+// ViewportClip's Save/PushClip/Restore wraps this whole body exactly once
+// rather than needing to be duplicated across both the fast (no
+// BeginGroup) and compositing (BeginGroup/EndGroup) branches below.
+func (r *Renderer) paintGroupBody(dev render.Device, node *svg.Group, gm render.Matrix, alpha float64, warned *warnFlags) {
+	if node.Opacity >= 1 && node.ClipPath == nil && node.Mask == nil {
+		// The common case (a plain <g> with no opacity, clip-path, or
+		// mask): skip BeginGroup/EndGroup entirely. Opening a group
+		// allocates a full-page offscreen scratch buffer (see
+		// raster.Device.BeginGroup), so paying that cost for every plain
+		// <g> in a document would be a serious, needless performance
+		// regression — there is nothing for a group with no opacity,
+		// clip, or mask to composite that per-paint alpha (unchanged,
+		// alpha=alpha) doesn't already produce correctly.
+		for _, kid := range node.Kids {
+			r.paint(dev, kid, gm, alpha, warned)
+		}
+		return
+	}
+	if node.Opacity <= 0 {
+		return // fully transparent: nothing to paint at all
+	}
+	// True compositing: children paint at full (alpha=1) opacity into an
+	// isolated offscreen group, and the group's OWN opacity (and/or
+	// clip-path mask) is applied exactly once, to the flattened result,
+	// in EndGroup. This is what makes two overlapping opaque children
+	// under <g opacity="0.5"> come out identical at the overlap and
+	// elsewhere, instead of the overlap double-darkening the way
+	// per-paint alpha would produce; the same isolation is what lets a
+	// clip-path's union apply to the group as a unit rather than to each
+	// child's own paint calls separately.
+	//
+	// The incoming alpha (e.g. from an enclosing <pattern> tile's own
+	// fill alpha — see fillPattern) is folded into EndGroup's factor
+	// alongside node.Opacity, rather than threaded into the children as
+	// alpha=alpha: alpha is uniform across the whole group with no
+	// internal overlap to protect against (unlike node.Opacity, which is
+	// exactly what creates the overlap risk), so multiplying it in at
+	// composite time is equally correct and avoids yet another nested
+	// group just to carry it.
+	if warned.groupDepth >= maxGroupNestingDepth {
+		// Every open BeginGroup holds a full-canvas scratch RGBA alive
+		// until its EndGroup (see raster.Device.BeginGroup) — unlike
+		// maxPatternNestingDepth/maxDrawCalls, which bound total CPU
+		// work, this bounds concurrently-live MEMORY, so it must stop
+		// opening a NEW group rather than merely stop recursing further.
+		// Degrade like a backend that cannot composite offscreen (see
+		// render.Device.BeginGroup's doc comment): paint children
+		// directly, without the isolation this group would have given
+		// them, rather than drop the subtree's content entirely.
+		r.logGroupDepthCapOnce(warned)
+		for _, kid := range node.Kids {
+			r.paint(dev, kid, gm, alpha, warned)
+		}
+		return
+	}
+	dev.Save()
+	dev.BeginGroup()
+	warned.groupDepth++
+	for _, kid := range node.Kids {
+		r.paint(dev, kid, gm, 1.0, warned)
+	}
+	warned.groupDepth--
+	var clipMask, softMask render.GroupMask
+	if node.ClipPath != nil {
+		// gm (not m): clip-path applies in the clipped element's OWN
+		// user space, i.e. AFTER its own transform has been established
+		// (SVG's clip-path is defined relative to the referencing
+		// element's user coordinate system at the point of reference) —
+		// the same reason paintShapeGrouped below uses sm (post-M), not
+		// the pre-M matrix, for a Shape target.
+		//
+		// A Group has no single Path of its own, so an objectBoundingBox
+		// clipPathUnits target has no PRE-transform geometry to measure
+		// (unlike a Shape's Path — see paintShape below): degrade to
+		// userSpaceOnUse (Identity mapping) for a Group target, a
+		// documented, narrow approximation until a group-subtree bbox
+		// helper exists.
+		clipMask = r.buildClipMask(dev, node.ClipPath, gm, nil)
+	}
+	if node.Mask != nil {
+		// Composite order is clip -> mask -> opacity (see the design
+		// doc). clipMask and softMask are passed to EndGroup SEPARATELY,
+		// not pre-combined here (see render.Device's doc comment on
+		// EndGroup): a backend gets to decide how to apply both — the
+		// raster backend multiplies their per-pixel coverage at
+		// composite time (the correct product, not a min-based
+		// intersection — see pkg/render/raster/device.go's EndGroup),
+		// while pdfwrite represents each with its own native PDF
+		// construct (a `W n` clip vs. an ExtGState /SMask) rather than
+		// forcing one into the other. Pre-combining them into a single
+		// GroupMask here, as an earlier revision did, broke pdfwrite's
+		// sentinel-identity recognition of its own luminosity mask the
+		// moment a clip-path also applied — see EndGroup's doc comment
+		// in pkg/render/pdfwrite/group.go for the regression this
+		// caused and the fix. Same nil-target approximation as ClipPath
+		// just above: a Group has no single Path for an
+		// objectBoundingBox maskUnits/maskContentUnits target.
+		softMask = r.buildMask(dev, node.Mask, gm, nil)
+	}
+	dev.EndGroup(alpha*node.Opacity, "", clipMask, softMask)
+	dev.Restore()
 }
 
 // paintShape paints one Shape: fill first, then stroke (SVG's default paint
