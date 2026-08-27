@@ -386,6 +386,54 @@ func TestWhitespaceHandling(t *testing.T) {
 	}
 }
 
+// TestSourceIndentationDoesNotShiftAnAbsolutePosition pins the corpus's
+// tspan/pseudo-multi-line.svg: three sibling <tspan>s each setting x="40",
+// separated only by the source's own indentation. All three must start at
+// exactly x=40.
+//
+// The trap is the collapsed space that indentation produces. It is emitted
+// lazily (so a trailing whitespace run can still be stripped), and if that
+// deferral lets it land INSIDE the following tspan it takes that tspan's x for
+// itself — pushing every line but the first one space-width to the right.
+func TestSourceIndentationDoesNotShiftAnAbsolutePosition(t *testing.T) {
+	doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"
+	  font-family="sans-serif" font-size="20">
+	  <text>
+	    <tspan x="40" y="60">
+	      Line 1
+	    </tspan>
+	    <tspan x="40" y="100">
+	      Line 2
+	    </tspan>
+	    <tspan x="40" y="140">
+	      Line 3
+	    </tspan>
+	  </text>
+	</svg>`)
+	placed := New(doc).layoutText(firstText(t, doc))
+	if len(placed) == 0 {
+		t.Fatal("no glyphs placed")
+	}
+	// The first inked glyph at each distinct y is a line start.
+	starts := map[float64]float64{}
+	for _, p := range placed {
+		if p.glyph.Outline == nil {
+			continue // a space: not a line's visible start
+		}
+		if x, seen := starts[p.penY]; !seen || p.penX < x {
+			starts[p.penY] = p.penX
+		}
+	}
+	if len(starts) != 3 {
+		t.Fatalf("found %d distinct baselines, want 3", len(starts))
+	}
+	for y, x := range starts {
+		if math.Abs(x-40) > 1e-9 {
+			t.Errorf("line at y=%v starts at x=%v, want 40 (source indentation must not shift it)", y, x)
+		}
+	}
+}
+
 // TestRTLTextReorders proves the flat glyph slice goes through
 // inline.Reorder: Hebrew in an RTL <text> must come out in visual order, i.e.
 // with pen positions DESCENDING in logical order.

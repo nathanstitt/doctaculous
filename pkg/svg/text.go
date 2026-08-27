@@ -217,7 +217,7 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 
 	tb := &textBuilder{b: b, ctx: ctx}
 	tb.walk(el, st, xmlSpaceOf(el, false), 0, nil, nil)
-	tb.flushPending()
+	tb.dropTrailingSpace()
 	if len(tb.chars) == 0 {
 		return nil
 	}
@@ -258,6 +258,14 @@ type textBuilder struct {
 
 	// chars is the flat character list built so far.
 	chars []TextChar
+
+	// collapsed parallels chars, marking each entry that is a space PRODUCED
+	// BY COLLAPSING rather than one preserved verbatim under
+	// xml:space="preserve". Only a collapsed space is subject to SVG's
+	// trailing-whitespace strip; a preserved one is content. It is a parallel
+	// slice rather than a TextChar field because nothing outside this builder
+	// needs it — the distinction exists only while the list is being built.
+	collapsed []bool
 
 	// lists holds one entry per element in the subtree that carried at least
 	// one position list, paired with the character range it covers.
@@ -340,6 +348,18 @@ func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int
 		if kid.space != svgNS {
 			continue // foreign-namespace child: skip silently, like buildNode
 		}
+		// A collapsible space seen just before a child element belongs to
+		// THIS element's character range, not the child's. Emitting it here
+		// rather than letting it ride into the child is what keeps a <tspan>'s
+		// own x/y list aligned with the child's first REAL character: the
+		// corpus's tspan/pseudo-multi-line.svg puts x="40" on three sibling
+		// tspans separated by source indentation, and a deferred space landing
+		// inside the child would take that x for itself and push the visible
+		// text one space-width right on every line but the first.
+		//
+		// The trailing-space strip this deferral also implements is preserved
+		// by dropTrailingSpace, which runs once over the finished list.
+		tb.flushPendingSpace()
 		switch kid.local {
 		case "tspan":
 			kidStyle := st.apply(kid, tb.ctx)
@@ -478,7 +498,7 @@ func (tb *textBuilder) appendText(s string, st Style, preserveSpace bool, clip *
 		}
 		if isXMLSpace(r) {
 			if preserveSpace {
-				tb.emit(' ', st, clip, mask)
+				tb.emit(' ', st, clip, mask, false)
 				continue
 			}
 			// Collapsing mode: remember that a space is owed, but only emit
@@ -493,26 +513,71 @@ func (tb *textBuilder) appendText(s string, st Style, preserveSpace bool, clip *
 		}
 		if tb.pendingSpace {
 			tb.pendingSpace = false
-			tb.emit(' ', tb.pendingStyle, tb.pendingClip, tb.pendingMask)
-			if tb.truncated {
-				return
+			// Unless a space is already the last character emitted: SVG
+			// collapses a whitespace run to ONE space across the whole
+			// <text>, including across element boundaries, and
+			// flushPendingSpace may already have emitted this run's space
+			// when the walk crossed into or out of a <tspan>.
+			if !tb.endsWithSpace() {
+				tb.emit(' ', tb.pendingStyle, tb.pendingClip, tb.pendingMask, true)
+				if tb.truncated {
+					return
+				}
 			}
 		}
 		tb.sawInk = true
-		tb.emit(r, st, clip, mask)
+		tb.emit(r, st, clip, mask, false)
 	}
 }
 
-// flushPending is a no-op that documents the deliberate DROP of a trailing
-// collapsible space: in the default xml:space mode a whitespace run at the
-// very end of a <text> is stripped, so the pending space is discarded rather
-// than emitted when the walk finishes. It exists as a named call site so the
-// omission reads as intentional at buildText.
-func (tb *textBuilder) flushPending() { tb.pendingSpace = false }
+// flushPendingSpace emits a deferred collapsible space now, if one is owed.
+// It is called at an element boundary, where the space's owning range is
+// about to change — see the call site in walk.
+func (tb *textBuilder) flushPendingSpace() {
+	if !tb.pendingSpace {
+		return
+	}
+	tb.pendingSpace = false
+	if tb.endsWithSpace() {
+		return // the run already contributed its one collapsed space
+	}
+	tb.emit(' ', tb.pendingStyle, tb.pendingClip, tb.pendingMask, true)
+}
+
+// endsWithSpace reports whether the last character emitted is a space, which
+// is how a whitespace run spanning an element boundary is kept to the single
+// space SVG's collapsing rule allows.
+func (tb *textBuilder) endsWithSpace() bool {
+	return len(tb.chars) > 0 && tb.chars[len(tb.chars)-1].R == ' '
+}
+
+// dropTrailingSpace implements the other half of SVG's default whitespace
+// handling: a whitespace run at the very END of a <text> is stripped.
+//
+// The deferral in appendText handles it for a space never followed by an
+// inked character, but flushPendingSpace can now emit one at an element
+// boundary that turns out to be the last thing in the <text> — e.g. the
+// indentation before a closing </tspan></text> pair. Removing it here, once,
+// covers both routes without either needing to predict the future.
+func (tb *textBuilder) dropTrailingSpace() {
+	tb.pendingSpace = false
+	for len(tb.chars) > 0 {
+		last := len(tb.chars) - 1
+		if tb.chars[last].R != ' ' || !tb.collapsed[last] {
+			// Only a COLLAPSED space is strippable. A space that came from an
+			// xml:space="preserve" run is content the author asked for, and
+			// SVG's trailing-strip rule does not apply to it — the corpus's
+			// tspan/xml-space fixtures depend on the distinction.
+			return
+		}
+		tb.chars = tb.chars[:last]
+		tb.collapsed = tb.collapsed[:last]
+	}
+}
 
 // emit appends one character with the given style, resolving that style's
 // paint servers, and trips the maxTextChars guard.
-func (tb *textBuilder) emit(r rune, st Style, clip *ClipPath, mask *Mask) {
+func (tb *textBuilder) emit(r rune, st Style, clip *ClipPath, mask *Mask, collapsedSpace bool) {
 	if len(tb.chars) >= maxTextChars {
 		if !tb.truncated {
 			tb.truncated = true
@@ -521,6 +586,7 @@ func (tb *textBuilder) emit(r rune, st Style, clip *ClipPath, mask *Mask) {
 		return
 	}
 	tb.chars = append(tb.chars, TextChar{R: r, Style: st, clipPath: clip, mask: mask})
+	tb.collapsed = append(tb.collapsed, collapsedSpace)
 }
 
 // textBBox is the geometry a text character's paint servers resolve against.
