@@ -55,10 +55,46 @@ type Text struct {
 	// Chars.
 	Anchors []int
 
+	// Lengths are the textLength/lengthAdjust requests found in the subtree,
+	// each against the [Start,End) range of Chars its element covered. See
+	// TextLength.
+	//
+	// They are recorded here rather than folded into TextChar because a
+	// textLength constrains a RANGE as a whole — it is the one text property
+	// whose effect cannot be expressed per character until the range has been
+	// shaped and measured, which happens in pkg/svg/draw.
+	Lengths []TextLength
+
 	// ClipPath and Mask are the resolved clip-path/mask references on the
 	// <text> element itself, or nil when absent. See Group.ClipPath.
 	ClipPath *ClipPath
 	Mask     *Mask
+}
+
+// TextLength is one element's textLength/lengthAdjust request: the exact
+// advance width its character range must occupy, and how the difference from
+// the natural width is absorbed.
+//
+// SVG2 §11.5 defines textLength on both <text> and <tspan>, and the two can
+// nest (resvg's on-text-and-tspan.svg puts one on each). Innermost wins for
+// the characters they both cover, which the paint pass gets by applying the
+// requests outermost-first, exactly as resolvePositions does for the position
+// lists.
+type TextLength struct {
+	// Start and End bound the character range, as indices into Text.Chars.
+	Start, End int
+
+	// Target is the requested advance width in user units. It is always >= 0:
+	// a negative textLength is invalid per SVG and is dropped at parse time
+	// rather than recorded (resvg's negative.svg renders at the natural
+	// width).
+	Target float64
+
+	// Glyphs reports lengthAdjust="spacingAndGlyphs", which scales the glyph
+	// OUTLINES horizontally in addition to the inter-glyph gaps. The default,
+	// lengthAdjust="spacing" (Glyphs false), leaves outlines untouched and
+	// distributes the whole difference into the gaps.
+	Glyphs bool
 }
 
 func (*Text) isNode() {}
@@ -215,6 +251,19 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 		return nil
 	}
 
+	// A text-decoration inherited from OUTSIDE the <text> — a <g> or the root
+	// — is re-anchored to the <text> element itself before the walk begins.
+	//
+	// SVG resolves a decoration's paint at the declaring element, but resvg
+	// (whose reference PNGs are this corpus's ground truth) treats the <text>
+	// as the outermost element a decoration can be declared at: its
+	// outside-the-text-element.svg puts text-decoration and fill="green" on a
+	// <g> wrapping a fill="black" <text>, and renders a BLACK underline, and
+	// style-resolving-2.svg repeats the point with a red <g> around a
+	// yellow/green <text>. Both are only explicable if the ancestor's
+	// declaration keeps its LINE but adopts the <text>'s paint and metrics.
+	st = st.rebaseDecorations()
+
 	tb := &textBuilder{b: b, ctx: ctx}
 	tb.walk(el, st, xmlSpaceOf(el, false), 0, nil, nil)
 	tb.dropTrailingSpace()
@@ -231,6 +280,7 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 		M:       elementTransform(el, b.logf),
 		Chars:   tb.chars,
 		Anchors: tb.anchors,
+		Lengths: tb.trimLengths(),
 	}
 	if ref, ok := st.ClipPathRef(); ok {
 		t.ClipPath = b.resolveClipPathRef(ref)
@@ -270,6 +320,14 @@ type textBuilder struct {
 	// lists holds one entry per element in the subtree that carried at least
 	// one position list, paired with the character range it covers.
 	lists []charRangeLists
+
+	// lengths holds one entry per element in the subtree that carried a valid
+	// textLength, paired with the character range it covers. Appended
+	// innermost-first (recordTextLength runs after the child recursion
+	// returns), so the paint pass iterates in REVERSE to apply outermost
+	// first and let the innermost request win — the same ordering trick
+	// resolvePositions uses.
+	lengths []TextLength
 
 	// anchors is the resolved text-chunk start indices; filled by
 	// resolvePositions.
@@ -399,6 +457,82 @@ func (tb *textBuilder) walk(el *element, st Style, preserveSpace bool, depth int
 	}
 
 	tb.recordLists(el, start, len(tb.chars))
+	tb.recordTextLength(el, st, start, len(tb.chars))
+}
+
+// recordTextLength parses el's textLength/lengthAdjust attributes and records
+// the request against the [start,end) character range el's subtree produced.
+//
+// textLength is an XML ATTRIBUTE, not a presentation attribute: it never
+// participates in the cascade and never inherits (resvg's inherit.svg puts
+// textLength="inherit" on a <text> inside a <g textLength="150"> and titles
+// the case "Not allowed", expecting the natural width). So it is read straight
+// off el.attrs here, not through ctx.resolve.
+//
+// A negative or unparseable value is dropped entirely, per SVG error handling;
+// zero is legal and collapses the range onto a point (resvg's zero.svg).
+// st supplies the font-size a percentage resolves against.
+func (tb *textBuilder) recordTextLength(el *element, st Style, start, end int) {
+	raw, ok := el.attrs["textLength"]
+	if !ok || end <= start {
+		return
+	}
+	target, ok := parseFontRelLength(raw, st.FontSizePt())
+	if !ok || target < 0 {
+		tb.b.logf("svg: ignoring textLength=%q: %s", raw, textLengthReason(ok, target))
+		return
+	}
+	// The same DoS bound letter-spacing takes, for the same reason: a
+	// textLength is divided into the inter-glyph gaps, so an unbounded value
+	// becomes an unbounded per-glyph pen offset.
+	if target > maxSpacingPt {
+		target = maxSpacingPt
+	}
+	tb.lengths = append(tb.lengths, TextLength{
+		Start:  start,
+		End:    end,
+		Target: target,
+		Glyphs: strings.TrimSpace(el.attrs["lengthAdjust"]) == "spacingAndGlyphs",
+	})
+}
+
+// trimLengths clamps every recorded textLength range to the FINAL character
+// count and drops any that ended up empty.
+//
+// The clamp is needed because dropTrailingSpace runs after the walk and can
+// shrink tb.chars, leaving a range recorded against characters that no longer
+// exist. Reversing here (rather than in the paint pass) puts the slice in
+// OUTERMOST-FIRST order, so a consumer applying them in slice order gets the
+// innermost request landing last, which is what SVG's nesting rule wants.
+func (tb *textBuilder) trimLengths() []TextLength {
+	if len(tb.lengths) == 0 {
+		return nil
+	}
+	n := len(tb.chars)
+	out := make([]TextLength, 0, len(tb.lengths))
+	for i := len(tb.lengths) - 1; i >= 0; i-- {
+		l := tb.lengths[i]
+		if l.End > n {
+			l.End = n
+		}
+		if l.Start >= l.End {
+			continue
+		}
+		out = append(out, l)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// textLengthReason names why a textLength value was rejected, for the log.
+func textLengthReason(parsed bool, v float64) string {
+	if !parsed {
+		return "unparseable"
+	}
+	_ = v
+	return "negative lengths are invalid"
 }
 
 // recordLists parses el's x/y/dx/dy/rotate attributes and records them
