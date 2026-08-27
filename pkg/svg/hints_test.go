@@ -10,8 +10,6 @@ import (
 // resolved somewhere else entirely (see the doc comments on
 // svgPresentationAttrs and on each field below for exactly where):
 // stop-color/stop-opacity only ever apply to a <stop> element, consumed by
-// parseStops in stops.go, never by the general cascade's Style.
-// stop-color/stop-opacity only ever apply to a <stop> element, consumed by
 // parseStops in stops.go; flood-color/flood-opacity/color-interpolation-
 // filters only ever apply to an <fe*> filter primitive, consumed by
 // resolveFloodColor/primitiveColorSpace in filter.go. Neither group is

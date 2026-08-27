@@ -2,6 +2,7 @@ package filter
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"testing"
 )
@@ -196,4 +197,81 @@ func absDiff(a, b uint8) int {
 		return int(a - b)
 	}
 	return int(b - a)
+}
+
+// TestFromRGBAUnpremultipliesSemiTransparentPixels is the test whose ABSENCE
+// let a broken un-premultiply survive the whole suite.
+//
+// image.RGBA is PREMULTIPLIED; a Buffer holds STRAIGHT alpha. Skipping the
+// un-premultiply leaves every semi-transparent pixel's color scaled by its
+// own alpha — a 50%-alpha pure red arrives as (0.5, 0, 0) instead of
+// (1, 0, 0). No primitive shipped so far reveals it (feFlood discards its
+// input, and feOffset's integer path copies pixels verbatim without ever
+// looking at a channel), but feGaussianBlur reads and weights those channels
+// directly, so a partially transparent edge is exactly where it shows.
+//
+// The color channels are asserted INDEPENDENTLY of alpha, which is what makes
+// this catch the omission: a round-trip-only test passes either way, since
+// re-premultiplying on the way out undoes the error.
+func TestFromRGBAUnpremultipliesSemiTransparentPixels(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 3, 1))
+	// Premultiplied: a 50%-alpha pure red is stored as R=128, A=128.
+	src.SetRGBA(0, 0, color.RGBA{R: 128, G: 0, B: 0, A: 128})
+	// A 25%-alpha pure white: every channel scaled to 64.
+	src.SetRGBA(1, 0, color.RGBA{R: 64, G: 64, B: 64, A: 64})
+	// Fully opaque needs no division and must pass through untouched.
+	src.SetRGBA(2, 0, color.RGBA{R: 200, G: 100, B: 50, A: 255})
+
+	buf := FromRGBA(src, src.Bounds(), SRGB)
+
+	cases := []struct {
+		x                          int
+		wantR, wantG, wantB, wantA float32
+		name                       string
+	}{
+		{0, 1, 0, 0, 0.5, "50% red must un-premultiply to FULL red"},
+		{1, 1, 1, 1, 0.25, "25% white must un-premultiply to FULL white"},
+		{2, 200.0 / 255, 100.0 / 255, 50.0 / 255, 1, "opaque passes through"},
+	}
+	for _, c := range cases {
+		r, g, b, a := buf.At(c.x, 0)
+		const tol = 0.01
+		if absF(r-c.wantR) > tol || absF(g-c.wantG) > tol || absF(b-c.wantB) > tol || absF(a-c.wantA) > tol {
+			t.Errorf("%s: got (%.3f, %.3f, %.3f, a=%.3f), want (%.3f, %.3f, %.3f, a=%.3f)",
+				c.name, r, g, b, a, c.wantR, c.wantG, c.wantB, c.wantA)
+		}
+	}
+}
+
+// TestSemiTransparentRoundTripPreservesPixels confirms the premultiplied ->
+// straight -> premultiplied path is lossless for partially transparent
+// pixels in BOTH color spaces, which is what lets a filter graph carry an
+// antialiased edge through without darkening or lightening it.
+func TestSemiTransparentRoundTripPreservesPixels(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 5, 1))
+	for i, c := range []color.RGBA{
+		{R: 128, G: 0, B: 0, A: 128},
+		{R: 64, G: 64, B: 64, A: 64},
+		{R: 20, G: 10, B: 5, A: 32},
+		{R: 0, G: 0, B: 0, A: 0},
+		{R: 46, G: 139, B: 87, A: 255},
+	} {
+		src.SetRGBA(i, 0, c)
+	}
+	for _, space := range []ColorSpace{LinearRGB, SRGB} {
+		got := FromRGBA(src, src.Bounds(), space).ToRGBA()
+		for x := 0; x < 5; x++ {
+			w, g := src.RGBAAt(x, 0), got.RGBAAt(x, 0)
+			if absDiff(w.R, g.R) > 2 || absDiff(w.G, g.G) > 2 || absDiff(w.B, g.B) > 2 || absDiff(w.A, g.A) > 1 {
+				t.Errorf("space %v pixel %d: got %v, want %v", space, x, g, w)
+			}
+		}
+	}
+}
+
+func absF(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
