@@ -54,9 +54,9 @@ import (
 // same shorthand DOES apply when written as `style="marker:url(#m)"` or a
 // `{ marker: url(#m) }` sheet rule — i.e. resvg (and this engine, matching
 // it) only recognizes "marker" as a CSS property, never as a presentation
-// attribute. applyMarkerShorthand still consumes "marker" from attr() in
-// apply() — the cascade's style=""/sheet-rule matching in cascade.go runs
-// independently of this list and reaches it regardless; only the
+// attribute. The cascade's setResolved expands the "marker" shorthand into
+// the three longhands as it resolves style=""/sheet-rule declarations, which
+// runs independently of this list and reaches them regardless; only the
 // bare-XML-attribute promotion this list drives is skipped. This is the ONE
 // intentional exception to the "every applyXxx call must be listed here"
 // rule the rest of this comment block documents — see the sync test's own

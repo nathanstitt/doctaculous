@@ -156,6 +156,13 @@ func (b *sceneBuilder) resolveMarkerRef(ref string) *Marker {
 // (percent-values.svg uses percentages only at the root viewport), and
 // changing the memo key is a change to shared clip/mask/marker memo
 // discipline that belongs with a fix to all three at once.
+//
+// KNOWN DIVERGENCE (memoization vs. depth cap): when the cap below truncates
+// a chain, the guard returns nil without memoizing, but the partially-built
+// parent IS memoized, so a later reference to that parent from a shallower
+// point reuses the truncated build instead of resolving it in full.
+// resolveMask and resolveClipPath have the identical shape; it only manifests
+// past a maxMarkerChainDepth-deep chain, which no real document reaches.
 func (b *sceneBuilder) resolveMarker(id string) *Marker {
 	if m, ok := b.markerMemo[id]; ok {
 		return m
