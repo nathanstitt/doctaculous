@@ -41,10 +41,18 @@ func (r *Renderer) buildClipMask(dev render.Device, cp *svg.ClipPath, m render.M
 	var flat []render.MaskPath
 	var nested []render.GroupMask
 	for _, kid := range cp.Kids {
-		if kid.Path == nil || kid.Path.Empty() {
-			continue
+		kidM := kid.M.Mul(cpM)
+		var dp *render.Path
+		switch {
+		case kid.Text != nil:
+			// A <text> clipPath child's geometry is its glyph outlines, which
+			// only exist once shaped — see svg.ClipPathChild.Text for why the
+			// node arrives unflattened. Shaping here, where the face cache
+			// already lives, is what lets text act as ordinary clip geometry.
+			dp = r.textClipPath(kid.Text, kidM)
+		case kid.Path != nil && !kid.Path.Empty():
+			dp = render.TransformPath(kid.Path, kidM)
 		}
-		dp := render.TransformPath(kid.Path, kid.M.Mul(cpM))
 		if dp == nil || dp.Empty() {
 			continue
 		}
@@ -71,7 +79,7 @@ func (r *Renderer) buildClipMask(dev render.Device, cp *svg.ClipPath, m render.M
 		// corpus fixtures for this feature, apply clip-path to a
 		// clipPath's direct children without a further nested reference).
 		childMask := dev.BuildClipMask([]render.MaskPath{{Path: dp, Rule: kid.Rule}})
-		selfMask := r.buildClipMask(dev, kid.Self, kid.M.Mul(cpM), nil)
+		selfMask := r.buildClipMask(dev, kid.Self, kidM, nil)
 		nested = append(nested, combineClipRegions(childMask, selfMask))
 	}
 

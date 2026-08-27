@@ -44,6 +44,32 @@ type placedGlyph struct {
 	fillPattern, strokePattern   pattern
 }
 
+// matrix returns the transform mapping this glyph's outline from em space
+// into the space tm maps from, where tm is the <text>'s own accumulated
+// matrix. Innermost first:
+//
+//  1. Scale by SizePt and FLIP Y. Glyph outlines are in em units with Y UP
+//     (see inline.Glyph.Outline); SVG user space has Y DOWN, so the sign flip
+//     is what puts the glyph the right way up.
+//  2. Rotate by the character's own rotate angle, about the glyph's ORIGIN —
+//     which is the origin of the scaled space, so it composes before the
+//     translation rather than after. Composing it the other way would rotate
+//     each glyph about the text's origin instead of its own, fanning the
+//     glyphs out along an arc.
+//  3. Translate to the pen position on the baseline.
+//  4. Compose with tm.
+//
+// Painting and clip-geometry extraction share this so the outlines a
+// <clipPath> gets are provably the same ones a fill would have drawn.
+func (p *placedGlyph) matrix(tm render.Matrix) render.Matrix {
+	size := p.glyph.SizePt
+	m := render.Scale(size, -size)
+	if p.rotateRad != 0 {
+		m = m.Mul(render.Rotate(p.rotateRad))
+	}
+	return m.Mul(render.Translate(p.penX, p.penY)).Mul(tm)
+}
+
 // faces returns the Renderer's font-face cache, creating it on first use.
 //
 // layoutfont.FaceCache is itself mutex-protected and safe for concurrent use,
@@ -507,32 +533,16 @@ func sameShapingStyle(a, b svg.Style) bool {
 // is what gives text gradients, patterns, and the whole paint pipeline for
 // free.
 //
-// The transform, innermost first:
-//
-//  1. Scale by SizePt and FLIP Y. Glyph outlines are in em units with Y UP
-//     (see inline.Glyph.Outline); SVG user space has Y DOWN, so the sign
-//     flip is what puts the glyph the right way up.
-//  2. Rotate by the character's own rotate angle, about the glyph's origin —
-//     which is the origin of the scaled space, so it composes before the
-//     translation rather than after.
-//  3. Translate to the pen position on the baseline.
-//  4. Compose with tm, the <text>'s accumulated user-space-to-device matrix.
+// See placedGlyph.matrix for the transform itself.
 func (r *Renderer) paintGlyph(dev render.Device, p *placedGlyph, tm render.Matrix, alpha float64, warned *warnFlags) {
 	if p.glyph.Outline == nil {
 		return // whitespace, or a rune the face has no ink for: advance only
 	}
-	size := p.glyph.SizePt
-	if size <= 0 {
+	if p.glyph.SizePt <= 0 {
 		return
 	}
 
-	gm := render.Scale(size, -size)
-	if p.rotateRad != 0 {
-		gm = gm.Mul(render.Rotate(p.rotateRad))
-	}
-	gm = gm.Mul(render.Translate(p.penX, p.penY)).Mul(tm)
-
-	dp := render.TransformPath(p.glyph.Outline, gm)
+	dp := render.TransformPath(p.glyph.Outline, p.matrix(tm))
 	if dp == nil {
 		return
 	}
@@ -542,11 +552,11 @@ func (r *Renderer) paintGlyph(dev render.Device, p *placedGlyph, tm render.Matri
 
 	// A glyph is a shape for painting purposes, so the fill/stroke split goes
 	// through the identical helpers — including the gradient/pattern routing
-	// and the stroke's user-space-to-device width scaling. tm (not gm) is the
-	// matrix a paint server's own local space composes under: a gradient on
-	// text is defined in the TEXT's user space, not in each glyph's rotated
-	// em space, so passing gm here would give every glyph its own private
-	// copy of the gradient.
+	// and the stroke's user-space-to-device width scaling. tm — NOT the
+	// glyph's own matrix — is what a paint server's local space composes
+	// under: a gradient on text is defined in the TEXT's user space, not in
+	// each glyph's scaled, rotated em space, so passing the glyph matrix here
+	// would give every glyph its own private copy of the gradient.
 	warned.drawCalls++
 	r.paintGlyphFill(dev, p, dp, tm, a, warned)
 	r.paintGlyphStroke(dev, p, dp, tm, a, warned)
@@ -615,6 +625,46 @@ func (r *Renderer) paintGlyphStroke(dev render.Device, p *placedGlyph, dp *rende
 		sp.DashArray = scaled
 	}
 	dev.Stroke(dp, sp)
+}
+
+// textClipPath shapes t and returns every glyph outline unioned into a single
+// device-space path under m, for a <text> used as clip or mask geometry.
+//
+// This is the whole payoff of painting text as outlines rather than through
+// DrawGlyph: a glyph is already a *render.Path, so text becomes clip geometry
+// with no new machinery — the same transform paintGlyph builds, applied to
+// the same outline, appended into one path instead of filled.
+//
+// Returns nil when t shapes to nothing (no characters, an unresolvable
+// zero font-size, or no glyph carrying ink), which the caller treats as "this
+// child contributes nothing to the union" — NOT as "clip to everything".
+func (r *Renderer) textClipPath(t *svg.Text, m render.Matrix) *render.Path {
+	if t == nil {
+		return nil
+	}
+	placed := r.layoutText(t)
+	if len(placed) == 0 {
+		return nil
+	}
+	// t.M is the <text> element's own transform, which composes under the
+	// caller's matrix exactly as it does in paintText.
+	tm := t.M.Mul(m)
+	out := &render.Path{}
+	for i := range placed {
+		p := &placed[i]
+		if p.glyph.Outline == nil || p.glyph.SizePt <= 0 {
+			continue
+		}
+		dp := render.TransformPath(p.glyph.Outline, p.matrix(tm))
+		if dp == nil {
+			continue
+		}
+		out.Segments = append(out.Segments, dp.Segments...)
+	}
+	if out.Empty() {
+		return nil
+	}
+	return out
 }
 
 // TextAdvances shapes text exactly as paintText would and returns each

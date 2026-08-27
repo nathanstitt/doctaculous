@@ -66,6 +66,20 @@ type ClipPathChild struct {
 	M    render.Matrix
 	Rule render.FillRule
 
+	// Text is set (and Path nil) when this child is a <text> element, whose
+	// geometry is its glyph outlines.
+	//
+	// It cannot be flattened into Path the way every other child kind is:
+	// turning text into outlines requires SHAPING it, which needs a resolved
+	// font face, and face resolution lives in pkg/svg/draw — a layer this one
+	// must not depend on (and could not, without Document growing a font
+	// cache and ceasing to be a read-only, side-table-free value). So the
+	// lowered Text node is carried through as-is and pkg/svg/draw's
+	// buildClipMask shapes it at the point it already has the face cache.
+	//
+	// Exactly one of Path and Text is non-nil for a usable child.
+	Text *Text
+
 	// Self is the child's OWN clip-path="url(#...)" reference: per SVG, a
 	// clipPath child's own clip-path intersects that child's region BEFORE
 	// it joins the union (a child clipped to nothing contributes nothing to
@@ -75,10 +89,10 @@ type ClipPathChild struct {
 }
 
 // clipPathChildKinds are the SVG-namespace element types buildClipChildren
-// accepts as <clipPath> children: the basic shapes, plus <text> (not yet
-// implemented — see the design's "out of scope" list, so it never actually
-// contributes a Path today, but is named here so a later PR can slot it in
-// additively without restructuring this allowlist) and <use> (implemented —
+// accepts as <clipPath> children: the basic shapes, plus <text> (its glyph
+// outlines are the clip geometry — carried through as a lowered Text node
+// rather than a Path, since shaping needs a font face this layer has no
+// access to; see ClipPathChild.Text) and <use> (implemented —
 // see buildClipChildFromUse; a <use> whose OWN target is not itself one of
 // these kinds, e.g. a <g> or <symbol>, is invalid and contributes nothing).
 // This is DELIBERATELY separate from buildNode's forgiving "unknown element
@@ -282,12 +296,30 @@ func (b *sceneBuilder) buildClipChildren(el *element, parentStyle Style, ctx *ca
 		return []ClipPathChild{child}
 	}
 
+	if el.local == "text" {
+		// A <text> clipPath child contributes its glyph outlines. They are
+		// not resolvable here — see ClipPathChild.Text — so the lowered node
+		// travels through for pkg/svg/draw to shape.
+		t, _ := b.buildText(el, st, ctx).(*Text)
+		if t == nil {
+			return nil
+		}
+		child := ClipPathChild{
+			Text: t,
+			M:    elementTransform(el, b.logf),
+			Rule: st.ClipRule(),
+		}
+		if ref, ok := st.ClipPathRef(); ok {
+			child.Self = b.resolveClipPathRefAt(ref, depth+1)
+		}
+		return []ClipPathChild{child}
+	}
+
 	path := shapePath(el, b.logf)
 	if path == nil {
-		// Degenerate geometry, OR a not-yet-implemented shape kind (text):
-		// either way this child contributes nothing to the union, which is
-		// exactly what "no Path" already means for the caller (append
-		// nothing, not "clip to everything").
+		// Degenerate geometry: this child contributes nothing to the union,
+		// which is exactly what "no Path" already means for the caller
+		// (append nothing, not "clip to everything").
 		return nil
 	}
 
