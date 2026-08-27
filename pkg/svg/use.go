@@ -195,7 +195,7 @@ func (b *sceneBuilder) buildSymbolInstance(useEl, symbolEl *element, useSiteStyl
 	b.vp = saved
 
 	g := &Group{M: vm, Opacity: symbolElementOpacity(symbolEl, ctx), Kids: kids.Kids}
-	if wantsViewportClip(symbolEl) {
+	if wantsViewportClip(symbolEl, ctx) {
 		// The clip rect lives in the SAME local space vm maps FROM (i.e.
 		// [0,w]x[0,h] in the <use>'s own user space, before the viewBox
 		// mapping is applied) — not in the post-viewBox content space vm maps
@@ -252,17 +252,24 @@ func symbolElementOpacity(symbolEl *element, ctx *cascadeCtx) float64 {
 	return s.opacity
 }
 
-// wantsViewportClip reports whether a <symbol> element's overflow resolves
-// to clipping its viewport: true for the absent attribute (the CSS/SVG
-// default for a viewport-establishing element is "hidden", not CSS's
-// general "visible" default) and for the literal "hidden"/"auto" keywords;
-// false only for an explicit "visible" (or "scroll", never meaningful for
-// static SVG).
-func wantsViewportClip(symbolEl *element) bool {
-	switch symbolEl.attrs["overflow"] {
-	case "visible", "scroll":
-		return false
-	default:
-		return true
+// wantsViewportClip reports whether el (a <symbol>, or any other
+// viewport-establishing element) has an overflow that clips its viewport:
+// true for the absent attribute (the CSS/SVG default for such an element is
+// "hidden", not CSS's general "visible" default) and for the literal
+// "hidden"/"auto" keywords; false only for an explicit "visible" (or
+// "scroll", never meaningful for static SVG).
+//
+// It resolves overflow through the CASCADE, not off the raw attribute, so
+// style="overflow:visible" and an `overflow` stylesheet rule work — and so
+// whitespace and keyword case are handled — exactly as they do for every
+// other property. See Style.WantsViewportClip / applyOverflow.
+func wantsViewportClip(el *element, ctx *cascadeCtx) bool {
+	s := Style{overflow: "hidden"}
+	attr := ctx.resolve(el)
+	logf := ctx.logf
+	if logf == nil {
+		logf = func(string, ...any) {}
 	}
+	applyOverflow(&s, attr, logf)
+	return s.WantsViewportClip()
 }

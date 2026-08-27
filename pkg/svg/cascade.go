@@ -56,7 +56,7 @@ func (c *cascadeCtx) resolve(el *element) func(name string) (string, bool) {
 	// allocation-light: it is the one hint slice for the whole call.
 	resolved := make(map[string]string, len(svgPresentationAttrs))
 	for _, d := range svgPresentationHints(el) {
-		resolved[d.Property] = d.Value
+		setResolved(resolved, d.Property, d.Value)
 	}
 
 	if c == nil || c.idx == nil {
@@ -113,7 +113,7 @@ func (c *cascadeCtx) resolve(el *element) func(name string) (string, bool) {
 	//    the presentation-hint < author-sheet ladder for the normal pass.
 	sort.SliceStable(normal, func(i, j int) bool { return lessNormal(normal[i], normal[j]) })
 	for _, m := range normal {
-		resolved[m.decl.Property] = m.decl.Value
+		setResolved(resolved, m.decl.Property, m.decl.Value)
 	}
 
 	// 2. Inline style="" (author origin, normal declarations only here).
@@ -130,7 +130,7 @@ func (c *cascadeCtx) resolve(el *element) func(name string) (string, bool) {
 				order++
 				continue
 			}
-			resolved[d.Property] = d.Value
+			setResolved(resolved, d.Property, d.Value)
 		}
 	}
 
@@ -141,7 +141,7 @@ func (c *cascadeCtx) resolve(el *element) func(name string) (string, bool) {
 	//    rule has no analogue to port here.
 	sort.SliceStable(important, func(i, j int) bool { return lessImportant(important[i], important[j]) })
 	for _, m := range important {
-		resolved[m.decl.Property] = m.decl.Value
+		setResolved(resolved, m.decl.Property, m.decl.Value)
 	}
 
 	return lookupFrom(resolved)
@@ -184,6 +184,45 @@ func bestMatch(sels []css.Selector, n css.Node) (css.Specificity, bool) {
 		}
 	}
 	return best, found
+}
+
+// markerLonghands are the three properties the "marker" shorthand expands
+// to, in the order CSS specifies them.
+var markerLonghands = [3]string{"marker-start", "marker-mid", "marker-end"}
+
+// setResolved records one cascade declaration into the resolved-property
+// map, EXPANDING a shorthand into its longhands as it goes.
+//
+// The expansion has to happen here, not in Style.apply, to get shorthand vs.
+// longhand precedence right in BOTH directions. resolve collapses the whole
+// cascade into a single map keyed by property, so by the time apply() reads
+// it, the origin and source order that decided each winner are gone: a
+// fixed "shorthand first, then longhands" call order in apply() would make a
+// longhand beat a shorthand unconditionally, which is wrong whenever the
+// shorthand outranks it. Writing the longhands at the moment the shorthand
+// is applied instead makes both compete as the same three properties, in
+// the one ordering the cascade already established — so
+// `style="marker:url(#a)"` correctly beats a marker-start="url(#b)"
+// presentation attribute (inline author style outranks a presentational
+// hint), and `style="marker-start:url(#b); marker:url(#a)"` correctly
+// yields url(#a) (the shorthand is later in source order).
+//
+// Only "marker" needs this today: it is the sole shorthand among the
+// properties this cascade resolves whose longhands are also cascaded
+// properties. The shorthand's own name is still recorded in the map (for a
+// future reader and for cheap debugging), but nothing consumes it —
+// Style.apply reads only the three longhands.
+//
+// Note this is expansion, not substitution: a LATER longhand still wins
+// over an EARLIER shorthand, because the later write simply overwrites the
+// longhand key the shorthand had set.
+func setResolved(resolved map[string]string, prop, val string) {
+	resolved[prop] = val
+	if prop == "marker" {
+		for _, lh := range markerLonghands {
+			resolved[lh] = val
+		}
+	}
 }
 
 // lookupFrom adapts a resolved property map to the func(name) (string, bool)

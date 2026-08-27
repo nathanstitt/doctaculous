@@ -85,6 +85,7 @@ var svgPresentationAttrs = []string{
 	"clip-rule",
 	"mask",
 	"mask-type",
+	"overflow",
 	"marker-start",
 	"marker-mid",
 	"marker-end",

@@ -49,6 +49,7 @@ func TestSVGPresentationHintsSyncedWithStyleApply(t *testing.T) {
 		"clip-rule":         "evenodd",
 		"mask":              "url(#x)",
 		"mask-type":         "alpha",
+		"overflow":          "visible",
 		"marker-start":      "url(#x)",
 		"marker-mid":        "url(#x)",
 		"marker-end":        "url(#x)",
@@ -82,8 +83,9 @@ func reflectDeepEqualStyle(a, b Style) bool {
 
 // TestMarkerShorthandNotAPresentationAttribute pins the ONE intentional
 // exception hints.go's svgPresentationAttrs doc comment calls out: the
-// "marker" shorthand is consumed by Style.apply() (applyMarkerShorthand) but
-// deliberately excluded from svgPresentationAttrs, so a bare XML
+// "marker" shorthand is consumed by the cascade (setResolved expands it into
+// the three longhands) but deliberately excluded from svgPresentationAttrs,
+// so a bare XML
 // marker="url(#m)" attribute must have NO effect (matching resvg's
 // the-marker-property.svg, titled "Should be ignored"), while the exact same
 // value reaching apply() through style="" (which cascade.go resolves

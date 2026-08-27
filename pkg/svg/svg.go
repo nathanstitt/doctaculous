@@ -533,6 +533,15 @@ type sceneBuilder struct {
 	// document-wide CSS rule reaching the marker's own content
 	// (recursive-4.svg). Mirrors buildingClip/buildingMask's shape exactly.
 	buildingMarker map[string]bool
+
+	// markerDepth is the number of <marker> content builds currently open on
+	// the call stack, incremented by resolveMarker around its buildKidsGroup
+	// call. It CANNOT be a plain parameter the way resolveMask's depth is: a
+	// nested marker reference re-enters through the ordinary scene walk
+	// (buildKidsGroup -> buildNode -> resolveMarkerRef), which has no depth
+	// to thread, so the count has to live on the builder. See
+	// maxMarkerChainDepth.
+	markerDepth int
 }
 
 // buildGroup converts el's children into a Group, threading inherited style

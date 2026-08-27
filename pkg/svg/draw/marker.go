@@ -35,10 +35,10 @@ func (r *Renderer) paintMarkers(dev render.Device, s *svg.Shape, sm render.Matri
 
 	for i, v := range verts {
 		var m *svg.Marker
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			m = s.MarkerStart
-		case i == last:
+		case last:
 			m = s.MarkerEnd
 		default:
 			m = s.MarkerMid

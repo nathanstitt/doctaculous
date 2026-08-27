@@ -10,9 +10,14 @@ import (
 // marker's own content drawing a shape that itself carries a marker-*
 // property, and so on), independent of the cycle guard in resolveMarker: a
 // cycle is caught in O(1) hops via sceneBuilder.buildingMarker, but this
-// instead guards a long ACYCLIC chain from costing unbounded recursion
-// depth, mirroring maxClipPathChainDepth/maxMaskChainDepth's rationale
-// exactly.
+// instead guards a long ACYCLIC chain — 64 DISTINCT marker ids each
+// referencing the next — from costing unbounded recursion depth, mirroring
+// maxClipPathChainDepth/maxMaskChainDepth's rationale exactly.
+//
+// The depth is counted on sceneBuilder.markerDepth rather than passed down
+// as a parameter, because a nested marker reference re-enters through the
+// ordinary scene walk (resolveMarker -> buildKidsGroup -> buildNode ->
+// resolveMarkerRef) which has no depth argument to thread.
 const maxMarkerChainDepth = 64
 
 // markerableElements are the SVG-namespace element local names a
@@ -91,16 +96,16 @@ type Marker struct {
 	// an empty <mask> is.
 	Kids *Group
 
-	// ClipToViewport is always true for a <marker> built by this engine's
-	// corpus (SVG2: a <marker>'s default AND ONLY commonly-authored overflow
-	// is "hidden" — the opposite default from most SVG elements). It clips
-	// Kids to the [0,Width]x[0,Height] marker viewport rect UNLESS the
-	// marker's own overflow attribute is "visible"/"scroll" (see
-	// wantsViewportClip, reused from use.go's <symbol> handling, which
-	// implements the identical default). Named explicitly on the struct
-	// (rather than always assumed true) so a future overflow:visible marker
-	// — see the resvg "nested.svg" fixture's marker2, which sets
-	// overflow="visible" — can suppress it per-instance.
+	// ClipToViewport clips Kids to the [0,Width]x[0,Height] marker viewport
+	// rect. It is true for the overwhelming majority of markers, since SVG2
+	// gives a <marker> the initial overflow "hidden" — the opposite default
+	// from most SVG elements — and false only when the marker's own
+	// resolved overflow is "visible"/"scroll" (see the resvg "nested.svg"
+	// fixture's marker2, which sets overflow="visible"). The value comes
+	// from the marker's own CASCADED style (Style.WantsViewportClip), so
+	// style="overflow:visible" and an `overflow` stylesheet rule work, not
+	// just the presentation attribute; <symbol> resolves the identical
+	// default the same way through wantsViewportClip in use.go.
 	ClipToViewport bool
 }
 
@@ -123,25 +128,39 @@ func (b *sceneBuilder) resolveMarkerRef(ref string) *Marker {
 	if !ok {
 		return nil
 	}
-	return b.resolveMarker(fragID, 0)
+	return b.resolveMarker(fragID)
 }
 
 // resolveMarker resolves id against the document index into a *Marker,
 // memoizing by id (see sceneBuilder.markerMemo) and guarding against a
 // self-referencing or cyclic marker chain via buildingMarker (mirrors
-// buildingClip/buildingMask exactly). depth bounds an acyclic chain via
-// maxMarkerChainDepth, independent of the cycle guard.
+// buildingClip/buildingMask exactly). sceneBuilder.markerDepth additionally
+// bounds an acyclic chain via maxMarkerChainDepth, independent of the cycle
+// guard.
 //
 // Returns nil when: id is not present in the document index, the element it
 // names is not a <marker>, a cycle or excessive chain depth is detected, or
 // the marker's own width/height resolve to zero/negative (SVG: a marker
 // with zero-or-negative markerWidth/markerHeight is not rendered — see
 // zero-sized.svg and marker-with-a-negative-size.svg).
-func (b *sceneBuilder) resolveMarker(id string, depth int) *Marker {
+//
+// KNOWN DIVERGENCE (memoization vs. viewport): the memo is keyed by id
+// alone, but a percentage markerWidth/markerHeight/refX/refY resolves
+// against b.vp — whichever viewport happened to be current at the FIRST
+// resolution of that id. A percentage-sized marker first reached from
+// inside another <marker> or <symbol> (which each install their own
+// viewport) therefore caches at that inner scale and is reused at that
+// scale by every later root-level reference. resolveMask has the identical
+// flaw. Keying by (id, viewport) would fix it; it is recorded rather than
+// fixed here because no fixture in the corpus exercises the combination
+// (percent-values.svg uses percentages only at the root viewport), and
+// changing the memo key is a change to shared clip/mask/marker memo
+// discipline that belongs with a fix to all three at once.
+func (b *sceneBuilder) resolveMarker(id string) *Marker {
 	if m, ok := b.markerMemo[id]; ok {
 		return m
 	}
-	if depth >= maxMarkerChainDepth || b.buildingMarker[id] {
+	if b.markerDepth >= maxMarkerChainDepth || b.buildingMarker[id] {
 		return nil
 	}
 	el, ok := b.idx.ids[id]
@@ -176,6 +195,22 @@ func (b *sceneBuilder) resolveMarker(id string, depth int) *Marker {
 		}
 	}
 
+	// A <marker> is not part of the ordinary parentStyle-threaded scene walk
+	// (buildNode never reaches it directly — see skippedElements), but its
+	// content IS ordinary paintable content that inherits from the
+	// <marker>'s own position in the DOM, exactly like a <mask>'s content —
+	// see resolveMask's identical inheritedStyleFor use.
+	ctx := &cascadeCtx{idx: b.idx, logf: b.logf}
+	inherited := b.inheritedStyleFor(el, ctx)
+	// The <marker> element's OWN presentation attributes and style are then
+	// cascaded on top, so its children inherit them: <marker fill="blue">
+	// makes an unstyled child path blue, matching browsers. Passing the
+	// ancestors-only `inherited` straight through (as resolveMask still
+	// does) would drop them. selfStyle also drives overflow, which is a
+	// CSS property — style="overflow:visible" must work, not just the
+	// presentation attribute.
+	selfStyle := inherited.apply(el, ctx)
+
 	m := &Marker{
 		RefX:             refX,
 		RefY:             refY,
@@ -184,16 +219,8 @@ func (b *sceneBuilder) resolveMarker(id string, depth int) *Marker {
 		UnitsStrokeWidth: markerUnitsStrokeWidth(el),
 		Orient:           markerOrient(el, b.logf),
 		ViewBoxM:         vm,
-		ClipToViewport:   wantsViewportClip(el),
+		ClipToViewport:   selfStyle.WantsViewportClip(),
 	}
-
-	// A <marker> is not part of the ordinary parentStyle-threaded scene walk
-	// (buildNode never reaches it directly — see skippedElements), but its
-	// content IS ordinary paintable content that inherits from the
-	// <marker>'s own position in the DOM, exactly like a <mask>'s content —
-	// see resolveMask's identical inheritedStyleFor use.
-	ctx := &cascadeCtx{idx: b.idx, logf: b.logf}
-	inherited := b.inheritedStyleFor(el, ctx)
 
 	// A <marker>'s own viewport (for a percentage inside its content, or a
 	// nested marker reference's userSpaceOnUse resolution) is the marker's
@@ -201,7 +228,12 @@ func (b *sceneBuilder) resolveMarker(id string, depth int) *Marker {
 	// buildSymbolInstance's identical b.vp save/restore discipline.
 	saved := b.vp
 	b.vp = viewport{w: width, h: height}
-	m.Kids = b.buildKidsGroup(el.kids, inherited, ctx)
+	// markerDepth bounds an acyclic marker chain; it must wrap exactly the
+	// content build, since that is the only path by which a nested
+	// marker-* property can re-enter resolveMarker.
+	b.markerDepth++
+	m.Kids = b.buildKidsGroup(el.kids, selfStyle, ctx)
+	b.markerDepth--
 	b.vp = saved
 
 	b.markerMemo[id] = m
