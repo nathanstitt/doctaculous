@@ -884,7 +884,19 @@ OPPOSITE of the obvious guess:
    floods; `on-an-empty-group-2` (the oBB default) is blank — an undefined
    bbox only disables the filter when the units actually need one.
 
-### Known tolerance gap
+### Known tolerance gaps
+
+`filter/on-a-thin-rect` renders at **2.78% differing pixels** (worst channel
+delta 75). Root cause: `filterSpace` (`pkg/svg/draw/filter.go`) derives a
+SINGLE uniform scale from the element matrix, so a non-uniform transform
+rasterizes the filter region at the wrong aspect — see the KNOWN
+APPROXIMATION comment at that line. A real fix needs a per-axis filter space
+threaded through `filterM`/`postM` and every primitive's subregion math.
+
+`feGaussianBlur/small-stdDeviation` differs by design: resvg switches to an
+**IIR** blur below stdDeviation 2 (stated in that fixture's own `<desc>`),
+while this engine implements the spec's three-box approximation everywhere.
+Both are valid readings of the spec; ours is the one the spec writes down.
 
 `feOffset/with-primitiveUnits=objectBoundingBox` renders at **0.28%
 differing pixels against resvg's reference**, just over the project's 0.2%

@@ -188,6 +188,24 @@ func (b *sceneBuilder) buildUse(el *element, useSiteStyle Style, ctx *cascadeCtx
 	// opacity="...">'s own element opacity does.
 	g := &Group{M: m, Opacity: useSiteStyle.opacity}
 	g.Kids = []Node{content}
+	// A filter on the <use> itself applies to the instantiated result, the
+	// same way it does on a <g> (buildGroupElement) or a shape (buildShape).
+	// Wiring it here rather than leaving it to the target matters for the
+	// error rule as much as the effect: an unresolvable reference means the
+	// element is NOT RENDERED, so a <use filter="url(#missing)"> that merely
+	// ignored the attribute would paint content the spec says must vanish.
+	//
+	// clip-path and mask on a <use> are still dropped — a pre-existing gap
+	// that predates filters and is recorded in FEATURES.md rather than fixed
+	// here, since neither has the not-rendered error rule that makes ignoring
+	// a filter actively wrong.
+	if ref, ok := useSiteStyle.FilterRef(); ok {
+		f, ok := b.resolveFilterRef(ref, el, useSiteStyle)
+		if !ok {
+			return nil
+		}
+		g.Filter = f
+	}
 	return g
 }
 

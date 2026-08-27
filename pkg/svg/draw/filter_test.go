@@ -627,6 +627,50 @@ func TestFilterAllocationIsProportionalToTheRegionNotTheCanvas(t *testing.T) {
 
 // TestFilterNestingCapLogsItsOwnReason pins that a nesting overflow reports
 // NESTING rather than borrowing the region cap's message, which sent a reader
+// TestFilterOnUseAppliesAndHonoursTheErrorRule pins a gap no corpus fixture
+// reaches: the corpus never combines `filter` with `<use>`.
+//
+// buildUse constructed its wrapper Group without ever reading FilterRef,
+// unlike buildGroupElement and buildShape which both do. Both halves were
+// wrong: a filter on a <use> had NO effect, and an unresolvable reference
+// left the element painted where SVG's error handling requires it not to
+// render at all — the same reference on a plain <rect> correctly dropped it.
+func TestFilterOnUseAppliesAndHonoursTheErrorRule(t *testing.T) {
+	const hdr = filterHdr + ` xmlns:xlink="http://www.w3.org/1999/xlink"`
+	const target = `<defs><rect id="r" x="10" y="10" width="60" height="60" fill="rgb(0,0,255)"/></defs>`
+
+	// feFlood replaces the content entirely, so "did the filter run" is
+	// directly observable rather than inferred from a subtle difference.
+	img, _ := renderFilterSVG(t, `<svg `+hdr+` width="100" height="100">`+target+`
+	  <filter id="f"><feFlood flood-color="rgb(0,255,0)"/></filter>
+	  <use xlink:href="#r" filter="url(#f)"/></svg>`, 100, 100)
+	if c := img.RGBAAt(40, 40); c.G < 200 || c.B > 60 {
+		t.Errorf("center = %+v, want the flood colour; a filter on <use> was ignored", c)
+	}
+
+	// An unresolvable filter reference drops the element. Checked against the
+	// identical reference on a plain shape, so the two paths cannot diverge
+	// again without this failing.
+	bad, _ := renderFilterSVG(t, `<svg `+hdr+` width="100" height="100">`+target+`
+	  <use xlink:href="#r" filter="url(#nope)"/></svg>`, 100, 100)
+	ctrl, _ := renderFilterSVG(t, `<svg `+hdr+` width="100" height="100">
+	  <rect x="10" y="10" width="60" height="60" fill="rgb(0,0,255)" filter="url(#nope)"/></svg>`, 100, 100)
+	if got, want := paintedPixels(bad), paintedPixels(ctrl); got != want {
+		t.Errorf("<use> with an unresolvable filter painted %d px, the same reference on <rect> painted %d; both must not render", got, want)
+	}
+}
+
+// paintedPixels counts pixels with any coverage at all.
+func paintedPixels(img *image.RGBA) int {
+	n := 0
+	for i := 3; i < len(img.Pix); i += 4 {
+		if img.Pix[i] > 0 {
+			n++
+		}
+	}
+	return n
+}
+
 // TestFilteredGroupSurvivesPlainNestingPastTheCompositingCap pins the cliff
 // that made a filtered group's content vanish outright.
 //

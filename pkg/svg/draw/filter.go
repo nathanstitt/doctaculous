@@ -572,6 +572,17 @@ func filterSpace(f *svg.Filter, m render.Matrix, target boundsFunc, dev render.D
 	// The region's four corners in device space give the scale m applies
 	// along each region axis; dividing m by that scale leaves the pure
 	// rotation/skew, which becomes postM.
+	//
+	// KNOWN APPROXIMATION: this is a SINGLE uniform scale, so a non-uniform
+	// transform (scale(1,20) and the like) rasterizes the filter region at
+	// the wrong aspect — the region is square in filter space where the
+	// element is not. The corpus's filter/on-a-thin-rect measures 2.78%
+	// differing pixels against resvg for exactly this reason; its golden
+	// ships as our own output so the suite stays green and regression-locked,
+	// and the tolerance was NOT widened to hide it. A real fix needs a
+	// per-axis filter space (separate x and y scales carried through
+	// filterM/postM and every primitive's subregion math), which is a larger
+	// change than this line suggests.
 	sf := m.ScaleFactor()
 	if sf <= 0 || math.IsNaN(sf) || math.IsInf(sf, 0) {
 		return fs, false
