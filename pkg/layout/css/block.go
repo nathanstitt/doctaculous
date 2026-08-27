@@ -374,6 +374,11 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		DebugTag:   debugTag(b),
 	}
 	frag.Box = b
+	// CSS filter: parsed once, here, and carried on the fragment so the flatten
+	// stage can bracket the box's subtree without re-parsing per page or per render
+	// worker. nil (the common case) leaves every unfiltered document's item stream
+	// byte-identical.
+	frag.Filter = filterChain(b)
 	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
 	if len(in.collapsedBorders) > 0 {
 		// The collapsed grid strips were built from the interior's cell fragments —
@@ -1115,7 +1120,14 @@ func establishesNewBFC(b *cssbox.Box) bool {
 		b.Display == cssbox.DisplayGrid || b.Display == cssbox.DisplayInlineGrid {
 		return true // a flex/grid container establishes a BFC (CSS Flexbox 2 / Grid 2)
 	}
-	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
+	// A FILTERED box establishes a BFC too (CSS Display 3's BFC-root list includes
+	// `filter` other than none). Beyond the spec, the engine relies on it: a BFC
+	// fragment flattens through ONE AppendItems call, which is what lets the filter
+	// bracket wrap the box's own decorations AND its contents as a single balanced
+	// pair. Without it a filtered box's background would be emitted in the ancestor's
+	// decoration phase and its text in the ancestor's content phase, with no single
+	// range to bracket.
+	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b) || filtered(b)
 }
 
 // establishesStackingContext reports whether b establishes a CSS stacking context.
