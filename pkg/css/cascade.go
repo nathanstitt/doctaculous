@@ -52,16 +52,21 @@ type ComputedStyle struct {
 	Color           color.RGBA
 	BackgroundColor color.RGBA // zero-alpha means transparent / not set
 
-	// NOT PRESENT, deliberately, and recorded here because this struct is
-	// where a maintainer would look for them:
+	// Filter is the CSS `filter` shorthand's RAW declaration text ("" or "none"
+	// = no filter, the initial value). It is kept unparsed here, exactly as
+	// BackgroundImage keeps its url() ref raw, and handed to
+	// pkg/filtereffects.Parse at use time by the consumer that also owns the
+	// length resolver (a CSS box resolves em/% against its own font size and
+	// containing block, which this package has no access to). NOT inherited,
+	// per spec.
 	//
-	//   - filter: the CSS filter shorthand is parsed by pkg/filtereffects
-	//     (built dependency-free for exactly this reuse) and the offscreen
-	//     primitives are already on render.Device, but a filtered box must
-	//     BRACKET its subtree's emitted items the way Clips does with
-	//     ClipPushKind/ClipPopKind. That is a change to the flat
-	//     layout.Page.Items interchange format, not to SVG, so it was kept
-	//     out of the SVG series rather than mixed into it.
+	// A filtered box BRACKETS its subtree's emitted items the way Clips does
+	// with ClipPushKind/ClipPopKind — see layout.FilterPushKind — so the
+	// property costs nothing for an unfiltered box.
+	Filter string
+
+	// NOT PRESENT, deliberately, and recorded here because this struct is
+	// where a maintainer would look for it:
 	//
 	//   - letter-spacing / word-spacing: implemented for SVG only (see
 	//     pkg/svg/style.go). An SVG-internal declaration works; inheriting
@@ -501,7 +506,10 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.Page = parent.Page       // CSS Paged Media: `page` is inherited
 	cs.Widows = parent.Widows   // CSS: widows is inherited
 	cs.Orphans = parent.Orphans // CSS: orphans is inherited
-	// table-layout, vertical-align, break-*, break-inside are NOT inherited (per CSS).
+	// table-layout, vertical-align, break-*, break-inside, filter are NOT inherited
+	// (per CSS). filter in particular must not inherit: it applies once to the box's
+	// whole rendered subtree, so inheriting it would re-apply the effect at every
+	// descendant.
 	return cs
 }
 
@@ -603,6 +611,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "background-image":
 		if ref, ok := parseBackgroundImage(d.Value); ok {
 			cs.BackgroundImage = ref
+		}
+	case "filter":
+		// Kept RAW (see ComputedStyle.Filter): the grammar is parsed by
+		// pkg/filtereffects at use time, where a length resolver exists. "none"
+		// (the initial value) is normalized to "" so an unfiltered box is the
+		// zero value and every downstream check is a single emptiness test.
+		if v := strings.TrimSpace(d.Value); strings.EqualFold(v, "none") {
+			cs.Filter = ""
+		} else {
+			cs.Filter = v
 		}
 	case "background-repeat":
 		switch strings.ToLower(strings.TrimSpace(d.Value)) {

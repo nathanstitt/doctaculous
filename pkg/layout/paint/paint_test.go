@@ -1,9 +1,14 @@
 package paint
 
 import (
+	"bytes"
 	"image"
 	"image/color"
+	"math"
+	"strings"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
 
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/render"
@@ -19,6 +24,10 @@ type recordDevice struct {
 	saves    int
 	restores int
 	clips    []*render.Path
+	// groups records BeginGroup/EndGroup in call order ("begin"/"end"), so a test can
+	// assert both the count AND the nesting a filter bracket must produce.
+	groups      []string
+	groupAlphas []float64
 }
 
 type recordedGlyph struct {
@@ -49,12 +58,15 @@ func (d *recordDevice) DrawGlyph(g render.GlyphRef) {
 	}
 	d.glyphs = append(d.glyphs, recordedGlyph{outline: o, color: g.Color})
 }
-func (d *recordDevice) FillShading(render.Shader, render.Matrix, string)             {}
-func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)                   { d.clips = append(d.clips, p) }
-func (d *recordDevice) BeginGroup()                                                  {}
-func (d *recordDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
-func (d *recordDevice) Save()                                                        { d.saves++ }
-func (d *recordDevice) Restore()                                                     { d.restores++ }
+func (d *recordDevice) FillShading(render.Shader, render.Matrix, string) {}
+func (d *recordDevice) PushClip(p *render.Path, _ render.FillRule)       { d.clips = append(d.clips, p) }
+func (d *recordDevice) BeginGroup()                                      { d.groups = append(d.groups, "begin") }
+func (d *recordDevice) EndGroup(alpha float64, _ string, _, _ render.GroupMask) {
+	d.groups = append(d.groups, "end")
+	d.groupAlphas = append(d.groupAlphas, alpha)
+}
+func (d *recordDevice) Save()    { d.saves++ }
+func (d *recordDevice) Restore() { d.restores++ }
 func (d *recordDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }
@@ -399,4 +411,449 @@ func pathBounds(p *render.Path) (minX, minY, maxX, maxY float64) {
 		}
 	}
 	return
+}
+
+// TestPaintFilterPushPopDrivesGroup: on a backend with NO offscreen raster
+// surface (recordDevice.RenderOffscreen returns nil, exactly as pkg/render/pdfwrite
+// does), a filter bracket degrades to a plain compositing group — BeginGroup, the
+// bracketed content, EndGroup at alpha 1 with no blend mode and no masks — so the
+// content is present and correctly placed, just unfiltered.
+//
+// This is the documented, permanent behavior for a vector backend, not a gap: PDF
+// has no filter operator and a blur has no vector representation.
+func TestPaintFilterPushPopDrivesGroup(t *testing.T) {
+	chain := []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}}
+	page := &layout.Page{
+		WidthPt: 100, HeightPt: 100,
+		Items: []layout.Item{
+			{Kind: layout.FilterPushKind, Filter: layout.FilterItem{Funcs: chain, XPt: 10, YPt: 20, WPt: 30, HPt: 40}},
+			{Kind: layout.GlyphKind, Glyph: layout.GlyphItem{Outline: triangle(), XPt: 12, YPt: 22, SizePt: 4, Color: color.RGBA{A: 0xff}}},
+			{Kind: layout.FilterPopKind},
+		},
+	}
+	dev := &recordDevice{}
+	PaintPage(dev, page, render.Scale(1, 1))
+
+	if got := strings.Join(dev.groups, ","); got != "begin,end" {
+		t.Errorf("group calls = %q, want \"begin,end\"", got)
+	}
+	if len(dev.groupAlphas) != 1 || dev.groupAlphas[0] != 1 {
+		t.Errorf("EndGroup alphas = %v, want [1] (pass-through composite)", dev.groupAlphas)
+	}
+	if len(dev.glyphs) != 1 {
+		t.Errorf("painted %d glyphs, want 1 (inside the group)", len(dev.glyphs))
+	}
+}
+
+// TestPaintFilterNests: nested filter brackets produce nested groups, in order.
+func TestPaintFilterNests(t *testing.T) {
+	page := &layout.Page{
+		WidthPt: 100, HeightPt: 100,
+		Items: []layout.Item{
+			{Kind: layout.FilterPushKind},
+			{Kind: layout.FilterPushKind},
+			{Kind: layout.FilterPopKind},
+			{Kind: layout.FilterPopKind},
+		},
+	}
+	dev := &recordDevice{}
+	PaintPage(dev, page, render.Identity)
+	if got := strings.Join(dev.groups, ","); got != "begin,begin,end,end" {
+		t.Errorf("group calls = %q, want \"begin,begin,end,end\"", got)
+	}
+}
+
+// filterProbe is the source colour every mapping assertion below filters. Its
+// three channels are deliberately distinct and none is 0 or 255, so a matrix that
+// mixes channels, one that scales them, and one that leaves them alone all produce
+// visibly different results.
+var filterProbe = color.RGBA{0x33, 0x66, 0x99, 0xff} // 51, 102, 153
+
+// rasterFiltered paints a 40x40 square of filterProbe inside a filter bracket
+// carrying chain, at 1 device pixel per point, and returns the resulting page.
+func rasterFiltered(chain []filtereffects.Function, shadows []color.RGBA) *image.RGBA {
+	return newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+			Funcs: chain, ShadowColors: shadows,
+			XPt: 10, YPt: 10, WPt: 40, HPt: 40,
+		}},
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: filterProbe}},
+		{Kind: layout.FilterPopKind},
+	}})
+}
+
+// TestPaintFilterFunctionMapping pins each CSS filter function's MAPPING onto its
+// spec-defined primitive, against HAND-COMPUTED pixel values rather than merely
+// asserting that the output changed.
+//
+// Every `want` below is derived from the Filter Effects specification's own
+// formula applied to filterProbe (51, 102, 153) by hand:
+//
+//   - grayscale(1) is saturate(0), i.e. the luminance 0.213R + 0.715G + 0.072B =
+//     10.86 + 72.93 + 11.02 = 94.8 on every channel.
+//   - hue-rotate(0deg) reduces exactly to the identity (cos=1, sin=0), which is
+//     the cheapest check that the spec's constants were transcribed correctly.
+//   - invert(1) flips each channel: 255-51, 255-102, 255-153.
+//   - brightness(0.5) halves each channel; contrast(0) collapses every channel to
+//     the 0.5 midpoint (128); saturate(1) and sepia(0) are the identity.
+//   - sepia(1) uses the spec's fixed matrix: R' = 0.393·51 + 0.769·102 + 0.189·153
+//     = 20.04 + 78.44 + 28.92 = 127.4, and likewise for G' and B'.
+func TestPaintFilterFunctionMapping(t *testing.T) {
+	fn := func(k filtereffects.FunctionKind, amount float64) []filtereffects.Function {
+		return []filtereffects.Function{{Kind: k, Amount: amount}}
+	}
+	for _, tc := range []struct {
+		name  string
+		chain []filtereffects.Function
+		want  color.RGBA
+	}{
+		{"grayscale(1)", fn(filtereffects.FuncGrayscale, 1), color.RGBA{95, 95, 95, 255}},
+		// grayscale(2) must not over-rotate past greyscale: it is clamped to 1.
+		{"grayscale(2)", fn(filtereffects.FuncGrayscale, 2), color.RGBA{95, 95, 95, 255}},
+		{"grayscale(0)", fn(filtereffects.FuncGrayscale, 0), filterProbe},
+		{"invert(1)", fn(filtereffects.FuncInvert, 1), color.RGBA{204, 153, 102, 255}},
+		{"invert(0)", fn(filtereffects.FuncInvert, 0), filterProbe},
+		// invert(0.5) sends every channel to the 0.5 midpoint: v·(1-2a)+a = 0.5.
+		{"invert(0.5)", fn(filtereffects.FuncInvert, 0.5), color.RGBA{128, 128, 128, 255}},
+		{"brightness(1)", fn(filtereffects.FuncBrightness, 1), filterProbe},
+		{"brightness(0.5)", fn(filtereffects.FuncBrightness, 0.5), color.RGBA{26, 51, 77, 255}},
+		{"brightness(0)", fn(filtereffects.FuncBrightness, 0), color.RGBA{0, 0, 0, 255}},
+		{"contrast(1)", fn(filtereffects.FuncContrast, 1), filterProbe},
+		{"contrast(0)", fn(filtereffects.FuncContrast, 0), color.RGBA{128, 128, 128, 255}},
+		// contrast(2): 2v - 0.5, so 51→0 (clamped from -25.5), 102→76.5, 153→178.5.
+		{"contrast(2)", fn(filtereffects.FuncContrast, 2), color.RGBA{0, 77, 179, 255}},
+		{"saturate(1)", fn(filtereffects.FuncSaturate, 1), filterProbe},
+		{"saturate(0)", fn(filtereffects.FuncSaturate, 0), color.RGBA{95, 95, 95, 255}},
+		{"sepia(0)", fn(filtereffects.FuncSepia, 0), filterProbe},
+		{"sepia(1)", fn(filtereffects.FuncSepia, 1), color.RGBA{127, 113, 88, 255}},
+		{"hue-rotate(0)", []filtereffects.Function{{Kind: filtereffects.FuncHueRotate}}, filterProbe},
+	} {
+		got := rasterFiltered(tc.chain, nil).RGBAAt(30, 30)
+		// A tolerance of 1 absorbs only the float32→uint8 rounding of the
+		// sRGB round trip, not any difference in the matrix itself.
+		if !isColor(got, tc.want, 1) {
+			t.Errorf("%s produced %v, want %v (the spec's own formula on %v)", tc.name, got, tc.want, filterProbe)
+		}
+	}
+}
+
+// TestPaintFilterOpacityMapping: opacity(a) scales the ALPHA channel only, so the
+// filtered square composites over the white page toward white rather than changing
+// hue. opacity(0.5) over white gives (51+255)/2, (102+255)/2, (153+255)/2.
+func TestPaintFilterOpacityMapping(t *testing.T) {
+	got := rasterFiltered([]filtereffects.Function{{Kind: filtereffects.FuncOpacity, Amount: 0.5}}, nil).RGBAAt(30, 30)
+	if want := (color.RGBA{153, 179, 204, 255}); !isColor(got, want, 2) {
+		t.Errorf("opacity(0.5) produced %v, want %v (half coverage over the white page)", got, want)
+	}
+	// opacity(0) removes the box entirely: the white page shows through.
+	got = rasterFiltered([]filtereffects.Function{{Kind: filtereffects.FuncOpacity}}, nil).RGBAAt(30, 30)
+	if want := (color.RGBA{255, 255, 255, 255}); !isColor(got, want, 1) {
+		t.Errorf("opacity(0) produced %v, want the bare page %v", got, want)
+	}
+}
+
+// TestPaintFilterComposesInWrittenOrder: two functions apply LEFT TO RIGHT, each
+// consuming the previous one's output.
+//
+// The pair is chosen so the order is observable. `invert(1) grayscale(1)` inverts
+// first (51,102,153 → 204,153,102) and then takes that result's luminance
+// (0.213·204 + 0.715·153 + 0.072·102 = 43.5 + 109.4 + 7.3 = 160). The reverse
+// greys first (→ 95,95,95) and then inverts (→ 160,160,160) — numerically the same
+// here, which is exactly why a SECOND, asymmetric pair is needed.
+//
+// `brightness(2) grayscale(1)` doubles first (102,204,255 after clamping) and then
+// greys (0.213·102 + 0.715·204 + 0.072·255 = 21.7 + 145.9 + 18.4 = 186), while
+// `grayscale(1) brightness(2)` greys first (95) and then doubles to 190. Those two
+// differ, and by more than the rounding tolerance.
+func TestPaintFilterComposesInWrittenOrder(t *testing.T) {
+	bright := filtereffects.Function{Kind: filtereffects.FuncBrightness, Amount: 2}
+	gray := filtereffects.Function{Kind: filtereffects.FuncGrayscale, Amount: 1}
+
+	forward := rasterFiltered([]filtereffects.Function{bright, gray}, nil).RGBAAt(30, 30)
+	if want := (color.RGBA{186, 186, 186, 255}); !isColor(forward, want, 1) {
+		t.Errorf("brightness(2) grayscale(1) = %v, want %v (brighten THEN grey)", forward, want)
+	}
+	reverse := rasterFiltered([]filtereffects.Function{gray, bright}, nil).RGBAAt(30, 30)
+	if want := (color.RGBA{190, 190, 190, 255}); !isColor(reverse, want, 1) {
+		t.Errorf("grayscale(1) brightness(2) = %v, want %v (grey THEN brighten)", reverse, want)
+	}
+	if forward == reverse {
+		t.Errorf("both orders produced %v; the pair was chosen to make order observable", forward)
+	}
+}
+
+// TestPaintFilterBlurSpreadsPastTheBorderBox: blur() moves pixels, so the filtered
+// output must reach OUTSIDE the box's border box — CSS, unlike SVG, does not clip a
+// filter to a region. A surface sized to the border box alone would cut the blur off
+// dead at the edge, which reads as a half-blurred box rather than a missing margin.
+func TestPaintFilterBlurSpreadsPastTheBorderBox(t *testing.T) {
+	img := rasterFiltered([]filtereffects.Function{{Kind: filtereffects.FuncBlur, StdDeviation: 3}}, nil)
+	// Just OUTSIDE the box (which spans x,y in [10,50)): a blur must tint it.
+	if got := img.RGBAAt(7, 30); got.R == 0xff && got.G == 0xff && got.B == 0xff {
+		t.Errorf("pixel (7,30) is still bare white; blur(3) must spread past the border box")
+	}
+	// The box's own centre stays close to the source colour (a 3px blur over a
+	// 40px box barely touches the middle).
+	if got := img.RGBAAt(30, 30); !isColor(got, filterProbe, 4) {
+		t.Errorf("blurred centre = %v, want ≈%v", got, filterProbe)
+	}
+	// Far from the box, nothing is painted at all — the margin is bounded.
+	if got := img.RGBAAt(90, 90); !isColor(got, color.RGBA{255, 255, 255, 255}, 0) {
+		t.Errorf("pixel (90,90) = %v, want bare white; the blur margin must be bounded", got)
+	}
+}
+
+// TestPaintFilterDropShadowUsesItsResolvedColor: drop-shadow(dx dy blur color)
+// lowers to blur → offset → flood → composite("in") → merge, with the shadow
+// BEHIND the source. A hard-edged shadow (stdDeviation 0) offset clear of the box
+// lets the flood colour be read directly.
+func TestPaintFilterDropShadowUsesItsResolvedColor(t *testing.T) {
+	red := color.RGBA{0xff, 0, 0, 0xff}
+	img := rasterFiltered(
+		[]filtereffects.Function{{Kind: filtereffects.FuncDropShadow, Dx: 12, Dy: 12}},
+		[]color.RGBA{red},
+	)
+	// (56,56) is inside the shadow (the box shifted by 12) but outside the box.
+	if got := img.RGBAAt(56, 56); !isColor(got, red, 2) {
+		t.Errorf("shadow pixel (56,56) = %v, want the resolved shadow colour %v", got, red)
+	}
+	// The source still paints ON TOP of its own shadow: feMerge's node order is
+	// painting order, so the composite (shadow) is first and the source second.
+	if got := img.RGBAAt(30, 30); !isColor(got, filterProbe, 2) {
+		t.Errorf("source pixel (30,30) = %v, want the unshadowed source %v (shadow must be BEHIND)", got, filterProbe)
+	}
+}
+
+// TestPaintFilterEmptyChainIsByteIdentical: a bracket carrying no functions must
+// leave the page byte-identical to the same content with no bracket at all. This is
+// the regression guard for every unfiltered document — `filter: none` and an
+// unparseable value both reach the painter as no bracket, but a hand-built or
+// future emission path could produce an empty one.
+func TestPaintFilterEmptyChainIsByteIdentical(t *testing.T) {
+	rule := layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: filterProbe}
+	plain := newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.BackgroundKind, Rule: rule},
+	}})
+	empty := newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40}},
+		{Kind: layout.BackgroundKind, Rule: rule},
+		{Kind: layout.FilterPopKind},
+	}})
+	if !bytes.Equal(plain.Pix, empty.Pix) {
+		t.Error("an empty filter chain did not render byte-identically to no bracket at all")
+	}
+}
+
+// TestPaintFilterDegenerateRegionDegrades: a filter whose region cannot produce a
+// surface — a zero-area box, a box entirely off the device, or one so large it
+// exceeds maxCSSFilterPixels — must still PAINT its content, unfiltered, rather
+// than dropping it or panicking. A visible approximation beats a blank.
+func TestPaintFilterDegenerateRegionDegrades(t *testing.T) {
+	gray := []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}}
+	for _, tc := range []struct {
+		name       string
+		x, y, w, h float64
+	}{
+		{name: "zero-area box", x: 10, y: 10, w: 0, h: 0},
+		{name: "NaN box", x: math.NaN(), y: 0, w: 10, h: 10},
+		{name: "infinite box", x: 0, y: 0, w: math.Inf(1), h: math.Inf(1)},
+		{name: "negative-extent box", x: 10, y: 10, w: -5, h: -5},
+	} {
+		img := newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+			{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+				Funcs: gray, XPt: tc.x, YPt: tc.y, WPt: tc.w, HPt: tc.h,
+			}},
+			{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: filterProbe}},
+			{Kind: layout.FilterPopKind},
+		}})
+		if got := img.RGBAAt(30, 30); !isColor(got, filterProbe, 1) {
+			t.Errorf("%s: centre = %v, want the UNFILTERED source %v (degrade, never drop)", tc.name, got, filterProbe)
+		}
+	}
+}
+
+// TestPaintFilterCoversContentOverflowingTheBox: CSS does not clip a filter's
+// input to the element's box, so content overflowing the border box must still be
+// filtered — not cropped away. A surface sized to the border box alone would drop
+// the overflowing part entirely, which is content loss dressed up as a filter.
+func TestPaintFilterCoversContentOverflowingTheBox(t *testing.T) {
+	img := newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+			Funcs: []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}},
+			// The declared border box is a 10x10 corner...
+			XPt: 10, YPt: 10, WPt: 10, HPt: 10,
+		}},
+		// ...but the painted content is 40x40, overflowing it on both axes.
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: filterProbe}},
+		{Kind: layout.FilterPopKind},
+	}})
+	// A point well outside the border box but inside the content: present AND
+	// filtered.
+	if got, want := img.RGBAAt(40, 40), (color.RGBA{95, 95, 95, 255}); !isColor(got, want, 1) {
+		t.Errorf("overflowing content at (40,40) = %v, want the filtered %v", got, want)
+	}
+}
+
+// TestCSSFilterSurfaceIsBounded pins the two properties that make
+// maxCSSFilterPixels actually bound the allocation rather than a nominal region:
+// the surface is INTERSECTED with the device before it is measured, and its
+// origin is SHIFTED to (0,0) so RenderOffscreen (which always allocates from the
+// origin) allocates the surface's own area rather than up to its far corner.
+//
+// Without the intersect, a `width:1e9px` box would exceed the cap and degrade to
+// unfiltered even though only a page-sized sliver is visible. Without the shift, a
+// small box far from the origin would allocate its far corner's area while this
+// check measured its own — silently, since the output would look correct.
+func TestCSSFilterSurfaceIsBounded(t *testing.T) {
+	gray := []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}}
+
+	// A colossal box on a page-sized device clips to the device and still runs.
+	fs, _, ok := cssFilterSurface(
+		&layout.FilterItem{Funcs: gray, WPt: 1e9, HPt: 1e9}, nil, render.Identity, 800, 600)
+	if !ok {
+		t.Fatal("a 1e9-point box on an 800x600 device should clip to the device, not be rejected")
+	}
+	if fs.size != (image.Point{X: 800, Y: 600}) {
+		t.Errorf("surface size = %v, want the device's own 800x600 (clipped)", fs.size)
+	}
+
+	// The same box on a device larger than the cap IS rejected, so no
+	// multi-gigabyte buffer is ever allocated.
+	if _, _, ok := cssFilterSurface(
+		&layout.FilterItem{Funcs: gray, WPt: 1e9, HPt: 1e9}, nil, render.Identity, 4000, 4000); ok {
+		t.Errorf("a 16M-pixel surface should exceed the %d-pixel cap", maxCSSFilterPixels)
+	}
+
+	// A coordinate beyond int range must be REJECTED, not converted. On amd64 a
+	// float64 outside int64's range converts to the int64 MINIMUM regardless of
+	// sign, so an off-to-the-right box would come back starting far to the LEFT
+	// and intersect the device to a plausible-looking wrong rectangle.
+	for _, fi := range []layout.FilterItem{
+		{Funcs: gray, XPt: 1e300, YPt: 1e300, WPt: 10, HPt: 10},
+		{Funcs: gray, XPt: -1e300, YPt: -1e300, WPt: 10, HPt: 10},
+	} {
+		if _, _, ok := cssFilterSurface(&fi, nil, render.Identity, 800, 600); ok {
+			t.Errorf("a box at (%g,%g), entirely beyond int range and off the device, was accepted", fi.XPt, fi.YPt)
+		}
+	}
+	// A colossal blur MARGIN is a different case and must NOT be rejected: the
+	// margin is clamped to the device, and pkg/svg/filter caps the deviation
+	// itself (MaxBlurStdDeviation), so the result is a full-device blur rather
+	// than an unbounded allocation.
+	if _, _, ok := cssFilterSurface(
+		&layout.FilterItem{Funcs: []filtereffects.Function{{Kind: filtereffects.FuncBlur, StdDeviation: 1e300}},
+			WPt: 10, HPt: 10}, nil, render.Identity, 800, 600); !ok {
+		t.Error("a huge blur margin should clamp to the device, not be rejected")
+	}
+
+	// A small box FAR from the origin allocates only its own area, not its far
+	// corner's: the shift is what makes the two agree.
+	fs, _, ok = cssFilterSurface(
+		&layout.FilterItem{Funcs: gray, XPt: 3900, YPt: 3900, WPt: 50, HPt: 50}, nil, render.Identity, 4000, 4000)
+	if !ok {
+		t.Fatal("a 50x50 box at (3900,3900) should be filterable")
+	}
+	if fs.size.X > 64 || fs.size.Y > 64 {
+		t.Errorf("surface size = %v for a 50x50 box; the origin shift is not being applied", fs.size)
+	}
+	if fs.origin.X < 3800 || fs.origin.Y < 3800 {
+		t.Errorf("surface origin = %v, want ≈(3900,3900) so the result is placed back correctly", fs.origin)
+	}
+}
+
+// TestPaintFilterNestedChainsBothApply: a filtered box inside another filtered box
+// runs BOTH chains, inner first. invert(1) inside brightness(0.5) gives
+// (204,153,102) halved to (102,77,51).
+func TestPaintFilterNestedChainsBothApply(t *testing.T) {
+	img := newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+			Funcs: []filtereffects.Function{{Kind: filtereffects.FuncBrightness, Amount: 0.5}},
+			XPt:   10, YPt: 10, WPt: 40, HPt: 40,
+		}},
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+			Funcs: []filtereffects.Function{{Kind: filtereffects.FuncInvert, Amount: 1}},
+			XPt:   10, YPt: 10, WPt: 40, HPt: 40,
+		}},
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: filterProbe}},
+		{Kind: layout.FilterPopKind},
+		{Kind: layout.FilterPopKind},
+	}})
+	if got, want := img.RGBAAt(30, 30), (color.RGBA{102, 77, 51, 255}); !isColor(got, want, 2) {
+		t.Errorf("nested invert(1) inside brightness(0.5) = %v, want %v", got, want)
+	}
+}
+
+// TestPaintFilterNestingIsCapped: nesting past maxFilterNestingDepth degrades to
+// painting the content unfiltered rather than allocating an unbounded stack of live
+// offscreen surfaces. Each level holds an RGBA plus its chain's own float32 buffers
+// alive at once, so the per-level pixel cap does not bound the product of N levels.
+//
+// The chain used is opacity(0.5): stacking N of them multiplies coverage, so the
+// depth at which filtering stops is directly readable from the pixel — a cap that
+// silently did nothing would keep halving.
+func TestPaintFilterNestingIsCapped(t *testing.T) {
+	build := func(n int) *layout.Page {
+		var items []layout.Item
+		for i := 0; i < n; i++ {
+			items = append(items, layout.Item{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+				Funcs: []filtereffects.Function{{Kind: filtereffects.FuncOpacity, Amount: 0.5}},
+				XPt:   10, YPt: 10, WPt: 40, HPt: 40,
+			}})
+		}
+		items = append(items, layout.Item{
+			Kind: layout.BackgroundKind,
+			Rule: layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: color.RGBA{0, 0, 0, 0xff}},
+		})
+		for i := 0; i < n; i++ {
+			items = append(items, layout.Item{Kind: layout.FilterPopKind})
+		}
+		return &layout.Page{WidthPt: 100, HeightPt: 100, Items: items}
+	}
+	// At the cap, every level still applies: black at coverage 0.5^4 over white.
+	atCap := newRasterPage(100, 100, build(maxFilterNestingDepth)).RGBAAt(30, 30)
+	if want := uint8(239); !isColor(atCap, color.RGBA{want, want, want, 255}, 2) {
+		t.Errorf("%d nested opacity(0.5) = %v, want ≈%d on every channel (0.5^%d coverage)",
+			maxFilterNestingDepth, atCap, want, maxFilterNestingDepth)
+	}
+	// One level PAST the cap, the innermost bracket degrades to a plain group, so
+	// the result is LIGHTER than a further halving would give — and, critically,
+	// the content is still there rather than dropped.
+	past := newRasterPage(100, 100, build(maxFilterNestingDepth+1)).RGBAAt(30, 30)
+	if past.R == 0xff && past.G == 0xff && past.B == 0xff {
+		t.Error("nesting past the cap dropped the content; it must degrade to unfiltered, never to a blank")
+	}
+	if past != atCap {
+		t.Errorf("past the cap = %v, want the same %v: the extra level must degrade to a pass-through group, "+
+			"not apply another opacity", past, atCap)
+	}
+}
+
+// TestPaintFilterUnmatchedPushStillPaints: an UNMATCHED FilterPushKind (which the
+// emission side makes impossible, but a hand-built or corrupted stream could carry)
+// must still paint the rest of the item list rather than swallowing it.
+func TestPaintFilterUnmatchedPushStillPaints(t *testing.T) {
+	img := newRasterPage(100, 100, &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+			Funcs: []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}},
+			XPt:   10, YPt: 10, WPt: 40, HPt: 40,
+		}},
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 10, YPt: 10, WPt: 40, HPt: 40, Color: filterProbe}},
+		// no matching pop
+	}})
+	if got, want := img.RGBAAt(30, 30), (color.RGBA{95, 95, 95, 255}); !isColor(got, want, 1) {
+		t.Errorf("unmatched push: centre = %v, want the filtered %v (content must not be dropped)", got, want)
+	}
+}
+
+// TestPaintUnbalancedFilterPopIsNoOp: a stray FilterPopKind (which the emission side
+// makes impossible, but a hand-built or corrupted stream could carry) must not panic.
+// render.Device documents EndGroup with no matching BeginGroup as a no-op.
+func TestPaintUnbalancedFilterPopIsNoOp(t *testing.T) {
+	page := &layout.Page{WidthPt: 100, HeightPt: 100, Items: []layout.Item{
+		{Kind: layout.FilterPopKind},
+		{Kind: layout.BackgroundKind, Rule: layout.RuleItem{XPt: 0, YPt: 0, WPt: 10, HPt: 10, Color: color.RGBA{A: 0xff}}},
+	}}
+	// Must not panic on either the recording device or the real rasterizer.
+	PaintPage(&recordDevice{}, page, render.Identity)
+	newRasterPage(100, 100, page)
 }

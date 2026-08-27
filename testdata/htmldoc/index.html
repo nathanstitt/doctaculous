@@ -663,5 +663,45 @@ newline is kept.</p>
     </div>
   </section>
 
+  <!-- ===================== 18 · CSS FILTER ===================== -->
+  <section class="section break">
+    <span class="kicker">18 / FILTER</span>
+    <h2>CSS <code>filter</code></h2>
+    <p class="lede">Every swatch below is the <em>same</em> source rendering &mdash; a
+      bordered tile with text and two colour bands &mdash; under a different
+      <code>filter</code> declaration. The effect runs over the box's flattened
+      pixels, so its border, background, text and children are all filtered together.</p>
+
+    <div class="fxgrid">
+      <div class="fx"><div class="fxtile">none<div class="fxband"></div><div class="fxband alt"></div></div>unfiltered</div>
+      <div class="fx f-gray"><div class="fxtile">gray<div class="fxband"></div><div class="fxband alt"></div></div>grayscale(1)</div>
+      <div class="fx f-sepia"><div class="fxtile">sepia<div class="fxband"></div><div class="fxband alt"></div></div>sepia(1)</div>
+      <div class="fx f-saturate"><div class="fxtile">sat<div class="fxband"></div><div class="fxband alt"></div></div>saturate(2.5)</div>
+      <div class="fx f-hue"><div class="fxtile">hue<div class="fxband"></div><div class="fxband alt"></div></div>hue-rotate(140deg)</div>
+      <div class="fx f-invert"><div class="fxtile">inv<div class="fxband"></div><div class="fxband alt"></div></div>invert(1)</div>
+      <div class="fx f-bright"><div class="fxtile">bright<div class="fxband"></div><div class="fxband alt"></div></div>brightness(1.6)</div>
+      <div class="fx f-contrast"><div class="fxtile">contr<div class="fxband"></div><div class="fxband alt"></div></div>contrast(2.2)</div>
+      <div class="fx f-opacity"><div class="fxtile">alpha<div class="fxband"></div><div class="fxband alt"></div></div>opacity(0.4)</div>
+      <div class="fx f-blur"><div class="fxtile">blur<div class="fxband"></div><div class="fxband alt"></div></div>blur(2px)</div>
+      <div class="fx f-shadow"><div class="fxtile">shadow<div class="fxband"></div><div class="fxband alt"></div></div>drop-shadow(5px 5px 3px)</div>
+      <div class="fx f-chain"><div class="fxtile">chain<div class="fxband"></div><div class="fxband alt"></div></div>grayscale(1) brightness(1.5) contrast(1.4)</div>
+    </div>
+
+    <p class="caption">Look for: the two spatial functions. <code>blur(2px)</code> and
+      <code>drop-shadow()</code> both reach <em>outside</em> the tile's border box &mdash;
+      CSS, unlike SVG, does not clip a filter to a region &mdash; while the eight colour
+      adjustments recolour each pixel in place. The last swatch chains three functions,
+      which apply left to right: grey first, then brighten that result, then raise its
+      contrast.</p>
+
+    <p>The chain runs over the box's flattened pixels in an offscreen surface, which is
+      why a filtered box also establishes a block formatting context and a stacking
+      context: its whole rendering has to compose as one isolated group before the
+      effect can apply. In PDF output the same content paints <em>unfiltered</em> &mdash;
+      a PDF writer has no offscreen raster surface and PDF has no filter operator, so the
+      content stays vector and correctly placed rather than being rasterised into a
+      picture of itself.</p>
+  </section>
+
 </body>
 </html>

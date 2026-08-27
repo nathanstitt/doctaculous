@@ -56,6 +56,18 @@ func parseLength(tok Token) (Length, bool) {
 			return Length{tok.Num, UnitPx}, true
 		case "pt":
 			return Length{tok.Num, UnitPt}, true
+		// KNOWN DIVERGENCE: rem is folded into em here, so it resolves against
+		// the ELEMENT's font size rather than the ROOT's. Measured: width:2rem
+		// under a 5pt font renders 10pt where the spec requires 40pt at a 20pt
+		// root. Correct only while the two happen to match.
+		//
+		// Modelling it properly needs a distinct UnitRem carried to the point
+		// where the root font size is known, which every consumer of Length
+		// would have to resolve. The CSS `filter` property does resolve rem
+		// correctly (see Engine.rootFontSizePt) because its lengths are
+		// resolved at paint time, where the root is reachable — so rem is
+		// currently right for filter and wrong for everything else, which is
+		// surprising enough to be worth stating at the fold itself.
 		case "em", "rem":
 			return Length{tok.Num, UnitEm}, true
 		default:
@@ -87,6 +99,21 @@ var namedColors = map[string]color.RGBA{
 	"gray":        {128, 128, 128, 255},
 	"silver":      {192, 192, 192, 255},
 	"transparent": {0, 0, 0, 0},
+}
+
+// ParseColorValue parses one complete CSS colour value — a #hex hash, an
+// rgb(r,g,b) function, or a named colour — reporting ok=false for anything this
+// engine does not recognize.
+//
+// It is exported for consumers that must resolve a colour appearing INSIDE
+// another property's value rather than as a declaration of its own, where the
+// cascade's own parsing never sees it: `filter: drop-shadow(red 2px 2px)` is the
+// case that forced it. pkg/filtereffects deliberately leaves such a colour
+// unparsed (it has no colour grammar and no document), so the caller must resolve
+// it, and duplicating a second hex/rgb/named parser to do so would be a silent
+// divergence from what every other colour in the cascade accepts.
+func ParseColorValue(s string) (color.RGBA, bool) {
+	return parseColor(newTokenizer(s))
 }
 
 // parseColor reads a color value from the tokenizer: a #hex hash, an rgb(r,g,b)

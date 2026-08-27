@@ -44,6 +44,18 @@ type Engine struct {
 	// engine is per-layout and layout is single-threaded (only rasterization fans
 	// out), so this needs no lock — the same reasoning measures relies on.
 	warned map[string]bool
+	// rootFontSizePt is the ROOT element's computed font size, recorded by
+	// layoutTree (the single choke point every public entry goes through) so a
+	// `rem` length can resolve against it. CSS defines rem as the root's font
+	// size, and no other part of the engine carries it: the cascade folds `rem`
+	// into UnitEm at parse time (pkg/css's parseLength), which is a separate,
+	// pre-existing approximation this does NOT fix — it only makes the one
+	// property parsed at use time, `filter`, resolve rem correctly.
+	//
+	// Zero means "not laid out through layoutTree" (a hand-built Engine in a
+	// unit test), which the resolver treats as a fallback rather than as a zero
+	// length.
+	rootFontSizePt float64
 }
 
 // warnOnce logs a formatted diagnostic the FIRST time it is called with key, and
@@ -133,6 +145,11 @@ func (e *Engine) layoutTree(ctx context.Context, root *cssbox.Box, viewportW flo
 	if root == nil {
 		return nil
 	}
+	// Record the root font size before any box is laid out: a `rem` length in a
+	// filter chain resolves against it (see Engine.rootFontSizePt). This is the
+	// single choke point Layout, LayoutPaged, and LayoutPagedDoc all pass
+	// through, so recording it here covers every entry point.
+	e.rootFontSizePt = root.Style.FontSizePt
 	fc := &floatContext{cbLeft: 0, cbRight: viewportW}
 	posCtx := &positionedContext{}
 	pageCB := posCBOwner{isPage: true}
@@ -374,6 +391,11 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		DebugTag:   debugTag(b),
 	}
 	frag.Box = b
+	// CSS filter: parsed once, here, and carried on the fragment so the flatten
+	// stage can bracket the box's subtree without re-parsing per page or per render
+	// worker. nil (the common case) leaves every unfiltered document's item stream
+	// byte-identical.
+	frag.Filter, frag.FilterShadows = e.filterChain(b)
 	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
 	if len(in.collapsedBorders) > 0 {
 		// The collapsed grid strips were built from the interior's cell fragments —
@@ -1115,15 +1137,34 @@ func establishesNewBFC(b *cssbox.Box) bool {
 		b.Display == cssbox.DisplayGrid || b.Display == cssbox.DisplayInlineGrid {
 		return true // a flex/grid container establishes a BFC (CSS Flexbox 2 / Grid 2)
 	}
-	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b)
+	// A FILTERED box establishes a BFC too (CSS Display 3's BFC-root list includes
+	// `filter` other than none). Beyond the spec, the engine relies on it: a BFC
+	// fragment flattens through ONE AppendItems call, which is what lets the filter
+	// bracket wrap the box's own decorations AND its contents as a single balanced
+	// pair. Without it a filtered box's background would be emitted in the ancestor's
+	// decoration phase and its text in the ancestor's content phase, with no single
+	// range to bracket.
+	return b.Display == cssbox.DisplayInlineBlock || b.Float != cssbox.FloatNone || clips(b) || filtered(b)
 }
 
 // establishesStackingContext reports whether b establishes a CSS stacking context.
-// In the supported subset: any positioned box (relative/absolute/fixed). The page
-// root is treated as a stacking context by layoutTree directly. (Full CSS also
-// includes opacity<1, transforms, etc. — none modeled yet.)
+// In the supported subset: any positioned box (relative/absolute/fixed), and any
+// filtered box. The page root is treated as a stacking context by layoutTree
+// directly. (Full CSS also includes opacity<1, transforms, etc. — none modeled yet.)
+//
+// filter != none MUST be here, not only in establishesNewBFC. A positioned
+// descendant bubbles up to the nearest STACKING CONTEXT holder (see
+// Fragment.appendItemsUnfiltered's IsStackingContext || IsBFC test and
+// sortedPositioned): a box that is a BFC but not a stacking context does not
+// consume its positioned layer, so the descendant escapes past it — and, for a
+// filtered box, past the FilterPush/FilterPop bracket entirely. Measured before
+// this was added: a position:relative or position:absolute child of a filtered
+// box painted OUTSIDE the bracket (a static child correctly painted inside), so
+// it would render completely unfiltered rather than merely mis-ordered. A
+// filtered box with a positioned child is an everyday pattern (badges, overlays,
+// dropdowns), so this is not an exotic case.
 func establishesStackingContext(b *cssbox.Box) bool {
-	return b.Position != cssbox.PosStatic
+	return b.Position != cssbox.PosStatic || filtered(b)
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous

@@ -24,35 +24,176 @@ type imageDest struct {
 // Y-down, origin at the page's top-left) into device space (pixels); for a simple
 // rasterization it is a uniform scale of dpi/72.
 func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
-	for i := range page.Items {
-		it := &page.Items[i]
-		switch it.Kind {
-		case layout.GlyphKind:
-			paintGlyph(dev, &it.Glyph, mat)
-		case layout.RuleKind:
-			paintRule(dev, &it.Rule, mat)
-		case layout.BackgroundKind:
-			// A background is just a filled rectangle behind content; reuse the rule
-			// path (Item.Rule carries its geometry and color).
-			paintRule(dev, &it.Rule, mat)
-		case layout.BorderKind:
-			paintBorder(dev, &it.Border, mat)
-		case layout.ImageKind:
-			paintImage(dev, &it.Image, mat)
-		case layout.BackgroundImageKind:
-			paintBackgroundImage(dev, &it.BgImage, mat)
-		case layout.ClipPushKind:
-			// Save the clip state, then intersect the active clip with the rect (mapped
-			// through the page matrix). A degenerate rect makes clipRect a no-op push, but
-			// Save/Restore still balance, so the stream stays well-formed.
-			dev.Save()
-			clipRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.XPt+it.Rule.WPt, it.Rule.YPt+it.Rule.HPt)
-		case layout.ClipPopKind:
-			dev.Restore()
-		case layout.VectorKind:
-			paintVector(dev, &it.Vector, mat)
+	paintItems(dev, page.Items, mat, 0)
+}
+
+// paintItems draws one contiguous run of items. It is separate from PaintPage
+// because a CSS `filter` bracket paints its own sub-run into an offscreen
+// surface (see paintFilterBracket) and needs to re-enter with that sub-run and a
+// shifted matrix — the flat item list has no other way to express a nested
+// paint.
+func paintItems(dev render.Device, items []layout.Item, mat render.Matrix, depth int) {
+	for i := 0; i < len(items); i++ {
+		it := &items[i]
+		if it.Kind == layout.FilterPushKind {
+			// The bracketed run is [i+1, end); end indexes the matching pop.
+			// An UNMATCHED push (impossible from the emission side, but a
+			// hand-built or corrupted stream could carry one) takes the rest of
+			// the list and closes at its end, so the content still paints.
+			end := matchingFilterPop(items, i)
+			paintFilterBracket(dev, it, items[i+1:end], mat, depth)
+			i = end
+			continue
+		}
+		paintItem(dev, it, mat)
+	}
+}
+
+// maxFilterNestingDepth bounds how many CSS filters may be applied at once (a
+// filtered box inside another filtered box's subtree).
+//
+// Each level holds an offscreen RGBA alive while its chain runs, PLUS that
+// chain's own per-primitive float32 buffers, so unbounded nesting is unbounded
+// LIVE memory rather than merely CPU time — maxCSSFilterPixels bounds one
+// level's surface, not the product of N of them. It matches pkg/svg/draw's
+// identically-named limit for the same reason and at the same value; real
+// documents never nest filters at all.
+//
+// Exceeding it degrades to painting the content unfiltered (see
+// paintFilterBracket), never to a crash or a blank.
+const maxFilterNestingDepth = 4
+
+// matchingFilterPop returns the index of the FilterPopKind closing the push at
+// index push, counting nesting so an inner bracket does not close the outer one.
+// With no matching pop it returns len(items), so the caller paints the rest of
+// the run inside the bracket rather than dropping it.
+func matchingFilterPop(items []layout.Item, push int) int {
+	depth := 0
+	for i := push; i < len(items); i++ {
+		switch items[i].Kind {
+		case layout.FilterPushKind:
+			depth++
+		case layout.FilterPopKind:
+			depth--
+			if depth == 0 {
+				return i
+			}
 		}
 	}
+	return len(items)
+}
+
+// paintItem draws one non-bracket item. A stray FilterPopKind (one paintItems
+// did not consume as part of a bracket) is a no-op: render.Device documents an
+// unbalanced EndGroup the same way, and the painter must never panic on a
+// malformed stream.
+func paintItem(dev render.Device, it *layout.Item, mat render.Matrix) {
+	switch it.Kind {
+	case layout.GlyphKind:
+		paintGlyph(dev, &it.Glyph, mat)
+	case layout.RuleKind:
+		paintRule(dev, &it.Rule, mat)
+	case layout.BackgroundKind:
+		// A background is just a filled rectangle behind content; reuse the rule
+		// path (Item.Rule carries its geometry and color).
+		paintRule(dev, &it.Rule, mat)
+	case layout.BorderKind:
+		paintBorder(dev, &it.Border, mat)
+	case layout.ImageKind:
+		paintImage(dev, &it.Image, mat)
+	case layout.BackgroundImageKind:
+		paintBackgroundImage(dev, &it.BgImage, mat)
+	case layout.ClipPushKind:
+		// Save the clip state, then intersect the active clip with the rect (mapped
+		// through the page matrix). A degenerate rect makes clipRect a no-op push, but
+		// Save/Restore still balance, so the stream stays well-formed.
+		dev.Save()
+		clipRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.XPt+it.Rule.WPt, it.Rule.YPt+it.Rule.HPt)
+	case layout.ClipPopKind:
+		dev.Restore()
+	case layout.VectorKind:
+		paintVector(dev, &it.Vector, mat)
+	}
+}
+
+// paintFilterBracket paints one CSS `filter` bracket: the items of inner
+// (everything between the push and its matching pop) rendered through push's
+// filter chain.
+//
+// The pipeline mirrors the SVG one (pkg/svg/draw's paintFiltered), because it is
+// the same problem: rasterize the bracketed content into an isolated offscreen
+// surface (render.Device.RenderOffscreen), convert those pixels into filter
+// buffers, run the chain, and draw the result back as an image at the surface's
+// device-space position.
+//
+// It degrades to an offscreen GROUP — dev.BeginGroup, paint, dev.EndGroup at
+// alpha 1 — whenever the chain cannot run:
+//
+//   - the backend has no offscreen raster surface (pdfwrite's RenderOffscreen
+//     returns nil, by design: PDF has no filter operator and a blur has no
+//     vector representation, so a PDF stays vector-native and paints the content
+//     unfiltered — logged by pkg/render/pdfwrite);
+//   - the region is degenerate, fully off-device, or exceeds
+//     maxCSSFilterPixels;
+//   - nesting exceeds maxFilterNestingDepth;
+//   - the chain is empty (a bracket carrying no functions).
+//
+// Every one of those paths still paints the content, correctly placed, just
+// without the effect — the "a visible approximation beats a blank" rule the SVG
+// side follows. The group (rather than a bare re-entry) is what keeps that path
+// byte-identical to the pass-through this replaced.
+func paintFilterBracket(dev render.Device, push *layout.Item, inner []layout.Item, mat render.Matrix, depth int) {
+	fi := &push.Filter
+	unfiltered := func() {
+		dev.BeginGroup()
+		paintItems(dev, inner, mat, depth)
+		dev.EndGroup(1, "", nil, nil)
+	}
+	if len(fi.Funcs) == 0 || depth >= maxFilterNestingDepth {
+		unfiltered()
+		return
+	}
+	devW, devH := dev.Size()
+	fs, scale, ok := cssFilterSurface(fi, inner, mat, devW, devH)
+	if !ok {
+		unfiltered()
+		return
+	}
+
+	// Paint the bracketed run into the offscreen surface with the surface's
+	// origin shifted to (0,0) — RenderOffscreen always allocates from the
+	// origin, so the same shift that makes maxCSSFilterPixels bound the
+	// allocation has to be applied to the geometry going in, and undone when
+	// the result is placed.
+	shifted := mat.Mul(render.Translate(float64(-fs.origin.X), float64(-fs.origin.Y)))
+	src := dev.RenderOffscreen(fs.size, func(scratch render.Device) {
+		paintItems(scratch, inner, shifted, depth+1)
+	})
+	if src == nil {
+		unfiltered()
+		return
+	}
+
+	out := applyCSSFilterChain(src, fi.Funcs, fi.ShadowColors, scale)
+	if out == nil {
+		return // the chain consumed the content entirely
+	}
+	b := out.Bounds()
+	if b.Empty() {
+		return
+	}
+	// Place the result. The Y scale is NEGATED and the anchor taken at the
+	// rect's BOTTOM edge because DrawImage maps the unit square in PDF IMAGE
+	// space, where v runs Y-UP with the image's TOP row at v=1 (see
+	// render.Device.DrawImage and the raster backend's `1-v` sampling). A plain
+	// Scale.Mul(Translate) lands the result VERTICALLY MIRRORED — which reads as
+	// a plausible-looking offset rather than an obvious error.
+	place := render.Scale(float64(b.Dx()), -float64(b.Dy())).
+		Mul(render.Translate(
+			float64(fs.origin.X+b.Min.X),
+			float64(fs.origin.Y+b.Max.Y),
+		))
+	dev.DrawImage(out, place, 1, "")
 }
 
 // paintGlyph fills one glyph. The outline is in em units (Y up); compose the

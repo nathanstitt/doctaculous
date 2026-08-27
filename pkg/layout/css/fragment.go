@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"sort"
 
+	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
@@ -118,6 +119,27 @@ type Fragment struct {
 	// the zero value (CBOwned=false, no clip chain) — the safe default, consulted only on
 	// a clipping fragment.
 	PositionedInfo []PositionedInfo
+
+	// Filter holds the box's parsed CSS `filter` chain (nil — the overwhelmingly
+	// common case — means no filter, and every unfiltered document's item stream is
+	// byte-identical to before the property existed). When set, AppendItems brackets
+	// EVERYTHING this fragment paints — its own background and border as well as its
+	// contents and descendants — in a FilterPushKind/FilterPopKind pair, because a
+	// CSS filter applies to the element's whole rendering, not just its contents.
+	// That is the one structural difference from Clips, whose bracket deliberately
+	// EXCLUDES the box's own border box.
+	//
+	// The bracket's rectangle is not stored: it is read from the fragment's own X/Y/
+	// W/H at flatten time, so it needs no separate shift and can never drift out of
+	// sync with the box after a pagination shift or a split.
+	Filter []filtereffects.Function
+
+	// FilterShadows carries each Filter entry's resolved drop-shadow() colour,
+	// positionally aligned with Filter (see layout.FilterItem.ShadowColors). It
+	// lives beside Filter rather than inside it because filtereffects.Function is
+	// the shared, document-agnostic parse result and deliberately leaves a colour
+	// token unparsed for its caller to resolve.
+	FilterShadows []color.RGBA
 }
 
 // PositionedInfo is one entry of a Fragment's PositionedInfo slice (parallel to
@@ -285,7 +307,33 @@ type GlyphFragment struct {
 // translateItems over its freshly-flattened range. AppendItems never mutates the
 // fragment tree (the sort packs a local copy; only appended dst items are translated),
 // so it is safe on a tree shared across the render fan-out.
+//
+// A FILTERED fragment (Filter non-empty) wraps everything below in a
+// FilterPushKind/FilterPopKind pair, so the whole box — its own decorations included
+// — composites through one offscreen group. The pair is emitted here, at the single
+// entry point, so every path that reaches a fragment (in-flow recursion, the float
+// layer, a positioned band, a page's root wrapper) gets a BALANCED pair without each
+// call site having to remember. Pagination splits the FRAGMENT TREE, not the item
+// list — each page flattens its own subtree through this method — so a filtered box
+// straddling a page break emits its own balanced pair on each page.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
+	if len(f.Filter) == 0 {
+		return f.appendItemsUnfiltered(dst)
+	}
+	dst = append(dst, layout.Item{Kind: layout.FilterPushKind, Filter: layout.FilterItem{
+		Funcs:        f.Filter,
+		ShadowColors: f.FilterShadows,
+		XPt:          f.X, YPt: f.Y, WPt: f.W, HPt: f.H,
+	}})
+	dst = f.appendItemsUnfiltered(dst)
+	return append(dst, layout.Item{Kind: layout.FilterPopKind})
+}
+
+// appendItemsUnfiltered is AppendItems without the filter bracket: the Appendix E
+// phase ordering itself. Split out so the bracket is applied exactly once, at the
+// public entry point, and so the recursive descent below (which calls AppendItems on
+// children) still brackets each filtered descendant in turn — nesting the pairs.
+func (f *Fragment) appendItemsUnfiltered(dst []layout.Item) []layout.Item {
 	if f.IsStackingContext || f.IsBFC {
 		ord := f.sortedPositioned()
 		if f.Clips {
@@ -657,8 +705,13 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 			// the box's own / descendant clips move — exactly what CSS 9.4.3 requires.
 			dst[i].Rule.XPt += dx
 			dst[i].Rule.YPt += dy
-		case layout.ClipPopKind:
-			// No coordinates; nothing to translate (paired with its ClipPushKind).
+		case layout.FilterPushKind:
+			// The filter region is the box's border box, so it rides the paint-time
+			// offset with the content it filters — exactly like a ClipPushKind's rect.
+			dst[i].Filter.XPt += dx
+			dst[i].Filter.YPt += dy
+		case layout.ClipPopKind, layout.FilterPopKind:
+			// No coordinates; nothing to translate (each is paired with its push).
 		}
 	}
 }

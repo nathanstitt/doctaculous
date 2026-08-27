@@ -423,6 +423,22 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 	var buckets []pageBucket
 	var cur pageBucket
 	var prevBlock *Fragment
+	// noteSplit records the one pagination approximation a CSS filter suffers.
+	// Filter brackets are PAGE-LOCAL (see layout.FilterPushKind): each page's slice
+	// of a split box gets its own balanced push/pop. That is exact for a per-pixel
+	// function, so those stay silent; a SPATIAL one (blur, drop-shadow) cannot
+	// sample the content that fell on the other page, so its seam differs from an
+	// unbroken render — logged once per document, since a document that splits one
+	// blurred box usually splits several.
+	spatialWarned := false
+	noteSplit := func(head, tail *Fragment) {
+		if spatialWarned || (!hasSpatialFilter(head) && !hasSpatialFilter(tail)) {
+			return
+		}
+		spatialWarned = true
+		logf("css pagination: a spatial CSS filter (blur/drop-shadow) was split across a page break; " +
+			"each page's slice is filtered on its own, so the seam differs from an unbroken render")
+	}
 	for i := 0; i < len(work); i++ {
 		b := work[i]
 		forcedBefore, forcedAfter := effectiveBreaks(b)
@@ -475,6 +491,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		// has already propagated it to b itself.
 		if !forcedBefore && lineSplittable(b) {
 			if res, ok := splitAtForcedBreak(b); ok {
+				noteSplit(res.head, res.tail)
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y}
@@ -486,6 +503,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		if overflow && !forcedBefore && len(cur.blocks) > 0 && lineSplittable(b) {
 			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
+				noteSplit(res.head, res.tail)
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y} // tail's top edge is suppressed → flush
@@ -526,6 +544,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		if !forcedBefore && len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
 			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
+				noteSplit(res.head, res.tail)
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y}
