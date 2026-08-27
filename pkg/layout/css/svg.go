@@ -264,10 +264,20 @@ func newSVGScene(doc *svg.Document) layout.VectorScene { return svgdraw.New(doc)
 // icon), so the scene must be scaled into its box. Doing it in the ctm keeps the
 // output vector: it is a coordinate transform, not a resampling.
 //
-// The scale is per-axis and non-uniform on purpose. The SVG's own
-// preserveAspectRatio already mapped its viewBox into its viewport; the host's
-// CSS then sizes that viewport, and CSS replaced-element sizing is what preserves
-// (or does not preserve) the ratio at this level.
+// The scale is per-axis and non-uniform. That is exact whenever CSS
+// replaced-element sizing preserved the ratio itself — which covers the common
+// cases: an unsized <img>, one with a single axis given (the other is derived
+// from the intrinsic ratio), or both axes matching the ratio.
+//
+// KNOWN DIVERGENCE when the CSS box's aspect differs from the document's: a
+// browser re-applies the SVG's preserveAspectRatio against the USED size, so
+// the default xMidYMid meet letterboxes inside the box, while this squashes to
+// fill it. Closing the gap means retaining the parsed preserveAspectRatio on
+// svg.Document (resolveSize consumes it into rootM at parse time and discards
+// it) and re-solving the viewBox mapping against the used size here, rather
+// than scaling the already-mapped viewport. Recorded rather than fixed because
+// it is a Document API change, and squashing is at least visible and correctly
+// placed — not silently dropped content.
 type scaledScene struct {
 	inner      layout.VectorScene
 	srcW, srcH float64
