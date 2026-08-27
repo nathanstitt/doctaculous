@@ -146,6 +146,8 @@ type Document struct {
 
 	root  *Group        // children of <svg>, transforms resolved
 	rootM render.Matrix // viewBox->viewport mapping (Identity without viewBox)
+
+	intrinsic IntrinsicSize
 }
 
 // Root returns the scene root group and the viewBox->viewport matrix, for
@@ -154,6 +156,47 @@ type Document struct {
 func (d *Document) Root() (rootM render.Matrix, root *Group) {
 	return d.rootM, d.root
 }
+
+// IntrinsicSize reports what an SVG document contributes to CSS replaced-element
+// sizing BEFORE the 300x150 default and the viewBox-extent fallback are applied.
+// It is the un-defaulted counterpart to Document.WidthPt/HeightPt.
+//
+// A standalone SVG is its own sizing authority, so Document.WidthPt/HeightPt
+// (which already ran the full cascade in resolveSize) is right there. An EMBEDDED
+// SVG — `<img src="x.svg">`, a CSS background — is not: the outer element's CSS
+// may supply one axis, and the SVG must then contribute only its aspect ratio.
+// Collapsing "a 2:1 ratio, no absolute size" into a defaulted 300x150 would make
+// `<img src="ratio.svg" width="600">` render 600x150 instead of 600x300.
+//
+// The three states are distinguished by the flags: HasWidth/HasHeight report an
+// explicit, absolute, positive width/height attribute; HasRatio reports a usable
+// viewBox aspect ratio. All combinations occur — an SVG may state a width and a
+// viewBox (both), a viewBox alone (ratio only), or neither (the caller applies
+// the CSS 300x150 default).
+type IntrinsicSize struct {
+	// Width is the explicit width attribute in points; meaningful only when
+	// HasWidth is true.
+	Width float64
+	// Height is the explicit height attribute in points; meaningful only when
+	// HasHeight is true.
+	Height float64
+	// HasWidth reports an explicit, absolute, positive width attribute.
+	HasWidth bool
+	// HasHeight reports an explicit, absolute, positive height attribute.
+	HasHeight bool
+
+	// RatioW, RatioH are the viewBox extent, giving the intrinsic aspect ratio
+	// RatioW:RatioH; meaningful only when HasRatio is true.
+	RatioW, RatioH float64
+	// HasRatio reports a usable (positive-extent) viewBox aspect ratio.
+	HasRatio bool
+}
+
+// Intrinsic returns the document's un-defaulted intrinsic sizing contribution
+// (see IntrinsicSize). Use it when the SVG is embedded in another document and
+// the host's CSS is the sizing authority; use WidthPt/HeightPt when the SVG is
+// the document.
+func (d *Document) Intrinsic() IntrinsicSize { return d.intrinsic }
 
 // Parse parses an SVG document into a read-only Document. logf (nil ok)
 // receives one debug line per skipped-or-degraded feature encountered while
@@ -172,6 +215,7 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	doc := &Document{}
 	vb, hasVB := resolveViewBox(root, logf)
 	doc.WidthPt, doc.HeightPt = resolveSize(root, vb, hasVB)
+	doc.intrinsic = resolveIntrinsic(root, vb, hasVB)
 
 	if hasVB {
 		doc.rootM = viewBoxMatrix(vb, doc.WidthPt, doc.HeightPt, root.attrs["preserveAspectRatio"])
@@ -322,6 +366,21 @@ func resolveSize(root *element, vb viewBox, hasVB bool) (w, h float64) {
 		}
 	}
 	return w, h
+}
+
+// resolveIntrinsic captures the SAME facts resolveSize consumes, but before any
+// defaulting: the explicit width/height attributes (rule 1's inputs) and the
+// viewBox aspect ratio (rule 4's input). resolveSize discards the distinction by
+// folding rules 2/3/4 into concrete numbers, which is correct for a standalone
+// SVG and wrong for an embedded one — see IntrinsicSize.
+func resolveIntrinsic(root *element, vb viewBox, hasVB bool) IntrinsicSize {
+	var in IntrinsicSize
+	in.Width, in.HasWidth = absoluteLength(root.attrs["width"])
+	in.Height, in.HasHeight = absoluteLength(root.attrs["height"])
+	if hasVB && vb.W > 0 && vb.H > 0 {
+		in.RatioW, in.RatioH, in.HasRatio = vb.W, vb.H, true
+	}
+	return in
 }
 
 // absoluteLength parses an SVG length attribute and reports ok=true only
