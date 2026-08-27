@@ -644,16 +644,13 @@ func (tb *textBuilder) resolvePositions() {
 // "preserve" turns preservation on, "default" turns it off, and anything else
 // (including the attribute's absence) inherits.
 //
-// The attribute arrives here under the plain "space" key: the XML decoder
-// reports xml:space in the XML namespace, and buildAttrs keys
-// no-namespace/SVG-namespace attributes by local name while dropping other
-// foreign-namespace ones — so "xml:space" is looked up as both, and whichever
-// the decoder produced is found.
+// The attribute arrives under the prefixed "xml:space" key, never the bare
+// local name: the decoder reports it in the XML namespace, and buildAttrs
+// folds it under the prefixed key specifically so it cannot collide with a
+// same-named SVG attribute. Looking up the bare "space" here would resurrect
+// exactly that collision.
 func xmlSpaceOf(el *element, inherited bool) bool {
-	v, ok := el.attrs["space"]
-	if !ok {
-		v, ok = el.attrs["xml:space"]
-	}
+	v, ok := el.attrs["xml:space"]
 	if !ok {
 		return inherited
 	}

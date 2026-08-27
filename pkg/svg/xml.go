@@ -14,6 +14,9 @@ const svgNS = "http://www.w3.org/2000/svg"
 // xlinkNS is the XLink namespace used by legacy xlink:href attributes.
 const xlinkNS = "http://www.w3.org/1999/xlink"
 
+// xmlNS is the built-in XML namespace, the one xml:space is defined in.
+const xmlNS = "http://www.w3.org/XML/1998/namespace"
+
 // maxElementDepth bounds the element nesting depth parseXML will follow. It
 // is far beyond anything a real SVG document reaches; hostile input with
 // deeper nesting is treated like truncated input (parsed prefix returned,
@@ -216,6 +219,14 @@ func buildAttrs(attrs []xml.Attr) map[string]string {
 			if _, ok := m["href"]; !ok {
 				m["href"] = a.Value
 			}
+		case a.Name.Space == xmlNS && a.Name.Local == "space":
+			// xml:space is the one XML-namespace attribute SVG gives meaning
+			// to (SVG2 §11.5's text whitespace processing). It is folded under
+			// the distinct "xml:space" key rather than the bare local name
+			// "space", so it can never collide with a same-named SVG
+			// attribute — which is exactly the collision the default branch
+			// below drops foreign-namespace attributes to avoid.
+			m["xml:space"] = a.Value
 		}
 	}
 	return m

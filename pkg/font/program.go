@@ -87,6 +87,22 @@ func (p *program) outline(gid fonts.GID) *render.Path {
 	out := &render.Path{}
 	started := false
 	for _, s := range segs {
+		if !started && s.Op != fonts.SegmentOpMoveTo {
+			// Some font programs (and the textlayout decoders that read them)
+			// emit a leading drawing op before any move-to — an artifact of
+			// how a subpath's implicit start point is represented, not real
+			// geometry. There is no current point yet, so render.Path.Bounds
+			// would take it as a segment starting at the origin: every glyph
+			// then reports a bounding box stretching back to (0,0), which
+			// silently corrupts any objectBoundingBox mapping, clip/mask
+			// extent, or ink measurement taken from an outline. Filling is
+			// unaffected (the stray segment is zero-length), which is why this
+			// went unnoticed while outlines were only ever painted.
+			//
+			// Dropping it is safe: a drawing op with no current point has no
+			// defined start, so it contributes no geometry under any reading.
+			continue
+		}
 		switch s.Op {
 		case fonts.SegmentOpMoveTo:
 			if started {
