@@ -3,7 +3,7 @@
 **Goal:** fix **every** fidelity issue in the engine — HTML/CSS, PDF, and DOCX-render — until the only
 remaining gaps are the explicitly out-of-scope items. EPUB is out of scope (see the CLAUDE.md note).
 
-This is the detailed working checklist; **CLAUDE.md's "Status & roadmap" is the prose source of truth**
+This is the detailed working checklist; **[CSS-LAYOUT.md](CSS-LAYOUT.md) is the prose source of truth**
 and is the one to keep current. Each fix lands with a fixture/test in the same PR, mutation-verified,
 byte-identical corpus except intended golden changes (which get eyeballed).
 

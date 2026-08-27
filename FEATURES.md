@@ -4,7 +4,8 @@ The complete inventory of shipped features, validated against a real-world corpu
 (`testdata/external/`). Keep this list current as features land: every feature that ships gets a
 bullet here in the same PR. Each bullet is a one-line pointer; the detailed design/rationale for a
 sub-project is in the commit and PR history. What's *next* — the TODO
-list and known approximations — lives in [CLAUDE.md → Status & roadmap](CLAUDE.md#status--roadmap).
+list and known approximations — lives in the per-subsystem docs: [docs/PDF.md](docs/PDF.md),
+[docs/DOCX.md](docs/DOCX.md), [docs/CSS-LAYOUT.md](docs/CSS-LAYOUT.md), and [docs/SVG.md](docs/SVG.md).
 
 **PDF pipeline** (covered by `gen.Core` fixtures + golden images):
 
@@ -1019,7 +1020,7 @@ read+write vocabulary for the tinycld text adoption path):
   combinators (`>`, `+`, `~`) parse without erroring but never match (the selector engine has no
   handling for either, so they parse into an inert simple selector); `@import` is recognized and
   skipped with a debug log rather than fetched. The selector gaps are shared with HTML (`pkg/css`)
-  and are tracked as planned work — see CLAUDE.md's roadmap item 8, "CSS selector coverage".
+  and are tracked as planned work — see [docs/CSS-LAYOUT.md](docs/CSS-LAYOUT.md), "Selectors".
 - Landed two shared `pkg/css` fixes that also apply to HTML: `!important` is now recognized with no
   preceding whitespace (`red!important`), and `/* */` comments inside a `style=""` attribute value
   are stripped before parsing, matching what a `<style>` sheet's rule body already did.
@@ -1183,7 +1184,7 @@ read+write vocabulary for the tinycld text adoption path):
   (`>`), sibling (`+`, `~`), attribute, or namespace selectors. Those already failed SAFE — the rule
   is inert, never mis-matched — but they failed SILENTLY. Design-tool SVG exports lean on
   `[class^="cls-"]` and `.icon > path`, so an inline `<svg>` carrying its own `<style>` lost those
-  rules with no hint why. **The selector ENGINE is unchanged** (it remains roadmap item 8); only the
+  rules with no hint why. **The selector ENGINE is unchanged** (see docs/CSS-LAYOUT.md, "Selectors"); only the
   diagnostic ships here, the cheap half that item already identifies as worth doing first.
 - `Parse` cannot log — `html.UAStylesheet` is a package-level var initialized by `Parse`, so there is
   no caller at that point to hold a logger. The records ride on `Stylesheet.Unsupported` as data
