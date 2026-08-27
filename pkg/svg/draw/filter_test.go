@@ -234,7 +234,6 @@ func TestUnsupportedPrimitiveRendersUnfilteredAndLogs(t *testing.T) {
 	for _, name := range []string{
 		"feTurbulence", "feConvolveMatrix", "feDiffuseLighting", "feSpecularLighting",
 		"feMorphology", "feImage", "feTile", "feComponentTransfer", "feDisplacementMap",
-		"feGaussianBlur", "feBlend", "feComposite", "feColorMatrix", "feMerge", "feDropShadow",
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := `<svg ` + filterHdr + ` width="60" height="60">

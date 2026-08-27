@@ -191,6 +191,47 @@ func (r *Renderer) paintFilteredAlpha(dev render.Device, f *svg.Filter, m render
 	return true
 }
 
+// paintFilteredThenClip runs paintFiltered inside a compositing group that
+// carries clip and mask, so both apply to the FILTERED RESULT rather than to
+// the filter's input.
+//
+// SVG's rendering model is filter → clip-path → mask → opacity, and the order
+// is observable wherever the filter moves pixels: a blur must be allowed to
+// spread past the clip's edge and then be CUT OFF hard by it. Clipping first
+// instead removes the content the blur would have spread from, so the shape's
+// edge fades out inside the clip rather than meeting it — which reads as a
+// too-soft blur rather than as a mis-ordered clip, and is why this is worth a
+// dedicated helper rather than an inline reordering at each call site.
+//
+// With neither a clip nor a mask (the overwhelmingly common case) it calls
+// paintFiltered directly, so no offscreen group is allocated. alpha is passed
+// THROUGH to paintFiltered in that case and applied by EndGroup otherwise, so
+// it is applied exactly once either way.
+func (r *Renderer) paintFilteredThenClip(dev render.Device, clip *svg.ClipPath, mask *svg.Mask, m render.Matrix, target boundsFunc, alpha float64, paintFiltered func(render.Device, float64)) {
+	if clip == nil && mask == nil {
+		paintFiltered(dev, alpha)
+		return
+	}
+	if alpha <= 0 {
+		return
+	}
+	dev.Save()
+	dev.BeginGroup()
+	// The filtered content paints at FULL alpha inside the group; EndGroup
+	// applies alpha once to the flattened result, which is the same
+	// apply-once rule paintGroupBody follows.
+	paintFiltered(dev, 1)
+	var clipMask, softMask render.GroupMask
+	if clip != nil {
+		clipMask = r.buildClipMask(dev, clip, m, target)
+	}
+	if mask != nil {
+		softMask = r.buildMask(dev, mask, m, target)
+	}
+	dev.EndGroup(alpha, "", clipMask, softMask)
+	dev.Restore()
+}
+
 // paintInFilterSpace runs paintSource against scratch with the filter-space
 // transform in effect.
 //
@@ -262,30 +303,34 @@ func (r *Renderer) runFilterGraph(f *svg.Filter, src *image.RGBA, region image.R
 		p := &f.Primitives[i]
 		space := filterColorSpace(p.Space)
 
-		var in *svgfilter.Buffer
-		switch p.In.Kind {
-		case svg.InputSourceGraphic:
-			in = sourceIn(space)
-		case svg.InputSourceAlpha:
-			in = svgfilter.AlphaOnly(sourceIn(space))
-		case svg.InputResult:
-			in = results[p.In.Index]
-		}
-		if in == nil {
-			in = sourceIn(space)
-		}
-		if in.Space != space {
-			// A graph may mix color-interpolation-filters values, so each
-			// primitive's input is brought into ITS OWN space. Copy first:
-			// the buffer may be another primitive's stored result, which
-			// must keep the space it was produced in.
-			converted := svgfilter.Crop(in, in.Bounds())
-			if converted == in {
-				converted = cloneBuffer(in)
+		resolveIn := func(fi svg.FilterInput) *svgfilter.Buffer {
+			var b *svgfilter.Buffer
+			switch fi.Kind {
+			case svg.InputSourceGraphic:
+				b = sourceIn(space)
+			case svg.InputSourceAlpha:
+				b = svgfilter.AlphaOnly(sourceIn(space))
+			case svg.InputResult:
+				b = results[fi.Index]
 			}
-			converted.ConvertTo(space)
-			in = converted
+			if b == nil {
+				b = sourceIn(space)
+			}
+			if b.Space != space {
+				// A graph may mix color-interpolation-filters values, so each
+				// primitive's input is brought into ITS OWN space. Copy first:
+				// the buffer may be another primitive's stored result, which
+				// must keep the space it was produced in.
+				converted := svgfilter.Crop(b, b.Bounds())
+				if converted == b {
+					converted = cloneBuffer(b)
+				}
+				converted.ConvertTo(space)
+				b = converted
+			}
+			return b
 		}
+		in := resolveIn(p.In)
 
 		sub := primitiveSubregion(p, f, region, in, primM)
 
@@ -297,6 +342,53 @@ func (r *Renderer) runFilterGraph(f *svg.Filter, src *image.RGBA, region image.R
 		case svg.PrimitiveOffset:
 			dx, dy := primM.ApplyVector(p.Dx, p.Dy)
 			out = svgfilter.Offset(in, dx, dy, sub)
+		case svg.PrimitiveGaussianBlur:
+			// stdDeviation is a LENGTH in the primitive's units, so it scales
+			// with the element's transform — a blurred element inside a scaled
+			// group must blur by the same visual amount as one drawn at that
+			// size directly.
+			//
+			// Each axis scales INDEPENDENTLY, which is why this is not
+			// primM.ApplyVector(sdx, sdy). ApplyVector computes
+			// (A·sdx + C·sdy, B·sdx + D·sdy), mixing the two deviations into
+			// each other: under any rotation or skew a horizontal-only blur
+			// would acquire a vertical component and vice versa. A standard
+			// deviation is a per-axis magnitude, not a displacement, so the
+			// correct transform is the length of each BASIS VECTOR — which is
+			// what mapping (sdx, 0) and (0, sdy) separately and taking their
+			// magnitudes gives.
+			sdx := vecLen(primM.ApplyVector(p.StdDevX, 0))
+			sdy := vecLen(primM.ApplyVector(0, p.StdDevY))
+			out = svgfilter.GaussianBlur(in, sdx, sdy, sub)
+		case svg.PrimitiveComposite:
+			in2 := resolveIn(p.In2)
+			// A two-input primitive's default subregion is the UNION of its
+			// inputs, not just `in`'s: an feComposite of a small flood over a
+			// large source must cover the source too, or the composite is
+			// clipped to whichever input happened to be first.
+			sub = twoInputSubregion(p, f, region, in, in2, primM)
+			out = svgfilter.Composite(in, in2, compositeOperator(p.Operator),
+				float32(p.K1), float32(p.K2), float32(p.K3), float32(p.K4), sub)
+		case svg.PrimitiveBlend:
+			in2 := resolveIn(p.In2)
+			sub = twoInputSubregion(p, f, region, in, in2, primM)
+			out = svgfilter.Blend(in, in2, p.BlendMode, sub)
+		case svg.PrimitiveColorMatrix:
+			out = svgfilter.ApplyColorMatrix(in, colorMatrixOf(p), sub)
+		case svg.PrimitiveMerge:
+			nodes := make([]*svgfilter.Buffer, 0, len(p.MergeInputs))
+			union := image.Rectangle{}
+			for _, fi := range p.MergeInputs {
+				nb := resolveIn(fi)
+				nodes = append(nodes, nb)
+				if nb != nil {
+					union = unionRect(union, nb.Bounds())
+				}
+			}
+			if !p.HasSubregion && !union.Empty() {
+				sub = union.Intersect(region)
+			}
+			out = svgfilter.Merge(nodes, sub, space)
 		}
 		if out == nil {
 			out = svgfilter.NewBuffer(sub, space)
@@ -308,6 +400,95 @@ func (r *Renderer) runFilterGraph(f *svg.Filter, src *image.RGBA, region image.R
 		return nil
 	}
 	return last.ToRGBA()
+}
+
+// vecLen returns the magnitude of a transformed basis vector, which is how a
+// per-axis LENGTH (feGaussianBlur's stdDeviation) maps through a matrix — see
+// the PrimitiveGaussianBlur case for why the component-wise ApplyVector is
+// wrong for this.
+func vecLen(x, y float64) float64 {
+	v := math.Hypot(x, y)
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+// compositeOperator maps the scene's operator enum onto the pixel-math
+// package's. The two are deliberately separate types (see
+// svg.CompositeOperator) so pkg/svg's public API does not leak the pixel-math
+// package, and this is the single point that must stay in step.
+func compositeOperator(op svg.CompositeOperator) svgfilter.CompositeOperator {
+	switch op {
+	case svg.CompositeIn:
+		return svgfilter.CompositeIn
+	case svg.CompositeOut:
+		return svgfilter.CompositeOut
+	case svg.CompositeAtop:
+		return svgfilter.CompositeAtop
+	case svg.CompositeXor:
+		return svgfilter.CompositeXor
+	case svg.CompositeArithmetic:
+		return svgfilter.CompositeArithmetic
+	default:
+		return svgfilter.CompositeOver
+	}
+}
+
+// colorMatrixOf narrows the scene's float64 colour matrix into the float32 the
+// pixel math works in — the one narrowing point, so it cannot happen twice.
+func colorMatrixOf(p *svg.FilterPrimitive) svgfilter.ColorMatrix {
+	var m svgfilter.ColorMatrix
+	for i, v := range p.Matrix {
+		m[i] = float32(v)
+	}
+	return m
+}
+
+// twoInputSubregion computes the default subregion of a primitive with TWO
+// inputs (feComposite, feBlend): the UNION of both inputs' extents, rather than
+// just the first's.
+//
+// The distinction is load-bearing. feComposite/feBlend's own `in` is often the
+// SMALLER input (a flood restricted to a subregion, say) with `in2` being
+// SourceGraphic; taking only `in`'s extent would clip the composite to the
+// flood's rectangle and drop everything of the source outside it — which the
+// corpus's with-subregion-on-input fixtures show directly.
+//
+// An EXPLICIT subregion on the primitive still wins; this only supplies the
+// default, so it defers to primitiveSubregion whenever one was specified.
+func twoInputSubregion(p *svg.FilterPrimitive, f *svg.Filter, region image.Rectangle, in, in2 *svgfilter.Buffer, primM render.Matrix) image.Rectangle {
+	if p.HasSubregion {
+		return primitiveSubregion(p, f, region, in, primM)
+	}
+	union := image.Rectangle{}
+	if in != nil {
+		union = unionRect(union, in.Bounds())
+	}
+	if in2 != nil {
+		union = unionRect(union, in2.Bounds())
+	}
+	if union.Empty() {
+		return region
+	}
+	return union.Intersect(region)
+}
+
+// unionRect unions two rects, treating an EMPTY rect as contributing nothing.
+//
+// image.Rectangle.Union does not: it treats the zero rect as a real rectangle
+// at the origin, so unioning it in would drag every result's bounds back to
+// (0,0) and inflate every buffer. That is silent — the output looks right and
+// merely costs more memory — which is exactly why it needs its own helper
+// rather than an inline call.
+func unionRect(a, b image.Rectangle) image.Rectangle {
+	if a.Empty() {
+		return b
+	}
+	if b.Empty() {
+		return a
+	}
+	return a.Union(b)
 }
 
 // cloneBuffer returns a deep copy of b, so converting a copy's color space
@@ -377,7 +558,9 @@ type filterSpaceInfo struct {
 // waste memory proportional to the square of the excess.
 func filterSpace(f *svg.Filter, m render.Matrix, target boundsFunc, dev render.Device) (filterSpaceInfo, bool) {
 	var fs filterSpaceInfo
-	if f.Units == "objectBoundingBox" {
+	// An unbounded filter needs no bounding box: its region IS the canvas, so
+	// it applies even to an element whose bbox cannot be measured.
+	if f.Units == "objectBoundingBox" && !f.Unbounded {
 		if target == nil {
 			return fs, false
 		}
@@ -406,24 +589,6 @@ func filterSpace(f *svg.Filter, m render.Matrix, target boundsFunc, dev render.D
 		return fs, false
 	}
 
-	// The region rect in filter space, axis-aligned by construction.
-	regionFilterM := clipUnitsMatrix(f.Units, target).Mul(fs.filterM)
-	x0, y0 := regionFilterM.Apply(f.RegionX, f.RegionY)
-	x1, y1 := regionFilterM.Apply(f.RegionX+f.RegionW, f.RegionY+f.RegionH)
-	if math.IsNaN(x0) || math.IsNaN(y0) || math.IsNaN(x1) || math.IsNaN(y1) ||
-		math.IsInf(x0, 0) || math.IsInf(y0, 0) || math.IsInf(x1, 0) || math.IsInf(y1, 0) {
-		return fs, false
-	}
-	minX, maxX := math.Min(x0, x1), math.Max(x0, x1)
-	minY, maxY := math.Min(y0, y1), math.Max(y0, y1)
-	rect := image.Rect(
-		int(math.Floor(minX)), int(math.Floor(minY)),
-		int(math.Ceil(maxX)), int(math.Ceil(maxY)),
-	)
-	if rect.Empty() {
-		return fs, false
-	}
-
 	// Clip the buffer to what can actually land on the canvas, so an
 	// enormous region costs only the pixels that could ever be seen. The
 	// canvas rect is mapped INTO filter space (through deviceToFilter) and
@@ -431,6 +596,30 @@ func filterSpace(f *svg.Filter, m render.Matrix, target boundsFunc, dev render.D
 	// axis-aligned in filter space.
 	dw, dh := dev.Size()
 	visible := hullOf(fs.deviceToFilter, 0, 0, float64(dw), float64(dh))
+
+	// The region rect in filter space, axis-aligned by construction — or the
+	// whole visible canvas for an UNBOUNDED filter (the CSS filter-function
+	// shorthand, which has no <filter> element and so no region; see
+	// svg.Filter.Unbounded).
+	rect := visible
+	if !f.Unbounded {
+		regionFilterM := clipUnitsMatrix(f.Units, target).Mul(fs.filterM)
+		x0, y0 := regionFilterM.Apply(f.RegionX, f.RegionY)
+		x1, y1 := regionFilterM.Apply(f.RegionX+f.RegionW, f.RegionY+f.RegionH)
+		if math.IsNaN(x0) || math.IsNaN(y0) || math.IsNaN(x1) || math.IsNaN(y1) ||
+			math.IsInf(x0, 0) || math.IsInf(y0, 0) || math.IsInf(x1, 0) || math.IsInf(y1, 0) {
+			return fs, false
+		}
+		minX, maxX := math.Min(x0, x1), math.Max(x0, x1)
+		minY, maxY := math.Min(y0, y1), math.Max(y0, y1)
+		rect = image.Rect(
+			int(math.Floor(minX)), int(math.Floor(minY)),
+			int(math.Ceil(maxX)), int(math.Ceil(maxY)),
+		)
+	}
+	if rect.Empty() {
+		return fs, false
+	}
 	// Grow by a pixel so an antialiased edge exactly on the boundary is not
 	// trimmed by the floor/ceil rounding.
 	visible = visible.Inset(-1)
@@ -516,14 +705,30 @@ func filterPrimitiveMatrix(f *svg.Filter, m render.Matrix, target boundsFunc) re
 // The result is always intersected with the filter region: SVG clips every
 // primitive's output to it, so a subregion reaching outside (the
 // subregion-bigger-that-region fixture) is trimmed rather than honored.
+//
+// Once ANY edge is specified, however, the unspecified edges fall back to the
+// FILTER REGION rather than the input's extent. The two defaults are not
+// interchangeable and the corpus separates them sharply:
+//
+//   - negative-subregion writes only x="-50" on an feGaussianBlur. If the
+//     unspecified width came from the input, the subregion would simply widen
+//     leftward and clip nothing; the reference instead cuts the output dead at
+//     x=142, which is -50 plus the filter region's own 192-unit width.
+//   - subregion-and-primitiveUnits=objectBoundingBox-2 writes only
+//     width="50%" height="50%", and the reference's green quadrant starts at
+//     the filter REGION's top-left corner (4,4), not the input's (20,20).
+//
+// Both would render as an unclipped blur under the input-extent rule, which
+// looks like a missing clip rather than a wrong default.
 func primitiveSubregion(p *svg.FilterPrimitive, f *svg.Filter, region image.Rectangle, in *svgfilter.Buffer, primM render.Matrix) image.Rectangle {
-	base := region
-	if p.Kind != svg.PrimitiveFlood && in != nil && !in.Bounds().Empty() {
-		base = in.Bounds()
-	}
 	if !p.HasSubregion {
+		base := region
+		if p.Kind != svg.PrimitiveFlood && in != nil && !in.Bounds().Empty() {
+			base = in.Bounds()
+		}
 		return base.Intersect(region)
 	}
+	base := region
 
 	// Each specified edge replaces its default, in device space. The rect is
 	// built in the primitive's own units then transformed, so a rotated CTM
@@ -539,6 +744,18 @@ func primitiveSubregion(p *svg.FilterPrimitive, f *svg.Filter, region image.Rect
 			ux0, uy0 = inv.Apply(x0, y0)
 			ux1, uy1 = inv.Apply(x1, y1)
 		}
+		// x/y and width/height are INDEPENDENT defaults: x defaults to the
+		// filter region's x, width to the filter region's WIDTH. So moving x
+		// without giving a width SLIDES the subregion rather than stretching
+		// it — the width travels with the origin.
+		//
+		// Capturing the base's width before x is overwritten is what makes
+		// that work. Deriving the right edge from the base's own Max instead
+		// (ux1 left as the region's right edge) turns x="-50" into a
+		// 246-unit-wide subregion that clips nothing, where the reference
+		// clips at -50+192=142 — the negative-subregion fixture is exactly
+		// this case and renders as an unclipped blur under the wrong rule.
+		uw, uh := ux1-ux0, uy1-uy0
 		if p.HasX {
 			ux0 = p.X
 		}
@@ -546,11 +763,12 @@ func primitiveSubregion(p *svg.FilterPrimitive, f *svg.Filter, region image.Rect
 			uy0 = p.Y
 		}
 		if p.HasW {
-			ux1 = ux0 + p.W
+			uw = p.W
 		}
 		if p.HasH {
-			uy1 = uy0 + p.H
+			uh = p.H
 		}
+		ux1, uy1 = ux0+uw, uy0+uh
 		corners := [4][2]float64{{ux0, uy0}, {ux1, uy0}, {ux0, uy1}, {ux1, uy1}}
 		minX, minY := math.Inf(1), math.Inf(1)
 		maxX, maxY := math.Inf(-1), math.Inf(-1)

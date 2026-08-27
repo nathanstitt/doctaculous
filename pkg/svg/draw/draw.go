@@ -222,18 +222,25 @@ func (r *Renderer) paintGroupBody(dev render.Device, node *svg.Group, gm render.
 	if node.Filter != nil {
 		// A filter applies BEFORE clip-path, mask, and opacity: the group's
 		// content is rendered and filtered as a unit, and the filtered
-		// RESULT is then clipped/masked/faded. The group's own Opacity is
-		// therefore stripped from the source pass and re-applied to the
-		// filtered output (see paintShape's filter branch for the fixture
-		// that pins this ordering); clip-path and mask remain on the nested
-		// node so the recursive call still composites them, correctly,
-		// around the already-filtered content.
+		// RESULT is then clipped/masked/faded.
+		//
+		// All three must therefore be stripped from the SOURCE pass, not just
+		// opacity. Leaving clip-path on the nested node applies it to the
+		// filter's INPUT, which clips the content before the blur can spread
+		// past the clip edge — the blur then fades to nothing inside the
+		// shape instead of being cut off hard at its boundary (the corpus's
+		// with-clip-path fixture shows the difference plainly: a star whose
+		// points fade out, versus one whose points are sliced).
 		unfiltered := *node
 		unfiltered.Filter = nil
 		unfiltered.Opacity = 1
+		unfiltered.ClipPath = nil
+		unfiltered.Mask = nil
 		outAlpha := alpha * clamp01(node.Opacity)
-		r.paintFilteredAlpha(dev, node.Filter, gm, r.groupUserBounds(node, warned), warned, outAlpha, func(target render.Device) {
-			r.paintGroupBody(target, &unfiltered, gm, 1, warned)
+		r.paintFilteredThenClip(dev, node.ClipPath, node.Mask, gm, r.groupUserBounds(node, warned), outAlpha, func(target render.Device, a float64) {
+			r.paintFilteredAlpha(target, node.Filter, gm, r.groupUserBounds(node, warned), warned, a, func(inner render.Device) {
+				r.paintGroupBody(inner, &unfiltered, gm, 1, warned)
+			})
 		})
 		return
 	}
@@ -379,12 +386,21 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		// accumulated alpha are applied afterward, to the composited
 		// result — the same "apply once, to the flattened result" rule
 		// paintGroupBody follows for a group.
+		//
+		// clip-path and mask are stripped from the source pass for the same
+		// ordering reason and re-applied to the RESULT — see
+		// paintFilteredThenClip.
 		unfiltered := *s
 		unfiltered.Filter = nil
 		unfiltered.Style = unfiltered.Style.SetOpacity(1)
+		unfiltered.ClipPath = nil
+		unfiltered.Mask = nil
 		outAlpha := alpha * clamp01(s.Style.Opacity())
-		r.paintFilteredAlpha(dev, s.Filter, s.M.Mul(m), s.Path.Bounds, warned, outAlpha, func(target render.Device) {
-			r.paintShape(target, &unfiltered, m, 1, warned)
+		sm := s.M.Mul(m)
+		r.paintFilteredThenClip(dev, s.ClipPath, s.Mask, sm, s.Path.Bounds, outAlpha, func(target render.Device, a float64) {
+			r.paintFilteredAlpha(target, s.Filter, sm, s.Path.Bounds, warned, a, func(inner render.Device) {
+				r.paintShape(inner, &unfiltered, m, 1, warned)
+			})
 		})
 		return
 	}

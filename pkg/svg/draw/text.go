@@ -163,13 +163,22 @@ func (r *Renderer) paintText(dev render.Device, t *svg.Text, m render.Matrix, al
 		// filter's source buffer. That is invisible for most primitives but
 		// total for one that discards its input: an feFlood under
 		// opacity="0.5" comes out fully opaque.
+		//
+		// clip-path and mask are likewise stripped from the source pass and
+		// applied to the filtered RESULT, since the same filter → clip → mask
+		// → opacity order governs all three — see paintFilteredThenClip.
 		elemOpacity := clamp01(t.Opacity)
 		unfiltered := *t
 		unfiltered.Filter = nil
 		unfiltered.Opacity = 1
+		unfiltered.ClipPath = nil
+		unfiltered.Mask = nil
 		unfiltered.Chars = charsWithoutElementOpacity(t.Chars, elemOpacity)
-		r.paintFilteredAlpha(dev, t.Filter, tm, textUserBounds(placed), warned, alpha*elemOpacity, func(target render.Device) {
-			r.paintText(target, &unfiltered, m, 1, warned)
+		bounds := textUserBounds(placed)
+		r.paintFilteredThenClip(dev, t.ClipPath, t.Mask, tm, bounds, alpha*elemOpacity, func(target render.Device, a float64) {
+			r.paintFilteredAlpha(target, t.Filter, tm, bounds, warned, a, func(inner render.Device) {
+				r.paintText(inner, &unfiltered, m, 1, warned)
+			})
 		})
 		return
 	}
