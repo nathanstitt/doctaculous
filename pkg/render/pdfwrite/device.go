@@ -20,7 +20,8 @@ type pageDevice struct {
 	buf      bytes.Buffer
 	wPt, hPt float64
 	embed    *fontEmbedder
-	images   []pendingImage // images referenced this page (assembled later)
+	images   []pendingImage   // images referenced this page (assembled later)
+	shadings []pendingShading // native /Shading dicts referenced this page (assembled later)
 	logf     func(string, ...any)
 
 	// clipStack tracks each Save()'s clip rectangle so Restore can pop back to it.
@@ -214,20 +215,85 @@ func (d *pageDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64
 	d.buf.WriteString("Q\n")
 }
 
-// FillShading rasterizes shader into an RGBA image over the current clip's
-// bounding box and draws it through DrawImage. render.Shader is an opaque
-// ColorAt-only interface, so pdfwrite cannot recover a gradient's coordinates,
-// stops, or spread method to emit a native PDF /Shading dictionary (that needs
-// either a richer Shader interface or a parallel paint description — deferred
-// to when transparency groups reopen this backend). Rasterizing at 1 image
-// pixel per PDF point (this device's own unit; pdfwrite carries no other DPI
-// notion) keeps the image sized to the shape rather than the whole page, and
-// is sharp enough that a gradient does not visibly band once placed back into
-// vector page space.
+// FillShading paints shader through the current clip. When shader implements
+// render.ShadingDescriber and describes a shading this writer can express
+// natively (opaque stops, SpreadPad — see canEmitShading), it emits a real
+// PDF /Shading dictionary painted with the `sh` operator: a native, resolution-
+// independent vector output. Otherwise it falls back to rasterizing shader into
+// an RGBA image XObject (the original behavior), which stays correct for
+// alpha and reflect/repeat spreads that PDF's /Shading cannot express natively.
 func (d *pageDevice) FillShading(s render.Shader, ctm render.Matrix, blend string) {
 	if s == nil {
 		return
 	}
+	if d.tryNativeShading(s, ctm, blend) {
+		return
+	}
+	d.rasterizeShading(s, ctm, blend)
+}
+
+// tryNativeShading attempts the vector path: type-assert s for
+// render.ShadingDescriber, and if it describes a shading canEmitShading
+// accepts, emit a /Shading dictionary and paint it with `sh`. Returns false
+// (having emitted nothing) whenever the vector path is not available, so the
+// caller falls back to rasterizing; it logs once per page WHY, so a caller
+// using WithLogf can see the fidelity decision.
+func (d *pageDevice) tryNativeShading(s render.Shader, ctm render.Matrix, blend string) bool {
+	describer, ok := s.(render.ShadingDescriber)
+	if !ok {
+		d.logShadingFallback("shader does not implement ShadingDescriber")
+		return false
+	}
+	desc, ok := describer.DescribeShading()
+	if !ok {
+		d.logShadingFallback("DescribeShading declined this instance (e.g. a mesh shading)")
+		return false
+	}
+	reason, ok := canEmitShading(desc)
+	if !ok {
+		d.logShadingFallback(reason)
+		return false
+	}
+
+	name := fmt.Sprintf("Sh%d", len(d.shadings))
+	d.shadings = append(d.shadings, pendingShading{name: name, dict: buildShadingDict(desc)})
+
+	// The shape is already clipped by the time FillShading is called (PushClip
+	// emitted W/W* n); paint the shading under that clip with the CTM applied,
+	// balancing q/Q around the state change exactly like DrawImage does. Per
+	// spec `sh` is not modulated by constant alpha (/ca) — only the blend mode
+	// would apply, and this writer does not yet emit ExtGState /BM anywhere
+	// (DrawImage/Fill/Stroke ignore it too), so blend is accepted for interface
+	// symmetry with the rasterized fallback but not yet acted on here.
+	d.buf.WriteString("q\n")
+	m := ctm
+	fmt.Fprintf(&d.buf, "%s %s %s %s %s %s cm\n",
+		formatReal(m.A), formatReal(m.B), formatReal(m.C), formatReal(m.D), formatReal(m.E), formatReal(m.F))
+	fmt.Fprintf(&d.buf, "/%s sh\n", name)
+	d.buf.WriteString("Q\n")
+	return true
+}
+
+// logShadingFallback logs (once per page) why FillShading fell back to
+// rasterizing instead of emitting a native /Shading dictionary. A no-op when
+// no logf was configured.
+func (d *pageDevice) logShadingFallback(reason string) {
+	if d.logf == nil || d.shadingLogged {
+		return
+	}
+	d.shadingLogged = true
+	d.logf("pdfwrite: shading rasterized into an image (%s)", reason)
+}
+
+// rasterizeShading samples shader into an RGBA image over the current clip's
+// bounding box and draws it through DrawImage — the fallback path for a
+// shading that tryNativeShading declined (opaque test failed, non-pad spread,
+// or a Shader with no description at all). Rasterizing at 1 image pixel per
+// PDF point (this device's own unit; pdfwrite carries no other DPI notion)
+// keeps the image sized to the shape rather than the whole page, and is sharp
+// enough that a gradient does not visibly band once placed back into vector
+// page space.
+func (d *pageDevice) rasterizeShading(s render.Shader, ctm render.Matrix, blend string) {
 	inv, ok := invertMatrix(ctm)
 	if !ok {
 		return // singular CTM: shading space is degenerate, nothing to sample
@@ -265,10 +331,6 @@ func (d *pageDevice) FillShading(s render.Shader, ctm render.Matrix, blend strin
 	}
 	if !any {
 		return
-	}
-	if d.logf != nil && !d.shadingLogged {
-		d.shadingLogged = true
-		d.logf("pdfwrite: shading rasterized into an image (no vector /Shading output yet)")
 	}
 	// DrawImage maps the image's unit square [0,1]x[0,1] into device space; place
 	// it exactly over [minX,maxX]x[minY,maxY] in page space.

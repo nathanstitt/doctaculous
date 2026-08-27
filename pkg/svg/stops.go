@@ -3,6 +3,8 @@ package svg
 import (
 	"image/color"
 	"strings"
+
+	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
 // stop is one resolved gradient stop: a position in [0,1] and a straight
@@ -81,6 +83,19 @@ func (r *stopRamp) Eval(in []float64) []float64 {
 		}
 	}
 	return rgbaFloats(last.c)
+}
+
+// shadingStops converts r's stops into render.ShadingStop form, the shape
+// raster.NewAxialShader/NewRadialShader retain for render.ShadingDescriber.
+// This is a pure reformatting of the same offsets/colors Eval already uses —
+// it does not affect sampling (Eval is untouched), only what a describable
+// shading can report about itself.
+func (r *stopRamp) shadingStops() []render.ShadingStop {
+	out := make([]render.ShadingStop, len(r.stops))
+	for i, s := range r.stops {
+		out[i] = render.ShadingStop{Offset: s.offset, Color: s.c}
+	}
+	return out
 }
 
 // lerp linearly interpolates between a and b at fraction f.

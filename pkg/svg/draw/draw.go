@@ -454,6 +454,36 @@ func (a alphaShader) ColorAt(x, y float64) (color.RGBA, bool) {
 	return c, true
 }
 
+// DescribeShading implements render.ShadingDescriber by delegating to the
+// wrapped shader and scaling each returned stop's alpha by a.alpha, using the
+// same scaleAlpha helper ColorAt uses so the two paths always agree. This is
+// the delegation render.ShadingDescriber's doc comment requires of any
+// wrapper: a naive alphaShader that only forwarded ColorAt would hide the
+// describable Shader underneath from a PDF writer's type-assertion, silently
+// falling back to rasterizing exactly the gradients most likely to carry
+// opacity (any gradient under a <g opacity> or with its own opacity).
+//
+// ok=false whenever the inner shader is not itself a ShadingDescriber, or
+// declines to describe this instance — alphaShader has no geometry of its
+// own to offer in that case.
+func (a alphaShader) DescribeShading() (render.ShadingDesc, bool) {
+	describer, ok := a.inner.(render.ShadingDescriber)
+	if !ok {
+		return render.ShadingDesc{}, false
+	}
+	desc, ok := describer.DescribeShading()
+	if !ok {
+		return render.ShadingDesc{}, false
+	}
+	stops := make([]render.ShadingStop, len(desc.Stops))
+	for i, s := range desc.Stops {
+		s.Color.A = scaleAlpha(s.Color.A, a.alpha)
+		stops[i] = s
+	}
+	desc.Stops = stops
+	return desc, true
+}
+
 // logStrokeGradientOnce emits the stroke-gradient degradation notice the
 // first time it is needed for the current DrawVector call, and is a no-op on
 // subsequent calls.

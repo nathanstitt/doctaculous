@@ -52,6 +52,7 @@ type renderedPage struct {
 	index      int
 	content    []byte
 	images     []pendingImage
+	shadings   []pendingShading
 	pdfW, pdfH float64
 }
 
@@ -200,11 +201,12 @@ func renderBand(b band, index int, embed *fontEmbedder, opts Options) renderedPa
 	mat := render.Translate(b.marginPt, b.marginPt-b.topPt)
 	paint.PaintPage(dev, b.page, mat)
 	return renderedPage{
-		index:   index,
-		content: dev.contentStream(),
-		images:  dev.images,
-		pdfW:    b.pdfW,
-		pdfH:    b.pdfH,
+		index:    index,
+		content:  dev.contentStream(),
+		images:   dev.images,
+		shadings: dev.shadings,
+		pdfW:     b.pdfW,
+		pdfH:     b.pdfH,
 	}
 }
 
@@ -259,6 +261,13 @@ func assemble(out io.Writer, rendered []renderedPage, embed *fontEmbedder, opts 
 				xobjs[pi.name] = imgRef
 			}
 			res["XObject"] = xobjs
+		}
+		if len(rp.shadings) > 0 {
+			shadings := Dict{}
+			for _, ps := range rp.shadings {
+				shadings[ps.name] = w.put1(ps.dict)
+			}
+			res["Shading"] = shadings
 		}
 
 		pageRef := w.alloc()

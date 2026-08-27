@@ -219,7 +219,7 @@ func TestFillShadingClipAndMap(t *testing.T) {
 // the endpoint color rather than mirroring or wrapping.
 func TestNewAxialShaderPad(t *testing.T) {
 	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
-	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadPad)
+	sh := NewAxialShader(0, 0, 10, 0, fn, nil, SpreadPad)
 	c, ok := sh.ColorAt(-5, 0)
 	wantRGB(t, c, ok, 255, 0, 0) // clamps to t=0 (red)
 	c, ok = sh.ColorAt(15, 0)
@@ -233,7 +233,7 @@ func TestNewAxialShaderPad(t *testing.T) {
 // 0.25 (mirrored around 0).
 func TestNewAxialShaderReflect(t *testing.T) {
 	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
-	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadReflect)
+	sh := NewAxialShader(0, 0, 10, 0, fn, nil, SpreadReflect)
 
 	want075, ok := sh.ColorAt(7.5, 0) // sval=0.75, within [0,1] unaffected by fold
 	if !ok {
@@ -257,7 +257,7 @@ func TestNewAxialShaderReflect(t *testing.T) {
 // sval=1.25 wraps to 0.25, sval=-0.25 wraps to 0.75.
 func TestNewAxialShaderRepeat(t *testing.T) {
 	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
-	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadRepeat)
+	sh := NewAxialShader(0, 0, 10, 0, fn, nil, SpreadRepeat)
 
 	want025, ok := sh.ColorAt(2.5, 0) // sval=0.25
 	if !ok {
@@ -279,7 +279,7 @@ func TestNewAxialShaderRepeat(t *testing.T) {
 // SVG-style parameters (fx,fy,fr,cx,cy,cr) mapped onto circles[0..2]/[3..5].
 func TestNewRadialShaderPad(t *testing.T) {
 	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
-	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, SpreadPad)
+	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, nil, SpreadPad)
 	c, ok := sh.ColorAt(0, 0)
 	wantRGB(t, c, ok, 0, 255, 0)
 	c, ok = sh.ColorAt(10, 0)
@@ -290,7 +290,7 @@ func TestNewRadialShaderPad(t *testing.T) {
 
 func TestNewRadialShaderReflect(t *testing.T) {
 	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
-	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, SpreadReflect)
+	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, nil, SpreadReflect)
 
 	want, ok := sh.ColorAt(5, 0) // s=0.5, within [0,1]
 	if !ok {
@@ -303,7 +303,7 @@ func TestNewRadialShaderReflect(t *testing.T) {
 
 func TestNewRadialShaderRepeat(t *testing.T) {
 	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
-	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, SpreadRepeat)
+	sh := NewRadialShader(0, 0, 0, 0, 0, 10, fn, nil, SpreadRepeat)
 
 	want025, ok := sh.ColorAt(2.5, 0) // s=0.25
 	if !ok {
@@ -319,7 +319,7 @@ func TestNewRadialShaderRepeat(t *testing.T) {
 func TestNewAxialShaderDegenerate(t *testing.T) {
 	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}
 	for _, sp := range []Spread{SpreadPad, SpreadReflect, SpreadRepeat} {
-		sh := NewAxialShader(5, 5, 5, 5, fn, sp)
+		sh := NewAxialShader(5, 5, 5, 5, fn, nil, sp)
 		c, ok := sh.ColorAt(100, -100)
 		wantRGB(t, c, ok, 255, 0, 0)
 	}
@@ -330,7 +330,7 @@ func TestNewAxialShaderDegenerate(t *testing.T) {
 func TestNewRadialShaderZeroRadius(t *testing.T) {
 	fn := linRamp{c0: [3]float64{0, 1, 0}, c1: [3]float64{1, 1, 0}}
 	for _, sp := range []Spread{SpreadPad, SpreadReflect, SpreadRepeat} {
-		sh := NewRadialShader(0, 0, 0, 0, 0, 0, fn, sp)
+		sh := NewRadialShader(0, 0, 0, 0, 0, 0, fn, nil, sp)
 		sh.ColorAt(1, 1)
 		sh.ColorAt(0, 0)
 	}
@@ -343,7 +343,7 @@ func TestNewRadialShaderZeroRadius(t *testing.T) {
 // blue must read back A≈255 at t=0, A≈128 at t=0.5, and A≈0 at t=1.
 func TestNewAxialShaderAlphaFromFn(t *testing.T) {
 	fn := linRampAlpha{c0: [4]float64{1, 0, 0, 1}, c1: [4]float64{0, 0, 1, 0}}
-	sh := NewAxialShader(0, 0, 10, 0, fn, SpreadPad)
+	sh := NewAxialShader(0, 0, 10, 0, fn, nil, SpreadPad)
 
 	c, ok := sh.ColorAt(0, 0)
 	if !ok {
@@ -400,6 +400,114 @@ func TestPDFShadingCMYKStaysOpaque(t *testing.T) {
 		}
 		if c.A != 0xFF {
 			t.Fatalf("ColorAt(%v,0).A = %d, want 0xFF (CMYK K component must not be read as alpha)", x, c.A)
+		}
+	}
+}
+
+// TestAxialShaderDescribeShadingRoundTrips confirms a shading built via
+// NewAxialShader implements render.ShadingDescriber and reports back exactly
+// the coords/stops/spread it was constructed with.
+func TestAxialShaderDescribeShadingRoundTrips(t *testing.T) {
+	fn := linRampAlpha{c0: [4]float64{1, 0, 0, 1}, c1: [4]float64{0, 0, 1, 1}}
+	stops := []render.ShadingStop{
+		{Offset: 0, Color: color.RGBA{255, 0, 0, 255}},
+		{Offset: 1, Color: color.RGBA{0, 0, 255, 255}},
+	}
+	sh := NewAxialShader(1, 2, 3, 4, fn, stops, SpreadReflect)
+
+	describer, ok := sh.(render.ShadingDescriber)
+	if !ok {
+		t.Fatalf("axial shading does not implement render.ShadingDescriber")
+	}
+	desc, ok := describer.DescribeShading()
+	if !ok {
+		t.Fatalf("DescribeShading reported !ok for a describable axial shading")
+	}
+	if desc.Kind != render.ShadingAxial {
+		t.Errorf("Kind = %v, want ShadingAxial", desc.Kind)
+	}
+	wantCoords := [6]float64{1, 2, 3, 4, 0, 0}
+	if desc.Coords != wantCoords {
+		t.Errorf("Coords = %v, want %v", desc.Coords, wantCoords)
+	}
+	if desc.Spread != SpreadReflect {
+		t.Errorf("Spread = %v, want SpreadReflect", desc.Spread)
+	}
+	if len(desc.Stops) != len(stops) {
+		t.Fatalf("Stops = %v, want %v", desc.Stops, stops)
+	}
+	for i := range stops {
+		if desc.Stops[i] != stops[i] {
+			t.Errorf("Stops[%d] = %v, want %v", i, desc.Stops[i], stops[i])
+		}
+	}
+}
+
+// TestRadialShaderDescribeShadingRoundTrips is TestAxialShaderDescribeShadingRoundTrips'
+// radial counterpart: Coords must carry fx,fy,fr,cx,cy,cr in that order.
+func TestRadialShaderDescribeShadingRoundTrips(t *testing.T) {
+	fn := linRampAlpha{c0: [4]float64{0, 1, 0, 1}, c1: [4]float64{1, 1, 0, 1}}
+	stops := []render.ShadingStop{
+		{Offset: 0, Color: color.RGBA{0, 255, 0, 255}},
+		{Offset: 0.5, Color: color.RGBA{128, 255, 0, 200}},
+		{Offset: 1, Color: color.RGBA{255, 255, 0, 255}},
+	}
+	sh := NewRadialShader(1, 2, 3, 4, 5, 6, fn, stops, SpreadRepeat)
+
+	describer, ok := sh.(render.ShadingDescriber)
+	if !ok {
+		t.Fatalf("radial shading does not implement render.ShadingDescriber")
+	}
+	desc, ok := describer.DescribeShading()
+	if !ok {
+		t.Fatalf("DescribeShading reported !ok for a describable radial shading")
+	}
+	if desc.Kind != render.ShadingRadial {
+		t.Errorf("Kind = %v, want ShadingRadial", desc.Kind)
+	}
+	wantCoords := [6]float64{1, 2, 3, 4, 5, 6}
+	if desc.Coords != wantCoords {
+		t.Errorf("Coords = %v, want %v", desc.Coords, wantCoords)
+	}
+	if desc.Spread != SpreadRepeat {
+		t.Errorf("Spread = %v, want SpreadRepeat", desc.Spread)
+	}
+	if len(desc.Stops) != len(stops) {
+		t.Fatalf("Stops = %v, want %v", desc.Stops, stops)
+	}
+	for i := range stops {
+		if desc.Stops[i] != stops[i] {
+			t.Errorf("Stops[%d] = %v, want %v", i, desc.Stops[i], stops[i])
+		}
+	}
+}
+
+// TestPDFShadingDoesNotDescribe confirms a PDF-constructed shading (built via
+// newShader) does NOT implement a describable DescribeShading — either it
+// doesn't satisfy render.ShadingDescriber at all, or DescribeShading reports
+// ok=false — because a PDF input shading already has its own source
+// dictionary and round-tripping it back to a description is out of scope.
+func TestPDFShadingDoesNotDescribe(t *testing.T) {
+	dict := pdf.Dict{
+		"ShadingType": pdf.Integer(2),
+		"ColorSpace":  pdf.Name("DeviceRGB"),
+		"Coords":      pdf.Array{pdf.Integer(0), pdf.Integer(0), pdf.Integer(10), pdf.Integer(0)},
+		"Function": pdf.Dict{
+			"FunctionType": pdf.Integer(2),
+			"Domain":       pdf.Array{pdf.Integer(0), pdf.Integer(1)},
+			"C0":           pdf.Array{pdf.Integer(1), pdf.Integer(0), pdf.Integer(0)},
+			"C1":           pdf.Array{pdf.Integer(0), pdf.Integer(0), pdf.Integer(1)},
+			"N":            pdf.Integer(1),
+		},
+		"Extend": pdf.Array{pdf.Boolean(true), pdf.Boolean(true)},
+	}
+	sh, err := newShader(nil, dict)
+	if err != nil {
+		t.Fatalf("newShader: %v", err)
+	}
+	if describer, ok := sh.(render.ShadingDescriber); ok {
+		if _, ok := describer.DescribeShading(); ok {
+			t.Fatalf("PDF-constructed shading must not describe itself (ok=true), it already has a source dictionary")
 		}
 	}
 }

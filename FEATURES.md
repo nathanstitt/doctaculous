@@ -645,7 +645,7 @@ read+write vocabulary for the tinycld text adoption path):
   `!important`, cascade order, and CDATA — with committed goldens.
 
 **SVG input — paint servers** (`pkg/svg` gradient/pattern resolution, `pkg/svg/draw` fill dispatch,
-`pkg/render/raster` shading, `pkg/render/pdfwrite` shading-to-image):
+`pkg/render/raster` shading, `pkg/render/pdfwrite` native `/Shading` emission):
 
 - `<linearGradient>` and `<radialGradient>`, both `gradientUnits` (`objectBoundingBox` default and
   `userSpaceOnUse`, including percentages in either), `gradientTransform`, and all three
@@ -669,9 +669,20 @@ read+write vocabulary for the tinycld text adoption path):
 - An unresolved `url(#id)` reference with no fallback color paints nothing (not the inherited solid
   color) — a real bug fixed while building this: `Style.applyPaint` now clears `hasFill`/`hasStroke`
   for a still-unresolved reference instead of leaving the previous cascade value in place.
-  `pkg/render/pdfwrite`'s `FillShading` was a no-op stub before this PR, so an SVG gradient converted
-  to PDF rendered as a blank fill; it now rasterizes the shading into an image XObject sampled at 1
-  device pixel per PDF point (see the gap below on why this isn't a native `/Shading` yet).
+- PDF output emits a native `/Shading` dictionary for an axial or radial gradient whose stops are all
+  fully opaque and whose `spreadMethod` is `pad` (`render.ShadingDescriber`, a Shader-optional
+  companion interface `pkg/render/raster`'s SVG-built shadings implement and `pkg/svg/draw`'s
+  `alphaShader` delegates through): `/ShadingType 2`/`3`, `/Coords`, `/ColorSpace /DeviceRGB`,
+  `/Extend [true true]`, and a `/Function` — a single `FunctionType 2` (exponential, linear) for two
+  stops, or a `FunctionType 3` stitching function over one `FunctionType 2` per segment for more,
+  painted with `sh` under the shape's existing clip. Coincident stop offsets (a hard color break) are
+  nudged apart by a sub-point epsilon so `/Bounds` stays strictly increasing without visibly smearing
+  the break. Proven by rendering an opaque multi-stop gradient two ways (SVG→raster directly, and
+  SVG→PDF→reopen→raster) and asserting pixel-for-pixel equivalence, not just a well-formed dictionary.
+  A gradient with any `stop-opacity` < 1 (no alpha channel in `/Shading` without a soft mask) or a
+  `reflect`/`repeat` spread (no native `/Extend` equivalent) still rasterizes into an image XObject
+  exactly as before, logged once with the reason — the previous stub-era "no vector output" gap is
+  now the correctness boundary, not a permanent limitation.
 - Known gaps, each verified by rendering rather than merely inferred, and excluded from the golden
   corpus rather than locked in as correct: **gradient/pattern strokes** (`stroke="url(#g)")`) degrade
   to the paint's fallback color (or no stroke) with a one-per-document warn-once log — no
@@ -683,8 +694,5 @@ read+write vocabulary for the tinycld text adoption path):
   `currentColor`/`inherit` only ever resolves against the stop's own attributes, never a real
   ancestor's `color`/`stop-color` (`pkg/svg/stops.go`'s `resolveStopColor` has no inherited-style walk
   from a stop up through its parent gradient or an enclosing `<g>`).
-- PDF output rasterizes a shading into an image XObject rather than emitting a native PDF
-  `/Shading` dictionary — correct pixels, but not a resolution-independent vector gradient in the
-  PDF; deferred to the transparency-groups follow-up, which needs the same soft-mask/group plumbing.
 - 110 curated fixtures from the same resvg test suite covering both gradient types, patterns, stop
   parsing, and the reference-chain/cycle machinery above — with committed goldens.

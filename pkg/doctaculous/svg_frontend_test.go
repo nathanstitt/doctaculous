@@ -96,9 +96,10 @@ func TestSVGPDFRoundTrip(t *testing.T) {
 // TestSVGGradientPDFRoundTrip proves an SVG linear gradient survives into PDF
 // output: FillShading used to be a no-op stub, so a gradient fill converted to
 // PDF rendered as nothing (worse than an honest "no fill", since it silently
-// swallowed the paint). It now rasterizes the shading into an image XObject, so
-// the reopened PDF's raster shows the gradient ramp: reddish on the left,
-// blueish on the right.
+// swallowed the paint). An opaque, pad-spread gradient like this one now emits
+// a native /Shading dictionary (see TestSVGOpaqueGradientEmitsNativeShading for
+// the structural assertion); either way the reopened PDF's raster shows the
+// gradient ramp: reddish on the left, blueish on the right.
 func TestSVGGradientPDFRoundTrip(t *testing.T) {
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
 	  <defs>
@@ -146,6 +147,195 @@ func TestSVGGradientPDFRoundTrip(t *testing.T) {
 	}
 	if left == (color.RGBA{255, 255, 255, 255}) || right == (color.RGBA{255, 255, 255, 255}) {
 		t.Errorf("gradient rendered blank white: left=%+v right=%+v", left, right)
+	}
+}
+
+// multiStopGradientSVG is a three-stop, fully opaque linear gradient (pad
+// spread, the default) — the shape pkg/render/pdfwrite's FillShading must
+// convert into a native /Shading dictionary rather than rasterizing.
+const multiStopGradientSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="red"/>
+      <stop offset="0.5" stop-color="lime"/>
+      <stop offset="1" stop-color="blue"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="120" height="60" fill="url(#g1)"/>
+</svg>`
+
+// TestSVGOpaqueGradientVisualEquivalence is the acceptance test for native PDF
+// shadings: an opaque multi-stop SVG gradient is rendered two ways — (a)
+// directly to raster, and (b) through PDF (SVG -> PDF -> OpenBytes -> raster).
+// A well-formed but wrong /Shading dictionary would still produce a plausible-
+// looking gradient, so pixel-for-pixel equivalence with the direct render
+// (within the project's standard golden tolerance) is the only real proof the
+// emitted /Function and /Coords are correct rather than merely present.
+func TestSVGOpaqueGradientVisualEquivalence(t *testing.T) {
+	doc, err := OpenSVGBytes([]byte(multiStopGradientSVG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 96})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	re, err := OpenBytes(pdfBuf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaPDF, err := re.RasterizePage(context.Background(), 0, RasterOptions{DPI: 96})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff, n := compareImages(direct.(*image.RGBA), viaPDF.(*image.RGBA)); diff {
+		t.Errorf("native shading render drifted from direct SVG render: %d pixels beyond tolerance", n)
+	}
+}
+
+// TestHardBreakStillRendersAsBreak proves pkg/render/pdfwrite's coincident-
+// offset nudge (minStopSpan, widened from 1e-6 to 5e-4 so it survives
+// formatReal's 4-decimal-place rounding — see shading.go) does not visibly
+// smear a hard two-tone color break (two stops at the same offset) into a
+// ramp: sampling just before and just after the break in the round-tripped
+// PDF render must show the two solid colors, not an interpolated blend.
+func TestHardBreakStillRendersAsBreak(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="20">
+	  <defs>
+	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+	      <stop offset="0" stop-color="red"/>
+	      <stop offset="0.5" stop-color="red"/>
+	      <stop offset="0.5" stop-color="blue"/>
+	      <stop offset="1" stop-color="blue"/>
+	    </linearGradient>
+	  </defs>
+	  <rect x="0" y="0" width="100" height="20" fill="url(#g1)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	re, err := OpenBytes(pdfBuf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := re.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rgba := img.(*image.RGBA)
+	// Just before the break (x=48 of 100) should be solid red; just after
+	// (x=52) should be solid blue. Neither should show a purple blend.
+	before := rgba.RGBAAt(48, 10)
+	after := rgba.RGBAAt(52, 10)
+	t.Logf("before break: %+v; after break: %+v", before, after)
+	if before.R < 200 || before.B > 20 {
+		t.Errorf("pixel just before break = %+v, want solid red (no smear)", before)
+	}
+	if after.B < 200 || after.R > 20 {
+		t.Errorf("pixel just after break = %+v, want solid blue (no smear)", after)
+	}
+}
+
+// TestSVGOpaqueGradientEmitsNativeShading is the structural counterpart to
+// TestSVGOpaqueGradientVisualEquivalence: an opaque, pad-spread gradient's PDF
+// output must contain a /ShadingType dictionary and must NOT contain an image
+// XObject (/Subtype /Image) — proving the vector path was taken, not silently
+// replaced by a rasterized fallback that happens to look right. Only the
+// stream *bodies* pdfwrite emits are Flate-compressed (see writer.addStream);
+// every dictionary, including a /Shading dict added via writer.put1, is
+// written as plain text, so both names are searchable directly in the raw
+// PDF bytes.
+func TestSVGOpaqueGradientEmitsNativeShading(t *testing.T) {
+	doc, err := OpenSVGBytes([]byte(multiStopGradientSVG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := pdfBuf.Bytes()
+	if !bytes.Contains(raw, []byte("/ShadingType")) {
+		t.Error("opaque gradient PDF has no /ShadingType dictionary; want a native shading")
+	}
+	if bytes.Contains(raw, []byte("/Subtype/Image")) || bytes.Contains(raw, []byte("/Subtype /Image")) {
+		t.Error("opaque gradient PDF contains an image XObject; want the vector path, not a rasterized fallback")
+	}
+}
+
+// TestSVGTransparentGradientStillRasterizes is the inverse of
+// TestSVGOpaqueGradientEmitsNativeShading: a gradient with a stop-opacity < 1
+// stop has no native PDF /Shading equivalent (no alpha channel without a soft
+// mask, out of scope here — see docs/superpowers/specs/2026-08-26-shader-
+// describe-design.md), so it must still rasterize into an image XObject and
+// must NOT emit a /ShadingType dictionary that would silently drop the
+// transparency.
+func TestSVGTransparentGradientStillRasterizes(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+	  <defs>
+	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+	      <stop offset="0" stop-color="red" stop-opacity="0.2"/>
+	      <stop offset="1" stop-color="blue"/>
+	    </linearGradient>
+	  </defs>
+	  <rect x="0" y="0" width="100" height="50" fill="url(#g1)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := pdfBuf.Bytes()
+	if bytes.Contains(raw, []byte("/ShadingType")) {
+		t.Error("gradient with stop-opacity emitted a native /Shading dict; alpha has no native PDF equivalent")
+	}
+	if !bytes.Contains(raw, []byte("/Subtype/Image")) && !bytes.Contains(raw, []byte("/Subtype /Image")) {
+		t.Error("gradient with stop-opacity produced no image XObject; want the rasterized fallback")
+	}
+}
+
+// TestSVGGradientReflectSpreadStillRasterizes proves a non-pad spreadMethod
+// (PDF /Extend models only "pad") also falls back to rasterizing rather than
+// emitting a /Shading dict that would render the reflected/repeated ramp as a
+// flat pad instead.
+func TestSVGGradientReflectSpreadStillRasterizes(t *testing.T) {
+	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+	  <defs>
+	    <linearGradient id="g1" x1="0.25" y1="0" x2="0.75" y2="0" spreadMethod="reflect">
+	      <stop offset="0" stop-color="red"/>
+	      <stop offset="1" stop-color="blue"/>
+	    </linearGradient>
+	  </defs>
+	  <rect x="0" y="0" width="100" height="50" fill="url(#g1)"/>
+	</svg>`)
+	doc, err := OpenSVGBytes(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pdfBuf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := pdfBuf.Bytes()
+	if bytes.Contains(raw, []byte("/ShadingType")) {
+		t.Error("reflect-spread gradient emitted a native /Shading dict; PDF /Extend has no reflect equivalent")
+	}
+	if !bytes.Contains(raw, []byte("/Subtype/Image")) && !bytes.Contains(raw, []byte("/Subtype /Image")) {
+		t.Error("reflect-spread gradient produced no image XObject; want the rasterized fallback")
 	}
 }
 

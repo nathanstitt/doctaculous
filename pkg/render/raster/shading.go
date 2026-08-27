@@ -108,7 +108,19 @@ type shading struct {
 	// /ColorSpace — component count alone cannot tell CMYK from RGBA.
 	// PDF-constructed shadings (newShader) never set this, so every
 	// existing PDF rendering path keeps producing A=0xFF exactly as before.
+	//
+	// alphaFromFn also gates DescribeShading (see below): both flags are set
+	// together, only by NewAxialShader/NewRadialShader, so one bool serves
+	// both "read alpha from fn" and "this shading is describable" without
+	// risk of the two ever diverging.
 	alphaFromFn bool
+
+	// describeStops holds the stop list a shading was built with, retained
+	// ONLY so DescribeShading can report it — ColorAt never reads this field,
+	// so sampling behavior is governed entirely by fn and stays byte-identical
+	// to before this field existed. Set only by NewAxialShader/NewRadialShader
+	// (nil for every PDF-constructed shading), matching alphaFromFn.
+	describeStops []render.ShadingStop
 }
 
 // Spread selects how an axial or radial gradient extends beyond its defining
@@ -116,18 +128,25 @@ type shading struct {
 // have no equivalent concept — they use the two-bool /Extend clamp, which
 // SpreadPad reproduces exactly — so Spread only matters for gradients built via
 // NewAxialShader/NewRadialShader (SVG paint servers).
-type Spread int
+//
+// Spread is an alias of render.SpreadMode rather than its own enum: both
+// describe the exact same three behaviors (pad/reflect/repeat), and a
+// ShadingDesc (render.ShadingDesc.Spread) needs to carry the same value a
+// *shading was built with. Aliasing keeps that a zero-cost identity instead
+// of a mapping that could silently drift if a mode were ever added to one
+// enum and not the other.
+type Spread = render.SpreadMode
 
 const (
 	// SpreadPad clamps the parameter to the nearest endpoint beyond [0,1],
 	// painting a solid endpoint color outside the gradient. This is the PDF
 	// /Extend[true true] behavior and the default for un-extended PDF shadings
 	// (which instead leave the region outside [0,1] unpainted).
-	SpreadPad Spread = iota
+	SpreadPad = render.SpreadPad
 	// SpreadReflect mirrors the ramp back and forth beyond [0,1] (0..1..0..1..).
-	SpreadReflect
+	SpreadReflect = render.SpreadReflect
 	// SpreadRepeat wraps the ramp modulo 1, repeating it beyond [0,1].
-	SpreadRepeat
+	SpreadRepeat = render.SpreadRepeat
 )
 
 // foldSpread maps an out-of-[0,1] parameter v into [0,1] per the spread mode.
@@ -169,16 +188,23 @@ func foldSpread(v float64, spread Spread) float64 {
 // domain [0,1]) and extending beyond the axis per spread. It shares evaluation
 // code (atAxial) with the PDF Type 2 shading path but never touches PDF types,
 // so it can be built directly from parsed SVG attributes.
-func NewAxialShader(x0, y0, x1, y1 float64, fn function.Func, spread Spread) render.Shader {
+//
+// stops is the same stop list fn's ramp was built from (the SVG caller already
+// has it — see pkg/svg/stops.go); it is retained ONLY so the returned Shader's
+// DescribeShading can report it. ColorAt keeps sampling fn exactly as before,
+// so passing stops changes nothing about rendered pixels — it only makes the
+// shading additionally implement render.ShadingDescriber.
+func NewAxialShader(x0, y0, x1, y1 float64, fn function.Func, stops []render.ShadingStop, spread Spread) render.Shader {
 	return &shading{
-		shadingType: 2,
-		csKind:      csRGB,
-		fn:          fn,
-		domain:      [2]float64{0, 1},
-		axis:        [4]float64{x0, y0, x1, y1},
-		extend:      [2]bool{true, true},
-		spread:      spread,
-		alphaFromFn: true,
+		shadingType:   2,
+		csKind:        csRGB,
+		fn:            fn,
+		domain:        [2]float64{0, 1},
+		axis:          [4]float64{x0, y0, x1, y1},
+		extend:        [2]bool{true, true},
+		spread:        spread,
+		alphaFromFn:   true,
+		describeStops: stops,
 	}
 }
 
@@ -188,17 +214,54 @@ func NewAxialShader(x0, y0, x1, y1 float64, fn function.Func, spread Spread) ren
 // 1-input color ramp keyed on domain [0,1]) and extending beyond the circle per
 // spread. It shares evaluation code (atRadial) with the PDF Type 3 shading path
 // but never touches PDF types.
-func NewRadialShader(fx, fy, fr, cx, cy, cr float64, fn function.Func, spread Spread) render.Shader {
+//
+// stops is retained only for DescribeShading, exactly as in NewAxialShader;
+// ColorAt's sampling via fn is unaffected.
+func NewRadialShader(fx, fy, fr, cx, cy, cr float64, fn function.Func, stops []render.ShadingStop, spread Spread) render.Shader {
 	return &shading{
-		shadingType: 3,
-		csKind:      csRGB,
-		fn:          fn,
-		domain:      [2]float64{0, 1},
-		circles:     [6]float64{fx, fy, fr, cx, cy, cr},
-		extend:      [2]bool{true, true},
-		spread:      spread,
-		alphaFromFn: true,
+		shadingType:   3,
+		csKind:        csRGB,
+		fn:            fn,
+		domain:        [2]float64{0, 1},
+		circles:       [6]float64{fx, fy, fr, cx, cy, cr},
+		extend:        [2]bool{true, true},
+		spread:        spread,
+		alphaFromFn:   true,
+		describeStops: stops,
 	}
+}
+
+// DescribeShading implements render.ShadingDescriber. Only a shading built via
+// NewAxialShader/NewRadialShader (gated by alphaFromFn, the same flag that
+// gates alpha interpretation in toRGBA — see its comment) can describe itself:
+// a PDF-constructed shading (newShader) already came from a source /Shading
+// dictionary, so round-tripping it back into a description is out of scope
+// here and would risk the same CMYK/RGBA component-count confusion alphaFromFn
+// exists to avoid. Types 1 (function-based) and mesh shadings (Types 4-7,
+// meshShading — a distinct type that does not implement this interface at
+// all) are never describable either way.
+func (s *shading) DescribeShading() (render.ShadingDesc, bool) {
+	if !s.alphaFromFn {
+		return render.ShadingDesc{}, false
+	}
+	var kind render.ShadingKind
+	var coords [6]float64
+	switch s.shadingType {
+	case 2:
+		kind = render.ShadingAxial
+		coords[0], coords[1], coords[2], coords[3] = s.axis[0], s.axis[1], s.axis[2], s.axis[3]
+	case 3:
+		kind = render.ShadingRadial
+		coords = s.circles
+	default:
+		return render.ShadingDesc{}, false
+	}
+	return render.ShadingDesc{
+		Kind:   kind,
+		Coords: coords,
+		Stops:  s.describeStops,
+		Spread: s.spread,
+	}, true
 }
 
 // newShader parses a /Shading object into a render.Shader. The object may be a
