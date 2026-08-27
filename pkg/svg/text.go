@@ -264,11 +264,12 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 	// declaration keeps its LINE but adopts the <text>'s paint and metrics.
 	st = st.rebaseDecorations()
 
-	// A baseline-shift on the <text> element itself, or inherited from above
-	// it, does NOT move the text: the accumulation starts at zero here and
-	// only a <tspan> inward can add to it.
+	// Two baseline properties must not cross the <text> boundary: the
+	// accumulated baseline-shift, and a dominant-baseline that arrived from a
+	// <g> rather than being written on the <text> itself. See resetBaselines
+	// for the dominant-baseline half.
 	//
-	// resvg asserts this three separate ways — inheritance-1 puts
+	// For baseline-shift, resvg asserts it three separate ways — inheritance-1 puts
 	// baseline-shift="super" directly on a <text> and renders it flush on the
 	// baseline; inheritance-4 does the same with a plain <tspan> inside;
 	// inheritance-5 adds an explicit baseline-shift="baseline" on that tspan —
@@ -276,7 +277,7 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 	// exactly cover. inheritance-3's baseline-shift="inherit" on a <text>
 	// inside a <g baseline-shift="super"> lands here too, and is likewise
 	// ignored, which is what makes it match its own red reference.
-	st = st.resetBaselineShift()
+	st = st.resetBaselines()
 
 	tb := &textBuilder{b: b, ctx: ctx}
 	tb.walk(el, st, xmlSpaceOf(el, false), 0, nil, nil)

@@ -157,15 +157,33 @@ type Style struct {
 	letterSpacingPt float64
 	wordSpacingPt   float64
 
-	// dominantBaseline is the resolved dominant-baseline keyword, inherited
-	// ("auto" initial). alignmentBaseline is the resolved alignment-baseline
-	// keyword, NOT inherited ("auto" initial) — CSS Inline defines it as a
-	// per-box property, and resvg's dominant-baseline/nested.svg depends on it
-	// not leaking into a grandchild tspan. Both are resolved to a physical
-	// baseline offset in pkg/svg/draw, where a resolved Face and its metrics
-	// exist.
-	dominantBaseline  string
-	alignmentBaseline string
+	// dominantBaseline and alignmentBaseline are the resolved baseline-
+	// SELECTION keywords ("auto" initial). Both resolve to a physical offset in
+	// pkg/svg/draw, where a Face and its metrics exist.
+	//
+	// Neither INHERITS. CSS Inline Layout §5 defines both as per-box
+	// properties, and resvg agrees in a way its corpus pins twice over:
+	// dominant-baseline/inherit.svg wraps a <text dominant-baseline="inherit">
+	// in a <g dominant-baseline="middle"> and renders it UNSHIFTED (so the
+	// keyword did not reach the text on its own), while
+	// alignment-baseline/inherit.svg does the same with "hanging" and DOES
+	// shift (so the explicit `inherit` pulled it). Non-inherited plus an
+	// explicit-inherit that copies the parent is the one model that satisfies
+	// both — see applyBaselineKeyword. dominant-baseline/nested.svg needs the
+	// non-inheritance too: a sibling tspan's own value must win over an
+	// uncle's.
+	//
+	// parentDominantBaseline / parentAlignmentBaseline carry the value an
+	// explicit `inherit` reaches for, captured before the reset at the top of
+	// apply(). setDominantBaseline records that THIS element wrote the
+	// property itself, which the <text> boundary reset needs in order to
+	// distinguish "declared here" from "arrived from an ancestor". None of
+	// the three is read by the render path.
+	dominantBaseline        string
+	alignmentBaseline       string
+	parentDominantBaseline  string
+	parentAlignmentBaseline string
+	setDominantBaseline     bool
 
 	// baselineShiftPt is the CUMULATIVE baseline shift in user units, positive
 	// = UP (away from the text's baseline). Unlike every other property here
@@ -278,8 +296,13 @@ func defaultStyle() Style {
 		unicodeBidi: "normal", // not inherited; reset every apply() call below
 		// letterSpacingPt/wordSpacingPt/baselineShiftPt default to 0 and
 		// decorations to nil, all of which are the zero value.
-		dominantBaseline:  "auto",
-		alignmentBaseline: "auto", // not inherited; reset every apply() call below
+		// Both baseline-selection properties (and the two shadow fields an
+		// explicit `inherit` reads) are non-inherited and reset on every
+		// apply() call below.
+		dominantBaseline:        "auto",
+		alignmentBaseline:       "auto",
+		parentDominantBaseline:  "auto",
+		parentAlignmentBaseline: "auto",
 	}
 }
 
@@ -307,11 +330,20 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s.maskType = "luminance" // not inherited; may be overridden below
 	s.overflow = "hidden"    // not inherited; may be overridden below
 	s.unicodeBidi = "normal" // not inherited; may be overridden below
-	// alignment-baseline is a per-box property (CSS Inline §5.2), NOT
-	// inherited: resvg's dominant-baseline/nested.svg puts it on one tspan and
-	// expects a SIBLING tspan's own dominant-baseline to win, which only works
-	// if the value does not leak down.
+	// alignment-baseline is per-box (CSS Inline §5) and does NOT inherit:
+	// resvg's dominant-baseline/nested.svg puts it on one tspan and expects a
+	// SIBLING tspan's own dominant-baseline to win, which only works if the
+	// value does not leak into a grandchild. dominant-baseline DOES propagate
+	// down a <text> subtree (dummy-tspan.svg shifts a plain tspan with its
+	// parent), so it is left inherited here and is instead reset once at the
+	// <text> boundary — see Style.resetBaselines.
+	//
+	// The pre-reset value is kept so an explicit `inherit` can still reach for
+	// it; see applyBaselineKeyword.
+	s.parentDominantBaseline = parent.dominantBaseline
+	s.parentAlignmentBaseline = parent.alignmentBaseline
 	s.alignmentBaseline = "auto"
+	s.setDominantBaseline = false
 
 	if el == nil {
 		return s
@@ -1349,20 +1381,38 @@ var baselineKeywords = map[string]bool{
 // baseline) rather than being approximated; an unrecognized value is ignored
 // entirely, keeping the inherited one.
 func applyDominantBaseline(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
-	applyBaselineKeyword("dominant-baseline", &s.dominantBaseline, attr, logf)
+	// An explicit `inherit` does NOT count as writing the property: it only
+	// restates what an ancestor already said, so it must not survive the
+	// <text> boundary reset any more than the bare inherited value would.
+	// resvg's dominant-baseline/inherit.svg is exactly that case, and renders
+	// unshifted.
+	if v, ok := attr("dominant-baseline"); ok && strings.ToLower(strings.TrimSpace(v)) != "inherit" {
+		s.setDominantBaseline = true
+	}
+	applyBaselineKeyword("dominant-baseline", &s.dominantBaseline, s.parentDominantBaseline, attr, logf)
 }
 
 // applyAlignmentBaseline resolves alignment-baseline, NOT inherited (see
 // Style.alignmentBaseline). Same keyword handling as dominant-baseline.
 func applyAlignmentBaseline(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
-	applyBaselineKeyword("alignment-baseline", &s.alignmentBaseline, attr, logf)
+	applyBaselineKeyword("alignment-baseline", &s.alignmentBaseline, s.parentAlignmentBaseline, attr, logf)
 }
 
 // applyBaselineKeyword is the shared body of the two baseline-selection
 // properties, which take the identical keyword set.
-func applyBaselineKeyword(name string, dst *string, attr func(string) (string, bool), logf func(string, ...any)) {
+//
+// Because neither property inherits, an explicit `inherit` is not a no-op the
+// way it is everywhere else in this file: it has to reach back for the
+// parent's value, which the caller supplies. resvg's
+// alignment-baseline/inherit.svg is what makes the difference visible — the
+// <g>'s "hanging" reaches the <text> ONLY through the explicit keyword.
+func applyBaselineKeyword(name string, dst *string, parentVal string, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr(name)
-	if !ok || val == "inherit" {
+	if !ok {
+		return
+	}
+	if val == "inherit" {
+		*dst = parentVal
 		return
 	}
 	val = strings.ToLower(strings.TrimSpace(val))
@@ -1523,12 +1573,31 @@ func (s Style) rebaseDecorations() Style {
 	return s
 }
 
-// resetBaselineShift returns s with the accumulated baseline-shift cleared.
-// It is called once, on the <text> element, so the accumulation begins at zero
-// and only a <tspan> inward can contribute — see buildText's call site for the
-// three resvg fixtures that pin this.
-func (s Style) resetBaselineShift() Style {
+// resetBaselines returns s with the two baseline properties that must not
+// cross the <text> boundary cleared. It is called once, on the <text> element,
+// after that element's own attributes have already been applied.
+//
+//   - baselineShiftPt goes to zero unconditionally, so the accumulation begins
+//     at zero and only a <tspan> inward can contribute. A shift written on the
+//     <text> itself is therefore inert, which is what resvg's inheritance-1,
+//     -3, -4 and -5 all assert (each overlays an unshifted red reference the
+//     black text must exactly cover).
+//   - dominantBaseline goes to "auto" only when the <text> did NOT write the
+//     property itself. It propagates freely INSIDE a <text> subtree
+//     (dummy-tspan.svg shifts a plain tspan along with its parent), but does
+//     not arrive from a <g> above (inherit.svg wraps the <text> in a <g
+//     dominant-baseline="middle"> and renders it unshifted — even though the
+//     <text> writes dominant-baseline="inherit", which pulls "middle" in and
+//     then has it discarded here).
+//
+// alignment-baseline is deliberately NOT reset: alignment-baseline/inherit.svg
+// is the same shape and DOES shift, so the <g>'s value must survive when the
+// <text> asks for it explicitly.
+func (s Style) resetBaselines() Style {
 	s.baselineShiftPt = 0
+	if !s.setDominantBaseline {
+		s.dominantBaseline = "auto"
+	}
 	return s
 }
 
