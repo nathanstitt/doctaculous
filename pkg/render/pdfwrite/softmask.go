@@ -171,6 +171,30 @@ func (d *pageDevice) takePendingSoftMask(mask render.GroupMask) (string, bool) {
 	return name, ok
 }
 
+// RenderOffscreen reports that this writer cannot rasterize offscreen, by
+// returning nil — the documented degradation in render.Device's contract.
+//
+// This is a REAL capability gap, not a shortcut taken for convenience, and it
+// is the one place in the SVG series where the vector-native principle cannot
+// hold: a PDF writer emits vector operators and has no pixel buffer to read
+// back, while an SVG filter is defined entirely as pixel math (a blur has no
+// vector representation, and PDF has no filter operator). Unlike
+// BuildClipMask — which approximates the union with a rectangle because a
+// rectangle is still recognizably a clip — there is no meaningful vector
+// approximation of "the rasterized pixels of this subtree" to offer, so this
+// declines outright rather than inventing one.
+//
+// The caller (pkg/svg/draw's filter path) treats nil as "filtering is
+// unavailable" and paints the element UNFILTERED, which keeps the content
+// visible and correctly placed in PDF output at the cost of the filter's
+// visual effect — the same "a visible approximation beats a blank" rule every
+// deferred primitive follows. paint is deliberately never invoked: it would
+// emit the subtree's operators into this device's content stream, painting
+// the element a second time on top of itself.
+func (d *pageDevice) RenderOffscreen(size image.Point, paint func(dev render.Device)) *image.RGBA {
+	return nil
+}
+
 // BuildClipMask is a documented APPROXIMATION: this writer has no offscreen
 // raster surface to build an exact per-pixel union mask into (see
 // render.Device.BuildClipMask's doc comment on why the exact union requires

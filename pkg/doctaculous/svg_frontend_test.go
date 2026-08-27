@@ -992,3 +992,170 @@ func TestSVGManySameAlphaShapesDedupeExtGState(t *testing.T) {
 		t.Errorf("found %d /ExtGState-typed objects; want exactly 1 (50 same-alpha shapes should dedupe)", n)
 	}
 }
+
+// TestFilteredElementSurvivesPDFRoundTrip is the SVG -> PDF -> reopen ->
+// raster guard for the filter path's pdfwrite contract.
+//
+// pkg/render/pdfwrite returns nil from RenderOffscreen — it emits vector
+// operators and has no pixel buffer, and a filter (pure pixel math, with no
+// PDF operator) has no vector form to fall back on. pkg/svg/draw must then
+// paint the element UNFILTERED: content stays visible and correctly placed,
+// losing only the filter's visual effect.
+//
+// That contract is invisible to the SVG-only tests (which all run on the
+// raster backend, where RenderOffscreen succeeds), and the failure modes it
+// guards are severe and silent — a nil mishandled one way DROPS the element
+// from the PDF entirely, and mishandled the other way (invoking the paint
+// callback before returning nil) paints it TWICE, once into the discarded
+// offscreen pass and once for real, double-darkening every overlap.
+//
+// All three element kinds are covered because each reaches the filter
+// through its own branch (paintShape, paintGroupBody, paintText) and each had
+// to strip element opacity separately — a per-kind regression would otherwise
+// only surface in one of them.
+func TestFilteredElementSurvivesPDFRoundTrip(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   string
+		probeX int
+		probeY int
+	}{
+		{
+			name:   "shape",
+			body:   `<rect x="10" y="10" width="80" height="80" fill="red" filter="url(#f)"/>`,
+			probeX: 50, probeY: 50,
+		},
+		{
+			name:   "group",
+			body:   `<g filter="url(#f)"><rect x="10" y="10" width="80" height="80" fill="red"/></g>`,
+			probeX: 50, probeY: 50,
+		},
+		{
+			name:   "text",
+			body:   `<text x="10" y="60" font-size="50" fill="red" filter="url(#f)">III</text>`,
+			probeX: 20, probeY: 40,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+			  <filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+			    <feOffset dx="0" dy="0"/>
+			  </filter>
+			  ` + c.body + `
+			</svg>`)
+			doc, err := OpenSVGBytes(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			directImg, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+			if err != nil {
+				t.Fatal(err)
+			}
+			directInk := countRedInk(directImg.(*image.RGBA))
+
+			var pdfBuf bytes.Buffer
+			if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			pdfDoc, err := OpenBytes(pdfBuf.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			viaImg, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+			if err != nil {
+				t.Fatal(err)
+			}
+			viaInk := countRedInk(viaImg.(*image.RGBA))
+
+			t.Logf("red ink: direct=%d px, via PDF=%d px", directInk, viaInk)
+
+			if directInk == 0 {
+				t.Fatal("the direct raster painted nothing; the fixture is wrong, not the PDF path")
+			}
+			// The filter is an identity feOffset, so pdfwrite's unfiltered
+			// fallback must cover essentially the same pixels the raster
+			// backend's filtered path does. A DROPPED element leaves no ink
+			// at all; coverage this far off would mean the fallback placed or
+			// scaled it wrongly.
+			if viaInk == 0 {
+				t.Fatalf("no ink in the PDF render: the filtered %s was dropped entirely", c.name)
+			}
+			if ratio := float64(viaInk) / float64(directInk); ratio < 0.8 || ratio > 1.25 {
+				t.Errorf("PDF ink %d px vs direct %d px (ratio %.2f): the unfiltered fallback is not landing where the filtered raster does",
+					viaInk, directInk, ratio)
+			}
+		})
+	}
+}
+
+// TestFilteredElementWithOpacitySurvivesPDFRoundTrip pins the element-opacity
+// half of the same contract: pdfwrite's unfiltered fallback must still apply
+// the element's own opacity, which pkg/svg/draw strips from the source pass
+// and re-applies to the result. Dropping it on the fallback path would render
+// the element fully opaque in PDF while the raster backend renders it faded.
+func TestFilteredElementWithOpacitySurvivesPDFRoundTrip(t *testing.T) {
+	for _, c := range []struct{ name, body string }{
+		{"shape", `<rect x="10" y="10" width="80" height="80" fill="red" opacity="0.5" filter="url(#f)"/>`},
+		{"group", `<g opacity="0.5" filter="url(#f)"><rect x="10" y="10" width="80" height="80" fill="red"/></g>`},
+		{"text", `<text x="10" y="60" font-size="50" fill="red" opacity="0.5" filter="url(#f)">III</text>`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+			  <filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+			    <feOffset dx="0" dy="0"/>
+			  </filter>
+			  ` + c.body + `
+			</svg>`)
+			doc, err := OpenSVGBytes(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pdfBuf bytes.Buffer
+			if err := doc.WritePDF(context.Background(), &pdfBuf, PDFOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			pdfDoc, err := OpenBytes(pdfBuf.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			viaImg, err := pdfDoc.RasterizePage(context.Background(), 0, RasterOptions{DPI: 72})
+			if err != nil {
+				t.Fatal(err)
+			}
+			via := viaImg.(*image.RGBA)
+
+			// Scan for the most-saturated red the element produced. At 50%
+			// opacity over white it must be visibly pink, never full red.
+			var best uint8 = 255
+			for y := 0; y < 100; y++ {
+				for x := 0; x < 100; x++ {
+					if p := via.RGBAAt(x, y); p.R > 0xa0 && p.G < best {
+						best = p.G
+					}
+				}
+			}
+			t.Logf("%s: strongest red has G=%d (want ~128 for 50%% over white, 0 would mean opacity was lost)", c.name, best)
+			if best < 90 {
+				t.Errorf("G=%d is too saturated: the element's opacity was lost on the unfiltered PDF fallback", best)
+			}
+		})
+	}
+}
+
+// countRedInk counts pixels that are recognisably the fixtures' red fill,
+// the placement-independent way the filter round-trip tests compare a raster
+// render against the same content routed through PDF.
+func countRedInk(img *image.RGBA) int {
+	n := 0
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if c := img.RGBAAt(x, y); c.R > 0xa0 && c.G < 0x80 && c.B < 0x80 {
+				n++
+			}
+		}
+	}
+	return n
+}

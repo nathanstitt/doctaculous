@@ -698,6 +698,113 @@ read+write vocabulary for the tinycld text adoption path):
   corpus's `mask/on-group-with-transform.svg` and `mask/half-width-region-with-rotation.svg`, both of
   which render blank under this engine (a graceful degradation, not a crash) versus resvg's correctly
   bbox-relative result.
+- **SVG `<filter>` — the primitives real documents use** (`pkg/svg/filter.go` resolves the
+  graph, `pkg/svg/filter` holds the pixel math, `pkg/svg/draw/filter.go` drives it). The `filter`
+  property is wired through the same presentation-attribute/cascade path as `clip-path`/`mask`, and
+  the `<filter>` element resolves at PARSE time (the document index is gone once `Parse` returns):
+  `filterUnits`/`primitiveUnits` (opposite defaults, `objectBoundingBox`/`userSpaceOnUse`), the
+  `x`/`y`/`width`/`height` region defaulting to **-10%,-10%,120%,120%** so a filter has room to bleed
+  past its source, per-primitive subregions, and the `result`/`in`/`in2` wiring with the implicit
+  `SourceGraphic`/`SourceAlpha` inputs. A cycle is impossible BY CONSTRUCTION rather than by a
+  runtime guard: `in` may only name an EARLIER `result`, so the resolved graph is a strictly backward
+  DAG the renderer evaluates in one forward pass. An `in` naming an undefined result falls back to
+  the previous primitive's output, per spec.
+- **Filters run in linearRGB by default** — the one place this engine departs from sRGB, and the
+  likeliest source of subtly-wrong output. `color-interpolation-filters` defaults to `linearRGB`
+  (with the `sRGB` opt-out supported), so a filter converts sRGB → linear, operates, and converts
+  back, using the exact IEC 61966-2-1 transfer function INCLUDING its linear segment near zero — not
+  a `pow(2.2)` approximation, which is wrong across the range and worst in the near-black values a
+  shadow's falloff is made of. The inverse is computed rather than table-driven, since a 256-entry
+  inverse table quantizes the dark end enough to band exactly those gradients.
+- **Filter error handling is the OPPOSITE of clip-path/mask's**, and the corpus pins each case: an
+  unresolvable `filter="url(#missing)"` means the element is **not rendered at all** (not "no
+  filtering"); an empty `<filter>` outputs transparent black, so the element disappears rather than
+  passing through; a zero/negative region or primitive subregion likewise disables the element; and
+  an `objectBoundingBox` region on an element with no bounding box (an empty group) disables it,
+  while a `userSpaceOnUse` region on the same group still paints.
+- **`feGaussianBlur` uses the spec's own three-box approximation**, not a hand-rolled Gaussian
+  convolution: `d = floor(s·3·√(2π)/4 + 0.5)`, three boxes of `d` when `d` is odd, and for an even
+  `d` two boxes centred on OPPOSITE pixel boundaries (so their half-pixel shifts cancel) plus one of
+  `d+1`. Ignoring that odd/even split yields a blur that is correct in shape but visibly
+  TRANSLATED. `stdDeviation` takes one or two numbers, each axis independent; a negative value, an
+  empty value, or more than two values is an error that disables the PRIMITIVE, so the element
+  renders **unblurred rather than blank**. **The blur operates on PREMULTIPLIED values** — the one
+  primitive where that is most visible, since averaging straight colour across a transparent edge
+  weights the transparent pixels' meaningless black equally and darkens every blurred edge. A blur
+  is O(pixels) per pass whatever the box width, and the deviation is additionally clamped so the box
+  never spans more than half the extent it blurs across: past that the window is almost entirely
+  off-buffer and the element decays toward NOTHING rather than becoming more blurred.
+- **`feComposite`** — the five Porter-Duff operators (`over`, `in`, `out`, `atop`, `xor`) plus
+  `arithmetic` with its `k1..k4`. Both run on premultiplied values, with the result (not the
+  coefficients) clamped to [0,1]: the corpus's `k4="100"` fixture renders opaque white, proving the
+  reference feeds the coefficients through verbatim despite its own `<desc>` claiming otherwise.
+  An unrecognized `operator` falls back to `over` rather than disabling the primitive.
+- **`feMerge`/`feMergeNode`** — its inputs composited in DOCUMENT order, which is painting order:
+  the first node is the bottom of the stack. It is exactly a fold of `over`, asserted against
+  `Composite` directly so an `feMerge` cannot drift from the equivalent `feComposite` chain.
+- **`feBlend`** — `normal` plus the fifteen CSS/PDF blend modes (`multiply`, `screen`, `overlay`,
+  `darken`, `lighten`, `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`,
+  `exclusion`, and the four non-separable `hue`/`saturation`/`color`/`luminosity`). The blend
+  FUNCTIONS moved to `pkg/render/blend.go` and are now **shared with the raster backend's PDF `/BM`
+  compositing** rather than reimplemented — one `colorBurn`, two consumers. Compositing follows the
+  full CSS formula, so a source over a TRANSPARENT backdrop comes through unblended rather than
+  multiplied against the backdrop's meaningless colour.
+- **`feColorMatrix`** — `matrix` (5x4), `saturate`, `hueRotate` and `luminanceToAlpha`, with each
+  shorthand expanded into a matrix at PARSE time so the renderer implements one operation.
+  **It operates UN-premultiplied**, the exact opposite of blur and composite; both directions are
+  mutation-proven by tests, since getting either backwards is the classic bug. `luminanceToAlpha`
+  uses SVG's BT.709 filter weights (0.2125/0.7154/0.0721), deliberately not the 0.3/0.59/0.11 set
+  PDF's blend functions use for the same-sounding quantity. An unrecognized `type` is treated as
+  `matrix` (so `type="qwe"` with a full `values` list still applies it), while a `values` list that
+  is not exactly 20 numbers falls back to the identity.
+- **`feDropShadow` is EXPANDED into its five-primitive chain**, not special-cased: blur → offset →
+  flood → composite(`in`) → merge. A test asserts the shorthand and the hand-written chain produce
+  **byte-identical** pixels, so it inherits the chain's premultiplication, fractional resampling and
+  colour-space handling instead of re-deriving them.
+- **The CSS `filter:` shorthand** — `blur()`, `drop-shadow()`, `brightness()`, `contrast()`,
+  `grayscale()`, `sepia()`, `saturate()`, `hue-rotate()`, `invert()`, `opacity()`, and `url()`, in
+  any combination and composing in sequence. Each lowers to its spec-defined primitive chain rather
+  than to separate pixel code. The parser lives in **`pkg/filtereffects`, deliberately shared** —
+  `filter` is one property with one grammar, and the HTML/CSS side consumes this parser rather than
+  growing a second one. Error handling is CSS's, and the corpus tests it hard: **one invalid
+  function invalidates the WHOLE declaration** (the element renders completely unfiltered, not with
+  the functions that did parse), while an unresolvable `url()` inside a list is merely dropped;
+  `blur(50%)` and `hue-rotate(45)` are both invalid (a percentage is not a `<length>`; a CSS
+  `<angle>` requires a unit) even though `blur(1mm)` and `hue-rotate(45deg)` are fine. A filter
+  function has **no filter region** — unlike the `<filter>` element — so a large `drop-shadow()`
+  spreads across the canvas instead of being clipped to a box barely larger than its element.
+- **Filters apply BEFORE clip-path, mask and opacity**, per SVG's rendering model. All three are
+  stripped from the filter's source pass and applied to the filtered RESULT, so a blur spreads past
+  a clip's edge and is then cut off hard by it. Clipping the filter's INPUT instead removes the
+  content the blur would have spread from, which reads as a too-soft blur rather than as a
+  mis-ordered clip.
+- **The remaining nine primitives degrade to the UNFILTERED element with a warn-once log naming
+  each** (`feTurbulence`, `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting`,
+  `feMorphology`, `feImage`, `feTile`, `feComponentTransfer`, `feDisplacementMap`). A visible
+  approximation beats a blank, and an unknown primitive never silently yields an empty result.
+  `enable-background` is DROPPED outright rather than deferred — it was removed from the spec and no
+  browser implements it — so its `BackgroundImage`/`BackgroundAlpha` inputs resolve like any other
+  unknown name.
+- **Filters rasterize, including in PDF output — stated plainly rather than discovered later.** This
+  is the one place the series' vector-native principle does not apply: a blur has no vector
+  representation and PDF has no filter operator, so **any filtered element is rasterized**, at a
+  resolution taken from the filter region and the current transform. That is what every PDF producer
+  does with SVG filters, but it is a real trade-off rather than a free lunch. The seam is
+  `render.Device.RenderOffscreen`, a third member of the `BuildClipMask`/`BuildLuminanceMask` family
+  that hands back a group's rasterized PIXELS (`*image.RGBA`) instead of a coverage mask, keeping
+  rasterization in the backend and `pkg/svg/draw` backend-agnostic. `pkg/render/pdfwrite` returns nil
+  from it — the documented "cannot rasterize offscreen" degradation — and the caller then paints the
+  element unfiltered, so PDF output keeps the content visible and correctly placed, minus the
+  filter's visual effect.
+- **A filter on `<text>` uses REAL placed-glyph bounds** (`textUserBounds`, computed from the shaped
+  glyphs), never `pkg/svg`'s build-time `textBBox` estimate. That estimate assumes a half em per
+  character and measures 0.53x–2.25x off; an `objectBoundingBox` filter region built on it would
+  visibly clip the filtered result rather than merely shifting a gradient.
+- **Filters are bounded against a build-time DoS.** The region is intersected with the part of the
+  canvas it could actually reach BEFORE any buffer is allocated, so a crafted `width="400000"` costs
+  the same pixels a sane region would; on top of that a hard per-region pixel cap, a primitive-count
+  cap, and a filter-nesting-depth cap each degrade to the unfiltered element with a log rather than
+  allocating unboundedly.
 - **`<use>` and `<symbol>` instantiation.** A `<use>` instantiates its href target as if it were a
   deep clone spliced in at the `<use>`'s own position: the clone inherits from the USE SITE, not from
   the target's document parent, so the target's own attributes win where it sets them and the

@@ -165,8 +165,7 @@ func replayStroke(a rasterx.Adder, path *render.Path, ox, oy float64) bool {
 // named blend mode. It mirrors compositeBlend() but translates local mask
 // coordinates to device space.
 func (d *Device) compositeOffset(mask *image.Alpha, dst image.Point, c color.RGBA, blendMode string) {
-	sep, isSep := separableBlends[blendMode]
-	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	sep, isSep, nonsep, isNonsep := lookupBlend(blendMode)
 	blend := isSep || isNonsep
 
 	b := mask.Bounds()

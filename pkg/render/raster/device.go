@@ -116,8 +116,7 @@ func (d *Device) DrawImage(img image.Image, ctm render.Matrix, alpha float64, bl
 	if alpha > 1 {
 		alpha = 1
 	}
-	sep, isSep := separableBlends[blendMode]
-	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	sep, isSep, nonsep, isNonsep := lookupBlend(blendMode)
 	inv, ok := invert(ctm)
 	if !ok {
 		return
@@ -302,8 +301,7 @@ func (d *Device) EndGroup(alpha float64, blendMode string, clipMask, softMask re
 	// once here (composite time), alongside the caller-supplied masks.
 	clip := g.outerClip
 
-	sep, isSep := separableBlends[blendMode]
-	nonsep, isNonsep := nonSeparableBlends[blendMode]
+	sep, isSep, nonsep, isNonsep := lookupBlend(blendMode)
 	b := scratch.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
@@ -398,6 +396,31 @@ func (d *Device) BuildLuminanceMask(size image.Point, alphaOnly bool, paint func
 		}
 	}
 	return mask
+}
+
+// RenderOffscreen renders paint's content into a fresh, fully-transparent
+// scratch *image.RGBA the same size as size and returns it directly: see
+// render.Device's doc comment for why an SVG <filter> needs the pixels
+// themselves rather than the coverage mask BuildLuminanceMask derives.
+//
+// paint runs against a NEW *Device wrapping the scratch, not d itself, for
+// exactly the reason BuildLuminanceMask does the same: d's own clip/group
+// stacks must stay untouched by whatever the caller paints, and a throwaway
+// Device is the simplest way to guarantee that. The scratch device shares
+// d's logf so a degradation logged while painting filter content is still
+// surfaced.
+//
+// The returned image is freshly allocated and never aliased by this Device
+// afterward, so the caller may transform it in place — which every filter
+// primitive does.
+func (d *Device) RenderOffscreen(size image.Point, paint func(dev render.Device)) *image.RGBA {
+	if paint == nil || size.X <= 0 || size.Y <= 0 {
+		return nil
+	}
+	scratch := New(image.NewRGBA(image.Rectangle{Max: size}))
+	scratch.logf = d.logf
+	paint(scratch)
+	return scratch.img
 }
 
 // pixelMaskValue converts one premultiplied *image.RGBA pixel into a mask

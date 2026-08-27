@@ -10,10 +10,18 @@ import (
 // resolved somewhere else entirely (see the doc comments on
 // svgPresentationAttrs and on each field below for exactly where):
 // stop-color/stop-opacity only ever apply to a <stop> element, consumed by
-// parseStops in stops.go, never by the general cascade's Style.
+// parseStops in stops.go; flood-color/flood-opacity/color-interpolation-
+// filters only ever apply to an <fe*> filter primitive, consumed by
+// resolveFloodColor/primitiveColorSpace in filter.go. Neither group is
+// describable by the general cascade's Style, so apply() never reads them —
+// but both must stay listed in svgPresentationAttrs so the attribute and
+// stylesheet-rule forms rank identically.
 var svgPresentationAttrsNotConsumedByApply = map[string]bool{
-	"stop-color":   true,
-	"stop-opacity": true,
+	"stop-color":                  true,
+	"stop-opacity":                true,
+	"flood-color":                 true,
+	"flood-opacity":               true,
+	"color-interpolation-filters": true,
 }
 
 // TestSVGPresentationHintsSyncedWithStyleApply guards the exact failure mode
@@ -49,6 +57,7 @@ func TestSVGPresentationHintsSyncedWithStyleApply(t *testing.T) {
 		"clip-rule":          "evenodd",
 		"mask":               "url(#x)",
 		"mask-type":          "alpha",
+		"filter":             "url(#x)",
 		"overflow":           "visible",
 		"marker-start":       "url(#x)",
 		"marker-mid":         "url(#x)",

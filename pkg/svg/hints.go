@@ -36,6 +36,20 @@ import (
 // reach it — see the resvg mask-type-in-style fixture, which this hint
 // entry is what makes pass.
 //
+// filter is resolved out-of-band exactly like clip-path and mask (see
+// resolveFilterRef in filter.go), for the same document-index reason, and IS
+// consumed by Style.apply (applyFilterProp) as a recorded raw value.
+//
+// flood-color, flood-opacity, and color-interpolation-filters are NOT
+// consumed by Style.apply — like stop-color/stop-opacity, they only ever
+// apply to elements the general cascade's Style never describes (the <fe*>
+// filter primitives, resolved by resolveFloodColor/primitiveColorSpace in
+// filter.go). They go through this same hint mechanism so a
+// flood-color="..." attribute and a `feFlood { flood-color: ... }` sheet rule
+// rank identically, which is what makes the corpus's flood-color inheritance
+// fixtures pass; the sync test's carve-out map lists all three for exactly
+// the reason it lists stop-color.
+//
 // marker-start/marker-mid/marker-end are resolved out-of-band exactly like
 // clip-path and mask (see resolveMarkerRef in marker.go), for the same
 // document-index reason: Style.apply only ever sees the cascade, never
@@ -85,6 +99,10 @@ var svgPresentationAttrs = []string{
 	"clip-rule",
 	"mask",
 	"mask-type",
+	"filter",
+	"flood-color",
+	"flood-opacity",
+	"color-interpolation-filters",
 	"overflow",
 	"marker-start",
 	"marker-mid",

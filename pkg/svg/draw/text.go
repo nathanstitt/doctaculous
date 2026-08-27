@@ -145,6 +145,43 @@ func (r *Renderer) paintText(dev render.Device, t *svg.Text, m render.Matrix, al
 		return
 	}
 
+	if t.Filter != nil {
+		// The objectBoundingBox target is textUserBounds — the REAL placed-
+		// glyph extent — not pkg/svg's build-time textBBox, whose half-em-
+		// per-character estimate measures up to 2.25x off. A filter region
+		// built on that estimate would visibly clip the filtered result,
+		// which is exactly why the filter work owns this seam (see
+		// svg.Text.Filter).
+		//
+		// The <text> element's OWN opacity is stripped from the source pass
+		// and re-applied to the filtered RESULT, exactly as paintShape and
+		// paintGroupBody do for their node kinds — SVG applies a filter
+		// BEFORE opacity. Text needs this handled per CHARACTER rather than
+		// on a single node field: opacity reaches a glyph through its own
+		// TextChar style (see paintGlyph), so clearing it on the Text node
+		// alone would leave every glyph still dimming itself inside the
+		// filter's source buffer. That is invisible for most primitives but
+		// total for one that discards its input: an feFlood under
+		// opacity="0.5" comes out fully opaque.
+		//
+		// clip-path and mask are likewise stripped from the source pass and
+		// applied to the filtered RESULT, since the same filter → clip → mask
+		// → opacity order governs all three — see paintFilteredThenClip.
+		elemOpacity := clamp01(t.Opacity)
+		unfiltered := *t
+		unfiltered.Filter = nil
+		unfiltered.Opacity = 1
+		unfiltered.ClipPath = nil
+		unfiltered.Mask = nil
+		unfiltered.Chars = charsWithoutElementOpacity(t.Chars, elemOpacity)
+		bounds := textUserBounds(placed)
+		r.paintFilteredThenClip(dev, t.ClipPath, t.Mask, tm, bounds, alpha*elemOpacity, func(target render.Device, a float64) {
+			r.paintFilteredAlpha(target, t.Filter, tm, bounds, warned, a, func(inner render.Device) {
+				r.paintText(inner, &unfiltered, m, 1, warned)
+			})
+		})
+		return
+	}
 	if t.ClipPath != nil || t.Mask != nil {
 		// The <text>'s OWN clip-path/mask wrap everything as one unit, so the
 		// whole node goes into a single group. Any per-<tspan> clip/mask
@@ -1512,6 +1549,35 @@ func (r *Renderer) TextAdvances(chars []svg.TextChar) []float64 {
 	out := make([]float64, 0, len(shaped))
 	for _, s := range shaped {
 		out = append(out, s.glyph.Advance)
+	}
+	return out
+}
+
+// charsWithoutElementOpacity returns a copy of chars with any character
+// carrying exactly the <text> element's own opacity reset to fully opaque,
+// so a filter can paint its source at full strength and attenuate the
+// RESULT instead (SVG applies a filter before opacity).
+//
+// Only characters whose opacity EQUALS elem are reset. Opacity is
+// non-inherited and a <tspan opacity> REPLACES rather than multiplies the
+// element's value (see svg.Text.Opacity), so a character showing something
+// other than elem got it from its own tspan — that attenuation is not the
+// element's to hoist, and must keep applying inside the filter's source
+// exactly as it would unfiltered.
+//
+// The result is always a fresh slice: the scene is read-only after Parse and
+// shared lock-free across concurrent renders, so the characters themselves
+// must never be mutated.
+func charsWithoutElementOpacity(chars []svg.TextChar, elem float64) []svg.TextChar {
+	if elem >= 1 {
+		return chars // nothing to hoist; avoid the copy entirely
+	}
+	out := make([]svg.TextChar, len(chars))
+	copy(out, chars)
+	for i := range out {
+		if clamp01(out[i].Style.Opacity()) == elem {
+			out[i].Style = out[i].Style.SetOpacity(1)
+		}
 	}
 	return out
 }

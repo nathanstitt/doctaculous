@@ -58,6 +58,24 @@ type warnFlags struct {
 	budgetCap      bool
 	groupDepthCap  bool
 
+	// filterUnsupported/filterNoRaster/filterRegionCap track the three ways
+	// a filter degrades to painting its element unfiltered: a primitive
+	// this engine does not implement, a backend with no offscreen raster
+	// (pdfwrite), and a filter region past the allocation cap. Each logs at
+	// most once per DrawVector call, like every other flag here.
+	filterUnsupported bool
+	filterNoRaster    bool
+	filterRegionCap   bool
+	filterNestingCap  bool
+	filterBBoxCap     bool
+
+	// filterDepth counts filters currently being applied on the stack: a
+	// filtered element inside another filter's source content. Each level
+	// holds a full-canvas offscreen RGBA plus a per-primitive float32
+	// buffer live at once, so depth bounds MEMORY the same way groupDepth
+	// does for compositing groups.
+	filterDepth int
+
 	// patternDepth counts nested <pattern> fills currently on the stack: a
 	// tile painted while resolving pattern P that itself fills with a
 	// DIFFERENT pattern Q is not a cycle (buildingPattern in pkg/svg only
@@ -202,6 +220,47 @@ func (r *Renderer) paint(dev render.Device, n svg.Node, m render.Matrix, alpha f
 // rather than needing to be duplicated across both the fast (no
 // BeginGroup) and compositing (BeginGroup/EndGroup) branches below.
 func (r *Renderer) paintGroupBody(dev render.Device, node *svg.Group, gm render.Matrix, alpha float64, warned *warnFlags) {
+	if node.Filter != nil {
+		// A filter applies BEFORE clip-path, mask, and opacity: the group's
+		// content is rendered and filtered as a unit, and the filtered
+		// RESULT is then clipped/masked/faded.
+		//
+		// All three must therefore be stripped from the SOURCE pass, not just
+		// opacity. Leaving clip-path on the nested node applies it to the
+		// filter's INPUT, which clips the content before the blur can spread
+		// past the clip edge — the blur then fades to nothing inside the
+		// shape instead of being cut off hard at its boundary (the corpus's
+		// with-clip-path fixture shows the difference plainly: a star whose
+		// points fade out, versus one whose points are sliced).
+		unfiltered := *node
+		unfiltered.Filter = nil
+		unfiltered.Opacity = 1
+		unfiltered.ClipPath = nil
+		unfiltered.Mask = nil
+		outAlpha := alpha * clamp01(node.Opacity)
+		clipBounds, _ := r.groupUserBounds(node, warned)
+		filterBounds, filterBoundsTruncated := r.groupUserBounds(node, warned)
+		r.paintFilteredThenClip(dev, node.ClipPath, node.Mask, gm, clipBounds, outAlpha, func(target render.Device, a float64) {
+			// A subtree too deep to measure yields a box covering only part
+			// of it. Filtering against that would silently omit content (or,
+			// with nothing measured at all, drop the element), so degrade to
+			// unfiltered with a diagnostic — the same trade every other cap
+			// in filter.go makes.
+			if filterBounds != nil {
+				if _, _, _, _, _ = filterBounds(); *filterBoundsTruncated {
+					r.logFilterBBoxDepthCapOnce(warned)
+					paintUnfiltered(target, a, func(inner render.Device) {
+						r.paintGroupBody(inner, &unfiltered, gm, 1, warned)
+					})
+					return
+				}
+			}
+			r.paintFilteredAlpha(target, node.Filter, gm, filterBounds, warned, a, func(inner render.Device) {
+				r.paintGroupBody(inner, &unfiltered, gm, 1, warned)
+			})
+		})
+		return
+	}
 	if node.Opacity >= 1 && node.ClipPath == nil && node.Mask == nil {
 		// The common case (a plain <g> with no opacity, clip-path, or
 		// mask): skip BeginGroup/EndGroup entirely. Opening a group
@@ -328,6 +387,40 @@ func (r *Renderer) paintShape(dev render.Device, s *svg.Shape, m render.Matrix, 
 		return
 	}
 	warned.drawCalls++
+
+	if s.Filter != nil {
+		// SVG's rendering model applies a filter FIRST, then clip-path,
+		// mask, and finally opacity — to the FILTERED RESULT, not to the
+		// filter's input. That ordering is observable whenever a primitive
+		// discards its input: an feFlood under opacity="0.5" must come out
+		// half-transparent, but folding the opacity into the source paint
+		// would let feFlood throw it away and produce a fully opaque flood
+		// (the resvg with-opacity-on-target-element fixture pins exactly
+		// this, and an earlier revision of this code failed it).
+		//
+		// So the source is painted at FULL opacity inside the offscreen
+		// buffer, and both this element's own opacity and the caller's
+		// accumulated alpha are applied afterward, to the composited
+		// result — the same "apply once, to the flattened result" rule
+		// paintGroupBody follows for a group.
+		//
+		// clip-path and mask are stripped from the source pass for the same
+		// ordering reason and re-applied to the RESULT — see
+		// paintFilteredThenClip.
+		unfiltered := *s
+		unfiltered.Filter = nil
+		unfiltered.Style = unfiltered.Style.SetOpacity(1)
+		unfiltered.ClipPath = nil
+		unfiltered.Mask = nil
+		outAlpha := alpha * clamp01(s.Style.Opacity())
+		sm := s.M.Mul(m)
+		r.paintFilteredThenClip(dev, s.ClipPath, s.Mask, sm, s.Path.Bounds, outAlpha, func(target render.Device, a float64) {
+			r.paintFilteredAlpha(target, s.Filter, sm, s.Path.Bounds, warned, a, func(inner render.Device) {
+				r.paintShape(inner, &unfiltered, m, 1, warned)
+			})
+		})
+		return
+	}
 
 	opacity := clamp01(s.Style.Opacity())
 

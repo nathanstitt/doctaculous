@@ -169,6 +169,41 @@ type Device interface {
 	// logging, which pkg/svg/draw's caller must treat as "no masking" — but
 	// must never panic and must never invoke paint with a nil Device.
 	BuildLuminanceMask(size image.Point, alphaOnly bool, paint func(dev Device)) GroupMask
+
+	// RenderOffscreen renders paint's content into an isolated, fully
+	// transparent surface the same size as the device and hands back its
+	// PIXELS, or nil when this backend cannot rasterize offscreen.
+	//
+	// This is the third member of the BuildClipMask/BuildLuminanceMask
+	// family and exists for the same layering reason: an SVG <filter> must
+	// read back the rasterized result of the element it filters in order to
+	// transform it (blur, offset, recolor), and pkg/svg/draw holds only a
+	// Device — it cannot allocate or rasterize a pixel buffer itself
+	// without importing a concrete backend and inverting the layer
+	// dependency (see that package's doc comment). Keeping the
+	// rasterization here leaves each backend's own rasterizer the single
+	// source of truth for what pixels a paint call covers.
+	//
+	// It differs from BuildLuminanceMask ONLY in its return type: a mask
+	// collapses color to one coverage channel, which is exactly what a
+	// <mask> needs and exactly what a filter must not do — a filter
+	// operates on RGBA. paint receives a Device to draw into (NOT
+	// necessarily the receiver), the surface starts fully transparent black
+	// matching BeginGroup's isolated-group backdrop, and the returned image
+	// is owned by the caller, which may modify it in place.
+	//
+	// The result is in the same device-space pixel grid every other Device
+	// method uses, so a filter can composite it back with DrawImage under
+	// an identity-scaled placement. Pixels are PREMULTIPLIED alpha, the
+	// *image.RGBA convention (see image/color.RGBA), so a filter converting
+	// to straight alpha must un-premultiply first.
+	//
+	// nil is the documented degradation for a backend with no raster
+	// surface (pdfwrite), and callers MUST treat it as "filtering is
+	// unavailable" — rendering the source unfiltered rather than dropping
+	// it, since a nil result carries no content of its own. A backend must
+	// never panic and never invoke paint with a nil Device.
+	RenderOffscreen(size image.Point, paint func(dev Device)) *image.RGBA
 }
 
 // MaskPath is one child shape contributing to a clip-path union: a path

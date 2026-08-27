@@ -836,3 +836,75 @@ baseline (`alignment-baseline=baseline-on-tspan.svg` renders flush), and a
 decoration was drawn as ONE rectangle across the whole run instead of one per
 baseline frame, which flattened `underline-with-dy-list-1`'s staircase and
 merged `underline-with-rotate-list-3`'s four tilted segments into one.
+
+## What shipped in the filters tranche (PR 7, task 1)
+
+38 files vendored, covering the filter INFRASTRUCTURE plus the two simplest
+primitives — the pipeline end to end, with the rest of the primitives
+deferred to task 2:
+
+- `filters/feFlood/` (8) — the flood itself, its default (black) value, a
+  partial and an explicit primitive subregion, subregion inheritance from the
+  filter region, `primitiveUnits="objectBoundingBox"`, `flood-opacity`, and a
+  flood under an element-level `opacity` (which pins the filter-then-opacity
+  order: the opacity applies to the filtered RESULT, not to the input the
+  flood discards).
+- `filters/flood-color/` (7) and `filters/flood-opacity/` (2) — the colour
+  syntaxes including `hsla()`, the percentage opacity form, and the full
+  `inheritance-1..5` set that pins flood-color as NON-inherited with an
+  explicit `inherit` reaching the direct parent only.
+- `filters/feOffset/` (9) — positive, negative, single-axis, zero, and
+  fractional offsets, `primitiveUnits="objectBoundingBox"`, a percentage
+  value (invalid for `<number>`, so it falls back to 0 — the element does not
+  move), and a skewed transform.
+- `filters/filter/` (12) — the region/units/graph and error-handling cases
+  that do not need an unimplemented primitive: an unresolvable FuncIRI, an
+  empty `<filter>`, `filter="none"`, a filter on an empty group in both unit
+  modes, a zero-sized shape, the tight path bounding box, invalid/zero/
+  oversized subregions, an invalid region, and a filter under a parent mask.
+
+### What the reference sweep settled (filters)
+
+Four behaviours were read off resvg's reference PNGs, and each one is the
+OPPOSITE of the obvious guess:
+
+1. **An unresolvable `filter="url(#missing)"` means the element is NOT
+   RENDERED AT ALL** — the exact opposite of `clip-path`/`mask`, where an
+   unresolvable reference degrades to "no restriction".
+   `filter/invalid-FuncIRI.png` shows no rect.
+2. **An empty `<filter>` outputs transparent black, not a pass-through.**
+   `filter/no-children.png` is likewise blank, so treating an empty graph as
+   "no filtering" (the tempting simplification) renders an element that must
+   have disappeared.
+3. **A negative or zero region OR primitive subregion disables the element
+   entirely**, rather than merely skipping that primitive —
+   `filter/invalid-subregion.png` and `zero-sized-subregion.png` are blank.
+4. **An `objectBoundingBox` filter on an empty group is not rendered, but a
+   `userSpaceOnUse` one still paints.** `on-an-empty-group-1` (userSpace)
+   floods; `on-an-empty-group-2` (the oBB default) is blank — an undefined
+   bbox only disables the filter when the units actually need one.
+
+### Known tolerance gaps
+
+`filter/on-a-thin-rect` renders at **2.78% differing pixels** (worst channel
+delta 75). Root cause: `filterSpace` (`pkg/svg/draw/filter.go`) derives a
+SINGLE uniform scale from the element matrix, so a non-uniform transform
+rasterizes the filter region at the wrong aspect — see the KNOWN
+APPROXIMATION comment at that line. A real fix needs a per-axis filter space
+threaded through `filterM`/`postM` and every primitive's subregion math.
+
+`feGaussianBlur/small-stdDeviation` differs by design: resvg switches to an
+**IIR** blur below stdDeviation 2 (stated in that fixture's own `<desc>`),
+while this engine implements the spec's three-box approximation everywhere.
+Both are valid readings of the spec; ours is the one the spec writes down.
+
+`feOffset/with-primitiveUnits=objectBoundingBox` renders at **0.28%
+differing pixels against resvg's reference**, just over the project's 0.2%
+budget (worst channel delta 66). The gap is a ONE-PIXEL antialiased seam on
+two edges: both edge POSITIONS are correct to the pixel, and the interior is
+exact. It comes from resvg resolving that fixture's fractional offset in a
+filter surface whose resolution differs from ours, so the sub-pixel coverage
+of the boundary row/column lands differently. The committed golden is OUR
+output (as everywhere in this corpus), so the sweep still locks it against
+regression; the number is recorded here rather than papered over by widening
+the tolerance.
