@@ -24,9 +24,33 @@ type Node interface {
 // Group is a container of child nodes sharing a local transform (an SVG <g>,
 // the <svg> root's own children, or an unrecognized SVG-namespace element
 // treated as a forgiving container).
+//
+// Opacity carries the container's own (non-inherited) element opacity, in
+// [0,1], defaulting to 1. It is intentionally a single float rather than a
+// whole Style: Style is shape-paint-shaped (fill/stroke/paint servers) and
+// would be misleading on a node that never paints anything itself. A group
+// with Opacity < 1 must be composited as a unit (see pkg/svg/draw's use of
+// render.Device.BeginGroup/EndGroup) rather than by threading the factor into
+// each child's own paint alpha, which would double-darken any overlap between
+// children — the exact artifact groups exist to avoid.
 type Group struct {
-	M    render.Matrix // local transform, applied to Kids
-	Kids []Node
+	M       render.Matrix // local transform, applied to Kids
+	Opacity float64       // element opacity [0,1]; 1 = fully opaque, no group needed
+	Kids    []Node
+
+	// ClipPath is the resolved clip-path="url(#...)" reference on the <g>
+	// element itself (or the root), or nil when absent/invalid/"none". See
+	// the ClipPath type (clippath.go) for how pkg/svg/draw turns this into a
+	// render.Device.BuildClipMask call.
+	ClipPath *ClipPath
+
+	// Mask is the resolved mask="url(#...)" reference on the <g> element
+	// itself, or nil when absent/invalid/"none". See the Mask type
+	// (mask.go) for how pkg/svg/draw turns this into a
+	// render.Device.BuildLuminanceMask call. Applied AFTER ClipPath and
+	// BEFORE Opacity in the composite order (clip -> mask -> opacity), per
+	// the design doc.
+	Mask *Mask
 }
 
 func (*Group) isNode() {}
@@ -53,6 +77,14 @@ type Shape struct {
 	StrokeGradient *paintServer  // resolved stroke="url(#...)" gradient, or nil
 	FillPattern    *patternPaint // resolved fill="url(#...)" pattern, or nil
 	StrokePattern  *patternPaint // resolved stroke="url(#...)" pattern, or nil
+
+	// ClipPath is the resolved clip-path="url(#...)" reference on this
+	// shape, or nil when absent/invalid/"none". See Group.ClipPath.
+	ClipPath *ClipPath
+
+	// Mask is the resolved mask="url(#...)" reference on this shape, or nil
+	// when absent/invalid/"none". See Group.Mask.
+	Mask *Mask
 }
 
 func (*Shape) isNode() {}
@@ -100,7 +132,16 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		doc.rootM = render.Identity
 	}
 
-	b := &sceneBuilder{logf: logf, warned: map[string]bool{}, vp: viewport{w: doc.WidthPt, h: doc.HeightPt}, buildingPattern: map[string]bool{}}
+	b := &sceneBuilder{
+		logf:            logf,
+		warned:          map[string]bool{},
+		vp:              viewport{w: doc.WidthPt, h: doc.HeightPt},
+		buildingPattern: map[string]bool{},
+		clipMemo:        map[string]*ClipPath{},
+		buildingClip:    map[string]bool{},
+		maskMemo:        map[string]*Mask{},
+		buildingMask:    map[string]bool{},
+	}
 	if hasVB {
 		// Gradient userSpaceOnUse coordinates live in the same user-unit
 		// space as the element geometry they paint — i.e. viewBox space when
@@ -112,8 +153,31 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	b.servers = newPaintServerResolver(b.idx, logf)
 	ctx := &cascadeCtx{idx: b.idx, logf: logf}
 	doc.root = b.buildGroup(root, defaultStyle(), ctx)
+	// The root <svg> element's own opacity attribute (e.g. <svg
+	// opacity="0.5">) applies to it just like any other element's, even
+	// though buildGroup only walks the root's CHILDREN (the root has no
+	// transform/M of its own to carry — viewBox->viewport is doc.rootM,
+	// applied separately by pkg/svg/draw). Resolving opacity alone here
+	// (rather than the root's full style) keeps every other presentation
+	// attribute's inheritance into children exactly as before; only opacity
+	// is unreachable without this, since Group had no field to carry it on.
+	doc.root.Opacity = rootOpacity(root, ctx)
 
 	return doc, nil
+}
+
+// rootOpacity resolves the root <svg> element's own opacity attribute
+// (default 1 if absent, invalid, or clamped by applyOpacityProp), without
+// resolving or applying any of its other presentation properties.
+func rootOpacity(root *element, ctx *cascadeCtx) float64 {
+	s := Style{opacity: 1}
+	attr := ctx.resolve(root)
+	logf := ctx.logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	applyOpacityProp("opacity", &s.opacity, attr, logf)
+	return s.opacity
 }
 
 // resolveViewBox parses the root <svg>'s viewBox attribute, if present. An
@@ -219,8 +283,6 @@ var unsupportedElements = map[string]bool{
 	"symbol":           true,
 	"text":             true,
 	"image":            true,
-	"clipPath":         true,
-	"mask":             true,
 	"filter":           true,
 	"marker":           true,
 	"switch":           true,
@@ -261,6 +323,24 @@ var unsupportedElements = map[string]bool{
 // "unknown element" default and get painted directly into the visible
 // scene at document coordinates, since Go map membership provides no
 // transitive "skip my children too" behavior.
+//
+// clipPath is resolved entirely out-of-band, like the paint servers above:
+// a shape/group referencing one via clip-path="url(#...)" carries the
+// resolved *ClipPath directly (see resolveClipPath in clippath.go), so the
+// <clipPath> element itself must contribute NO scene nodes and must NOT be
+// recursed into by the ordinary scene walk (its children are walked
+// separately, through the clip-only allowlist in clippath.go, which is
+// deliberately stricter than buildGroup's forgiving default — see that
+// file's buildClipChild).
+//
+// mask is likewise resolved entirely out-of-band: a shape/group referencing
+// one via mask="url(#...)" carries the resolved *Mask directly (see
+// resolveMask in mask.go), so the <mask> element itself must contribute NO
+// scene nodes. Unlike clipPath, a <mask>'s children ARE walked through the
+// ordinary buildKidsGroup machinery (a mask may contain any paintable
+// content, not a shape-only allowlist) — but that walk happens inside
+// resolveMask itself, not here, so the main scene walk must still never
+// descend into a <mask> a second time.
 var skippedElements = map[string]bool{
 	"defs":           true,
 	"style":          true,
@@ -271,6 +351,8 @@ var skippedElements = map[string]bool{
 	"radialGradient": true,
 	"pattern":        true,
 	"stop":           true,
+	"clipPath":       true,
+	"mask":           true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -297,6 +379,43 @@ type sceneBuilder struct {
 	idx     *docIndex
 	servers *paintServerResolver // gradient/pattern href-chain resolver, built once from idx
 	vp      viewport             // current viewport size, for userSpaceOnUse percentage resolution
+
+	// clipMemo memoizes resolveClipPath by id: several shapes/groups can
+	// reference the same <clipPath>, and each reference resolves the
+	// identical *ClipPath value (idempotent, no per-referencer state), so
+	// memoizing avoids re-walking a possibly-large clipPath subtree once per
+	// referencing element. A memoized ok=false result is recorded via a
+	// separate presence check on clipMemo combined with buildingClip's
+	// membership (see resolveClipPath) rather than a second map, since a
+	// failed resolution has no value worth caching beyond "don't recurse
+	// into it again" — buildingClip already provides that during the walk
+	// that discovers the failure, and a document referencing an invalid
+	// clip-path from many elements is not a realistic perf concern the way
+	// gradient/pattern reuse is.
+	clipMemo map[string]*ClipPath
+
+	// buildingClip guards against a <clipPath> whose own clip-path
+	// attribute, or one of its children's, refers back to a <clipPath>
+	// already being resolved somewhere up the current call stack — directly
+	// (self-reference) or through a cycle of several clipPaths. Mirrors
+	// buildingPattern's shape exactly (see that field's doc comment): an id
+	// present here is "in progress" further up the stack, and resolving it
+	// again is treated as SVG's own cycle-must-be-an-error rule, degrading
+	// to "no clip-path" for the self-referencing property instead of
+	// recursing forever.
+	buildingClip map[string]bool
+
+	// maskMemo memoizes resolveMask by id, mirroring clipMemo exactly (see
+	// that field's doc comment): several elements can reference the same
+	// <mask>, and each reference resolves the identical *Mask value.
+	maskMemo map[string]*Mask
+
+	// buildingMask guards against a <mask> whose own mask attribute (or,
+	// once <use>/<image> can appear inside a mask's content, a descendant's)
+	// refers back to a <mask> already being resolved further up the current
+	// call stack — directly (self-reference) or through a cycle of several
+	// masks. Mirrors buildingClip's shape exactly.
+	buildingMask map[string]bool
 
 	// buildingPattern guards against a pattern tile's content referencing
 	// (directly, or via its own href chain, or indirectly through a chain of
@@ -338,7 +457,7 @@ func (b *sceneBuilder) buildGroup(el *element, parentStyle Style, ctx *cascadeCt
 // may come from a DIFFERENT element in the href chain than the one being
 // resolved — can build a Group from it directly.
 func (b *sceneBuilder) buildKidsGroup(kids []*element, parentStyle Style, ctx *cascadeCtx) *Group {
-	g := &Group{M: render.Identity}
+	g := &Group{M: render.Identity, Opacity: 1}
 	for _, kid := range kids {
 		if n := b.buildNode(kid, parentStyle, ctx); n != nil {
 			g.Kids = append(g.Kids, n)
@@ -403,28 +522,22 @@ func (b *sceneBuilder) buildNode(el *element, parentStyle Style, ctx *cascadeCtx
 }
 
 // buildGroupElement converts a <g> element into a Group carrying its own
-// parsed transform.
-//
-// Group has no field to carry st.opacity forward (see the doc comment on
-// groupOpacityWarnKey): a <g opacity="..."> below 1 is therefore silently
-// dropped by the scene graph today. Per-paint alpha through a group's
-// children would produce a plausible-but-wrong render (overlapping children
-// would each dim independently, causing seams/double-darkening) rather than
-// an honestly-flat one, so true compositing is deferred to a later PR. This
-// still must not fail silently: warn once per document instead.
+// parsed transform and element opacity. pkg/svg/draw composites Opacity < 1
+// via an offscreen group (render.Device.BeginGroup/EndGroup) rather than
+// per-child paint alpha, so overlapping children inside the group don't
+// double-darken where they overlap.
 func (b *sceneBuilder) buildGroupElement(el *element, st Style, ctx *cascadeCtx) Node {
-	if st.opacity < 1 {
-		b.warnOnceMsg(groupOpacityWarnKey, "svg: <g opacity> not yet composited; group opacity ignored")
-	}
 	g := b.buildGroup(el, st, ctx)
 	g.M = elementTransform(el, b.logf)
+	g.Opacity = st.opacity // already clamped to [0,1] by applyOpacityProp
+	if ref, ok := st.ClipPathRef(); ok {
+		g.ClipPath = b.resolveClipPathRef(ref)
+	}
+	if ref, ok := st.MaskRef(); ok {
+		g.Mask = b.resolveMaskRef(ref)
+	}
 	return g
 }
-
-// groupOpacityWarnKey is the warnOnce key for the group-opacity degradation
-// notice, distinct from any element's local name (warnOnce's usual key) so
-// it can never collide with an actual element name logged elsewhere.
-const groupOpacityWarnKey = " group-opacity"
 
 // buildShape converts a basic-shape element into a Shape, or nil when
 // shapePath reports the shape degenerate (zero/negative extent) or
@@ -459,6 +572,12 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 		if id, ok := fragmentID(ref); ok {
 			b.resolvePaint(id, path, &s.StrokeGradient, &s.StrokePattern)
 		}
+	}
+	if ref, ok := st.ClipPathRef(); ok {
+		s.ClipPath = b.resolveClipPathRef(ref)
+	}
+	if ref, ok := st.MaskRef(); ok {
+		s.Mask = b.resolveMaskRef(ref)
 	}
 	return s
 }

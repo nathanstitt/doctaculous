@@ -21,6 +21,21 @@ type recDevice struct {
 	shadings       int // FillShading call count
 	lastFillPath   *render.Path
 	lastImageAlpha float64
+
+	// groupDepth/maxGroupDepth/endGroupCalls track BeginGroup/EndGroup calls,
+	// used by TestFormGroupCompositesOnceNotPerChild to assert a /Group form
+	// under a non-default alpha opens exactly one group around its content
+	// (not zero, and not one per child paint call inside it).
+	groupDepth    int
+	maxGroupDepth int
+	endGroupCalls []endGroupCall
+}
+
+// endGroupCall records one EndGroup invocation's parameters.
+type endGroupCall struct {
+	alpha     float64
+	blendMode string
+	hasMask   bool
 }
 
 func (d *recDevice) Size() (int, int) { return 612, 792 }
@@ -41,8 +56,24 @@ func (d *recDevice) FillShading(shader render.Shader, ctm render.Matrix, blendMo
 	d.shadings++
 }
 func (d *recDevice) PushClip(p *render.Path, r render.FillRule) { d.clips++ }
-func (d *recDevice) Save()                                      { d.saves++ }
-func (d *recDevice) Restore()                                   { d.restores++ }
+func (d *recDevice) BeginGroup() {
+	d.groupDepth++
+	if d.groupDepth > d.maxGroupDepth {
+		d.maxGroupDepth = d.groupDepth
+	}
+}
+func (d *recDevice) EndGroup(alpha float64, blendMode string, clipMask, softMask render.GroupMask) {
+	d.groupDepth--
+	d.endGroupCalls = append(d.endGroupCalls, endGroupCall{alpha: alpha, blendMode: blendMode, hasMask: clipMask != nil || softMask != nil})
+}
+func (d *recDevice) Save()    { d.saves++ }
+func (d *recDevice) Restore() { d.restores++ }
+func (d *recDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
+func (d *recDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 func runContent(t *testing.T, src string, res Resources) *recDevice {
 	t.Helper()
@@ -195,23 +226,43 @@ type constShader struct{ c color.RGBA }
 
 func (s constShader) ColorAt(float64, float64) (color.RGBA, bool) { return s.c, true }
 
+// fakeForm is one entry fakeRes.forms can serve from doXObject's "Do" form
+// branch: content to run (in the form's own space), and isGroup (whether it
+// declares /Group << /S /Transparency >>).
+type fakeForm struct {
+	content []byte
+	isGroup bool
+}
+
 type fakeRes struct {
 	font        GlyphSource
 	extGS       map[string]ExtGStateParams
 	shadings    map[string]render.Shader
 	patterns    map[string]render.Shader
 	colorSpaces map[string]*TintTransform
+	forms       map[string]fakeForm
 }
 
 func (r fakeRes) Font(name string) GlyphSource { return r.font }
 func (r fakeRes) Image(name string, fill render.FillColor) (image.Image, bool) {
+	// A name explicitly registered as a form (r.forms) is never also an
+	// image — doXObject tries Image first, so without this a form-only test
+	// (any name it did not also add to r.forms as an image) would silently
+	// be served this stub image instead of ever reaching Form.
+	if _, isForm := r.forms[name]; isForm {
+		return nil, false
+	}
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
 }
 func (r fakeRes) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (image.Image, bool) {
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), true
 }
-func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, *[4]float64, bool) {
-	return nil, nil, render.Identity, nil, false
+func (r fakeRes) Form(name string) ([]byte, Resources, render.Matrix, *[4]float64, bool, bool) {
+	f, ok := r.forms[name]
+	if !ok {
+		return nil, nil, render.Identity, nil, false, false
+	}
+	return f.content, r, render.Identity, nil, f.isGroup, true
 }
 func (r fakeRes) Shading(name string) (render.Shader, bool) {
 	s, ok := r.shadings[name]
@@ -262,6 +313,100 @@ func TestExtGStateImageAlpha(t *testing.T) {
 	}
 	if dev.lastImageAlpha != 0.5 {
 		t.Errorf("image alpha = %v, want 0.5", dev.lastImageAlpha)
+	}
+}
+
+// TestGroupFormCompositesOnceUnderAlpha is the regression test for the bug
+// where a form XObject declaring /Group << /S /Transparency >>, invoked
+// under a non-default constant alpha ("/GSn gs" then "Do"), was run
+// directly against that alpha instead of being composited as an isolated
+// group — folding the alpha into each of the form's own fills individually.
+// It asserts the INTERPRETER-level mechanism directly: exactly one
+// BeginGroup/EndGroup pair wraps the form's two child fills, EndGroup
+// receives the group's own alpha (0.5, not re-applied to the children), and
+// the two fills inside run at FULL alpha (255) — not 0.5 each, which would
+// double-darken their overlap once EndGroup's own 0.5 is applied on top.
+func TestGroupFormCompositesOnceUnderAlpha(t *testing.T) {
+	res := fakeRes{
+		extGS: map[string]ExtGStateParams{
+			"GS0": {FillAlpha: 0.5, HasFillAlpha: true},
+		},
+		forms: map[string]fakeForm{
+			"Fm0": {isGroup: true, content: []byte(
+				"0 0 1 rg 5 5 40 40 re f 0 0 1 rg 20 20 40 40 re f",
+			)},
+		},
+	}
+	dev := runContent(t, "/GS0 gs /Fm0 Do", res)
+
+	if len(dev.endGroupCalls) != 1 {
+		t.Fatalf("EndGroup calls = %d, want exactly 1 (one group around the whole form)", len(dev.endGroupCalls))
+	}
+	if dev.maxGroupDepth != 1 {
+		t.Errorf("max group nesting depth = %d, want 1 (not one group per child fill)", dev.maxGroupDepth)
+	}
+	if got := dev.endGroupCalls[0].alpha; got != 0.5 {
+		t.Errorf("EndGroup alpha = %v, want 0.5 (the group's own constant alpha)", got)
+	}
+	if len(dev.fills) != 2 {
+		t.Fatalf("fills recorded = %d, want 2", len(dev.fills))
+	}
+	for i, f := range dev.fills {
+		if f.Color.A != 255 {
+			t.Errorf("fill %d alpha = %d, want 255 (full — the group's 0.5 applies once, at EndGroup, not per child)", i, f.Color.A)
+		}
+	}
+}
+
+// TestGroupFormAtFullAlphaSkipsGroup proves a /Group form invoked at full
+// alpha, Normal blend, and no soft mask stays on the cheap path: no
+// BeginGroup/EndGroup at all, since an isolated group with nothing to apply
+// produces an identical result to painting the content directly. This is
+// the same "don't pay for an offscreen composite you don't need" discipline
+// pkg/svg/draw's own Group case and pkg/render/pdfwrite's EndGroup callers
+// already follow.
+func TestGroupFormAtFullAlphaSkipsGroup(t *testing.T) {
+	res := fakeRes{
+		forms: map[string]fakeForm{
+			"Fm0": {isGroup: true, content: []byte("0 0 1 rg 5 5 40 40 re f")},
+		},
+	}
+	dev := runContent(t, "/Fm0 Do", res)
+	if len(dev.endGroupCalls) != 0 {
+		t.Errorf("EndGroup calls = %d, want 0 (full-alpha group form needs no offscreen composite)", len(dev.endGroupCalls))
+	}
+	if len(dev.fills) != 1 {
+		t.Fatalf("fills recorded = %d, want 1", len(dev.fills))
+	}
+	if dev.fills[0].Color.A != 255 {
+		t.Errorf("fill alpha = %d, want 255", dev.fills[0].Color.A)
+	}
+}
+
+// TestNonGroupFormAlphaAppliesPerPrimitive proves a form that does NOT
+// declare /Group is unaffected by this fix: its content still runs directly
+// against the ambient constant alpha (each fill dimmed individually), since
+// a non-group form has no isolated backdrop of its own to composite as a
+// unit — this is the PDF-correct behavior for a plain form and must not
+// regress into always grouping any form under alpha < 1.
+func TestNonGroupFormAlphaAppliesPerPrimitive(t *testing.T) {
+	res := fakeRes{
+		extGS: map[string]ExtGStateParams{
+			"GS0": {FillAlpha: 0.5, HasFillAlpha: true},
+		},
+		forms: map[string]fakeForm{
+			"Fm0": {isGroup: false, content: []byte("0 0 1 rg 5 5 40 40 re f")},
+		},
+	}
+	dev := runContent(t, "/GS0 gs /Fm0 Do", res)
+	if len(dev.endGroupCalls) != 0 {
+		t.Errorf("EndGroup calls = %d, want 0 (non-group form: alpha applies per-primitive, no group needed)", len(dev.endGroupCalls))
+	}
+	if len(dev.fills) != 1 {
+		t.Fatalf("fills recorded = %d, want 1", len(dev.fills))
+	}
+	if a := dev.fills[0].Color.A; a < 120 || a > 135 {
+		t.Errorf("fill alpha = %d, want ~128 (0.5 x 255, applied directly)", a)
 	}
 }
 

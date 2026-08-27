@@ -31,15 +31,33 @@ func TestCanEmitShadingAcceptsOpaquePad(t *testing.T) {
 	}
 }
 
-// TestCanEmitShadingRejectsAlpha proves any stop with alpha < 255 forces a
-// fallback: PDF /Shading has no alpha channel and a native shading would
-// silently drop the transparency.
-func TestCanEmitShadingRejectsAlpha(t *testing.T) {
+// TestCanEmitShadingAllowsAlpha proves a stop with alpha < 255 no longer
+// forces a fallback: with luminosity soft masks available (group.go/
+// softmask.go), the color ramp still emits as a native /Shading dictionary;
+// FillShading pairs it with a parallel /DeviceGray alpha shading under an
+// /SMask instead of rasterizing (see TestFillShadingAlphaEmitsShadingUnderSoftMask).
+// needsAlphaMask, not canEmitShading, is what decides whether the alpha-mask
+// wrapping happens.
+func TestCanEmitShadingAllowsAlpha(t *testing.T) {
 	stops := opaqueStops()
 	stops[0].Color.A = 128
 	desc := render.ShadingDesc{Kind: render.ShadingAxial, Stops: stops, Spread: render.SpreadPad}
-	if _, ok := canEmitShading(desc); ok {
-		t.Fatal("a stop with alpha < 255 must not be emittable as a native shading")
+	if _, ok := canEmitShading(desc); !ok {
+		t.Fatal("a stop with alpha < 255 should still be emittable as a native shading (paired with a soft mask)")
+	}
+	if !needsAlphaMask(desc) {
+		t.Error("needsAlphaMask should report true for a stop with alpha < 255")
+	}
+}
+
+// TestNeedsAlphaMaskFalseWhenOpaque proves needsAlphaMask reports false for
+// an all-opaque stop list, so an ordinary opaque gradient's /Shading emits
+// with no soft-mask wrapping at all (byte-identical to before this alpha
+// support existed).
+func TestNeedsAlphaMaskFalseWhenOpaque(t *testing.T) {
+	desc := render.ShadingDesc{Kind: render.ShadingAxial, Stops: opaqueStops(), Spread: render.SpreadPad}
+	if needsAlphaMask(desc) {
+		t.Error("needsAlphaMask should report false when every stop is opaque")
 	}
 }
 
@@ -411,11 +429,14 @@ func TestFillShadingEmitsNativeShadingForOpaqueAxial(t *testing.T) {
 	}
 }
 
-// TestFillShadingFallsBackAndLogsReason proves a shader whose description is
-// not emittable (here: a stop carries alpha) still rasterizes into an image
-// (the pre-existing fallback behavior) and logs exactly one fidelity note
-// explaining why, so a WithLogf caller can see the decision.
-func TestFillShadingFallsBackAndLogsReason(t *testing.T) {
+// TestFillShadingAlphaEmitsShadingUnderSoftMask proves a shader whose
+// description carries a transparent stop now emits VECTOR content: a native
+// color /Shading (DeviceRGB), no image XObject, plus a Form XObject wrapping
+// a parallel /DeviceGray alpha shading referenced by an /SMask on the
+// ExtGState that scopes the "sh" operator — the alpha-gradient fallback lift
+// (SVG groups/clip/mask design doc, decision 4). No fallback log fires: this
+// is the vector path, not a degradation.
+func TestFillShadingAlphaEmitsShadingUnderSoftMask(t *testing.T) {
 	dev := newPageDevice(100, 50)
 	var logs []string
 	dev.logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
@@ -430,21 +451,34 @@ func TestFillShadingFallsBackAndLogsReason(t *testing.T) {
 	dev.PushClip(clip, render.NonZero)
 
 	stops := opaqueStops()
-	stops[0].Color.A = 100 // transparent stop: must force the raster fallback
+	stops[0].Color.A = 100 // transparent stop: needs a soft mask, not a raster fallback
 	shader := raster.NewAxialShader(0, 0, 100, 0, rampFunc{}, stops, raster.SpreadPad)
 	dev.FillShading(shader, render.Matrix{A: 1, D: 1}, "")
 	dev.Restore()
 
-	if len(dev.shadings) != 0 {
-		t.Errorf("shadings recorded = %d, want 0 (should have fallen back)", len(dev.shadings))
+	if len(dev.images) != 0 {
+		t.Errorf("alpha shading recorded %d image(s), want 0 (vector path, no raster fallback)", len(dev.images))
 	}
-	if len(dev.images) == 0 {
-		t.Fatal("fallback did not rasterize into an image")
+	if len(dev.shadings) != 1 {
+		t.Fatalf("shadings recorded = %d, want 1 (the color shading)", len(dev.shadings))
 	}
-	if len(logs) != 1 {
-		t.Fatalf("logs = %v, want exactly one fallback note", logs)
+	if dev.shadings[0].dict["ColorSpace"] != Name("DeviceRGB") {
+		t.Errorf("color shading /ColorSpace = %v, want DeviceRGB", dev.shadings[0].dict["ColorSpace"])
 	}
-	if !bytes.Contains([]byte(logs[0]), []byte("alpha")) {
-		t.Errorf("log message = %q, want it to mention alpha as the reason", logs[0])
+	if len(dev.forms) != 1 {
+		t.Fatalf("forms recorded = %d, want 1 (the alpha-mask form)", len(dev.forms))
+	}
+	maskForm := dev.forms[0]
+	if maskForm.colorSpace != "DeviceGray" {
+		t.Errorf("mask form colorSpace = %q, want DeviceGray", maskForm.colorSpace)
+	}
+	if len(maskForm.shadings) != 1 || maskForm.shadings[0].dict["ColorSpace"] != Name("DeviceGray") {
+		t.Fatalf("mask form shadings = %+v, want one DeviceGray shading", maskForm.shadings)
+	}
+	if len(dev.extGStates) != 1 || dev.extGStates[0].state.smaskFormName != maskForm.name {
+		t.Fatalf("extGState smaskFormName = %+v, want it to reference %q", dev.extGStates, maskForm.name)
+	}
+	if len(logs) != 0 {
+		t.Errorf("logs = %v, want none (this is the vector path, not a fallback)", logs)
 	}
 }

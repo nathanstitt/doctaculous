@@ -40,27 +40,54 @@ func ResolveFont(doc *pdf.Document, res pdf.Dict, name string, provider font.Pro
 // ResolveForm resolves res["XObject"][name] to a decoded form XObject: its
 // content, its child /Resources dict (falling back to res per the spec, since
 // a form without its own /Resources inherits the page's so names resolve),
-// its /Matrix, and its /BBox. ok=false if name is not a form XObject or its
-// content cannot be decoded, so the interpreter skips it gracefully. The
-// /Matrix and /BBox degrade per FormMatrix (Identity) and FormBBox (nil).
-func ResolveForm(doc *pdf.Document, res pdf.Dict, name string, logPrefix string, logf func(string, ...any)) (data []byte, childRes pdf.Dict, m render.Matrix, bbox *[4]float64, ok bool) {
+// its /Matrix, its /BBox, and whether it declares a /Group /S /Transparency
+// (isGroup). ok=false if name is not a form XObject or its content cannot be
+// decoded, so the interpreter skips it gracefully. The /Matrix and /BBox
+// degrade per FormMatrix (Identity) and FormBBox (nil).
+func ResolveForm(doc *pdf.Document, res pdf.Dict, name string, logPrefix string, logf func(string, ...any)) (data []byte, childRes pdf.Dict, m render.Matrix, bbox *[4]float64, isGroup bool, ok bool) {
 	xobjs := doc.GetDict(res["XObject"])
 	if xobjs == nil {
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
-	s := doc.GetStream(xobjs[pdf.Name(name)])
+	return decodeForm(doc, res, xobjs[pdf.Name(name)], "form "+string(name), logPrefix, logf)
+}
+
+// ResolveFormObject decodes obj (a direct object reference, not a named
+// resource lookup) as a form XObject: its content, its child /Resources dict
+// (falling back to res so names resolve, matching ResolveForm), its /Matrix,
+// its /BBox, and whether it declares a /Group /S /Transparency (isGroup, not
+// currently consulted by the /SMask caller — a soft mask's /G form is always
+// treated as an isolated group regardless of its own declared /Group — but
+// returned for symmetry with ResolveForm and any future caller). This is the
+// shape an ExtGState's /SMask /G entry needs — the mask group form is
+// referenced directly by object reference inside the ExtGState dict, not
+// through a page's /XObject resource name — so it shares decodeForm with
+// ResolveForm rather than duplicating the stream/Subtype/Resources/Matrix/
+// BBox handling.
+func ResolveFormObject(doc *pdf.Document, res pdf.Dict, obj pdf.Object, logPrefix string, logf func(string, ...any)) (data []byte, childRes pdf.Dict, m render.Matrix, bbox *[4]float64, isGroup bool, ok bool) {
+	return decodeForm(doc, res, obj, "form object", logPrefix, logf)
+}
+
+// decodeForm resolves obj to a stream, validates /Subtype /Form, decodes its
+// content, and reads /Resources (falling back to res), /Matrix, /BBox, and
+// /Group (isGroup: true iff /Group is a dict whose /S is /Transparency — ISO
+// 32000-1 §8.10.3 — the only group subtype the spec defines to date, so /S
+// itself is not otherwise inspected). desc names what failed in a log line
+// (e.g. "form %q" or "form object").
+func decodeForm(doc *pdf.Document, res pdf.Dict, obj pdf.Object, desc string, logPrefix string, logf func(string, ...any)) (data []byte, childRes pdf.Dict, m render.Matrix, bbox *[4]float64, isGroup bool, ok bool) {
+	s := doc.GetStream(obj)
 	if s == nil {
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
 	if sub, _ := doc.GetName(s.Dict["Subtype"]); sub != "Form" {
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
 	data, _, err := doc.DecodedStream(s)
 	if err != nil {
 		if logf != nil {
-			logf(logPrefix+": form %q: %v", name, err)
+			logf(logPrefix+": %s: %v", desc, err)
 		}
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
 
 	// A form's /Resources is optional; fall back to the page's so names resolve.
@@ -69,7 +96,14 @@ func ResolveForm(doc *pdf.Document, res pdf.Dict, name string, logPrefix string,
 		childDict = res
 	}
 
-	return data, childDict, FormMatrix(doc, s.Dict["Matrix"]), FormBBox(doc, s.Dict["BBox"]), true
+	group := false
+	if gd := doc.GetDict(s.Dict["Group"]); gd != nil {
+		if st, _ := doc.GetName(gd["S"]); st == "Transparency" {
+			group = true
+		}
+	}
+
+	return data, childDict, FormMatrix(doc, s.Dict["Matrix"]), FormBBox(doc, s.Dict["BBox"]), group, true
 }
 
 // FormMatrix reads a 6-number /Matrix array (form XObject, pattern, or shading)

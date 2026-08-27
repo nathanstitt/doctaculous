@@ -22,7 +22,15 @@ type pageDevice struct {
 	embed    *fontEmbedder
 	images   []pendingImage   // images referenced this page (assembled later)
 	shadings []pendingShading // native /Shading dicts referenced this page (assembled later)
+	forms    []pendingForm    // transparency-group/mask Form XObjects referenced this page
 	logf     func(string, ...any)
+
+	// extGStates holds every distinct /ExtGState dict this page has emitted,
+	// in first-use order; extGStateNames maps a state back to its already
+	// assigned resource name so identical states (e.g. a hundred shapes at
+	// the same alpha) share ONE resource instead of one each. See emitGState.
+	extGStates     []pendingExtGState
+	extGStateNames map[extGState]string
 
 	// clipStack tracks each Save()'s clip rectangle so Restore can pop back to it.
 	// clipRect is the current clip's device-space bounding box (not the exact
@@ -32,6 +40,17 @@ type pageDevice struct {
 	// "unclipped" (bounds fall back to the full page box).
 	clipRect  *clipBounds
 	clipStack []*clipBounds
+
+	// groupStack holds the buffer/resource/clip state BeginGroup swapped out,
+	// restored by the matching EndGroup (see group.go).
+	groupStack []groupFrame
+
+	// pendingSoftMasks maps a sentinel *image.Alpha BuildLuminanceMask
+	// returned to the name of the real luminosity Form XObject it stands for
+	// (see softmask.go's BuildLuminanceMask/takePendingSoftMask) — the
+	// mechanism that lets EndGroup emit a native PDF soft mask instead of a
+	// baked raster fallback for the common case.
+	pendingSoftMasks map[*image.Alpha]string
 
 	shadingLogged bool // true once a fidelity note has been logged for this device
 }
@@ -66,6 +85,12 @@ func (d *pageDevice) Fill(p *render.Path, paint render.FillPaint) {
 	if p == nil || p.Empty() {
 		return
 	}
+	g := extGState{hasFillAlpha: true, fillAlpha: float64(paint.Color.A) / 255, blendMode: paint.BlendMode}
+	needsScope := g.needed()
+	if needsScope {
+		d.buf.WriteString("q\n")
+		d.emitGState(g)
+	}
 	d.setFillColor(paint.Color.R, paint.Color.G, paint.Color.B)
 	d.writePath(p)
 	if paint.Rule == render.EvenOdd {
@@ -73,11 +98,20 @@ func (d *pageDevice) Fill(p *render.Path, paint render.FillPaint) {
 	} else {
 		d.buf.WriteString("f\n")
 	}
+	if needsScope {
+		d.buf.WriteString("Q\n")
+	}
 }
 
 func (d *pageDevice) Stroke(p *render.Path, paint render.StrokePaint) {
 	if p == nil || p.Empty() {
 		return
+	}
+	g := extGState{hasStrokeAlpha: true, strokeAlpha: float64(paint.Color.A) / 255, blendMode: paint.BlendMode}
+	needsScope := g.needed()
+	if needsScope {
+		d.buf.WriteString("q\n")
+		d.emitGState(g)
 	}
 	d.setStrokeColor(paint.Color.R, paint.Color.G, paint.Color.B)
 	fmt.Fprintf(&d.buf, "%s w\n", formatReal(paint.Width))
@@ -91,6 +125,9 @@ func (d *pageDevice) Stroke(p *render.Path, paint render.StrokePaint) {
 	d.writeDash(paint.DashArray, paint.DashPhase)
 	d.writePath(p)
 	d.buf.WriteString("S\n")
+	if needsScope {
+		d.buf.WriteString("Q\n")
+	}
 }
 
 // capCode maps a render.LineCap to the PDF line-cap style operand (PDF 1.7 §8.4.3.3).
@@ -198,7 +235,7 @@ func (d *pageDevice) fillGlyphOutline(g render.GlyphRef) {
 }
 
 func (d *pageDevice) FillGlyph(outline *render.Path, c render.FillColor, blend string) {
-	d.Fill(outline, render.FillPaint{Color: colorFromFill(c)})
+	d.Fill(outline, render.FillPaint{Color: colorFromFill(c), BlendMode: blend})
 }
 
 func (d *pageDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64, blend string) {
@@ -207,7 +244,9 @@ func (d *pageDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64
 	}
 	name := fmt.Sprintf("Im%d", len(d.images))
 	d.images = append(d.images, pendingImage{name: name, img: img, ctm: ctm})
+	g := extGState{hasFillAlpha: true, fillAlpha: alpha, blendMode: blend}
 	d.buf.WriteString("q\n")
+	d.emitGState(g)
 	m := ctm
 	fmt.Fprintf(&d.buf, "%s %s %s %s %s %s cm\n",
 		formatReal(m.A), formatReal(m.B), formatReal(m.C), formatReal(m.D), formatReal(m.E), formatReal(m.F))
@@ -262,16 +301,64 @@ func (d *pageDevice) tryNativeShading(s render.Shader, ctm render.Matrix, blend 
 	// emitted W/W* n); paint the shading under that clip with the CTM applied,
 	// balancing q/Q around the state change exactly like DrawImage does. Per
 	// spec `sh` is not modulated by constant alpha (/ca) — only the blend mode
-	// would apply, and this writer does not yet emit ExtGState /BM anywhere
-	// (DrawImage/Fill/Stroke ignore it too), so blend is accepted for interface
-	// symmetry with the rasterized fallback but not yet acted on here.
+	// applies (ISO 32000-1 §8.7.4.3), so only /BM is set here.
+	g := extGState{blendMode: blend}
+	if needsAlphaMask(desc) {
+		// The color-only shading above cannot express desc's per-stop alpha
+		// (PDF /Shading has no alpha channel). Pair it with a parallel
+		// /DeviceGray alpha shading, painted into its own Form XObject and
+		// wired in as a luminosity soft mask — this is the "lift the
+		// alpha-gradient fallback" from the design doc: only the alpha half
+		// lifts (a non-pad spread already returned false from
+		// canEmitShading above and never reaches here).
+		g.smaskFormName = d.registerAlphaShadingMask(desc, ctm)
+	}
 	d.buf.WriteString("q\n")
+	d.emitGState(g)
 	m := ctm
 	fmt.Fprintf(&d.buf, "%s %s %s %s %s %s cm\n",
 		formatReal(m.A), formatReal(m.B), formatReal(m.C), formatReal(m.D), formatReal(m.E), formatReal(m.F))
 	fmt.Fprintf(&d.buf, "/%s sh\n", name)
 	d.buf.WriteString("Q\n")
 	return true
+}
+
+// registerAlphaShadingMask builds a DeviceGray Form XObject whose content
+// paints desc's ALPHA shading (buildAlphaShadingDict) under ctm, clipped to
+// the device's full page box (the mask's own BBox — the soft mask's coverage
+// outside the shape being filled is irrelevant, since the shape's own path
+// clip, still active in the outer content stream, already restricts where
+// the masked `sh` paints), and returns its resource name for
+// extGState.smaskFormName. This mirrors registerScratchForm's "form +
+// resources" shape but builds the content directly (a single `sh` under the
+// CTM) rather than running an arbitrary paint callback, since a shading has
+// no sub-content to recurse into.
+func (d *pageDevice) registerAlphaShadingMask(desc render.ShadingDesc, ctm render.Matrix) string {
+	alphaShadings := []pendingShading{{name: "Sh0", dict: buildAlphaShadingDict(desc)}}
+	var content bytes.Buffer
+	m := ctm
+	fmt.Fprintf(&content, "%s %s %s %s %s %s cm\n",
+		formatReal(m.A), formatReal(m.B), formatReal(m.C), formatReal(m.D), formatReal(m.E), formatReal(m.F))
+	content.WriteString("/Sh0 sh\n")
+
+	forms := &d.forms
+	if n := len(d.groupStack); n > 0 {
+		// See registerScratchForm's doc comment for why an in-progress group
+		// (BeginGroup already swapped d.forms to the group's own accumulator)
+		// requires registering into the ENCLOSING scope instead: the "/GSn gs"
+		// referencing this mask is emitted into the outer buffer by whichever
+		// call restores it, not into the group's own still-open content.
+		forms = &d.groupStack[n-1].forms
+	}
+	name := fmt.Sprintf("Fm%d", len(*forms))
+	*forms = append(*forms, pendingForm{
+		name:       name,
+		content:    content.Bytes(),
+		bbox:       [4]float64{0, 0, d.wPt, d.hPt},
+		colorSpace: "DeviceGray",
+		shadings:   alphaShadings,
+	})
+	return name
 }
 
 // logShadingFallback logs (once per page) why FillShading fell back to
@@ -391,6 +478,28 @@ func intersectClipBounds(a, b *clipBounds) *clipBounds {
 		return &clipBounds{} // empty
 	}
 	return r
+}
+
+// BeginGroup, EndGroup, BuildClipMask, and BuildLuminanceMask are implemented
+// in group.go and softmask.go (transparency-group Form XObjects and
+// luminosity soft masks), kept in their own files since they carry
+// substantially more machinery than this file's other per-operator methods.
+
+// unionClipBounds returns the smallest rectangle enclosing both a and b; a
+// nil operand is treated as "no contribution yet" (returns the other).
+func unionClipBounds(a, b *clipBounds) *clipBounds {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &clipBounds{
+		minX: min(a.minX, b.minX),
+		minY: min(a.minY, b.minY),
+		maxX: max(a.maxX, b.maxX),
+		maxY: max(a.maxY, b.maxY),
+	}
 }
 
 func (d *pageDevice) Save() {

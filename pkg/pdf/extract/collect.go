@@ -266,16 +266,24 @@ type nullDevice struct {
 	w, h int
 }
 
-func (d *nullDevice) Size() (int, int)                                      { return d.w, d.h }
-func (d *nullDevice) Fill(*render.Path, render.FillPaint)                   {}
-func (d *nullDevice) Stroke(*render.Path, render.StrokePaint)               {}
-func (d *nullDevice) DrawImage(image.Image, render.Matrix, float64, string) {}
-func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string)      {}
-func (d *nullDevice) DrawGlyph(render.GlyphRef)                             {}
-func (d *nullDevice) FillShading(render.Shader, render.Matrix, string)      {}
-func (d *nullDevice) PushClip(*render.Path, render.FillRule)                {}
-func (d *nullDevice) Save()                                                 {}
-func (d *nullDevice) Restore()                                              {}
+func (d *nullDevice) Size() (int, int)                                             { return d.w, d.h }
+func (d *nullDevice) Fill(*render.Path, render.FillPaint)                          {}
+func (d *nullDevice) Stroke(*render.Path, render.StrokePaint)                      {}
+func (d *nullDevice) DrawImage(image.Image, render.Matrix, float64, string)        {}
+func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string)             {}
+func (d *nullDevice) DrawGlyph(render.GlyphRef)                                    {}
+func (d *nullDevice) FillShading(render.Shader, render.Matrix, string)             {}
+func (d *nullDevice) PushClip(*render.Path, render.FillRule)                       {}
+func (d *nullDevice) BeginGroup()                                                  {}
+func (d *nullDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
+func (d *nullDevice) Save()                                                        {}
+func (d *nullDevice) Restore()                                                     {}
+func (d *nullDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
+func (d *nullDevice) BuildLuminanceMask(image.Point, bool, func(render.Device)) render.GroupMask {
+	return image.NewAlpha(image.Rectangle{})
+}
 
 // Collect runs the content interpreter over one page with the capture sinks and
 // returns the recovered glyphs, ruling lines, and page size. It recovers at the
@@ -392,15 +400,16 @@ func (r *pageResources) Font(name string) content.GlyphSource {
 }
 
 // Form resolves a form XObject to its decoded content, scoped resources, matrix,
-// and BBox, so text inside a form (a common wrapper) is captured too. A form
-// without its own /Resources inherits the page's.
-func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool) {
-	data, childRes, m, bbox, ok := pageres.ResolveForm(r.doc, r.dict, name, "extract", r.logf)
+// BBox, and whether it declares a transparency /Group, so text inside a form (a
+// common wrapper) is captured too. A form without its own /Resources inherits
+// the page's.
+func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Matrix, *[4]float64, bool, bool) {
+	data, childRes, m, bbox, isGroup, ok := pageres.ResolveForm(r.doc, r.dict, name, "extract", r.logf)
 	if !ok {
-		return nil, nil, render.Identity, nil, false
+		return nil, nil, render.Identity, nil, false, false
 	}
 	child := &pageResources{doc: r.doc, dict: childRes, logf: r.logf}
-	return data, child, m, bbox, true
+	return data, child, m, bbox, isGroup, true
 }
 
 // Image reports "not an image" — the extractor discards raster content.

@@ -217,6 +217,11 @@ bullet's design rationale is in its PR:
   `/FontFile` for the bundled substitutes; `/ToUnicode` on every face). Concurrent per-band assembly,
   deterministic output, `@media print` capture (`pkg/css/media.go`). Byte-identical for the raster
   corpus (the new `DrawGlyph` seam rasterizes via the outline).
+- **`/ExtGState` resource emission**: a partially-transparent fill/stroke/glyph/image now survives
+  into PDF output as `/ca` (non-stroking) or `/CA` (stroking) alpha, and a non-Normal blend mode as
+  `/BM`, wrapped in a scoped `q`/`Q` so it never leaks to later content. States are deduplicated by
+  content, so many shapes sharing one alpha/blend emit a single `/ExtGState` resource. Fully-opaque,
+  Normal-blend output is unchanged byte-for-byte (no resource, no `gs` operator emitted).
 
 **HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `WriteMarkdown`
 + `WriteText`, CLI `tomd`):
@@ -613,11 +618,98 @@ read+write vocabulary for the tinycld text adoption path):
   `layout.VectorKind` item rather than rasterizing to an embedded image (an SVG circle → PDF has no
   image XObject). Landed with a cross-cutting fix in the shared rasterizer: an unclosed subpath used
   to fill incorrectly (also affecting the PDF content interpreter's `f` operator on unclosed paths).
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text,
-  `clip-path`/`mask`, filters, `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked
-  as the PR 4–8 slices in `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
-- 148 curated fixtures from the resvg test suite (MIT, commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`)
-  with committed goldens.
+- Group opacity (`<g opacity>`, including on the root `<svg>` element, and nested groups multiplying)
+  composites correctly via a new `render.Device.BeginGroup`/`EndGroup` offscreen-compositing
+  primitive, implemented by BOTH backends: overlapping children inside an opacity group blend once, at
+  the flattened result, instead of each child's own paint alpha double-darkening the overlap. The same
+  primitive fixes the analogous double-paint case on a single shape carrying both a fill AND a stroke
+  at element `opacity` < 1 (the stroke's inner edge overlaps the fill) — routed through a group only
+  when both a fill and a stroke are present and opacity < 1, so the common opaque/single-paint shape
+  stays on the cheap per-paint path with no offscreen allocation. In PDF output, `BeginGroup`/`EndGroup`
+  emit a real `/Group << /S /Transparency /CS /DeviceRGB /I true >>` Form XObject: children paint into
+  their own content stream/resources, and the group composites back with one `/GSn gs /Fmn Do`
+  referencing an ExtGState carrying the group's `/ca` and `/BM`. A fully-opaque, ungrouped document's
+  PDF output stays byte-identical to before this feature (verified: `cmp` on a rendered fixture matches
+  the pre-groups commit exactly).
+- `clip-path`/`<clipPath>`: a clipPath's children form a UNION (not an intersection), flattened via a
+  new `render.Device.BuildClipMask(paths []MaskPath) GroupMask` primitive that rasterizes EACH child
+  under its OWN `clip-rule` and combines coverage with `max()` — the correctness-critical design
+  point, since two non-overlapping children pushed as separate `PushClip` calls would intersect to
+  empty. `clipPathUnits` (`userSpaceOnUse` default, `objectBoundingBox` reusing the same
+  pre-transform-`Path.Bounds()` mapping gradients use), `clip-rule` (new inherited property, per-child,
+  mixed nonzero/evenodd within one clipPath), a `clip-path` on the `<clipPath>` element itself
+  (intersects the whole union) or on one of its children (intersects that child before it joins the
+  union), and an explicit shape/`<text>`/`<use>` allowlist for valid children (a `<g>`/`<image>`/
+  `<switch>` child is dropped, not recursed into as a forgiving container) all ship. An empty
+  `<clipPath>` (no valid children) clips its target to NOTHING, distinct from `clip-path="none"`/an
+  unresolved reference (no clipping at all). `display:none` and `visibility:hidden` both remove a clip
+  child from the union (verified against the resvg corpus's reference renders for both). fill/stroke/
+  opacity/filter/mask on a clip child have no effect — only geometry, transform,
+  clip-rule, and clip-path matter. Resolved during `Parse` (like paint servers), with a
+  `buildingClip`-style recursion guard so a self-referencing or mutually-cyclic clipPath terminates.
+  raster implements `BuildClipMask` exactly (per-child rasterize + max union); pdfwrite — which has no
+  offscreen surface to rasterize a pixel-exact per-child-rule union into — returns a documented
+  rectangular bounding-box approximation, now applied for real: it feeds the same `/SMask` machinery a
+  luminance mask uses (a DeviceGray coverage image behind a luminosity soft mask), so a PDF clip-path
+  is a real (if rectangular-approximate) restriction rather than an inert no-op.
+- `mask`/`<mask>`: the mask's rendered content's LUMINANCE (not its geometry) becomes per-pixel alpha,
+  via a new `render.Device.BuildLuminanceMask(size, alphaOnly, paint func(dev Device)) GroupMask`
+  primitive — the backend hands back a scratch surface, `pkg/svg/draw` paints the mask's subtree into
+  it through the ordinary `Device` seam (never importing a concrete backend), and the backend converts
+  the result to a mask. Default sRGB luminance (`0.2126R+0.7152G+0.0722B`, times the pixel's own
+  alpha) rather than SVG 1.1's linearRGB, matching browsers/SVG2/resvg (following the letter of SVG
+  1.1 here would make every mask golden visibly wrong). `mask-type` (SVG2, new non-inherited property
+  in both `hints.go` and `style.go`) selects `luminance` (default) or `alpha` (reads the pixel's own
+  alpha channel directly). `maskUnits` (`objectBoundingBox` default, `-10%/-10%/120%/120%` region —
+  a real 10% bleed past the masked element's bbox) and `maskContentUnits` (`userSpaceOnUse` default —
+  the OPPOSITE default from `maskUnits`) both ship, reusing the clip-path objectBoundingBox mapping. A
+  `transform` on the `<mask>` element itself is ignored (only a transform on the masked element
+  applies); an empty `<mask>` (no children) makes its target FULLY TRANSPARENT, distinct from
+  `mask="none"`/an unresolved reference (no masking at all). Mask, clip-path, and opacity compose in
+  that order (clip → mask → opacity) via mask intersection before a single `EndGroup` call. Nested
+  masks (a mask referencing another mask) and a self-referencing/cyclic mask chain (a `buildingMask`
+  recursion guard mirroring `buildingClip`) both terminate. Resolved during `Parse`, like clip-path;
+  raster implements `BuildLuminanceMask` exactly (renders into a scratch `*image.RGBA`, converts per
+  pixel); pdfwrite renders the mask's content into a SECOND, nested Form XObject
+  (`/Group << /S /Transparency /CS /DeviceGray >>`) and wires it into the group's own ExtGState as
+  `/SMask << /S /Luminosity /G <form> /BC [0] >>` — a real PDF luminosity soft mask, not an
+  approximation. `/BC [0]` (a black backdrop) is mandatory: without it, the area outside the mask form's
+  own content is undefined where SVG requires fully transparent. `pkg/pdf/content` (the PDF *reader*)
+  was taught `/SMask` too (an ExtGState soft mask now renders through `Device.BuildLuminanceMask`
+  exactly like the writer produces it, scoped per paint operator: fills, strokes, `sh`, image/inline-
+  image `Do`, and a form XObject's entire nested content — text glyph fill/stroke is the one documented
+  gap, since masking each glyph individually would reintroduce the per-child compositing seam this
+  whole feature exists to avoid), so the SVG → PDF → reopen → raster round trip is genuine end-to-end
+  proof for masks, independently cross-checked against Poppler's own renderer.
+- Known gaps in the group/clip/mask feature, each verified by rendering rather than merely inferred:
+  **`BuildClipMask`'s pdfwrite approximation is rectangular, not exact** — a non-rectangular
+  `<clipPath>` union (e.g. two non-overlapping circles) clips to the union's BOUNDING BOX in PDF
+  output, not its true shape (raster remains pixel-exact via the per-child rasterize + max-union
+  primitive; only the PDF writer, which has no offscreen surface to rasterize a pixel-exact union
+  into, degrades). **Glyph fill/stroke is not soft-mask-wrapped** — `pkg/pdf/content`'s ExtGState
+  soft-mask support scopes to fills, strokes, `sh`, images, and nested form XObjects, but not
+  per-glyph text painting, to avoid reintroducing the per-child compositing seam this feature exists
+  to eliminate. **`reflect`/`repeat` gradient spreads still rasterize** in PDF output (see the
+  alpha-gradient shading lift above — only `pad` gets a native `/Shading`/`/Extend`). **`objectBoundingBox`
+  clip-path/mask units on a `<g>` target degrade to `userSpaceOnUse`** (Identity mapping): a `<g>` has
+  no single `Path` to measure a bounding box from the way a `Shape` does, so `pkg/svg/draw` passes a
+  nil `boundsFunc` for a Group target and `clipUnitsMatrix`/mask region resolution falls back to
+  Identity rather than resolving the group's real (post-layout) bbox — verified against the resvg
+  corpus's `mask/on-group-with-transform.svg` and `mask/half-width-region-with-rotation.svg`, both of
+  which render blank under this engine (a graceful degradation, not a crash) versus resvg's correctly
+  bbox-relative result.
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: `<use>`, text, filters,
+  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 5–8 slices in
+  `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- 74 curated fixtures from the resvg test suite's `masking/**` tranche (MIT, commit
+  `d8e064337faf01bc5a9579187a56dbdbe3eacc72`; see `testdata/svg/resvg/README.md` for the earlier
+  tranches' counts) land with this feature: `clipPath/` (37) and `mask/` (37), all with committed
+  goldens. This tranche's goldens were additionally cross-checked pixel-for-pixel against resvg's own
+  reference PNGs (not just visually inspected against fixture intent), the strongest verification
+  available — the sweep found and fixed three real bugs (a `visibility:hidden` clipPath child wrongly
+  kept in the union, nested/self-referencing masks composing via `min` instead of multiplication, and
+  a clipPath child's own nested `clip-path` resolving in the wrong coordinate space when the child
+  carried its own transform).
 
 **SVG input — CSS styling** (`pkg/svg`, `pkg/css`):
 
@@ -679,10 +771,14 @@ read+write vocabulary for the tinycld text adoption path):
   nudged apart by a sub-point epsilon so `/Bounds` stays strictly increasing without visibly smearing
   the break. Proven by rendering an opaque multi-stop gradient two ways (SVG→raster directly, and
   SVG→PDF→reopen→raster) and asserting pixel-for-pixel equivalence, not just a well-formed dictionary.
-  A gradient with any `stop-opacity` < 1 (no alpha channel in `/Shading` without a soft mask) or a
-  `reflect`/`repeat` spread (no native `/Extend` equivalent) still rasterizes into an image XObject
-  exactly as before, logged once with the reason — the previous stub-era "no vector output" gap is
-  now the correctness boundary, not a permanent limitation.
+  A gradient with `stop-opacity` < 1 ALSO emits vector output now that luminosity soft masks exist: the
+  color ramp still emits as the native `/DeviceRGB` `/Shading` above, paired with a second, parallel
+  `/DeviceGray` shading (one gray component per stop, equal to that stop's own alpha) painted into a
+  Form XObject and wired in as the `sh` operator's ExtGState `/SMask` — same `/Coords`/`/Extend`/offset
+  segmentation as the color shading, so the two agree pixel-for-pixel. This is a lift of a real,
+  previously-shipped fallback, not new scope: **only the alpha half lifts** — a `reflect`/`repeat`
+  spread still has no native `/Extend` equivalent and still rasterizes into an image XObject, logged
+  once with the reason, exactly as before.
 - Known gaps, each verified by rendering rather than merely inferred, and excluded from the golden
   corpus rather than locked in as correct: **gradient/pattern strokes** (`stroke="url(#g)")`) degrade
   to the paint's fallback color (or no stroke) with a one-per-document warn-once log — no

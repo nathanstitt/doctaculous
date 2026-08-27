@@ -470,6 +470,292 @@ func TestNestedDistinctPatternsShallowChainStillPaints(t *testing.T) {
 	}
 }
 
+// nestedGroupsSVG builds depth levels of nested <g opacity="0.999">, each
+// wrapping the next, with a single leaf rect at the center. opacity is kept
+// just under 1 (never exactly 1) so every level takes the real
+// BeginGroup/EndGroup compositing path (see paint's Group case: opacity>=1
+// with no clip/mask skips group-opening entirely) — the path
+// maxGroupNestingDepth guards — while the cumulative opacity stays
+// indistinguishable from fully opaque for pixel-level assertions.
+func nestedGroupsSVG(depth int) string {
+	var sb strings.Builder
+	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">`)
+	for i := 0; i < depth; i++ {
+		sb.WriteString(`<g opacity="0.999">`)
+	}
+	sb.WriteString(`<rect x="10" y="10" width="20" height="20" fill="#000000"/>`)
+	for i := 0; i < depth; i++ {
+		sb.WriteString(`</g>`)
+	}
+	sb.WriteString(`</svg>`)
+	return sb.String()
+}
+
+// TestDeeplyNestedGroupsDoNotExhaustMemory is MUST-FIX 2's regression test:
+// every BeginGroup allocates a full-canvas scratch RGBA that lives until its
+// matching EndGroup (see raster.Device.BeginGroup), so unbounded nesting
+// depth is unbounded concurrently-live scratch memory, reachable from
+// Open/OpenBytes on untrusted input via nested <g opacity>/clip-path/mask.
+// This renders a document nested far deeper (200 levels) than
+// maxGroupNestingDepth (16) and asserts it completes at all (the real risk
+// is an OOM kill or multi-GB allocation, not a hang — a timeout would not
+// catch a memory blowup the way it catches a runaway loop) AND that the
+// depth-cap guard actually fired, the same log-line-based assertion
+// TestNestedDistinctPatternsDoNotBlowUp uses for the analogous pattern-depth
+// guard.
+func TestDeeplyNestedGroupsDoNotExhaustMemory(t *testing.T) {
+	doc, err := svg.Parse([]byte(nestedGroupsSVG(200)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs []string
+	img := image.NewRGBA(image.Rect(0, 0, 40, 40))
+	stddraw.Draw(img, img.Bounds(), image.NewUniform(color.White), image.Point{}, stddraw.Src)
+	r := New(doc)
+	r.Logf = func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
+
+	done := make(chan struct{})
+	go func() {
+		r.DrawVector(raster.New(img), render.Identity)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("200-deep nested groups did not complete within 10s (unbounded recursion/allocation?)")
+	}
+
+	var tripped bool
+	for _, l := range logs {
+		if strings.Contains(l, "nesting exceeded") {
+			tripped = true
+			t.Logf("guard fired: %s", l)
+		}
+	}
+	if !tripped {
+		t.Errorf("200-deep nested groups did not trip the group-nesting-depth guard; logs=%v", logs)
+	}
+
+	// The leaf rect must still have painted (degraded past the cap, not
+	// dropped): center of the 20x20 rect at (10,10) is (20,20).
+	got := img.RGBAAt(20, 20)
+	if got.R > 20 || got.G > 20 || got.B > 20 {
+		t.Errorf("center = %+v, want ~black (leaf content must still paint once the depth cap trips, just without further isolation)", got)
+	}
+}
+
+// TestModestlyNestedGroupsStillRenderCorrectly verifies a realistic nesting
+// depth (4 levels, well under maxGroupNestingDepth) is unaffected by the
+// cap and still composites its cumulative opacity correctly end to end —
+// the guard must not trip, or degrade fidelity, for ordinary documents.
+func TestModestlyNestedGroupsStillRenderCorrectly(t *testing.T) {
+	img := renderSVG(t, nestedGroupsSVG(4), 40, 40)
+	got := img.RGBAAt(20, 20)
+	t.Logf("4-deep nested opacity=0.999 groups, center = %+v", got)
+	// Cumulative opacity 0.999^4 ~= 0.996, i.e. still essentially opaque
+	// black -- this is a correctness check (the content survived 4 levels
+	// of real compositing), not a precision check on the opacity math.
+	if got.R > 5 || got.G > 5 || got.B > 5 {
+		t.Errorf("center = %+v, want ~black (near-fully-opaque black through 4 nested compositing groups)", got)
+	}
+}
+
+// TestGroupOpacityCompositesOnce is the discriminating test for group
+// opacity: two OVERLAPPING opaque shapes inside <g opacity="0.5"> must
+// composite to the SAME color at the overlap as at a non-overlap area. Under
+// the old (dropped) behavior, group opacity did nothing at all, so both
+// squares painted fully opaque and the overlap would show whichever square
+// painted last, not a blend — this test's real job is pinning that group
+// opacity blends correctly now. If group opacity were instead approximated
+// by threading it into each child's own paint alpha (the artifact this
+// feature exists to avoid), the overlap would come out TWICE as dark as a
+// non-overlap area, since two 50%-alpha black-ish paints stacked over white
+// do not equal one 50%-alpha paint. Both pixel values are logged so the
+// reported artifact is visible directly in test output.
+func TestGroupOpacityCompositesOnce(t *testing.T) {
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <g opacity="0.5">
+	    <rect x="5" y="5" width="20" height="20" fill="#000000"/>
+	    <rect x="15" y="5" width="20" height="20" fill="#000000"/>
+	  </g>
+	</svg>`
+	img := renderSVG(t, src, 40, 40)
+
+	overlap := img.RGBAAt(17, 15)   // x in [15,25): covered by BOTH rects
+	nonOverlap := img.RGBAAt(7, 15) // x in [5,15): covered by only the first rect
+	t.Logf("overlap=%+v nonOverlap=%+v", overlap, nonOverlap)
+
+	if overlap != nonOverlap {
+		t.Errorf("overlap = %+v, nonOverlap = %+v; want EQUAL (group opacity must composite once, not per child — a per-paint approximation would double-darken the overlap)", overlap, nonOverlap)
+	}
+	// Both should show the 50%-black-on-white blend (~127,127,127), not full
+	// black (100% opacity, opacity ignored) or full white (nothing painted).
+	if nonOverlap.R < 100 || nonOverlap.R > 155 {
+		t.Errorf("nonOverlap = %+v, want ~127 gray (50%% black over white)", nonOverlap)
+	}
+}
+
+// TestNestedGroupOpacityMultiplies verifies <g opacity="0.5"><g
+// opacity="0.5"> gives an effective 0.25, not 0.5 (nesting must multiply,
+// not just take the innermost or outermost value).
+func TestNestedGroupOpacityMultiplies(t *testing.T) {
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <g opacity="0.5">
+	    <g opacity="0.5">
+	      <rect x="0" y="0" width="40" height="40" fill="#000000"/>
+	    </g>
+	  </g>
+	</svg>`
+	img := renderSVG(t, src, 40, 40)
+	got := img.RGBAAt(20, 20)
+	t.Logf("nested 0.5*0.5 = %+v", got)
+	// Effective alpha 0.25 over white: ~191 gray (255*0.75).
+	if got.R < 180 || got.R > 202 {
+		t.Errorf("center = %+v, want ~191 gray (effective opacity 0.25 = 0.5*0.5)", got)
+	}
+}
+
+// TestPlainGroupDoesNotOpenOffscreenGroup verifies a <g> with no opacity
+// attribute (or opacity="1") takes the cheap per-paint path and never calls
+// BeginGroup/EndGroup: opening an offscreen group allocates a full-page
+// scratch buffer (see raster.Device.BeginGroup), so doing that for every
+// plain <g> — the overwhelming common case — would be a serious, needless
+// performance regression. This is asserted directly against a
+// render.Device double that panics on BeginGroup/EndGroup, rather than
+// inferred from timing, so a regression fails loudly and unambiguously.
+func TestPlainGroupDoesNotOpenOffscreenGroup(t *testing.T) {
+	doc, err := svg.Parse([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <g>
+	    <rect x="0" y="0" width="10" height="10" fill="red"/>
+	    <g opacity="1">
+	      <rect x="10" y="10" width="10" height="10" fill="blue"/>
+	    </g>
+	  </g>
+	</svg>`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := &noGroupDevice{Device: raster.New(image.NewRGBA(image.Rect(0, 0, 40, 40)))}
+	New(doc).DrawVector(dev, render.Identity)
+	if dev.opened {
+		t.Errorf("BeginGroup was called for a plain <g> / opacity=1 group; want no offscreen group at all")
+	}
+}
+
+// noGroupDevice wraps a real render.Device and records whether
+// BeginGroup/EndGroup were ever invoked, without altering any other
+// behavior (every other method delegates to the embedded Device).
+type noGroupDevice struct {
+	render.Device
+	opened bool
+}
+
+func (d *noGroupDevice) BeginGroup() {
+	d.opened = true
+	d.Device.BeginGroup()
+}
+
+// TestShapeFillAndStrokeOpacityNoSeam verifies a single shape with BOTH a
+// fill and a stroke at opacity < 1 shows no seam where the stroke overlaps
+// the fill: the stroke's inner half overlaps the fill along the fill's
+// border, and folding opacity into each paint independently would double
+// them there (the same double-darkening artifact group opacity produces),
+// giving three visibly different bands (fill-only, fill+stroke overlap,
+// stroke-only) instead of two. This mirrors the resvg
+// painting/{fill,stroke}-opacity/with-opacity.svg fixtures, which carry
+// exactly this fill+stroke+opacity combination.
+func TestShapeFillAndStrokeOpacityNoSeam(t *testing.T) {
+	// A 20x20 black-filled rect centered in a 40x40 canvas, with an 8-wide
+	// black stroke (4 inside + 4 outside the fill edge) at opacity 0.5.
+	// Sampling straight down the middle of the top edge:
+	//   y=12: outside the fill, only the stroke's outer half -> stroke-only.
+	//   y=17: inside the fill AND under the stroke's inner half -> overlap.
+	//   y=20: well inside the fill, past the stroke -> fill-only.
+	src := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <rect x="10" y="10" width="20" height="20" fill="#000000" stroke="#000000" stroke-width="8" opacity="0.5"/>
+	</svg>`
+	img := renderSVG(t, src, 40, 40)
+
+	strokeOnly := img.RGBAAt(20, 12)
+	overlap := img.RGBAAt(20, 17)
+	fillOnly := img.RGBAAt(20, 20)
+	t.Logf("strokeOnly=%+v overlap=%+v fillOnly=%+v", strokeOnly, overlap, fillOnly)
+
+	if overlap != strokeOnly {
+		t.Errorf("overlap = %+v, strokeOnly = %+v; want EQUAL (opacity must apply once to the composited shape, not per-paint)", overlap, strokeOnly)
+	}
+	if overlap != fillOnly {
+		t.Errorf("overlap = %+v, fillOnly = %+v; want EQUAL (opacity must apply once to the composited shape, not per-paint)", overlap, fillOnly)
+	}
+	// All three should show the 50%-black-on-white blend (~127 gray), not
+	// full black or a double-darkened ~64 gray at the overlap.
+	if overlap.R < 100 || overlap.R > 155 {
+		t.Errorf("overlap = %+v, want ~127 gray (50%% black over white, not double-darkened)", overlap)
+	}
+}
+
+// TestShapeOpacityZeroAndOneAndAbsent verifies the boundary behavior for
+// element opacity on a shape carrying both a fill and a stroke (the grouped
+// path): opacity="0" paints nothing, and opacity="1" (or the attribute
+// entirely absent) renders identically to the ungrouped baseline.
+func TestShapeOpacityZeroAndOneAndAbsent(t *testing.T) {
+	shape := func(opacityAttr string) string {
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+		  <rect x="10" y="10" width="20" height="20" fill="#112233" stroke="#445566" stroke-width="4"` + opacityAttr + `/>
+		</svg>`
+	}
+
+	t.Run("opacity=0 paints nothing", func(t *testing.T) {
+		img := renderSVG(t, shape(` opacity="0"`), 40, 40)
+		got := img.RGBAAt(20, 20)
+		if got != (color.RGBA{255, 255, 255, 255}) {
+			t.Errorf("center = %+v, want untouched white (opacity=0 must paint nothing)", got)
+		}
+	})
+
+	t.Run("opacity=1 matches opacity absent", func(t *testing.T) {
+		withOne := renderSVG(t, shape(` opacity="1"`), 40, 40)
+		absent := renderSVG(t, shape(""), 40, 40)
+		p1 := withOne.RGBAAt(20, 20)
+		p2 := absent.RGBAAt(20, 20)
+		fillEdge1 := withOne.RGBAAt(10, 20)
+		fillEdge2 := absent.RGBAAt(10, 20)
+		t.Logf("center: opacity=1 -> %+v, absent -> %+v", p1, p2)
+		t.Logf("stroke edge: opacity=1 -> %+v, absent -> %+v", fillEdge1, fillEdge2)
+		if p1 != p2 {
+			t.Errorf("center opacity=1 = %+v, absent = %+v; want identical", p1, p2)
+		}
+		if fillEdge1 != fillEdge2 {
+			t.Errorf("stroke-edge opacity=1 = %+v, absent = %+v; want identical", fillEdge1, fillEdge2)
+		}
+	})
+}
+
+// TestRootOpacityApplies verifies a root <svg opacity="0.5"> applies to the
+// whole document's painted content, matching a <g opacity="0.5"> wrapping
+// the same content.
+func TestRootOpacityApplies(t *testing.T) {
+	rootOpacity := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" opacity="0.5">
+	  <rect x="0" y="0" width="40" height="40" fill="#000000"/>
+	</svg>`
+	groupOpacity := `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+	  <g opacity="0.5"><rect x="0" y="0" width="40" height="40" fill="#000000"/></g>
+	</svg>`
+
+	imgRoot := renderSVG(t, rootOpacity, 40, 40)
+	imgGroup := renderSVG(t, groupOpacity, 40, 40)
+
+	got := imgRoot.RGBAAt(20, 20)
+	want := imgGroup.RGBAAt(20, 20)
+	t.Logf("root opacity=%+v, group opacity=%+v", got, want)
+	if got != want {
+		t.Errorf("root <svg opacity> = %+v, want to match <g opacity> equivalent = %+v", got, want)
+	}
+	if got.R < 100 || got.R > 155 {
+		t.Errorf("root opacity result = %+v, want ~127 gray (50%% black over white)", got)
+	}
+}
+
 // describableShader is a minimal render.ShadingDescriber fake, used to prove
 // alphaShader delegates DescribeShading rather than hiding it (the "wrapper
 // trap" render.ShadingDescriber's doc comment warns about). Its ColorAt is

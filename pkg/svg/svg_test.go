@@ -228,52 +228,101 @@ func TestUnknownElementRecursesAsContainer(t *testing.T) {
 	}
 }
 
-// TestGroupOpacityLoggedOnce covers the group-opacity observability fix: a
-// <g opacity="..."> below 1 has no representation in the scene graph (Group
-// carries only a transform, not a Style), so per-paint alpha through its
-// children would be a plausible-but-wrong render rather than an honestly
-// flat one. Since true compositing is deferred, the scene builder must at
-// least say so — once per document, no matter how many such groups appear —
-// while a group with opacity=1 (or no opacity attribute at all) is fully
-// supported today and must NOT be logged.
-func TestGroupOpacityLoggedOnce(t *testing.T) {
+// TestGroupOpacity covers the scene-graph half of group opacity: a <g
+// opacity="..."> must set Group.Opacity to the (clamped) resolved value, no
+// warning logged, so pkg/svg/draw has something to composite. Compositing
+// itself (BeginGroup/EndGroup) is covered by pkg/svg/draw's tests.
+func TestGroupOpacity(t *testing.T) {
 	const hdr = `xmlns="http://www.w3.org/2000/svg"`
 
-	opacityLogCount := func(logs []string) int {
-		n := 0
+	opacityOf := func(t *testing.T, src string, index int) float64 {
+		t.Helper()
+		var logs []string
+		doc, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, l := range logs {
-			if strings.Contains(l, "<g opacity>") {
-				n++
+			if strings.Contains(l, "opacity") {
+				t.Errorf("unexpected opacity-related log line: %q (group opacity must not warn anymore)", l)
 			}
 		}
-		return n
+		_, root := doc.Root()
+		g, ok := root.Kids[index].(*Group)
+		if !ok {
+			t.Fatalf("kid[%d] = %#v, want *Group", index, root.Kids[index])
+		}
+		return g.Opacity
 	}
 
-	t.Run("below 1 logs once regardless of occurrence count", func(t *testing.T) {
+	t.Run("below 1 is carried on the Group", func(t *testing.T) {
 		src := `<svg ` + hdr + ` width="100" height="100">
 		  <g opacity="0.5"><rect width="10" height="10"/></g>
 		  <g opacity="0.25"><rect width="10" height="10"/></g>
 		</svg>`
-		var logs []string
-		if _, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }); err != nil {
-			t.Fatal(err)
+		if got := opacityOf(t, src, 0); got != 0.5 {
+			t.Errorf("group[0].Opacity = %v, want 0.5", got)
 		}
-		if n := opacityLogCount(logs); n != 1 {
-			t.Errorf("group-opacity log count = %d, want 1 (once per document, not once per group)", n)
+		if got := opacityOf(t, src, 1); got != 0.25 {
+			t.Errorf("group[1].Opacity = %v, want 0.25", got)
 		}
 	})
 
-	t.Run("opacity=1 and absent opacity are not logged", func(t *testing.T) {
+	t.Run("opacity=1 and absent opacity default to 1", func(t *testing.T) {
 		src := `<svg ` + hdr + ` width="100" height="100">
 		  <g opacity="1"><rect width="10" height="10"/></g>
 		  <g><rect width="10" height="10"/></g>
 		</svg>`
-		var logs []string
-		if _, err := Parse([]byte(src), func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }); err != nil {
+		if got := opacityOf(t, src, 0); got != 1 {
+			t.Errorf("group[0].Opacity = %v, want 1", got)
+		}
+		if got := opacityOf(t, src, 1); got != 1 {
+			t.Errorf("group[1].Opacity = %v, want 1", got)
+		}
+	})
+
+	t.Run("clamped to [0,1]", func(t *testing.T) {
+		src := `<svg ` + hdr + ` width="100" height="100">
+		  <g opacity="5"><rect width="10" height="10"/></g>
+		  <g opacity="-1"><rect width="10" height="10"/></g>
+		</svg>`
+		if got := opacityOf(t, src, 0); got != 1 {
+			t.Errorf("group[0].Opacity = %v, want 1 (clamped)", got)
+		}
+		if got := opacityOf(t, src, 1); got != 0 {
+			t.Errorf("group[1].Opacity = %v, want 0 (clamped)", got)
+		}
+	})
+}
+
+// TestRootOpacity covers root-<svg>-level opacity: <svg opacity="..."> is
+// legal SVG and, before Group gained an Opacity field, was unreachable.
+func TestRootOpacity(t *testing.T) {
+	t.Run("root opacity is carried on the root Group", func(t *testing.T) {
+		src := `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" opacity="0.5">
+		  <rect width="10" height="10"/>
+		</svg>`
+		doc, err := Parse([]byte(src), nil)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if n := opacityLogCount(logs); n != 0 {
-			t.Errorf("group-opacity log count = %d, want 0 (guard is on <1, not on mere presence)", n)
+		_, root := doc.Root()
+		if root.Opacity != 0.5 {
+			t.Errorf("root.Opacity = %v, want 0.5", root.Opacity)
+		}
+	})
+
+	t.Run("absent root opacity defaults to 1", func(t *testing.T) {
+		src := `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+		  <rect width="10" height="10"/>
+		</svg>`
+		doc, err := Parse([]byte(src), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, root := doc.Root()
+		if root.Opacity != 1 {
+			t.Errorf("root.Opacity = %v, want 1", root.Opacity)
 		}
 	})
 }

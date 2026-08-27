@@ -22,18 +22,17 @@ type pendingShading struct {
 //
 // canEmitShading applies the decision rule from the shader-describe design: a
 // native shading is emitted only when doing so cannot silently misrender the
-// gradient. PDF's /Shading has no alpha channel (real transparency needs a soft
-// mask, out of scope here) and /Extend only models "pad" (reflect/repeat have
-// no native equivalent), so either condition forces a fallback to rasterizing,
-// which already handles both correctly.
+// gradient. /Extend only models "pad" (reflect/repeat have no native
+// equivalent), so a non-pad spread always forces a fallback to rasterizing.
+// An alpha-carrying stop no longer forces that fallback (see needsAlphaMask):
+// with luminosity soft masks available (group.go/softmask.go), the color
+// ramp emits as a native /DeviceRGB shading same as always, and the caller
+// wraps it in a parallel /DeviceGray alpha shading under an /SMask — see
+// tryNativeShading in device.go. Only the color-shading-with-no-native-
+// equivalent cases (too few stops, non-pad spread) still decline entirely.
 func canEmitShading(desc render.ShadingDesc) (reason string, ok bool) {
 	if len(desc.Stops) < 2 {
 		return "fewer than two stops", false
-	}
-	for _, s := range desc.Stops {
-		if s.Color.A != 0xFF {
-			return "a stop carries alpha (needs a soft mask, not yet supported)", false
-		}
 	}
 	if desc.Spread != render.SpreadPad {
 		return "spread method has no native PDF /Extend equivalent", false
@@ -41,16 +40,53 @@ func canEmitShading(desc render.ShadingDesc) (reason string, ok bool) {
 	return "", true
 }
 
-// buildShadingDict converts a describable, opaque, pad-spread gradient
-// description into a PDF /Shading dictionary (ISO 32000-1 §8.7.4.5): axial
-// (ShadingType 2) or radial (ShadingType 3), DeviceRGB, both ends extended, with
-// a /Function built from the stop ramp by buildRampFunction. Callers must first
+// needsAlphaMask reports whether desc carries a stop with alpha < 1, meaning
+// the color-only /Shading dictionary buildShadingDict emits must be paired
+// with a parallel /DeviceGray alpha shading wrapped in a luminosity soft mask
+// (see buildAlphaShadingDict) for the gradient's transparency to survive —
+// PDF's /Shading dictionary itself has no alpha channel (ISO 32000-1 §8.7.4.5
+// colors are always opaque device-space colors).
+func needsAlphaMask(desc render.ShadingDesc) bool {
+	for _, s := range desc.Stops {
+		if s.Color.A != 0xFF {
+			return true
+		}
+	}
+	return false
+}
+
+// buildShadingDict converts a describable, pad-spread gradient description
+// into a PDF /Shading dictionary (ISO 32000-1 §8.7.4.5): axial (ShadingType
+// 2) or radial (ShadingType 3), DeviceRGB, both ends extended, with a
+// /Function built from the stop ramp's COLOR by buildRampFunction (alpha, if
+// any, is carried separately — see buildAlphaShadingDict). Callers must first
 // confirm canEmitShading(desc) returned ok=true.
 func buildShadingDict(desc render.ShadingDesc) Dict {
+	return shadingDictWith(desc, "DeviceRGB", buildRampFunction(desc.Stops))
+}
+
+// buildAlphaShadingDict builds the PARALLEL /DeviceGray shading dictionary
+// that carries desc's per-stop ALPHA as a coverage ramp, sharing desc's exact
+// geometry (/Coords), extend behavior, and offset segmentation with the color
+// shading buildShadingDict emits — only the color space and /Function
+// (buildAlphaRampFunction, not buildRampFunction) differ. Painted through a
+// luminosity soft mask (see EndGroup and tryNativeShading in device.go), this
+// is what lets a gradient with a transparent stop still emit as native PDF
+// vector content instead of rasterizing (the design doc's "lift the alpha-
+// gradient fallback" — only the alpha half lifts; a non-pad spread still has
+// no native equivalent and is unaffected by this function).
+func buildAlphaShadingDict(desc render.ShadingDesc) Dict {
+	return shadingDictWith(desc, "DeviceGray", buildAlphaRampFunction(desc.Stops))
+}
+
+// shadingDictWith builds the /ShadingType/Coords/Extend structure shared by
+// buildShadingDict and buildAlphaShadingDict, parameterized by color space
+// and the already-built /Function (the one place the two differ).
+func shadingDictWith(desc render.ShadingDesc, colorSpace string, fn Dict) Dict {
 	dict := Dict{
-		"ColorSpace": Name("DeviceRGB"),
+		"ColorSpace": Name(colorSpace),
 		"Extend":     Array{Bool(true), Bool(true)},
-		"Function":   buildRampFunction(desc.Stops),
+		"Function":   fn,
 	}
 	switch desc.Kind {
 	case render.ShadingRadial:
@@ -87,26 +123,50 @@ func buildShadingDict(desc render.ShadingDesc) Dict {
 // length a page-space PDF would realistically use.
 const minStopSpan = 5e-4
 
-// buildRampFunction converts a non-decreasing stop list into a PDF /Function:
-// a single FunctionType 2 (exponential, N=1 = linear) for exactly two stops, or
-// a FunctionType 3 (stitching) over one Type 2 per segment for more than two.
-// Coincident (or near-coincident) offsets are nudged apart by minStopSpan so
-// /Bounds stays strictly increasing (PDF requires this; a zero-width interval
-// is undefined behavior for a reader) while still rendering as a hard color
-// break rather than a smeared ramp, since the nudge is imperceptibly small.
-//
+// buildRampFunction converts a non-decreasing stop list into a PDF /Function
+// ramping across each stop's straight RGB (alpha ignored — canEmitShading's
+// color/alpha split means a caller building THIS function already knows any
+// alpha is carried separately, by buildAlphaRampFunction under a soft mask).
 // Callers must pass at least two stops (canEmitShading enforces this before
 // buildShadingDict is ever reached).
 func buildRampFunction(stops []render.ShadingStop) Dict {
+	return buildStitchedFunction(stops, rgbArray)
+}
+
+// buildAlphaRampFunction converts the SAME stop list's ALPHA channel (not
+// color) into a parallel PDF /Function for a /DeviceGray shading: one gray
+// component per stop, equal to that stop's alpha in [0,1]. Sharing
+// buildStitchedFunction with buildRampFunction guarantees the two functions
+// agree on every /Bounds/Encode/interpolation-segment structural decision
+// (spreadOffsets, stitching vs. a single exponential) — the color and alpha
+// shadings must ramp over EXACTLY the same domain segmentation for the
+// combined result (color modulated by the soft mask's alpha) to line up
+// per-pixel with what a rasterized fallback would have produced.
+func buildAlphaRampFunction(stops []render.ShadingStop) Dict {
+	return buildStitchedFunction(stops, alphaArray)
+}
+
+// buildStitchedFunction converts a non-decreasing stop list into a PDF
+// /Function: a single FunctionType 2 (exponential, N=1 = linear) for exactly
+// two stops, or a FunctionType 3 (stitching) over one Type 2 per segment for
+// more than two. Coincident (or near-coincident) offsets are nudged apart by
+// minStopSpan so /Bounds stays strictly increasing (PDF requires this; a
+// zero-width interval is undefined behavior for a reader) while still
+// rendering as a hard break rather than a smeared ramp, since the nudge is
+// imperceptibly small. comps extracts the per-stop /C0,/C1 component array
+// (RGB for the color ramp, a single gray value for the alpha ramp), so this
+// one implementation backs both buildRampFunction and
+// buildAlphaRampFunction.
+func buildStitchedFunction(stops []render.ShadingStop, comps func(color.RGBA) Array) Dict {
 	offsets := spreadOffsets(stops)
 	n := len(stops)
 	if n == 2 {
-		return exponentialFunc(stops[0], stops[1])
+		return exponentialFunc(stops[0], stops[1], comps)
 	}
 
 	functions := make(Array, n-1)
 	for i := 0; i < n-1; i++ {
-		functions[i] = exponentialFunc(stops[i], stops[i+1])
+		functions[i] = exponentialFunc(stops[i], stops[i+1], comps)
 	}
 	bounds := make(Array, n-2)
 	for i := 0; i < n-2; i++ {
@@ -125,16 +185,15 @@ func buildRampFunction(stops []render.ShadingStop) Dict {
 	}
 }
 
-// exponentialFunc builds a FunctionType 2 (exponential interpolation, N=1 so it
-// is exactly linear) dictionary ramping from c0 to c1 across straight RGB.
-// Alpha is not encoded — canEmitShading already required every stop be fully
-// opaque before a caller reaches here.
-func exponentialFunc(c0, c1 render.ShadingStop) Dict {
+// exponentialFunc builds a FunctionType 2 (exponential interpolation, N=1 so
+// it is exactly linear) dictionary ramping from c0 to c1, using comps to
+// extract each stop's /C0,/C1 component array (see buildStitchedFunction).
+func exponentialFunc(c0, c1 render.ShadingStop, comps func(color.RGBA) Array) Dict {
 	return Dict{
 		"FunctionType": Int(2),
 		"Domain":       Array{Real(0), Real(1)},
-		"C0":           rgbArray(c0.Color),
-		"C1":           rgbArray(c1.Color),
+		"C0":           comps(c0.Color),
+		"C1":           comps(c1.Color),
 		"N":            Int(1),
 	}
 }
@@ -147,6 +206,14 @@ func rgbArray(c color.RGBA) Array {
 		Real(float64(c.G) / 255),
 		Real(float64(c.B) / 255),
 	}
+}
+
+// alphaArray converts c's alpha channel to a 1-element PDF array in [0,1],
+// the shape /C0 and /C1 need for a DeviceGray alpha ramp (see
+// buildAlphaRampFunction) — one gray component per stop, equal to that
+// stop's own alpha.
+func alphaArray(c color.RGBA) Array {
+	return Array{Real(float64(c.A) / 255)}
 }
 
 // spreadOffsets returns stops' offsets nudged so that every value that will

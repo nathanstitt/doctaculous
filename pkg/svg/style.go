@@ -40,6 +40,32 @@ type Style struct {
 	opacity float64    // element opacity [0,1]; NOT inherited
 	display bool       // display != none
 	visible bool       // visibility: visible (inherited)
+
+	clipRule render.FillRule // clip-rule (inherited); which winding rule a clipPath child uses for itself
+
+	// clipPathRef is the raw, unresolved clip-path property value ("none",
+	// "url(#id)", or an invalid/unrecognized value), NOT inherited (clip-path
+	// is a non-inherited property per SVG/CSS Masking). It is resolved
+	// against the document index by the scene builder (see resolveClipPath in
+	// clippath.go), not here: Style.apply only ever sees the cascade, never
+	// docIndex, so it cannot look the id up itself — the same reason
+	// fill/stroke url() references are recorded as a string here and
+	// resolved later (see fillServer/strokeServer).
+	clipPathRef string
+
+	// maskRef is the raw, unresolved mask property value ("none",
+	// "url(#id)", or an invalid/unrecognized value), NOT inherited (mask is
+	// a non-inherited property per SVG/CSS Masking, exactly like
+	// clip-path). Resolved against the document index by the scene builder
+	// (see resolveMask in mask.go), not here — see clipPathRef's doc
+	// comment for why.
+	maskRef string
+
+	// maskType is mask-type (SVG2: "luminance" (default) | "alpha"),
+	// non-inherited. Unlike maskRef, this IS a plain enum with no
+	// document-index dependency, so it is fully resolved here rather than
+	// deferred to the scene builder.
+	maskType string
 }
 
 // defaultStyle returns the SVG initial presentation state: black fill, no
@@ -65,6 +91,10 @@ func defaultStyle() Style {
 		opacity:       1,
 		display:       true,
 		visible:       true,
+		clipRule:      render.NonZero,
+		clipPathRef:   "", // not inherited; reset every apply() call below
+		maskRef:       "", // not inherited; reset every apply() call below
+		maskType:      "luminance",
 	}
 }
 
@@ -82,7 +112,10 @@ func defaultStyle() Style {
 // property is inherited.
 func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s := parent
-	s.opacity = 1 // not inherited; may be overridden below
+	s.opacity = 1            // not inherited; may be overridden below
+	s.clipPathRef = ""       // not inherited; may be overridden below
+	s.maskRef = ""           // not inherited; may be overridden below
+	s.maskType = "luminance" // not inherited; may be overridden below
 
 	if el == nil {
 		return s
@@ -116,6 +149,10 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyOpacityProp("opacity", &s.opacity, attr, logf)
 	applyDisplay(&s, attr, logf)
 	applyVisibility(&s, attr, logf)
+	applyClipRule(&s, attr, logf)
+	applyClipPathProp(&s, attr, logf)
+	applyMaskProp(&s, attr, logf)
+	applyMaskType(&s, attr, logf)
 
 	return s
 }
@@ -267,6 +304,81 @@ func applyFillRule(s *Style, attr func(string) (string, bool), logf func(string,
 		s.fillRule = render.EvenOdd
 	default:
 		logf("svg: ignoring %s=%q: unparseable", "fill-rule", val)
+	}
+}
+
+// applyClipRule resolves clip-rule (nonzero|evenodd), the winding rule a
+// clipPath CHILD uses to determine its own interior — distinct from
+// fill-rule, which governs how the same shape paints when it is not being
+// used as clip geometry. clip-rule is inherited, exactly like fill-rule.
+func applyClipRule(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("clip-rule")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch val {
+	case "nonzero":
+		s.clipRule = render.NonZero
+	case "evenodd":
+		s.clipRule = render.EvenOdd
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "clip-rule", val)
+	}
+}
+
+// applyClipPathProp records the raw clip-path property value for the scene
+// builder to resolve against the document index. "none" and "inherit" both
+// clear/keep clipPathRef as appropriate; anything else (including a
+// syntactically invalid url()) is recorded verbatim — resolveClipPath is
+// where an invalid FuncIRI is distinguished from a valid one that doesn't
+// resolve, both of which mean "no clipping" per SVG's error-handling model.
+func applyClipPathProp(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("clip-path")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		s.clipPathRef = ""
+		return
+	}
+	s.clipPathRef = val
+}
+
+// applyMaskProp records the raw mask property value for the scene builder to
+// resolve against the document index, mirroring applyClipPathProp exactly:
+// "none" and "inherit" both clear/keep maskRef as appropriate; anything else
+// (including a syntactically invalid url()) is recorded verbatim —
+// resolveMask is where an invalid FuncIRI is distinguished from a valid one
+// that doesn't resolve, both of which mean "no masking" per SVG's
+// error-handling model.
+func applyMaskProp(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("mask")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		s.maskRef = ""
+		return
+	}
+	s.maskRef = val
+}
+
+// applyMaskType resolves mask-type (SVG2: luminance|alpha), non-inherited.
+// An unrecognized value is logged and ignored, keeping the default
+// (luminance) — matching applyFillRule's error-handling shape for an
+// unparseable enum.
+func applyMaskType(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("mask-type")
+	if !ok || val == "inherit" {
+		return
+	}
+	switch val {
+	case "luminance", "alpha":
+		s.maskType = val
+	default:
+		logf("svg: ignoring %s=%q: unparseable", "mask-type", val)
 	}
 }
 
@@ -476,4 +588,31 @@ func (s Style) StrokePaint() (render.StrokePaint, bool) {
 // Opacity returns the element's own (non-inherited) opacity in [0,1].
 func (s Style) Opacity() float64 {
 	return s.opacity
+}
+
+// ClipRule returns the element's resolved (inherited) clip-rule, used only
+// when this element appears as a <clipPath> child to determine its own
+// interior for the union.
+func (s Style) ClipRule() render.FillRule {
+	return s.clipRule
+}
+
+// ClipPathRef returns the element's raw, unresolved (non-inherited)
+// clip-path property value ("url(#id)" or an invalid value) and whether one
+// is present ("" / absent / "none" report ok=false).
+func (s Style) ClipPathRef() (string, bool) {
+	return s.clipPathRef, s.clipPathRef != ""
+}
+
+// MaskRef returns the element's raw, unresolved (non-inherited) mask
+// property value ("url(#id)" or an invalid value) and whether one is
+// present ("" / absent / "none" report ok=false).
+func (s Style) MaskRef() (string, bool) {
+	return s.maskRef, s.maskRef != ""
+}
+
+// MaskTypeValue returns the element's resolved (non-inherited) mask-type
+// value: "luminance" (default) or "alpha".
+func (s Style) MaskTypeValue() string {
+	return s.maskType
 }
