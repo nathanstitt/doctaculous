@@ -627,6 +627,49 @@ func TestFilterAllocationIsProportionalToTheRegionNotTheCanvas(t *testing.T) {
 
 // TestFilterNestingCapLogsItsOwnReason pins that a nesting overflow reports
 // NESTING rather than borrowing the region cap's message, which sent a reader
+// TestFilteredGroupSurvivesPlainNestingPastTheCompositingCap pins the cliff
+// that made a filtered group's content vanish outright.
+//
+// groupUserBounds measures an objectBoundingBox filter region by walking the
+// subtree. It used to abandon that walk at maxGroupNestingDepth — but that
+// constant counts offscreen COMPOSITING groups, and plain nested <g>s
+// composite nowhere and paint fine far past it. So a filtered group whose
+// content sat 17+ plain <g>s deep measured an empty box, and the element was
+// dropped SILENTLY: no log, no degradation, just missing content. Measured at
+// the time: 16 levels painted 160,000px, 17 levels painted 0.
+//
+// The depths here straddle that old boundary exactly, so a regression puts
+// the cliff back and this fails on the deep cases while the shallow one still
+// passes.
+func TestFilteredGroupSurvivesPlainNestingPastTheCompositingCap(t *testing.T) {
+	for _, depth := range []int{maxGroupNestingDepth - 1, maxGroupNestingDepth + 1, 64} {
+		body := `<rect x="10" y="10" width="60" height="60" fill="rgb(0,0,255)"/>`
+		for i := 0; i < depth; i++ {
+			body = `<g>` + body + `</g>`
+		}
+		// The filter is objectBoundingBox (the default), so it MUST measure
+		// the subtree — a userSpaceOnUse region would sidestep the walk and
+		// prove nothing. feFlood replaces the content with a flat colour, so
+		// whether the filter actually RAN is directly observable: filtered
+		// gives lime, unfiltered leaves the blue rect. Asserting merely that
+		// something was painted would pass on the unfiltered fallback too,
+		// and so would not detect the walk truncating.
+		src := `<svg ` + filterHdr + ` width="100" height="100">
+		  <filter id="f"><feFlood flood-color="rgb(0,255,0)"/></filter>
+		  <g filter="url(#f)">` + body + `</g></svg>`
+		img, logs := renderFilterSVG(t, src, 100, 100)
+
+		if c := img.RGBAAt(40, 40); c.G < 200 || c.B > 60 {
+			t.Errorf("nesting depth %d: center = %+v, want the flood colour; the filter did not run, so the bbox walk truncated and the element fell back to unfiltered", depth, c)
+		}
+		for _, l := range logs {
+			if strings.Contains(l, "measuring an objectBoundingBox") {
+				t.Errorf("nesting depth %d: degraded with %q, but this depth is well within what the parser accepts and must filter normally", depth, l)
+			}
+		}
+	}
+}
+
 // looking at a region that was never the problem.
 func TestFilterNestingCapLogsItsOwnReason(t *testing.T) {
 	// Nest filtered groups deeper than maxFilterNestingDepth.

@@ -812,7 +812,32 @@ func primitiveSubregion(p *svg.FilterPrimitive, f *svg.Filter, region image.Rect
 // ok=false for a group with no drawable descendant (an empty <g>), which per
 // SVG means an objectBoundingBox filter cannot be applied and the element is
 // not rendered — the resvg on-an-empty-group-2 behavior.
-func (r *Renderer) groupUserBounds(node *svg.Group, warned *warnFlags) boundsFunc {
+// maxBBoxWalkDepth bounds how deep groupUserBounds descends.
+//
+// It is deliberately MUCH larger than maxGroupNestingDepth. That limit counts
+// offscreen COMPOSITING groups (see draw.go), while this walk descends plain
+// nested <g>s that composite nowhere and paint fine far past it — measuring
+// with the compositing limit silently truncated the box for trees that render
+// perfectly well, so a filtered group nested 17 deep vanished entirely.
+//
+// Set to match pkg/svg's maxElementDepth, which means it is defense in depth
+// rather than the binding constraint: the parser truncates a deeper document
+// (with its own log) before the scene ever reaches this walk. Keeping the two
+// equal is what makes that true — lowering this one would reintroduce a
+// silent cliff for documents the parser accepted.
+const maxBBoxWalkDepth = 1024
+
+// groupUserBounds measures a group subtree's extent in the group's own user
+// space, for an objectBoundingBox filter region.
+//
+// The returned truncated flag reports that the walk hit maxBBoxWalkDepth and
+// the box therefore covers only part of the subtree. That distinction is
+// load-bearing: a silently-short box makes filterSpace compute a region that
+// omits real content, and the caller would then paint an element missing
+// pieces — or, when nothing at all was measured, drop it entirely with no
+// diagnostic. Callers must degrade to unfiltered instead.
+func (r *Renderer) groupUserBounds(node *svg.Group, warned *warnFlags) (bounds boundsFunc, truncated *bool) {
+	hitCap := false
 	return func() (minX, minY, maxX, maxY float64, ok bool) {
 		add := func(x0, y0, x1, y1 float64) {
 			if !ok {
@@ -824,10 +849,8 @@ func (r *Renderer) groupUserBounds(node *svg.Group, warned *warnFlags) boundsFun
 		}
 		var walk func(n svg.Node, m render.Matrix, depth int)
 		walk = func(n svg.Node, m render.Matrix, depth int) {
-			if depth > maxGroupNestingDepth {
-				// Bound the walk the same way painting is bounded, so a
-				// pathological tree cannot make bbox measurement itself the
-				// expensive operation.
+			if depth > maxBBoxWalkDepth {
+				hitCap = true
 				return
 			}
 			switch k := n.(type) {
@@ -886,7 +909,7 @@ func (r *Renderer) groupUserBounds(node *svg.Group, warned *warnFlags) boundsFun
 			walk(kid, render.Identity, 0)
 		}
 		return minX, minY, maxX, maxY, ok
-	}
+	}, &hitCap
 }
 
 // logFilterUnsupportedOnce emits the unsupported-primitive notice the first
@@ -920,6 +943,21 @@ func (r *Renderer) logFilterNestingCapOnce(warned *warnFlags) {
 	}
 	warned.filterNestingCap = true
 	r.Logf("svg: filter nesting exceeded %d levels; the element was rendered unfiltered", maxFilterNestingDepth)
+}
+
+// logFilterBBoxDepthCapOnce emits the subtree-too-deep-to-measure notice the
+// first time it is needed for the current DrawVector call.
+//
+// Kept separate from the other two caps for the same reason they are separate
+// from each other: this one fires while MEASURING an objectBoundingBox region,
+// not while applying the filter, so reporting it as a nesting or region
+// overflow would point a reader at the wrong thing entirely.
+func (r *Renderer) logFilterBBoxDepthCapOnce(warned *warnFlags) {
+	if warned.filterBBoxCap || r.Logf == nil {
+		return
+	}
+	warned.filterBBoxCap = true
+	r.Logf("svg: group nesting exceeded %d levels while measuring an objectBoundingBox filter region; the element was rendered unfiltered", maxBBoxWalkDepth)
 }
 
 // logFilterRegionCapOnce emits the filter-region-too-large notice the first

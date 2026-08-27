@@ -67,6 +67,7 @@ type warnFlags struct {
 	filterNoRaster    bool
 	filterRegionCap   bool
 	filterNestingCap  bool
+	filterBBoxCap     bool
 
 	// filterDepth counts filters currently being applied on the stack: a
 	// filtered element inside another filter's source content. Each level
@@ -237,8 +238,24 @@ func (r *Renderer) paintGroupBody(dev render.Device, node *svg.Group, gm render.
 		unfiltered.ClipPath = nil
 		unfiltered.Mask = nil
 		outAlpha := alpha * clamp01(node.Opacity)
-		r.paintFilteredThenClip(dev, node.ClipPath, node.Mask, gm, r.groupUserBounds(node, warned), outAlpha, func(target render.Device, a float64) {
-			r.paintFilteredAlpha(target, node.Filter, gm, r.groupUserBounds(node, warned), warned, a, func(inner render.Device) {
+		clipBounds, _ := r.groupUserBounds(node, warned)
+		filterBounds, filterBoundsTruncated := r.groupUserBounds(node, warned)
+		r.paintFilteredThenClip(dev, node.ClipPath, node.Mask, gm, clipBounds, outAlpha, func(target render.Device, a float64) {
+			// A subtree too deep to measure yields a box covering only part
+			// of it. Filtering against that would silently omit content (or,
+			// with nothing measured at all, drop the element), so degrade to
+			// unfiltered with a diagnostic — the same trade every other cap
+			// in filter.go makes.
+			if filterBounds != nil {
+				if _, _, _, _, _ = filterBounds(); *filterBoundsTruncated {
+					r.logFilterBBoxDepthCapOnce(warned)
+					paintUnfiltered(target, a, func(inner render.Device) {
+						r.paintGroupBody(inner, &unfiltered, gm, 1, warned)
+					})
+					return
+				}
+			}
+			r.paintFilteredAlpha(target, node.Filter, gm, filterBounds, warned, a, func(inner render.Device) {
 				r.paintGroupBody(inner, &unfiltered, gm, 1, warned)
 			})
 		})
