@@ -746,9 +746,56 @@ read+write vocabulary for the tinycld text adoption path):
   whole-document total (a per-subtree counter would reset on every sibling and let such a graph
   through) and sits about an order of magnitude above the largest realistic icon sprite sheet, so
   legitimate documents are never truncated.
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: text, filters,
-  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 6–8 slices in
+- **`<text>` and `<tspan>` as vector outlines** — the core text pipeline. SVG text is shaped by the
+  SAME `inline.Shape` the CSS reflow engine uses, not a second shaper: `Shape` is a pure function
+  that is not fused to line-breaking, so SVG calls it and walks the flat `[]Glyph` accumulating
+  advances, skipping `Break`/`MakeLine`/`Place` entirely (those need a width to wrap against, and
+  SVG text does not wrap). Arabic harfbuzz shaping and per-rune script fallback happen inside
+  `Shape`, so SVG gets them for free, and `inline.Reorder` supplies UAX#9 bidi on the same flat
+  slice. Supported: the per-character `x`/`y`/`dx`/`dy`/`rotate` LISTS with SVG's full rule set
+  (absolute resets start a new text chunk, relative offsets accumulate, a short list stops applying
+  — except `rotate`, whose last value persists), `text-anchor` (`start`/`middle`/`end`, resolved per
+  CHUNK and DIRECTION-RELATIVE, so `start` anchors the right edge in an rtl chunk), `<tspan>` nesting
+  with an inherited position cursor and per-tspan style, `font-family`/`font-size`
+  (incl. `em`/`ex`/percentage against the parent, and the CSS size keywords)/`font-weight`
+  (incl. `bolder`/`lighter`)/`font-style`, `direction`, `unicode-bidi: bidi-override`, both
+  `xml:space` modes, and the SVG 2 `clip-path`/`mask`/`opacity` properties on a `<tspan>`.
+  `<text>` also works as `<clipPath>` and `<mask>` geometry.
+- SVG text paints through `Device.FillGlyph`/`Stroke`, **never `DrawGlyph`** — so it routes through
+  the same `paintFill`/`paintStroke` helpers a `<path>` uses and gets gradients, patterns, and
+  independent fill+stroke for free. `DrawGlyph` emits PDF text-showing operators, which cannot
+  express a per-glyph transform (SVG's `rotate`), independent fill and stroke on one glyph, or a
+  glyph acting as clip/mask geometry. **The cost, stated plainly: SVG text in PDF output is vector
+  outlines, not selectable or searchable text.**
+- Known scope limits of SVG text, each degrading with a log: **`<textPath>`** renders its text on a
+  straight baseline (arc-length parameterization of a `render.Path` is a subsystem of its own) and
+  **`writing-mode`** renders horizontally (vertical metrics need `vhea`/`vmtx` reading `pkg/font`
+  does not do). **`<tref>` is dropped, not deferred** — it was removed from SVG 2 and is
+  unimplemented in every current browser. `textLength`/`lengthAdjust`, `letter-spacing`/
+  `word-spacing`, the baseline attributes, and `text-decoration` are a later slice. A ligature or
+  cursive join spanning a `<tspan>` boundary does not form, since the two sides reach the shaper as
+  separate runs. An `objectBoundingBox` paint server on text resolves against an approximated box (a
+  text chunk's true box needs shaping, which happens a layer away from where paint servers resolve);
+  `userSpaceOnUse` is exact. Text is bounded against hostile input by a `<tspan>` nesting cap and a
+  whole-document character budget (`maxTextChars`, 200,000), both logged once.
+- Not yet, each degrading with a `WithLogf` debug line rather than failing: filters,
+  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 7–8 slices in
   `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- 100 curated fixtures from the resvg suite's `text/**` tranche land with SVG text, with committed
+  goldens: `text/` (25), `tspan/` (25), `text-anchor/` (11), `font-size/` (16), `font-weight/` (12),
+  `font-family/` (6), `font-style/` (3), `direction/` (1), `unicode-bidi/` (1). Most of that suite
+  names a font this repo does not bundle, so every golden differs from resvg's reference in glyph
+  SHAPE — each file was vendored only because its claim is GEOMETRIC (anchoring, per-character
+  positioning, whitespace, clipping) and survives substitution, and each was compared against the
+  reference by eye first. Fixtures whose reference cannot be matched for font reasons were SKIPPED
+  with the reason recorded rather than committing a golden that locks in a substituted rendering as
+  if it were correct; see `testdata/svg/resvg/README.md`. The sweep found five real bugs in SVG text
+  (`clip-path`/`mask` ignored on a `<tspan>`; bidi reordered before the pen walk, so an absolute `x`
+  landed on the wrong glyph; `text-anchor` not direction-relative; `unicode-bidi: bidi-override`
+  doing nothing to Latin; and source indentation stealing the following `<tspan>`'s `x`) plus two
+  outside `pkg/svg`: `pkg/font` glyph outlines carried a leading drawing op before any move-to, so
+  every glyph's `Bounds` stretched back to the origin, and `inline.Reorder` emitted a multi-rune
+  cluster glyph once per RUNE, returning more glyphs than it was given.
 - 74 curated fixtures from the resvg test suite's `masking/**` tranche (MIT, commit
   `d8e064337faf01bc5a9579187a56dbdbe3eacc72`; see `testdata/svg/resvg/README.md` for the earlier
   tranches' counts) land with this feature: `clipPath/` (37) and `mask/` (37), all with committed
