@@ -95,6 +95,16 @@ backend-agnostic so a new backend can be added without touching parsing, interpr
   `go test ./pkg/render/raster -run TestGolden -update`, then **eyeball every changed PNG in the PR**
   — an unexplained golden diff is a regression. Goldens are committed; the fixtures that produce them
   are generated, so the chain stays hermetic. HTML/DOCX also carry WPT-style reftests.
+  - **`-update` rewriting a golden does NOT mean it was stale.** A handful of goldens
+    (`docx-model-specimen`, `md-specimen`, and some masking ones) get new BYTES on every
+    `-update` while remaining pixel-identical or well inside tolerance — PNG encoding is not
+    byte-stable across runs even when the rendered pixels are. Rendering itself IS
+    deterministic (verified: repeated renders hash identically). Judge staleness by the
+    tolerance check, never by `git status`.
+  - **Compare PNGs by decoded pixels, not raw bytes.** These files use per-row PNG filters
+    (Paeth/Average/Sub/Up), so a byte-level diff reads filter RESIDUALS, where one changed
+    pixel perturbs every byte after it — a 1/255 difference can look like 7% of the file.
+    Use the harness's own `compareImages`, or decode properly, before concluding anything.
 - **Benchmarks**: `BenchmarkRasterizePages` proves goroutine speedup vs. `--workers 1`. Run the
   race detector (`go test -race ./...`) since concurrency is core.
 - Tests must be hermetic and fast: no network (HTTP paths use `net/http/httptest` loopback).

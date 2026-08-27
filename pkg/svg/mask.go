@@ -92,6 +92,56 @@ func (b *sceneBuilder) resolveMaskRef(ref string) *Mask {
 // resolveMaskRefAt is resolveMaskRef with an explicit chain depth, for a
 // mask reference discovered while already resolving another mask (its own
 // self-reference).
+// maskRefCycles reports whether following ref's mask="url(#...)" chain leads
+// back to a mask already under construction (including from, the mask that
+// carries ref) — i.e. whether ref is the link that closes a cycle.
+//
+// It resolves nothing and builds nothing: it walks ids through the document
+// index reading only each <mask>'s own mask attribute, so it is safe to call
+// while resolveMask is mid-build and cannot itself recurse into the cycle it
+// is looking for. maxMaskChainDepth bounds a long acyclic chain, mirroring
+// resolveMask's own bound.
+func (b *sceneBuilder) maskRefCycles(ref, from string) bool {
+	seen := map[string]bool{from: true}
+	for i := 0; i < maxMaskChainDepth; i++ {
+		id, ok := maskRefID(ref)
+		if !ok {
+			return false // not a resolvable reference; nothing to cycle back
+		}
+		if seen[id] || b.buildingMask[id] {
+			return true
+		}
+		seen[id] = true
+		el, ok := b.idx.ids[id]
+		if !ok || el.space != svgNS || el.local != "mask" {
+			return false // dangling or not a <mask>: unresolvable, not cyclic
+		}
+		next, ok := el.attrs["mask"]
+		if !ok {
+			return false // chain ends without returning
+		}
+		ref = next
+	}
+	// Longer than the chain bound: resolveMask's own depth cap stops it, and
+	// reporting "cyclic" here would silently drop a legitimate deep chain.
+	return false
+}
+
+// maskRefID extracts the fragment id from a mask="url(#...)" value, reporting
+// false for any value that is not a resolvable local url() reference. It is
+// the id-only half of resolveMaskRefAt, split out so maskRefCycles can walk a
+// chain without resolving (and thus building) anything along it.
+func maskRefID(ref string) (string, bool) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ref)), "url(") {
+		return "", false
+	}
+	id, _, ok := parsePaintServerRef(ref)
+	if !ok {
+		return "", false
+	}
+	return fragmentID(id)
+}
+
 func (b *sceneBuilder) resolveMaskRefAt(ref string, depth int) *Mask {
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ref)), "url(") {
 		// Not a url() reference at all (some other invalid value, e.g. a bare
@@ -146,7 +196,31 @@ func (b *sceneBuilder) resolveMask(id string, depth int) *Mask {
 	m.RegionX, m.RegionY, m.RegionW, m.RegionH = maskRegion(el, m.Units, b.vp)
 
 	if ref, ok := selfStyle.MaskRef(); ok {
-		m.Self = b.resolveMaskRefAt(ref, depth+1)
+		// A mask="url(#...)" on a <mask> attenuates that mask's own content
+		// (see buildMask's msk.Self branch). When the chain from here leads
+		// back to a mask already under construction, the reference is CYCLIC
+		// and must contribute nothing at all — dropping it, rather than
+		// resolving a truncated version of it.
+		//
+		// The distinction is load-bearing and was a real bug. Resolving
+		// through the cycle used to return a mask whose OWN Self had been
+		// nil'd by the buildingMask guard one level deeper, so this mask kept
+		// it and multiplied by it — one attenuation more than any other
+		// renderer applies. On the corpus's recursive-on-self fixture (mask1
+		// and mask2 referencing each other) that made the result the product
+		// of both gradients: symmetric in x AND y, and ~4x too faint, where
+		// every other renderer shows just mask2's own rotated gradient.
+		//
+		// Dropping the cyclic link matches resvg, whose parser rewrites a
+		// cyclic mask attribute to "none" before rendering
+		// (usvg/src/parser/svgtree/parse.rs, fix_recursive_links). Verified
+		// against usvg directly: for that fixture it resolves the element's
+		// mask to mask2 with self_mask=None. Chrome, Firefox, Safari, resvg,
+		// and Inkscape all agree on this fixture (resvg-test-suite
+		// results.csv), so it is interoperable behavior, not a coin flip.
+		if !b.maskRefCycles(ref, id) {
+			m.Self = b.resolveMaskRefAt(ref, depth+1)
+		}
 	}
 
 	// A <mask>'s content is not part of the ordinary scene tree (a <mask>
