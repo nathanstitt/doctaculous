@@ -403,27 +403,55 @@ func reorderChunk(run []placedGlyph) {
 	// for ordering — Atomic, which it treats as an opaque payload — makes the
 	// permutation exact and total. Runes must stay untouched: they are what
 	// the algorithm reads to classify each glyph's bidi character type.
-	tagged := make([]inline.Glyph, len(run))
+	tagged := make([]inline.Glyph, 0, len(run)+2)
 	idx := make([]inline.AtomicItem, len(run))
-	for i := range run {
-		tagged[i] = run[i].glyph
-		idx[i] = inline.AtomicItem{Ref: i}
-		tagged[i].Atomic = &idx[i]
+
+	// unicode-bidi: bidi-override forces EVERY character into the base
+	// direction rather than letting UAX#9 choose per character, so Latin
+	// inside an rtl override reads backwards too. That is precisely what the
+	// Unicode override controls mean, so the run is bracketed in an
+	// LRO/RLO ... PDF pair here — synthetic, zero-width, and carrying no tag,
+	// so they order the real glyphs without becoming any.
+	//
+	// They are added at REORDER time rather than folded into the shaper's
+	// input, because the pen walk between shaping and here drops control
+	// glyphs (a control must not consume a position-list entry), which would
+	// have discarded them before they could do their job.
+	override := run[0].style.BidiOverride()
+	if override {
+		open := '‭' // LRO
+		if dir == inline.DirRTL {
+			open = '‮' // RLO
+		}
+		tagged = append(tagged, inline.Glyph{Runes: []rune{open}})
 	}
+	for i := range run {
+		g := run[i].glyph
+		idx[i] = inline.AtomicItem{Ref: i}
+		g.Atomic = &idx[i]
+		tagged = append(tagged, g)
+	}
+	if override {
+		tagged = append(tagged, inline.Glyph{Runes: []rune{'‬'}}) // PDF
+	}
+
 	visual := inline.Reorder(tagged, dir)
 	if len(visual) != len(tagged) {
 		return // defensive: a reorder that changed the count is not usable
 	}
-	order := make([]int, 0, len(visual))
+	order := make([]int, 0, len(run))
 	for _, vg := range visual {
 		if vg.Atomic == nil {
-			return // tag lost: leave logical order rather than guess
+			continue // a synthetic bracket control: it maps to no real glyph
 		}
 		l, ok := vg.Atomic.Ref.(int)
 		if !ok || l < 0 || l >= len(run) {
 			return
 		}
 		order = append(order, l)
+	}
+	if len(order) != len(run) {
+		return // not a total permutation: leave logical order rather than guess
 	}
 
 	if isIdentity(order) {
@@ -610,23 +638,15 @@ func (r *Renderer) shapeChars(chars []svg.TextChar) []shapedChar {
 		for k := range span {
 			runes[k] = span[k].R
 		}
-		text := string(runes)
-		if st.BidiOverride() {
-			// unicode-bidi: bidi-override forces every character into the
-			// base direction rather than letting UAX#9 pick per character.
-			// Expressing it with the Unicode override controls means the
-			// reorder below needs no special case: LRO/RLO ... PDF is
-			// exactly what the algorithm defines the override to mean, and
-			// inline.Shape already carries bidi controls through as
-			// zero-width glyphs precisely so ordering survives shaping.
-			if st.DirectionRTL() {
-				text = "‮" + text + "‬"
-			} else {
-				text = "‭" + text + "‬"
-			}
-		}
+		// unicode-bidi: bidi-override is NOT applied here by wrapping the
+		// text in the Unicode LRO/RLO controls. That works at the shaper
+		// level, but reordering now happens after the pen walk (see
+		// reorderVisually), and the walk drops the zero-width control glyphs
+		// because they must not consume a position-list entry — so the
+		// controls would be gone by the time the reorder ran. The override is
+		// applied at reorder time instead, in reorderChunk.
 		run := inline.Run{
-			Text:   text,
+			Text:   string(runes),
 			Family: familyWithFallback(st.FontFamily()),
 			Bold:   st.FontBold(),
 			Italic: st.FontItalic(),
@@ -646,7 +666,7 @@ func (r *Renderer) shapeChars(chars []svg.TextChar) []shapedChar {
 		// around, and an absolute x meant for the first logical character
 		// would land on whichever glyph reordering happened to put first.
 		// See reorderVisually, which the caller runs on the PLACED glyphs.
-		out = append(out, mapGlyphsToChars(glyphs, span, i, st.BidiOverride())...)
+		out = append(out, mapGlyphsToChars(glyphs, span, i)...)
 		i = j
 	}
 	return out
@@ -683,17 +703,19 @@ func familyWithFallback(family string) string {
 // be located (a synthesized outline with no Runes, or reordering that moved a
 // glyph before its predecessor's match point) falls back to the span's
 // running position, which keeps every glyph placed rather than dropping it.
-func mapGlyphsToChars(glyphs []inline.Glyph, span []svg.TextChar, spanStart int, hadOverride bool) []shapedChar {
+func mapGlyphsToChars(glyphs []inline.Glyph, span []svg.TextChar, spanStart int) []shapedChar {
 	out := make([]shapedChar, 0, len(glyphs))
 	next := 0
 	for _, g := range glyphs {
 		if g.Break {
 			continue
 		}
-		if hadOverride && len(g.Runes) == 1 && isBidiControl(g.Runes[0]) {
-			// The LRO/RLO/PDF pair this function's caller wrapped the text in
-			// is layout machinery, not content: it carries no advance and
-			// must not consume a position-list entry.
+		if len(g.Runes) == 1 && isBidiControl(g.Runes[0]) {
+			// A bidi control draws nothing and has no advance, so it must not
+			// occupy a position-list entry. It is dropped here rather than
+			// carried through placement; the reorder that would have read it
+			// runs later on the placed glyphs, and gets the base direction
+			// and the override flag from the style instead.
 			continue
 		}
 		idx := -1

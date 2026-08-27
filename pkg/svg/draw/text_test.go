@@ -492,6 +492,42 @@ func TestRTLAnchorIsDirectionRelative(t *testing.T) {
 	}
 }
 
+// TestBidiOverrideReversesLatin covers unicode-bidi: bidi-override, which
+// forces EVERY character into the base direction rather than letting UAX#9
+// choose per character — so Latin inside an rtl override reads backwards.
+// The corpus's unicode-bidi/bidi-override.svg renders "This is" as "sihT si".
+func TestBidiOverrideReversesLatin(t *testing.T) {
+	visualOf := func(src string) string {
+		t.Helper()
+		doc, _ := parseSVG(t, src)
+		placed := New(doc).layoutText(firstText(t, doc))
+		var out []rune
+		for _, p := range placed {
+			if len(p.glyph.Runes) > 0 {
+				out = append(out, p.glyph.Runes[0])
+			}
+		}
+		return string(out)
+	}
+
+	const tmpl = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200"
+	  font-family="sans-serif" font-size="20"><text x="10" y="100" %s>abcd</text></svg>`
+
+	// The control first: plain rtl direction does NOT reverse Latin, because
+	// UAX#9 resolves an ltr run inside an rtl paragraph as ltr.
+	if got := visualOf(fmt.Sprintf(tmpl, `direction="rtl"`)); got != "abcd" {
+		t.Errorf("direction=rtl alone gave %q, want \"abcd\" (a Latin run stays ltr)", got)
+	}
+	// The override does reverse it.
+	if got := visualOf(fmt.Sprintf(tmpl, `direction="rtl" unicode-bidi="bidi-override"`)); got != "dcba" {
+		t.Errorf("bidi-override with direction=rtl gave %q, want \"dcba\"", got)
+	}
+	// And an ltr override leaves it alone.
+	if got := visualOf(fmt.Sprintf(tmpl, `unicode-bidi="bidi-override"`)); got != "abcd" {
+		t.Errorf("bidi-override with direction=ltr gave %q, want \"abcd\"", got)
+	}
+}
+
 // TestBidiReorderPreservesGlyphCount is a regression test for an
 // inline.Reorder bug this feature surfaced: a glyph covering several runes (an
 // Arabic contextual cluster, or a ligature) was emitted once PER RUNE, so the
