@@ -69,6 +69,16 @@ type Text struct {
 	// <text> element itself, or nil when absent. See Group.ClipPath.
 	ClipPath *ClipPath
 	Mask     *Mask
+
+	// Filter is the resolved filter reference on the <text> element itself,
+	// or nil when absent. See Group.Filter.
+	//
+	// A filter region on text uses the REAL placed-glyph extent (see
+	// pkg/svg/draw's textUserBounds), never pkg/svg's build-time textBBox
+	// estimate: textBBox assumes a half-em per character, which measures up
+	// to 2.25x off, and a filter region that wrong visibly clips the
+	// filtered result rather than merely shifting a gradient.
+	Filter *Filter
 }
 
 // TextLength is one element's textLength/lengthAdjust request: the exact
@@ -302,6 +312,13 @@ func (b *sceneBuilder) buildText(el *element, st Style, ctx *cascadeCtx) Node {
 	}
 	if ref, ok := st.MaskRef(); ok {
 		t.Mask = b.resolveMaskRef(ref)
+	}
+	if ref, ok := st.FilterRef(); ok {
+		f, ok := b.resolveFilterRef(ref)
+		if !ok {
+			return nil // not rendered at all; see buildGroupElement
+		}
+		t.Filter = f
 	}
 	return t
 }

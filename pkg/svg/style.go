@@ -61,6 +61,19 @@ type Style struct {
 	// comment for why.
 	maskRef string
 
+	// filterRef is the raw, unresolved filter property value ("none",
+	// "url(#id)", or an invalid/unrecognized value), NOT inherited (filter
+	// is a non-inherited property, exactly like clip-path and mask).
+	// Resolved against the document index by the scene builder (see
+	// resolveFilterRef in filter.go), not here — see clipPathRef's doc
+	// comment for why.
+	//
+	// UNLIKE clipPathRef/maskRef, an unresolvable value here does NOT mean
+	// "no filtering": per SVG an invalid filter reference makes the element
+	// not render at all, so resolveFilterRef reports that case distinctly
+	// and the scene builder drops the node.
+	filterRef string
+
 	// maskType is mask-type (SVG2: "luminance" (default) | "alpha"),
 	// non-inherited. Unlike maskRef, this IS a plain enum with no
 	// document-index dependency, so it is fully resolved here rather than
@@ -284,6 +297,7 @@ func defaultStyle() Style {
 		clipRule:      render.NonZero,
 		clipPathRef:   "", // not inherited; reset every apply() call below
 		maskRef:       "", // not inherited; reset every apply() call below
+		filterRef:     "", // not inherited; reset every apply() call below
 		maskType:      "luminance",
 		overflow:      "hidden", // not inherited; reset every apply() call below
 		// markerStartRef/markerMidRef/markerEndRef default to "" (no
@@ -329,6 +343,7 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	s.opacity = 1            // not inherited; may be overridden below
 	s.clipPathRef = ""       // not inherited; may be overridden below
 	s.maskRef = ""           // not inherited; may be overridden below
+	s.filterRef = ""         // not inherited; may be overridden below
 	s.maskType = "luminance" // not inherited; may be overridden below
 	s.overflow = "hidden"    // not inherited; may be overridden below
 	s.unicodeBidi = "normal" // not inherited; may be overridden below
@@ -412,6 +427,7 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyClipRule(&s, attr, logf)
 	applyClipPathProp(&s, attr, logf)
 	applyMaskProp(&s, attr, logf)
+	applyFilterProp(&s, attr, logf)
 	applyMaskType(&s, attr, logf)
 	applyOverflow(&s, attr, logf)
 	// There is deliberately no applyMarkerShorthand here: the "marker"
@@ -641,6 +657,30 @@ func applyMaskProp(s *Style, attr func(string) (string, bool), logf func(string,
 		return
 	}
 	s.maskRef = val
+}
+
+// applyFilterProp records the raw filter property value for the scene builder
+// to resolve against the document index, mirroring applyClipPathProp/
+// applyMaskProp's recording shape exactly: "none" and "inherit" both
+// clear/keep filterRef as appropriate, anything else is recorded verbatim.
+//
+// The DIFFERENCE from those two is in what an unresolvable value means, and
+// it lives in resolveFilterRef rather than here: an invalid clip-path or mask
+// degrades to "no restriction", while an invalid filter makes the element not
+// render at all. Recording verbatim (rather than validating here) is what
+// lets resolveFilterRef draw that distinction with the document index in
+// hand.
+func applyFilterProp(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("filter")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.TrimSpace(val)
+	if val == "none" {
+		s.filterRef = ""
+		return
+	}
+	s.filterRef = val
 }
 
 // applyMarkerProp records the raw value of one marker-start/-mid/-end
@@ -923,6 +963,20 @@ func (s Style) Opacity() float64 {
 	return s.opacity
 }
 
+// SetOpacity returns a copy of s with opacity replaced, clamped to [0,1].
+//
+// It exists for one narrow case: SVG applies a filter BEFORE the filtered
+// element's own opacity, so pkg/svg/draw paints the filter's source at full
+// opacity and re-applies the element's opacity to the filtered RESULT (see
+// paintShape's filter branch). Style is a value type and the scene is
+// read-only after Parse, so this returns a copy and never mutates the
+// original — the caller filters a local copy of the node, leaving the shared
+// scene untouched.
+func (s Style) SetOpacity(v float64) Style {
+	s.opacity = clamp(v, 0, 1)
+	return s
+}
+
 // ClipRule returns the element's resolved (inherited) clip-rule, used only
 // when this element appears as a <clipPath> child to determine its own
 // interior for the union.
@@ -935,6 +989,13 @@ func (s Style) ClipRule() render.FillRule {
 // is present ("" / absent / "none" report ok=false).
 func (s Style) ClipPathRef() (string, bool) {
 	return s.clipPathRef, s.clipPathRef != ""
+}
+
+// FilterRef returns the element's raw, unresolved (non-inherited) filter
+// property value and whether one is set, for the scene builder to resolve
+// against the document index. See MaskRef.
+func (s Style) FilterRef() (string, bool) {
+	return s.filterRef, s.filterRef != ""
 }
 
 // MaskRef returns the element's raw, unresolved (non-inherited) mask

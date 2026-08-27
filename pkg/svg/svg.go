@@ -52,6 +52,19 @@ type Group struct {
 	// the design doc.
 	Mask *Mask
 
+	// Filter is the resolved filter="url(#...)" reference on the <g>
+	// element itself, or nil when absent/"none". See the Filter type
+	// (filter.go) for how pkg/svg/draw turns this into a
+	// render.Device.RenderOffscreen call.
+	//
+	// A filter applies BEFORE clip-path, mask, and opacity: the element is
+	// rendered, filtered, and only then clipped/masked/faded, per SVG's
+	// rendering model. An element whose filter reference does not resolve
+	// is dropped at parse time (it does not render at all — see
+	// resolveFilterRef), so a nil here always means "no filter was
+	// requested", never "one was requested and failed".
+	Filter *Filter
+
 	// ViewportClip is a plain axis-aligned [0,w]x[0,h] rect, in the SAME
 	// local space M maps FROM (i.e. composed under M exactly like a Shape's
 	// Path composes under Shape.M), clipping this group's content to a
@@ -105,6 +118,10 @@ type Shape struct {
 	// Mask is the resolved mask="url(#...)" reference on this shape, or nil
 	// when absent/invalid/"none". See Group.Mask.
 	Mask *Mask
+
+	// Filter is the resolved filter="url(#...)" reference on this shape, or
+	// nil when absent/"none". See Group.Filter.
+	Filter *Filter
 
 	// MarkerStart, MarkerMid, MarkerEnd are the resolved marker-start/-mid/
 	// -end references in effect at this shape (inherited from an ancestor
@@ -171,6 +188,8 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 		buildingClip:    map[string]bool{},
 		maskMemo:        map[string]*Mask{},
 		buildingMask:    map[string]bool{},
+		filterMemo:      map[string]*Filter{},
+		buildingFilter:  map[string]bool{},
 		buildingUse:     map[string]bool{},
 		markerMemo:      map[string]*Marker{},
 		buildingMarker:  map[string]bool{},
@@ -352,7 +371,6 @@ var unsupportedElements = map[string]bool{
 	// buildNode for its children.
 	"tref":             true,
 	"image":            true,
-	"filter":           true,
 	"switch":           true,
 	"foreignObject":    true,
 	"svg":              true, // nested <svg>: viewport-establishing, not yet supported
@@ -441,6 +459,14 @@ var skippedElements = map[string]bool{
 	"mask":           true,
 	"symbol":         true,
 	"marker":         true,
+	// filter, like clipPath/mask/marker above, is never rendered where it
+	// appears: it is only ever instantiated through a filter="url(#...)"
+	// reference (see resolveFilter in filter.go), reached directly via
+	// idx.ids. It moved here from unsupportedElements when filters shipped,
+	// so a document containing one no longer logs "not yet supported"; a
+	// filter this engine cannot fully apply logs from the RENDERER instead,
+	// naming the specific primitive (see Filter.Unsupported).
+	"filter": true,
 }
 
 // shapeElements are the SVG basic shapes shapePath knows how to convert.
@@ -504,6 +530,17 @@ type sceneBuilder struct {
 	// call stack — directly (self-reference) or through a cycle of several
 	// masks. Mirrors buildingClip's shape exactly.
 	buildingMask map[string]bool
+
+	// filterMemo memoizes resolveFilter by id, mirroring maskMemo exactly.
+	// A nil VALUE is meaningful and cached: it records "this id does not
+	// resolve to a usable <filter>", which per SVG means every element
+	// referencing it does not render — see resolveFilter.
+	filterMemo map[string]*Filter
+
+	// buildingFilter guards against a <filter> reached again while it is
+	// already being resolved further up the call stack. Mirrors
+	// buildingMask's shape exactly.
+	buildingFilter map[string]bool
 
 	// buildingPattern guards against a pattern tile's content referencing
 	// (directly, or via its own href chain, or indirectly through a chain of
@@ -705,6 +742,18 @@ func (b *sceneBuilder) buildGroupElement(el *element, st Style, ctx *cascadeCtx)
 	if ref, ok := st.MaskRef(); ok {
 		g.Mask = b.resolveMaskRef(ref)
 	}
+	if ref, ok := st.FilterRef(); ok {
+		f, ok := b.resolveFilterRef(ref)
+		if !ok {
+			// An unresolvable filter reference means the element is NOT
+			// RENDERED (SVG's error handling, verified against the resvg
+			// invalid-FuncIRI fixture) — the opposite of clip-path/mask,
+			// where an unresolvable reference degrades to "no restriction".
+			// Dropping the node here is what implements that.
+			return nil
+		}
+		g.Filter = f
+	}
 	return g
 }
 
@@ -747,6 +796,13 @@ func (b *sceneBuilder) buildShape(el *element, st Style) Node {
 	}
 	if ref, ok := st.MaskRef(); ok {
 		s.Mask = b.resolveMaskRef(ref)
+	}
+	if ref, ok := st.FilterRef(); ok {
+		f, ok := b.resolveFilterRef(ref)
+		if !ok {
+			return nil // not rendered at all; see buildGroupElement
+		}
+		s.Filter = f
 	}
 	if markerableElements[el.local] {
 		// Per SVG2 §11.6.7, marker-start/-mid/-end paint only on path, line,
