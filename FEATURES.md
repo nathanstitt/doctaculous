@@ -698,6 +698,58 @@ read+write vocabulary for the tinycld text adoption path):
   corpus's `mask/on-group-with-transform.svg` and `mask/half-width-region-with-rotation.svg`, both of
   which render blank under this engine (a graceful degradation, not a crash) versus resvg's correctly
   bbox-relative result.
+- **SVG `<filter>` — infrastructure plus `feFlood` and `feOffset`** (`pkg/svg/filter.go` resolves the
+  graph, `pkg/svg/filter` holds the pixel math, `pkg/svg/draw/filter.go` drives it). The `filter`
+  property is wired through the same presentation-attribute/cascade path as `clip-path`/`mask`, and
+  the `<filter>` element resolves at PARSE time (the document index is gone once `Parse` returns):
+  `filterUnits`/`primitiveUnits` (opposite defaults, `objectBoundingBox`/`userSpaceOnUse`), the
+  `x`/`y`/`width`/`height` region defaulting to **-10%,-10%,120%,120%** so a filter has room to bleed
+  past its source, per-primitive subregions, and the `result`/`in`/`in2` wiring with the implicit
+  `SourceGraphic`/`SourceAlpha` inputs. A cycle is impossible BY CONSTRUCTION rather than by a
+  runtime guard: `in` may only name an EARLIER `result`, so the resolved graph is a strictly backward
+  DAG the renderer evaluates in one forward pass. An `in` naming an undefined result falls back to
+  the previous primitive's output, per spec.
+- **Filters run in linearRGB by default** — the one place this engine departs from sRGB, and the
+  likeliest source of subtly-wrong output. `color-interpolation-filters` defaults to `linearRGB`
+  (with the `sRGB` opt-out supported), so a filter converts sRGB → linear, operates, and converts
+  back, using the exact IEC 61966-2-1 transfer function INCLUDING its linear segment near zero — not
+  a `pow(2.2)` approximation, which is wrong across the range and worst in the near-black values a
+  shadow's falloff is made of. The inverse is computed rather than table-driven, since a 256-entry
+  inverse table quantizes the dark end enough to band exactly those gradients.
+- **Filter error handling is the OPPOSITE of clip-path/mask's**, and the corpus pins each case: an
+  unresolvable `filter="url(#missing)"` means the element is **not rendered at all** (not "no
+  filtering"); an empty `<filter>` outputs transparent black, so the element disappears rather than
+  passing through; a zero/negative region or primitive subregion likewise disables the element; and
+  an `objectBoundingBox` region on an element with no bounding box (an empty group) disables it,
+  while a `userSpaceOnUse` region on the same group still paints.
+- **Every unimplemented primitive degrades to the UNFILTERED element with a warn-once log naming it**
+  (`feGaussianBlur`, `feBlend`, `feComposite`, `feColorMatrix`, `feMerge`, `feDropShadow` — all
+  shipping next — plus `feTurbulence`, `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting`,
+  `feMorphology`, `feImage`, `feTile`, `feComponentTransfer`, `feDisplacementMap`). A visible
+  approximation beats a blank, and an unknown primitive never silently yields an empty result.
+  `enable-background` is DROPPED outright rather than deferred — it was removed from the spec and no
+  browser implements it — so its `BackgroundImage`/`BackgroundAlpha` inputs resolve like any other
+  unknown name.
+- **Filters rasterize, including in PDF output — stated plainly rather than discovered later.** This
+  is the one place the series' vector-native principle does not apply: a blur has no vector
+  representation and PDF has no filter operator, so **any filtered element is rasterized**, at a
+  resolution taken from the filter region and the current transform. That is what every PDF producer
+  does with SVG filters, but it is a real trade-off rather than a free lunch. The seam is
+  `render.Device.RenderOffscreen`, a third member of the `BuildClipMask`/`BuildLuminanceMask` family
+  that hands back a group's rasterized PIXELS (`*image.RGBA`) instead of a coverage mask, keeping
+  rasterization in the backend and `pkg/svg/draw` backend-agnostic. `pkg/render/pdfwrite` returns nil
+  from it — the documented "cannot rasterize offscreen" degradation — and the caller then paints the
+  element unfiltered, so PDF output keeps the content visible and correctly placed, minus the
+  filter's visual effect.
+- **A filter on `<text>` uses REAL placed-glyph bounds** (`textUserBounds`, computed from the shaped
+  glyphs), never `pkg/svg`'s build-time `textBBox` estimate. That estimate assumes a half em per
+  character and measures 0.53x–2.25x off; an `objectBoundingBox` filter region built on it would
+  visibly clip the filtered result rather than merely shifting a gradient.
+- **Filters are bounded against a build-time DoS.** The region is intersected with the part of the
+  canvas it could actually reach BEFORE any buffer is allocated, so a crafted `width="400000"` costs
+  the same pixels a sane region would; on top of that a hard per-region pixel cap, a primitive-count
+  cap, and a filter-nesting-depth cap each degrade to the unfiltered element with a log rather than
+  allocating unboundedly.
 - **`<use>` and `<symbol>` instantiation.** A `<use>` instantiates its href target as if it were a
   deep clone spliced in at the `<use>`'s own position: the clone inherits from the USE SITE, not from
   the target's document parent, so the target's own attributes win where it sets them and the
