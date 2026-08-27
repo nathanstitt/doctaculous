@@ -2,8 +2,9 @@
 
 Pure-Go, MIT-licensed document toolkit. Long-term goal: convert any document to any other format,
 author/sign PDF/DOCX/HTML, and rasterize pages to images. The core pipeline (parse → interpret →
-raster) is working end-to-end and renders real-world PDFs, DOCX, and HTML faithfully; see FEATURES.md for the full
-inventory of what has shipped, and "Status & roadmap" at the bottom for what is next.
+raster) is working end-to-end and renders real-world PDFs, DOCX, HTML, EPUB, and SVG faithfully; see
+FEATURES.md for the full inventory of what has shipped, and "Status & roadmap" at the bottom for what
+is next.
 
 ## Working directives (how to build here)
 
@@ -58,8 +59,22 @@ shaping, greedy line-breaking, alignment/justification math). `pkg/layout` retai
 types (`Pages`/`Page`/`Item`) and `pkg/layout/paint`. Font outlines come from `pkg/font`
 (`pkg/font/family.go` exposes named-family faces for reflow); `pkg/layout/font` caches them.
 
-The `Device` interface is the seam: the interpreter (PDF) and the reflow engine (DOCX/HTML) stay
-backend-agnostic so a new backend can be added without touching parsing, interpretation, or layout.
+**SVG** is a third frontend and does NOT go through `cssbox`: it is not reflowable, so `pkg/svg`
+parses to its own read-only scene graph (shapes, groups, paint servers, clips/masks, text, filters)
+and `pkg/svg/draw` paints that straight onto a `render.Device`. It shares `pkg/css` for the cascade,
+`pkg/layout/inline` for text shaping (`inline.Shape` is a pure function, not fused to line-breaking,
+so SVG skips `Break`/`MakeLine`/`Place`), and `pkg/font`/`pkg/layout/font` for faces.
+`pkg/svg/filter` holds the filter pixel math; `pkg/filtereffects` is a dependency-free parser for the
+CSS `filter` shorthand, shared by the SVG frontend and `pkg/layout/paint`'s HTML filter path.
+
+SVG reaches HTML/EPUB through `layout.VectorScene`/`VectorItem` — a `Fragment.Vector` carrier
+parallel to `Image`, painted by `paint.paintVector`. That seam is what keeps an embedded SVG
+**vector** into PDF rather than a bitmap; routing it through the raster `imageCache`/`ImageContent`
+path would silently undo it.
+
+The `Device` interface is the seam: the interpreter (PDF), the reflow engine (DOCX/HTML), and the
+SVG painter stay backend-agnostic so a new backend can be added without touching parsing,
+interpretation, or layout.
 
 ## Go practices
 
@@ -89,6 +104,25 @@ backend-agnostic so a new backend can be added without touching parsing, interpr
   locking one must-always-work path from parse through raster. Range over it where a uniform sweep
   fits (parser round-trip, golden rendering, the parallel-render benchmark). When you add a fixture
   for a new core path, add it to `gen.Core`.
+- **SVG corpus (`testdata/svg/resvg`, 848 fixtures)**: curated from resvg-test-suite (MIT, pinned
+  commit), one feature per file, with our own committed goldens under
+  `pkg/doctaculous/testdata/golden/svg-resvg/`. Provenance and every curation/exclusion decision live
+  in that directory's README — read it before adding or excluding a fixture.
+  - **The `.png` beside each fixture is NOT resvg's output.** The suite's README says `results.csv`
+    holds "results of manual testing via `tools/vdiff`", and `vdiff` renders each SVG *live* across
+    Chrome, QtSvg, Inkscape, librsvg and Batik for a human to compare — so those PNGs are curated
+    expected-result images. Verified: `shapes/circle/simple-case.png`, a plain circle, differs from a
+    fresh resvg render by 0.66% along the antialiased edge alone. **Do not try to "refresh" them from
+    a resvg build** — that is not a meaningful operation, and one attempt reported 45% of the corpus
+    as stale before the premise was caught.
+  - They are still the right thing to eyeball against: compare *intent and geometry*, not pixels,
+    since our bundled fonts and rasterizer differ. Vendor a fixture only when its geometric claim
+    stays verifiable under font substitution; otherwise skip it with a recorded reason rather than
+    committing a golden that locks in a substituted rendering as correct.
+  - When a fidelity question turns on what resvg *actually does*, build it and look
+    (`~/code/vendor/resvg`, `cargo` works out of the box). Reading `usvg`'s resolved tree settled in
+    minutes a cyclic-mask question that days of pixel archaeology could not — and revealed that one
+    committed reference was simply out of step with current resvg.
 - **Golden-image tests** (`pkg/render/raster/golden_test.go`, plus the `pkg/doctaculous` `docx-*` /
   `html-*` / `htmldoc-*` goldens): render at 72 DPI, compare to committed PNGs with a per-pixel
   tolerance (±4/channel) + 0.2% differing-pixel budget. Regenerate an intentional render change with
@@ -186,6 +220,51 @@ each degrades gracefully and is documented in the relevant spec):
   is keyed `(family, style)`).
 - **Pagination** — mid-cell / mid-item (flex/grid) content splitting of a genuinely-indivisible
   over-tall row/item overflows; positioned/float distribution within a different-width named-page run.
+- **SVG** — **DONE** as an input format (8 PRs: core, styling, paint servers, groups/clip/mask,
+  `use`/`symbol`/markers, text, filters, HTML/EPUB integration — see FEATURES.md). Vector-native
+  throughout: an SVG reaching PDF via `<img>`, inline markup, `background-image`, or an EPUB cover
+  emits real path operators, never a rasterized image (asserted on the emitted PDF, not on pixels).
+  Remaining, roughly in value order:
+  - **`<textPath>`** (44 corpus fixtures) — needs arc-length parameterization of a `render.Path`
+    plus per-glyph tangent frames. `render.Vertices` (PR 5) gives tangents at *vertices*, not at an
+    arbitrary distance along a curve, so it is a start and not a solution. Degrades to a straight
+    baseline with a log.
+  - **`writing-mode`** (25 fixtures) — needs `vhea`/`vmtx` vertical metrics `pkg/font` does not
+    parse, plus a vertical advance model; every metric in the engine is horizontal-only. Degrades to
+    horizontal with a log.
+  - **`preserveAspectRatio` on an EMBEDDED SVG** — `fitSceneTo` scales per-axis, so a CSS box whose
+    aspect differs from the document's squashes where a browser re-applies the SVG's own
+    `preserveAspectRatio` against the used size and letterboxes. Exact whenever CSS sizing preserved
+    the ratio (unsized `<img>`, one axis given, matching box) — the common case. Needs the parsed
+    value retained on `svg.Document`; `resolveSize` consumes it into `rootM` and discards it.
+  - **Filters not implemented** (each renders the element unfiltered with a log): `feTurbulence`,
+    `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting` + light sources, `feMorphology`,
+    `feImage`, `feTile`, `feComponentTransfer`, `feDisplacementMap`. `enable-background` is dropped
+    outright (removed from the spec, implemented by no browser), as is `<tref>`.
+  - **A non-uniform transform rasterizes a filter region at the wrong aspect** — `filterSpace` derives
+    a single uniform scale (`pkg/svg/draw/filter.go`); a per-axis filter space threaded through
+    `filterM`/`postM` and every primitive's subregion math would fix it. One corpus fixture measures
+    2.78% differing pixels; the tolerance was NOT widened to hide it.
+  - **`letter-spacing`/`word-spacing` are SVG-only** — implemented in `pkg/svg/style.go`, absent from
+    `ComputedStyle`, so an SVG-internal declaration works but inheriting one from an enclosing HTML
+    ancestor does not. Wiring them into reflow means facing line-breaking and justification.
+- **CSS `filter:`** — DONE for HTML boxes (all ten shorthand functions). Remaining: `backdrop-filter`
+  (needs the backdrop, not the element's own pixels — a different mechanism); native PDF filter
+  emulation via soft masks (PDF output currently paints filtered content **unfiltered**, keeping it
+  vector rather than rasterizing a page region). Two degradations are **silent** because
+  `pkg/layout/paint` has no logger — `PaintPage` takes only a Device, a Page, and a Matrix, unlike
+  the SVG side whose Renderer carries a `Logf`: the over-cap/off-device region (`maxCSSFilterPixels`
+  is 4M pixels, which a 300 DPI A4 page at ~8.7M exceeds, so a full-page filter degrades at print
+  resolution) and the 4-deep nesting cap. Threading a logger through `PaintPage` is a small, contained
+  fix worth doing. Also: the five colour-matrix helpers are DUPLICATED between
+  `pkg/layout/paint/cssfilter.go` and `pkg/svg/filterfunc.go` — they agree today (verified
+  byte-identical across all ten functions) by being kept in step, not by construction; moving them to
+  a shared package would make that structural.
+- **`rem` resolves against the element's font size, not the root** — `pkg/css/value.go` folds `rem`
+  into `UnitEm` at parse time. The CSS `filter` property resolves it correctly (its lengths resolve
+  at paint time, where the root is reachable), so `rem` is currently right for `filter` and wrong for
+  every other property. Modelling it properly needs a distinct `UnitRem` carried to where the root
+  font size is known, which every `Length` consumer would have to resolve.
 
 Out-of-scope, don't gold-plate without a concrete need: full ICC color management, JavaScript,
 interactive AcroForm widget rendering, tagged-PDF/accessibility, digital-signature verification.
