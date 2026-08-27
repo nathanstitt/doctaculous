@@ -68,12 +68,11 @@ gracefully.
 - **CSS `filter:`** — `backdrop-filter`
   (needs the backdrop, not the element's own pixels — a different mechanism); native PDF filter
   emulation via soft masks (PDF output currently paints filtered content **unfiltered**, keeping it
-  vector rather than rasterizing a page region). Two degradations are **silent** because
-  `pkg/layout/paint` has no logger — `PaintPage` takes only a Device, a Page, and a Matrix, unlike
-  the SVG side whose Renderer carries a `Logf`: the over-cap/off-device region (`maxCSSFilterPixels`
-  is 4M pixels, which a 300 DPI A4 page at ~8.7M exceeds, so a full-page filter degrades at print
-  resolution) and the 4-deep nesting cap. Threading a logger through `PaintPage` is a small, contained
-  fix worth doing. Also: the five colour-matrix helpers are DUPLICATED between
+  vector rather than rasterizing a page region). The over-cap/off-device region and the 4-deep
+  nesting cap now report through `PaintPageWithOptions`'s `Options.Logf` — see FEATURES.md.
+  Still open: the surface caps stay UNREPORTED on the PDF path, deliberately, because
+  `pkg/render/pdfwrite` already says once per document that every filter paints unfiltered there.
+  Also: the five colour-matrix helpers are DUPLICATED between
   `pkg/layout/paint/cssfilter.go` and `pkg/svg/filterfunc.go` — they agree today (verified
   byte-identical across all ten functions) by being kept in step, not by construction; moving them to
   a shared package would make that structural.

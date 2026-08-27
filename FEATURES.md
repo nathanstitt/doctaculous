@@ -1241,11 +1241,10 @@ read+write vocabulary for the tinycld text adoption path):
   **byte-identical** to a document with no declaration, since an invalid declaration is ignored
   ENTIRELY rather than applying the entries that did parse.
 
-Honest degradations. The first three log; the last two are **silent**, and that is
-stated rather than glossed — `pkg/layout/paint` has no logger to report through
-(`PaintPage` takes only a Device, a Page, and a Matrix), unlike the SVG side whose
-Renderer carries a `Logf`. Threading one in is a public API change, tracked
-separately:
+Honest degradations. Every one of them logs on the raster path; the one place a
+cap stays silent is named explicitly below rather than glossed. `pkg/layout/paint`
+carries the same optional `Logf` the rest of the engine uses — see the painter's
+own entry further down:
 
 - **PDF output paints filtered content UNFILTERED.** `pkg/render/pdfwrite`'s `RenderOffscreen`
   declines by design — PDF has no filter operator and a blur has no vector representation — so the
@@ -1262,14 +1261,36 @@ separately:
   an HTML box tree cannot resolve. The surrounding shorthand functions still apply.
 - A degenerate, off-device, or over-cap region (`maxCSSFilterPixels`, 4M pixels — the same bound the
   SVG side uses, and meaningful for the same reason: the surface is clipped to the device and its
-  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered,
-  **silently**. Note 4M is NOT above every legitimate page: a 300 DPI A4 page is ~8.7M pixels, so a
-  full-page filter renders filtered at 72 and 150 DPI and unfiltered at 300. The surface also covers
-  the border box UNIONED with the bracketed content's extents (CSS does not clip a filter's input),
-  so one far-flung positioned descendant inflates the hull and can reach the cap on an otherwise
-  modest box.
-- Filters nested more than 4 deep degrade to unfiltered, **silently**, matching the SVG side's
-  nesting bound — each live level holds its own offscreen surface, so depth bounds concurrent memory
-  rather than just CPU.
+  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered, **logged
+  once per page** with the specific cause named (over-cap, off-device, and degenerate-box are three
+  different problems and read as three different lines). Note 4M is NOT above every legitimate page:
+  a 300 DPI A4 page is ~8.7M pixels, so a full-page filter renders filtered at 72 and 150 DPI and
+  unfiltered at 300 — the over-cap line names the cap and points at the DPI, since that outcome is
+  otherwise unexplainable from the output. The surface also covers the border box UNIONED with the
+  bracketed content's extents (CSS does not clip a filter's input), so one far-flung positioned
+  descendant inflates the hull and can reach the cap on an otherwise modest box.
+- Filters nested more than 4 deep degrade to unfiltered, **logged once per page**, matching the SVG
+  side's nesting bound — each live level holds its own offscreen surface, so depth bounds concurrent
+  memory rather than just CPU.
+- **Still silent, deliberately:** the two caps above do NOT log on the **PDF** path. `pkg/render/
+  pdfwrite` calls plain `PaintPage`, because its `RenderOffscreen` always declines and it already
+  reports once per document that every filter in the file paints unfiltered — a second, narrower
+  reason for a subset of brackets would annotate an outcome already stated for all of them, and it
+  would have to fire from the concurrent per-band render phase, where the once-per-page flags are
+  per-band and so could repeat. A PDF caller therefore learns THAT its filters were not applied, but
+  not that a particular one would also have exceeded a cap.
 - Not implemented: `backdrop-filter` (it needs the backdrop, not the element's own pixels — a
   different mechanism entirely), and native PDF filter emulation via soft masks.
+
+**`paint.PaintPageWithOptions` — an optional diagnostics logger on the painter.** `PaintPage` gained
+a sibling entry point taking `paint.Options{Logf: ...}`, rather than a widened signature, so all
+existing callers stay source-compatible and byte-identical; the zero `Options` is exactly the old
+behavior. The `Logf func(string, ...any)` signature matches every other degradation logger in the
+engine (`svg/draw.Renderer.Logf`, `raster.Options.Logf`, `pdfwrite.Options.Logf`), so one func
+threads through the whole pipeline. With no logger the warn-once state is a **nil pointer** — nothing
+is allocated and nothing is captured on the per-page hot path, and the logger-less path is pinned by
+a test. Notices are warn-once **per cause, per page**, allocated per call and never stored, so the
+concurrent page fan-out cannot race on them or suppress each other's first line. The raster/reflow
+backend passes the caller's `Logf` through automatically. A test asserts the *captured output* of
+each degradation (not merely that the branch runs), and another pins that attaching a logger moves
+no pixels.
