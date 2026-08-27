@@ -1134,7 +1134,10 @@ func applyFontWeight(s *Style, parentWeight int, attr func(string) (string, bool
 		return
 	}
 	val = strings.ToLower(strings.TrimSpace(val))
-	w := parentWeight
+	// Declared without an initializer: every switch arm either assigns w or
+	// returns, so seeding it with parentWeight was dead (and misleading — the
+	// bolder/lighter arms step from parentWeight explicitly).
+	var w int
 	switch val {
 	case "normal":
 		w = 400
