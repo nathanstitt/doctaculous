@@ -1130,9 +1130,74 @@ read+write vocabulary for the tinycld text adoption path):
 - **The vector path is chosen by CONTENT TYPE, never by sniffing bytes**: an unknown/empty content
   type falls through to the raster path, so an unrecognized binary blob is not fed to an XML parser.
   A `data:` URI SVG works, carrying its own type and bypassing the loader entirely.
-- Known scope limits, each recorded rather than silently missing: `background-image: url(…svg)`,
-  EPUB cover images, and the unsupported-selector warn-once are a follow-up; CSS `filter:` on HTML
-  boxes is deferred because `layout.Page.Items` is a FLAT list and a filtered box needs to bracket
-  its subtree the way `Clips` does — a structural change to the reflow item format unrelated to SVG
-  (`pkg/filtereffects` is already shared and waiting); and `letter-spacing`/`word-spacing` do not
-  inherit across the HTML→SVG boundary, since `ComputedStyle` has no such fields.
+- **`background-image: url(*.svg)` is vector too.** `resolveBackgroundImage` previously called the
+  same `imageCache` as `<img>`, so an SVG background dead-ended there — invisibly, since a
+  background that never paints looks like a styling mistake. It now resolves through the SVG cache
+  first (`backgroundSource`), and `layout.BackgroundImageItem` carries a `Scene` alongside `Img`,
+  exactly one of which is set. The geometry model is shared verbatim between the two: tile size,
+  position, origin box and clip box are computed identically (`BackgroundImageItem.TileSize`), and
+  only the final draw call differs — `DrawImage` for a raster source, a scaled ctm handed to the
+  scene for a vector one. Asserted the same structural way as `<img>`: an SVG background emits path
+  operators and **no image XObject**, with a PNG-background control keeping that falsifiable.
+- **`background-size` uses the SVG's real intrinsic ratio.** `cover`/`contain` (and a single-axis
+  explicit size) go through `svgIntrinsic` — the same un-defaulted accessor the replaced path uses —
+  so a viewBox-only SVG contains and covers by its viewBox ratio rather than by the 300×150 default
+  `Document.WidthPt`/`HeightPt` already carry. All four size modes ship (`cover`, `contain`,
+  explicit lengths with either axis auto, and the initial `auto`).
+- **`background-repeat` TILING of an SVG is deliberately NOT implemented, and degrades visibly.**
+  Repeating a vector source interacts with the SVG's own viewBox/`preserveAspectRatio` mapping in a
+  corner most engines special-case, and a subtly wrong tile grid would be a silent fidelity bug. A
+  tiling declaration paints the image ONCE — correctly sized, positioned, and clipped, never blank —
+  and logs a warn-once naming the ref. The raster path is untouched and still tiles. Both halves are
+  covered by tests, including a control proving the suppression does not leak onto raster
+  backgrounds.
+
+**EPUB cover images** (`pkg/epub` manifest, `pkg/doctaculous` frontend):
+
+- **The OPF manifest's cover image is surfaced and rendered.** It was previously parsed and then
+  discarded — `parseBook` read `Manifest.Items` only to build `hrefByID` for spine resolution — so a
+  cover appeared only when some chapter happened to `<img>` it, which is a minority of real books.
+  `Book.CoverHref`/`CoverMediaType` now report it.
+- **Both real-world conventions resolve**: the EPUB 3 manifest property `properties="cover-image"`,
+  and the EPUB 2 de-facto `<meta name="cover" content="itemID">`. Plenty of EPUB 3 files ship both
+  for reader compatibility; both are read, and the normative EPUB 3 property wins when they disagree.
+- **Any image format works.** An SVG cover reaches the page through the same vector seam as any
+  other `<img src="*.svg">` (so it stays vector and stays sharp at any zoom); a JPEG/PNG cover takes
+  the raster path. Neither is privileged, and both are tested.
+- **The cover renders alone on the first page, ahead of the spine** — what a cover is, and the only
+  position available, since a cover-image manifest item is not part of the reading order and has no
+  place within the spine to occupy. It is constrained with `max-width: 100%` so a typical oversized
+  cover scales down whole rather than being clipped to a corner crop. Only the width is bounded: the
+  engine has no `vh` unit, and a percentage height on a replaced element has no basis in its
+  single-axis model, so a height bound would be dropped — one of the two silently.
+- **`Book.CoverInSpine` guards the duplicate.** Many EPUB 3 books put a cover XHTML document in the
+  spine that `<img>`s the same manifest item; prepending the image would then show it twice. Detected
+  both ways (the cover item IS a spine document, or a spine document references it), and the prepend
+  is skipped. A book with **no** declared cover is byte-for-byte unchanged — no section, and no
+  `break-before` on the first chapter, so it gains no leading blank page. Covered by a test.
+
+**Unsupported-selector diagnostic** (`pkg/css`, shared by HTML/DOCX/SVG):
+
+- **A selector dropped for an unimplemented construct now says so, once.** `pkg/css` supports type,
+  class, id, universal, descendant, grouping and the structural pseudo-classes, and has no child
+  (`>`), sibling (`+`, `~`), attribute, or namespace selectors. Those already failed SAFE — the rule
+  is inert, never mis-matched — but they failed SILENTLY. Design-tool SVG exports lean on
+  `[class^="cls-"]` and `.icon > path`, so an inline `<svg>` carrying its own `<style>` lost those
+  rules with no hint why. **The selector ENGINE is unchanged** (it remains roadmap item 8); only the
+  diagnostic ships here, the cheap half that item already identifies as worth doing first.
+- `Parse` cannot log — `html.UAStylesheet` is a package-level var initialized by `Parse`, so there is
+  no caller at that point to hold a logger. The records ride on `Stylesheet.Unsupported` as data
+  (deduplicated, capped) and are drained by the two places that already hold both a logger and every
+  sheet: `NewResolver` for HTML/DOCX and `pkg/svg`'s index for SVG-internal `<style>`.
+- **Warn-once per CONSTRUCT, not per selector**, and never for a UA sheet: a framework stylesheet can
+  hold hundreds of `>` rules, and blaming the author for the engine's own UA sheet would fire on
+  every document ever rendered. The negative half is tested as hard as the positive — every supported
+  selector form records nothing, a drop for a non-construct reason (a pseudo-element, `:not`, `:is`)
+  records nothing, and valid `An+B` syntax (`:nth-child(2n+1)`, and the spaced `:nth-last-child(2n +
+  1)` the parser already could not handle) is never mis-reported as a sibling combinator.
+- Known scope limits, each recorded rather than silently missing: CSS `filter:` on HTML boxes is
+  deferred because `layout.Page.Items` is a FLAT list and a filtered box needs to bracket its subtree
+  the way `Clips` does — a structural change to the reflow item format unrelated to SVG
+  (`pkg/filtereffects` is already shared and waiting); `letter-spacing`/`word-spacing` do not inherit
+  across the HTML→SVG boundary, since `ComputedStyle` has no such fields; SVG background tiling
+  degrades to one paint (above); and the selector engine itself is NOT fixed — only the diagnostic.
