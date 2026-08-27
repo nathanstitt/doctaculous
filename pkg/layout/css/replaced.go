@@ -7,6 +7,7 @@ import (
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/svg"
 )
 
 // replacedUsedSize computes the used content-box size (in points) of replaced box
@@ -136,19 +137,68 @@ func constrainRatio(w, h, minW, maxW float64, hasMaxW bool, minH, maxH float64, 
 	return w, h
 }
 
-// intrinsicSize returns b's replaced image's intrinsic pixel size (treated 1:1 as
-// points), with ok=false when b has no decodable image (no src, failed decode, or
-// a zero-area image). The decoded image is cached on the engine, so repeated calls
-// for the same src are cheap.
+// intrinsicSize returns b's replaced content's intrinsic pixel size (treated 1:1
+// as points), with ok=false when b has no usable intrinsic size (no src, failed
+// decode/parse, or a zero-area result). The decoded image / parsed SVG is cached
+// on the engine, so repeated calls for the same src are cheap.
+//
+// An SVG source is resolved through the VECTOR cache, and its intrinsic size is
+// its UN-DEFAULTED one (svgIntrinsic): the sizing authority for an embedded SVG
+// is the host's CSS, so an SVG carrying only a viewBox must contribute a ratio,
+// not the 300x150 default a standalone SVG would resolve to. The default is
+// applied here, once, only when the SVG offers neither a size nor a ratio.
 func (e *Engine) intrinsicSize(ctx context.Context, b *cssbox.Box) (iw, ih float64, ok bool) {
 	if b.Replaced == nil {
 		return 0, 0, false
+	}
+	if doc, isSVG := e.replacedSVG(ctx, b); isSVG {
+		if doc == nil {
+			return 0, 0, false // unparseable: a sized placeholder, per the degradation rule
+		}
+		if iw, ih, ok = svgIntrinsic(doc); ok && iw > 0 && ih > 0 {
+			return iw, ih, true
+		}
+		// Neither an absolute size nor a ratio: CSS's replaced-element default.
+		return svgDefaultW, svgDefaultH, true
 	}
 	d := e.images.get(ctx, b.Replaced.Attrs["src"])
 	if !d.ok || d.w <= 0 || d.h <= 0 {
 		return 0, 0, false
 	}
 	return d.w, d.h, true
+}
+
+// replacedSVG resolves b's replaced content as an SVG scene. isSVG reports that b
+// is vector content and must NOT be routed to the raster path; doc is the parsed
+// document, or nil when the source is SVG but could not be parsed (a graceful
+// degradation: the box is still reserved, nothing paints).
+//
+// Two sources feed this: inline <svg> markup, which box generation re-serialized
+// onto the replaced content, and an <img src> whose resource has an SVG content
+// type. Inline markup wins if somehow both are present, since it needs no fetch.
+func (e *Engine) replacedSVG(ctx context.Context, b *cssbox.Box) (doc *svg.Document, isSVG bool) {
+	if b.Replaced == nil {
+		return nil, false
+	}
+	if src, ok := b.Replaced.Attrs[cssbox.InlineSVGAttr]; ok {
+		d := e.inlineSVGs.get(src, e.logf)
+		return d.doc, true
+	}
+	if b.Replaced.Tag != "img" {
+		return nil, false
+	}
+	ref := b.Replaced.Attrs["src"]
+	if ref == "" {
+		return nil, false
+	}
+	p := e.svgs.get(ctx, ref)
+	if !p.ok {
+		// Not SVG at all (the common case: a PNG/JPEG <img>) -> raster path.
+		// Distinguished from "SVG that failed to parse" by asking the cache
+		// whether the ref's content type was SVG, which it recorded on the miss.
+		return nil, p.wasSVG
+	}
+	return p.doc, true
 }
 
 // specifiedReplacedLen resolves a replaced box's specified width/height: the CSS
@@ -241,6 +291,15 @@ func (e *Engine) replacedFragment(ctx context.Context, b *cssbox.Box, w, h, bord
 	}
 	if b.Replaced != nil && b.Replaced.Control != cssbox.CtrlNone {
 		frag.Control = e.controlContentFor(b, contentX, contentY, w, h)
+	} else if doc, isSVG := e.replacedSVG(ctx, b); isSVG {
+		// The VECTOR seam: carry the scene itself, never a rasterization of it.
+		// A nil doc (unparseable SVG) leaves Scene nil, so the box is reserved
+		// and nothing paints — the same degradation a failed image decode gets.
+		vc := &VectorContent{CX: contentX, CY: contentY, CW: w, CH: h}
+		if doc != nil {
+			vc.Scene = fitSceneTo(doc, w, h)
+		}
+		frag.Vector = vc
 	} else {
 		img := decodedImageFor(ctx, e, b)
 		frag.Image = &ImageContent{

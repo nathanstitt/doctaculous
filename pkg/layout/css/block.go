@@ -21,7 +21,14 @@ import (
 type Engine struct {
 	faces  *layoutfont.FaceCache
 	images *imageCache
-	logf   func(string, ...any)
+	// svgs is the VECTOR counterpart to images: an SVG resource is parsed into an
+	// svg.Document and painted through layout.VectorItem, never decoded into an
+	// image.Image. Keeping the two caches separate is what stops SVG silently
+	// acquiring a bitmap round trip.
+	svgs *svgCache
+	// inlineSVGs memoizes parses of inline <svg> markup (no ref, no loader).
+	inlineSVGs *inlineSVGCache
+	logf       func(string, ...any)
 	// measures memoizes per-box min/max-content widths within ONE layout. measureContent
 	// is a pure function of the box subtree and the (fixed) face cache, but table auto
 	// layout, grid track sizing, and flex base sizing each measure every cell/item for
@@ -54,10 +61,12 @@ func New(faces *layoutfont.FaceCache, loader resource.ResourceLoader, logf func(
 		logf = func(string, ...any) {}
 	}
 	return &Engine{
-		faces:    faces,
-		images:   newImageCache(loader, logf),
-		logf:     logf,
-		measures: make(map[*cssbox.Box]*minMaxContent),
+		faces:      faces,
+		images:     newImageCache(loader, logf),
+		svgs:       newSVGCache(loader, logf),
+		inlineSVGs: newInlineSVGCache(),
+		logf:       logf,
+		measures:   make(map[*cssbox.Box]*minMaxContent),
 	}
 }
 
@@ -1342,7 +1351,7 @@ func shiftFragmentSelf(f *Fragment, dy float64) {
 }
 
 // shiftFragmentExtras moves the page-space fields a fragment OWNS — but that are not
-// reachable through Children/Floats/Lines/Image — by (dx,dy): the box's own clip
+// reachable through Children/Floats/Lines/Image/Vector — by (dx,dy): the box's own clip
 // rectangle (ClipRect), its border-collapse grid strips (Collapsed), each positioned
 // descendant's clip-escape chain (PositionedInfo[].ClipChain), and its out-of-flow
 // positioned descendants (the abs/fixed entries of Positioned). shiftFragment delegates

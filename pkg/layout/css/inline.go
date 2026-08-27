@@ -722,6 +722,10 @@ func translateFragment(f *Fragment, dx, dy float64) {
 		f.Image.CX += dx
 		f.Image.CY += dy
 	}
+	if f.Vector != nil {
+		f.Vector.CX += dx
+		f.Vector.CY += dy
+	}
 	if f.Control != nil {
 		f.Control.CX += dx
 		f.Control.CY += dy

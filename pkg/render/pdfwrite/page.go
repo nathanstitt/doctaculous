@@ -384,6 +384,10 @@ func itemIntervals(lp *layout.Page) []vinterval {
 			out = append(out, vinterval{it.Image.YPt, it.Image.YPt + it.Image.HPt})
 		case layout.BackgroundImageKind:
 			out = append(out, vinterval{it.BgImage.ClipY, it.BgImage.ClipY + it.BgImage.ClipH})
+		case layout.VectorKind:
+			// A vector scene is indivisible (it clips to its viewport), so it counts
+			// as one straddling extent exactly like an image.
+			out = append(out, vinterval{it.Vector.YPt, it.Vector.YPt + it.Vector.HPt})
 		}
 	}
 	return out
@@ -429,6 +433,8 @@ func itemsExtent(lp *layout.Page) float64 {
 			y = it.Image.YPt + it.Image.HPt
 		case layout.BackgroundImageKind:
 			y = it.BgImage.ClipY + it.BgImage.ClipH
+		case layout.VectorKind:
+			y = it.Vector.YPt + it.Vector.HPt
 		}
 		if y > max {
 			max = y

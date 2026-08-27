@@ -31,6 +31,7 @@ type Fragment struct {
 	Lines      []LineFragment          // inline content (set for a box establishing an inline formatting context)
 	Children   []*Fragment             // child box fragments (block children; atomic inline boxes)
 	Image      *ImageContent           // decoded replaced-element image (set for a replaced box), painted in the content box
+	Vector     *VectorContent          // parsed replaced-element SVG scene (set for an SVG replaced box), painted in the content box
 	Control    *ControlContent         // form-control widget (set for a control replaced box), painted in the content box
 	BgImage    *BackgroundImageContent // decoded CSS background image (set when the box has a decodable background-image), painted behind content
 	DebugTag   string                  // optional label for test lookup; not used in paint
@@ -152,6 +153,23 @@ type ImageContent struct {
 	// PosX, PosY are the object-position as fractions of the content box's free space
 	// (0.5/0.5 = centered, the default). See layout.ImageItem.
 	PosX, PosY float64
+}
+
+// VectorContent is a resolution-independent replaced-element drawing (an SVG)
+// carried on a Fragment. It is the VECTOR sibling of ImageContent and exists
+// precisely so an SVG never has to become an image.Image: the scene flattens to a
+// layout.VectorItem, which the painter hands straight to the render.Device, so a
+// PDF backend emits real path operators instead of a rasterized bitmap.
+//
+// CX,CY,CW,CH is the fragment's content box in the same frame as the fragment's
+// own border box (so it shifts with the fragment). The content box IS the SVG
+// viewport: the scene is scaled to fill it and clipped to it (an SVG viewport is
+// overflow:hidden), which is why there is no object-fit here — the SVG's own
+// preserveAspectRatio governs how its viewBox maps into the viewport. A nil Scene
+// means the parse failed: the fragment still reserves its box, but nothing paints.
+type VectorContent struct {
+	Scene          layout.VectorScene
+	CX, CY, CW, CH float64
 }
 
 // BackgroundImageContent is a fragment's resolved CSS background image plus the
@@ -550,6 +568,19 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			},
 		})
 	}
+	// A vector replaced element (SVG) flattens to a VectorKind item, NOT an
+	// ImageKind one: layout.VectorItem carries the scene itself, so the painter
+	// hands it to the Device to draw at device resolution. A nil Scene (failed
+	// parse) emits nothing — the box is already reserved.
+	if f.Vector != nil && f.Vector.Scene != nil {
+		dst = append(dst, layout.Item{
+			Kind: layout.VectorKind,
+			Vector: layout.VectorItem{
+				Scene: f.Vector.Scene,
+				XPt:   f.Vector.CX, YPt: f.Vector.CY, WPt: f.Vector.CW, HPt: f.Vector.CH,
+			},
+		})
+	}
 	if f.Control != nil {
 		dst = f.Control.append(dst)
 	}
@@ -599,6 +630,9 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 		case layout.ImageKind:
 			dst[i].Image.XPt += dx
 			dst[i].Image.YPt += dy
+		case layout.VectorKind:
+			dst[i].Vector.XPt += dx
+			dst[i].Vector.YPt += dy
 		case layout.BackgroundImageKind:
 			dst[i].BgImage.OriginX += dx
 			dst[i].BgImage.OriginY += dy
