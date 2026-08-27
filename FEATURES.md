@@ -771,13 +771,76 @@ read+write vocabulary for the tinycld text adoption path):
   straight baseline (arc-length parameterization of a `render.Path` is a subsystem of its own) and
   **`writing-mode`** renders horizontally (vertical metrics need `vhea`/`vmtx` reading `pkg/font`
   does not do). **`<tref>` is dropped, not deferred** — it was removed from SVG 2 and is
-  unimplemented in every current browser. `textLength`/`lengthAdjust`, `letter-spacing`/
-  `word-spacing`, the baseline attributes, and `text-decoration` are a later slice. A ligature or
+  unimplemented in every current browser. A ligature or
   cursive join spanning a `<tspan>` boundary does not form, since the two sides reach the shaper as
   separate runs. An `objectBoundingBox` paint server on text resolves against an approximated box (a
   text chunk's true box needs shaping, which happens a layer away from where paint servers resolve);
   `userSpaceOnUse` is exact. Text is bounded against hostile input by a `<tspan>` nesting cap and a
   whole-document character budget (`maxTextChars`, 200,000), both logged once.
+- **`letter-spacing` and `word-spacing` on SVG text** — applied as a post-shaping advance adjustment
+  on the flat glyph slice, resolved per SOURCE CHARACTER (so a `<tspan letter-spacing="10">` inside a
+  `<text letter-spacing="3">` widens only its own gaps). Values may be a bare number, any absolute
+  unit, `em`/`ex`/`%` (against the element's own `font-size`), `normal`, or negative. `letter-spacing`
+  widens the gap AFTER each character except the last in the whole `<text>` — CSS Text 3's rule, not
+  SVG 1.1's literal wording, matching resvg (whose `letter-spacing/filter-bbox.svg` asserts the flush
+  trailing edge with a filter region and states the rule in its own `<desc>`). `word-spacing` adds at
+  each space character. **Deliberate asymmetry: neither property exists anywhere else in this engine
+  — not in `pkg/css`, not in `pkg/layout/css` — so both work in SVG and are inert in HTML/DOCX.**
+  Wiring them into CSS reflow means threading them through line-breaking and justification, which is
+  a materially larger job; the asymmetry is recorded on the `Style` fields so it does not read as a
+  bug.
+- **`textLength` and `lengthAdjust`** — a range's advance is forced to an exact width.
+  `lengthAdjust="spacing"` (the default) distributes the difference into the interior gaps only, so
+  the leading and trailing edges are untouched; `lengthAdjust="spacingAndGlyphs"` scales the glyph
+  OUTLINES horizontally as well. Both work on `<text>` and on `<tspan>`, and nest (innermost wins for
+  the characters they share). `textLength` is an XML attribute, not a presentation attribute: it
+  neither cascades nor inherits. Edge cases handled without a special case: a target smaller than the
+  natural width (the glyphs overlap), exactly zero (they collapse onto a point), negative (invalid,
+  ignored), and a single-character range, which has no interior gap for `"spacing"` to use and is
+  left at its natural width rather than dividing by zero.
+- **`dominant-baseline` and `alignment-baseline`** — `auto`, `alphabetic`, `middle`, `central`,
+  `hanging`, `text-before-edge`/`before-edge`, and `text-after-edge`/`after-edge`, each resolved
+  against the GLYPH's own `Face.Metrics()` so a per-rune script fallback hangs each character from
+  its own font. `alignment-baseline` wins when set and defers at `auto`; its `baseline` keyword
+  DEFERS to the parent's dominant baseline rather than resetting to alphabetic. Scoping matches
+  resvg: `dominant-baseline` propagates inside a `<text>` subtree but does not arrive from a `<g>`
+  above it, while `alignment-baseline` is non-inherited with an explicit `inherit` that reaches back
+  for the parent's value. `ideographic`, `mathematical`, `use-script`, `no-change`, and `reset-size`
+  **degrade to the alphabetic baseline with a warn-once** — they need OS/2 and BASE table metrics
+  `pkg/font` does not parse. `middle` uses the conventional 0.5 em x-height substitute for the same
+  reason (no OS/2 `sxHeight`).
+- **`baseline-shift`** — `sub`, `super`, lengths, and percentages (against the element's own
+  `font-size`), CUMULATIVE through nested `<tspan>`s per SVG2 §11.10.2, with the `baseline` keyword
+  contributing zero WITHOUT resetting the accumulation. A shift written on the `<text>` element
+  itself, or inherited from above it, is inert: the accumulation starts at zero there and only a
+  `<tspan>` inward can add to it (resvg asserts this four ways, each overlaying an unshifted
+  reference the shifted text must exactly cover). `sub`/`super` use the conventional ∓0.2 em / ±0.4
+  em offsets, since the font's OS/2 sub/superscript offsets are not parsed.
+- **`text-decoration`** — `underline`, `overline`, and `line-through`, in any combination and either
+  separator, drawn as filled (and, when the declaring element has one, stroked) rectangles.
+  **A rule takes the paint AND the font metrics of the element that DECLARED it, not of the
+  descendant characters it covers**, so `<text fill="red" text-decoration="underline"><tspan
+  fill="blue">x</tspan></text>` underlines in RED and a decoration declared at `font-size:200` draws
+  a thick rule over 48 px text. The one bend: a decoration inherited from ABOVE the `<text>` keeps
+  its line but adopts the `<text>`'s paint, which is what resvg's `outside-the-text-element.svg` and
+  `style-resolving-2.svg` both assert. A rule spans the whole run that inherited the same
+  declaration, crossing `<tspan>` boundaries, and is emitted once per baseline FRAME rather than once
+  per run — so it staircases with a `dy`/`y` list and tilts per glyph with a `rotate` list, matching
+  the references. Underline and overline paint under the glyphs, line-through over them. Position and
+  thickness use conventional em fractions: `pkg/font` parses no `post` table, so a face's own
+  `underlinePosition`/`underlineThickness` are unavailable.
+- **The `font` shorthand** — expands to `font-style`, `font-weight`, `font-size` (with an optional
+  `/line-height` that is discarded, since SVG text does not wrap), and `font-family`. A value that
+  does not yield BOTH a size and a family is invalid per CSS and applies nothing rather than half of
+  itself. The system-font keywords (`caption`, `icon`, …) name platform UI fonts this engine cannot
+  resolve and are logged and ignored.
+- **`font-stretch`, `font-variant`, `kerning`, and `font-kerning` ship as honest no-ops**, each
+  logged once. Stated plainly rather than approximated: the bundled families (`pkg/font/standard`)
+  have no condensed, expanded, or small-caps variant, no synthetic stretching or obliquing exists
+  anywhere in the engine, OpenType feature settings are not plumbed through the shaper, and no GPOS
+  kerning-pair pass runs for simple scripts — so there is no kerning to disable and no length that
+  could replace it. A synthetic squeeze or a fabricated small-caps would change advances and glyph
+  shapes in ways no font designer sanctioned and no other renderer reproduces.
 - Not yet, each degrading with a `WithLogf` debug line rather than failing: filters,
   `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 7–8 slices in
   `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
@@ -796,6 +859,24 @@ read+write vocabulary for the tinycld text adoption path):
   outside `pkg/svg`: `pkg/font` glyph outlines carried a leading drawing op before any move-to, so
   every glyph's `Bounds` stretched back to the origin, and `inline.Reorder` emitted a multi-rune
   cluster glyph once per RUNE, returning more glyphs than it was given.
+- 98 further `text/**` fixtures land with the spacing, length, baseline, and decoration properties
+  above, all with committed goldens: `baseline-shift/` (22), `text-decoration/` (20),
+  `dominant-baseline/` (17), `alignment-baseline/` (11), `textLength/` (10), `letter-spacing/` (7),
+  `word-spacing/` (6), `lengthAdjust/` (2), `font/` (2), `font-kerning/` (1). Every one was compared
+  against resvg's reference PNG by eye before vendoring. The sweep settled four behaviours the spec
+  leaves ambiguous (`letter-spacing`'s trailing gap, whose paint an inherited decoration takes,
+  `baseline-shift`'s inertness on `<text>` itself, and the opposite `inherit` scoping of the two
+  baseline-selection properties) and caught two outright bugs before any golden was committed:
+  `alignment-baseline="baseline"` was resetting to alphabetic instead of deferring, and a decoration
+  was one rectangle across the whole run instead of one per baseline frame, which flattened the
+  `dy`-list staircase and merged the `rotate`-list's four tilted segments. Also fixed at the source:
+  `applyFontSize` silently dropped every ABSOLUTE-unit `font-size` (`font-size="40px"` fell back to
+  the inherited value with an "unparseable" log) because the branch delegating px/pt/pc/mm/cm/in to
+  `parseLength` was unreachable; no vendored fixture caught it, since the resvg text corpus writes
+  bare numbers throughout. Fixtures whose reference cannot be matched — the `(UB)` cases, the ones
+  needing `<textPath>`/`writing-mode`/filters, unbundled fonts, real GPOS kerning, or the OS/2 and
+  BASE metrics the two degraded baselines want — were SKIPPED with the reason recorded in
+  `testdata/svg/resvg/README.md`.
 - 74 curated fixtures from the resvg test suite's `masking/**` tranche (MIT, commit
   `d8e064337faf01bc5a9579187a56dbdbe3eacc72`; see `testdata/svg/resvg/README.md` for the earlier
   tranches' counts) land with this feature: `clipPath/` (37) and `mask/` (37), all with committed
