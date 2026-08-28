@@ -201,6 +201,26 @@ bullet's design rationale is in its PR:
   declaration — `applyBackground` resets every longhand before classifying components and
   deliberately tolerates ones it cannot classify. That is a shorthand-expander gap, not a colour-
   grammar one; the longhands (`background-color`, `color`, `border-*-color`) drop correctly.
+- **`border-radius`** (`pkg/css/borderradius.go`, `pkg/layout/borderradius.go`,
+  `usedRadii` in `pkg/layout/css/block.go` + paint): CSS Backgrounds 3 §5 in full — the shorthand
+  (1–4 values in CORNER order, i.e. diagonal pairing, not `expandBox`'s clockwise side rule), the
+  `/` form for elliptical corners, all four longhands, and percentages. A corner's two semi-axes
+  resolve against DIFFERENT bases (horizontal against the border box's width, vertical against its
+  height), which is why radii stay unresolved `Length` pairs until layout. The §5.1 overlap
+  correction scales all eight components by one shared factor `f = min` over sides, so
+  `border-radius:100px` on an 80×80 box yields a true circle rather than four separately-clamped
+  arcs. Backgrounds fill the rounded path directly (so the backend antialiases the arcs itself);
+  background IMAGES are bracketed by a rounded clip, since `DrawImage` has no shape parameter.
+  Borders paint as one even-odd RING (outer rounded rect minus inner), the inner radius being the
+  outer minus the border width floored at zero — a uniformly-thick rounded border is NOT the outer
+  path stroked, and a border thicker than its radius correctly squares the inner corner while the
+  outside stays round. PDF keeps real curves (`pdfwrite` emits the same Béziers as `c` operators
+  natively, for both the fill and the `W n` clip); DOCX is unaffected, as that writer builds a
+  document model rather than painting and has no rounded-box primitive to target.
+  **Degradations, logged by the layout engine and covered by tests:** a rounded border is filled in
+  ONE colour as SOLID, so per-side border colours and the non-solid styles (dashed/dotted/double/
+  ridge/groove/inset/outset) are approximated on a rounded box — square-cornered boxes still paint
+  four fully-styled strips and are byte-identical.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/

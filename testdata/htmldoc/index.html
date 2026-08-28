@@ -915,7 +915,59 @@ newline is kept.</p>
       show a gradient really is a background image &mdash; <code>background-size</code>
       resizes its box, and the result tiles or is placed by
       <code>background-position</code> exactly as a bitmap would.</p>
+  </section>
 
+  <!-- ===================== 24 · BORDER RADIUS ===================== -->
+  <section class="section break">
+    <span class="kicker">24 / BORDER RADIUS</span>
+    <h2>Rounded Corners</h2>
+    <p class="lede">Every form of <code>border-radius</code>: circular and elliptical
+      corners, the four per&#8209;corner longhands, percentage radii, the
+      overlap&#8209;correction rule, and rounded borders with their true inner curve.</p>
+
+    <div class="radgrid">
+      <div class="rad r-none"><div class="radtile">none</div>no radius</div>
+      <div class="rad r-small"><div class="radtile">8px</div>border-radius: 8px</div>
+      <div class="rad r-pill"><div class="radtile">pill</div>border-radius: 999px</div>
+      <div class="rad r-circle"><div class="radtile">50%</div>border-radius: 50%</div>
+      <div class="rad r-ellipse"><div class="radtile">30/12</div>border-radius: 30px / 12px</div>
+      <div class="rad r-corners"><div class="radtile">4 vals</div>2px 10px 20px 10px</div>
+    </div>
+    <p class="caption">Look for: the <code>50%</code> tile is a true ellipse rather than a
+      circle, because its box is wider than it is tall &mdash; a percentage resolves the
+      horizontal radius against the box's <em>width</em> and the vertical one against its
+      <em>height</em>. The <code>30px / 12px</code> tile shows the same asymmetry written
+      explicitly with the slash form, and the last tile gives all four corners a different
+      radius in one declaration.</p>
+
+    <div class="radgrid">
+      <div class="rad r-b-thin"><div class="radtile">thin</div>2px border, 14px radius</div>
+      <div class="rad r-b-thick"><div class="radtile">thick</div>10px border, 14px radius</div>
+      <div class="rad r-b-square"><div class="radtile">inner</div>12px border, 6px radius</div>
+      <div class="rad r-over"><div class="radtile">over</div>radius 200px, corrected</div>
+    </div>
+    <p class="caption">Look for: the inner curve. A rounded border is not the outer path
+      stroked &mdash; the inner edge's radius is the outer radius <em>minus</em> the border
+      width, so the thick tile's hole is far less round than its outside, and in the third
+      tile the border is thicker than the radius, which squares the inner corner completely
+      while the outside stays round. The last tile asks for a 200px radius on a box far
+      smaller than that; the corners cannot overlap, so every radius scales down by one
+      shared factor until they exactly meet.</p>
+
+    <p>The overlap correction (CSS Backgrounds&nbsp;3 &sect;5.1) is what makes an
+      over&#8209;large radius degrade gracefully rather than producing self&#8209;crossing
+      arcs: each side compares its length against the sum of the two radii meeting along
+      it, and the <em>smallest</em> of those ratios scales all eight radius components at
+      once. That single shared factor is why <code>border-radius: 999px</code> on the pill
+      above resolves to exactly half the box's height on every corner.</p>
+
+    <p>Backgrounds and borders both follow the rounded outline, and a background
+      <em>image</em> is clipped to it. In PDF output the corners stay genuinely curved: the
+      writer emits the same cubic curve path natively, so a rounded box remains vector
+      rather than being flattened to a picture. A rounded border is filled as one ring in a
+      single colour, so a dashed or multi&#8209;coloured rounded border paints solid &mdash;
+      the engine logs that substitution rather than making it silently.</p>
+  </section>
 
 </body>
 </html>

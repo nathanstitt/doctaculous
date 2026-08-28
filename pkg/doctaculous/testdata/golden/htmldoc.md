@@ -504,7 +504,7 @@ rebeccapurple
 
 border rgba(176,48,48,0.5)
 
-Aa
+**Aa**
 
 color rgba(20,30,45,0.4)
 
@@ -546,49 +546,49 @@ A gradient is a generated _background image_, not a colour: it is painted by the
 
 ### Direction
 
-**(none) → to bottom**
+(none) → to bottom
 
-**to right**
+to right
 
-**to left**
+to left
 
-**to top**
+to top
 
-**45deg**
+45deg
 
-**0.75turn**
+0.75turn
 
-**to bottom right**
+to bottom right
 
-**to top right**
+to top right
 
 Look for: the two corner swatches. Their bands are _not_ at 45°. CSS angles the gradient line so the perpendicular through each end lands exactly on a corner, which on a 2:1 box makes the line noticeably shallower — and puts the two _other_ corners at precisely the midpoint colour. `0deg` points up and angles run clockwise, so `0.75turn` (270°) matches `to left`.
 
 ### Colour stops
 
-**four colours, no positions**
+four colours, no positions
 
-**25% … 75%**
+25% … 75%
 
-**two stops at 50% (hard break)**
+two stops at 50% (hard break)
 
-**four hard bands**
+four hard bands
 
-**→ transparent**
+→ transparent
 
 Look for: stops with no position are spread _evenly_ between the ones that have them, so the four-colour swatch changes at 33% and 67% without being told to. Two stops sharing a position give a hard edge with no blend at all — the mechanism behind the four-band swatch. The last swatch fades to `transparent` and stays _red_ the whole way: interpolation runs in premultiplied alpha, which is what keeps a grey band from appearing through the middle of it.
 
 ### Radial
 
-**ellipse (default)**
+ellipse (default)
 
-**circle**
+circle
 
-**closest-side**
+closest-side
 
-**circle farthest-side**
+circle farthest-side
 
-**circle at 20% 30%**
+circle at 20% 30%
 
 Look for: the default ending shape is an _ellipse_ sized to the farthest corner, so it stretches with the box; adding `circle` makes both radii equal and the rings become round. The sizing keyword picks which box feature the shape must reach — `closest-side` lands the end colour on the nearest edges, so the corners sit beyond the ramp and are solid.
 
@@ -598,14 +598,68 @@ Look for: the default ending shape is an _ellipse_ sized to the farthest corner,
 
 A gradient is a generated _image_, so it answers to the same sizing, tiling and positioning properties a bitmap does. These swatches are the proof: the same declarations that place a `url()` background place a gradient one.
 
-**repeating, 16px period**
+repeating, 16px period
 
-**repeating at 45deg**
+repeating at 45deg
 
-**repeating radial**
+repeating radial
 
-**background-size: 40px**
+background-size: 40px
 
-**60% size, centered, no-repeat**
+60% size, centered, no-repeat
 
 Look for: a repeating gradient takes its _stop range_ as the period, so the ramp tiles rather than stretching once. The last two swatches show a gradient really is a background image — `background-size` resizes its box, and the result tiles or is placed by `background-position` exactly as a bitmap would.
+
+**24 / BORDER RADIUS**
+
+## Rounded Corners
+
+Every form of `border-radius`: circular and elliptical corners, the four per‑corner longhands, percentage radii, the overlap‑correction rule, and rounded borders with their true inner curve.
+
+none
+
+no radius
+
+8px
+
+border-radius: 8px
+
+pill
+
+border-radius: 999px
+
+50%
+
+border-radius: 50%
+
+30/12
+
+border-radius: 30px / 12px
+
+4 vals
+
+2px 10px 20px 10px
+
+Look for: the `50%` tile is a true ellipse rather than a circle, because its box is wider than it is tall — a percentage resolves the horizontal radius against the box's _width_ and the vertical one against its _height_. The `30px / 12px` tile shows the same asymmetry written explicitly with the slash form, and the last tile gives all four corners a different radius in one declaration.
+
+thin
+
+2px border, 14px radius
+
+thick
+
+10px border, 14px radius
+
+inner
+
+12px border, 6px radius
+
+over
+
+radius 200px, corrected
+
+Look for: the inner curve. A rounded border is not the outer path stroked — the inner edge's radius is the outer radius _minus_ the border width, so the thick tile's hole is far less round than its outside, and in the third tile the border is thicker than the radius, which squares the inner corner completely while the outside stays round. The last tile asks for a 200px radius on a box far smaller than that; the corners cannot overlap, so every radius scales down by one shared factor until they exactly meet.
+
+The overlap correction (CSS Backgrounds 3 §5.1) is what makes an over‑large radius degrade gracefully rather than producing self‑crossing arcs: each side compares its length against the sum of the two radii meeting along it, and the _smallest_ of those ratios scales all eight radius components at once. That single shared factor is why `border-radius: 999px` on the pill above resolves to exactly half the box's height on every corner.
+
+Backgrounds and borders both follow the rounded outline, and a background _image_ is clipped to it. In PDF output the corners stay genuinely curved: the writer emits the same cubic curve path natively, so a rounded box remains vector rather than being flattened to a picture. A rounded border is filled as one ring in a single colour, so a dashed or multi‑coloured rounded border paints solid — the engine logs that substitution rather than making it silently.
