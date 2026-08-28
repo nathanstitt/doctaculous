@@ -452,7 +452,31 @@ Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach 
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
 
-**19 / COLOUR**
+**19 / CUSTOM PROPERTIES**
+
+## Custom properties and `var()`
+
+The palette below is declared _once_ on `:root` and reached by every swatch through `var()`. Custom properties inherit, so a value set at the document root is visible to any descendant without being redeclared — the pattern almost every themed stylesheet is built on.
+
+var(--brand)
+
+var(--accent)
+
+var(--muted)
+
+var(--absent, #7a5cff)
+
+var(--indirect)
+
+scoped override
+
+Look for: the last two swatches. _Indirect_ resolves `--indirect: var(--brand)` — a custom property whose own value is another `var()`, substituted recursively. _Scoped override_ redeclares `--brand` on the swatch itself, so the same `var(--brand)` reference resolves differently there than in the first swatch: custom properties cascade and inherit exactly like any other property, and the nearest declaration wins.
+
+Substitution happens between the cascade and value parsing, so `var()` works in _any_ property, shorthands included — the rule below draws its whole border from one variable. A reference that cannot be resolved is _invalid at computed‑value time_, which is not the same as a syntax error: rather than leaving an earlier declaration showing, the property falls back to its inherited or initial value, as though `unset` had been specified.
+
+border: var(--rule)
+
+**20 / COLOUR**
 
 ## Alpha-bearing colour values
 

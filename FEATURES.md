@@ -56,6 +56,19 @@ bullet's design rationale is in its PR:
 - **CSS parse + cascade** (`pkg/css`): dependency-free tokenizer/parser, selector matching +
   specificity, full cascade (specificity + source order + inheritance + `!important` + inline
   `style` + origins), shorthand expansion.
+- **Custom properties + `var()`** (CSS Variables 1; `pkg/css/customprop.go`, `varsubst.go`):
+  `--*` properties cascade by the normal rules and INHERIT, stored as raw token streams (the
+  treatment `filter` already gets) and substituted at computed-value time. Substitution sits
+  between the cascade and value parsing, so `var()` works in every property including
+  shorthands — `border: var(--rule)` expands normally once substituted. Supports fallbacks
+  (`var(--x, blue)`), nested fallbacks, recursive substitution (`--a: var(--b)`), and the
+  case-sensitivity rule that makes `--Foo` and `--foo` distinct. Cycles are detected exactly
+  (an active-reference set, not a depth guess) and a non-cyclic exponential fan-out is bounded
+  by a depth cap. An unresolvable reference is **invalid at computed-value time**, not a
+  dropped declaration: per spec the property falls back to its inherited-or-initial value as
+  though `unset` were specified, rather than leaving an earlier declaration showing — the one
+  case where this engine must NOT treat a bad value as "keep the previous one". `:root` also
+  landed here (`pkg/css/selector.go`), since it is where a palette is normally declared.
 - **HTML frontend — box generation** (`pkg/html`, `pkg/layout/cssbox`): owned DOM, UA stylesheet,
   anonymous-box fixups, whitespace collapsing, `display:none` pruning; `<link>` via
   `pkg/resource.ResourceLoader`.
