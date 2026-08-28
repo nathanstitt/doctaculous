@@ -793,6 +793,12 @@ a.seen:visited { color: #6a9a3a; }
 /* A comma-separated LIST. The FIRST shadow paints on TOP, and every outer
    shadow paints behind the box's own background. */
 .bs-stack   .bstile { box-shadow: 4px 4px 0 #b03030, 9px 9px 0 #d9a521, 14px 14px 0 #2f6fb0; }
+/* A shadow does NOT affect layout (CSS Backgrounds 3 §6) — correct, and what
+   browsers do — so this swatch's 14px stack reaches past the tile's 8px bottom
+   margin and into its own caption. The extra clearance is a legibility choice
+   for the specimen, not a workaround: the swatch exists to show the shadow
+   escaping the box, and that escape is the behaviour under test. */
+.bs-stack   .bstile { margin-bottom: 22px; }
 /* Outer and inset in one list: they occupy different slots in the paint order,
    so both are visible at once. */
 .bs-both    .bstile { box-shadow: 6px 6px 5px #7a6a2a, inset 0 0 6px #b03030; }
