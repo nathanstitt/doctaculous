@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// px is a shorthand for a pixel Length, which every case below is written in.
-func px(v float64) Length { return Length{Value: v, Unit: UnitPx} }
+// px — a shorthand for a pixel Length, which every case below is written in —
+// is declared once for the package in borderradius_test.go.
 
 // TestParseBoxShadowAcceptsTheFullGrammar walks the spec's grammar
 // (`inset? && <length>{2,4} && <color>?`) case by case, including the orderings
@@ -32,6 +32,14 @@ func TestParseBoxShadowAcceptsTheFullGrammar(t *testing.T) {
 		{"short hex colour", "2px 3px #f00",
 			[]BoxShadow{{OffsetX: px(2), OffsetY: px(3), Color: red, HasColor: true}}},
 		{"rgb() colour", "2px 3px rgb(255, 0, 0)",
+			[]BoxShadow{{OffsetX: px(2), OffsetY: px(3), Color: red, HasColor: true}}},
+		// Space syntax (CSS Color 4) inside an && grammar: the colour must be
+		// consumed to its closing paren and no further, so the shadow's own
+		// lengths survive. Reading the whole remainder as one colour is exactly
+		// the bug this guards.
+		{"rgb() space syntax", "2px 3px rgb(255 0 0)",
+			[]BoxShadow{{OffsetX: px(2), OffsetY: px(3), Color: red, HasColor: true}}},
+		{"colour before the lengths", "rgb(255 0 0) 2px 3px",
 			[]BoxShadow{{OffsetX: px(2), OffsetY: px(3), Color: red, HasColor: true}}},
 		{"leading inset", "inset 2px 3px",
 			[]BoxShadow{{OffsetX: px(2), OffsetY: px(3), Inset: true}}},
@@ -105,7 +113,7 @@ func TestParseBoxShadowRejectsMalformedValues(t *testing.T) {
 		{"trailing comma leaves an empty shadow", "2px 2px,"},
 		{"leading comma", ", 2px 2px"},
 		{"currentColor plus a colour fills the slot twice", "currentColor red 2px 3px"},
-		{"malformed rgb()", "2px 3px rgb(255 0 0)"},
+		{"unclosed rgb()", "2px 3px rgb(255, 0, 0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got, ok := parseBoxShadow(tc.value); ok {

@@ -2,6 +2,7 @@ package css
 
 import (
 	"image/color"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,12 @@ type OriginSheet struct {
 type ComputedStyle struct {
 	Display string // "block" | "inline" | "none" | "list-item" | raw value
 
+	// CustomProps holds the element's computed custom properties (--*), kept as
+	// raw token streams and substituted into other properties by var(). They are
+	// INHERITED, which is what makes the common `:root { --brand: … }` pattern
+	// reach every descendant. See customprop.go.
+	CustomProps CustomProps
+
 	Color           color.RGBA
 	BackgroundColor color.RGBA // zero-alpha means transparent / not set
 
@@ -77,7 +84,21 @@ type ComputedStyle struct {
 	//
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
-	BackgroundImage    string
+	BackgroundImage string
+	// BackgroundGradient is set INSTEAD of BackgroundImage when background-image
+	// is a <gradient> function rather than a url(). The two are mutually
+	// exclusive: whichever form the declaration produced clears the other, so a
+	// later `background-image: url(x)` correctly replaces an earlier gradient
+	// and vice versa. nil means "no gradient", the initial state.
+	//
+	// It holds a PARSED *Gradient rather than raw declaration text (the way
+	// Filter keeps its value raw) because a gradient's grammar needs no length
+	// resolution at parse time — only its stop POSITIONS and radii do, and those
+	// stay as Lengths inside the struct until layout resolves them against the
+	// gradient box. Parsing here means a malformed gradient is dropped by the
+	// cascade like any other bad declaration, rather than failing later where the
+	// original text is no longer available to report.
+	BackgroundGradient *Gradient
 	BackgroundRepeat   string         // "repeat" (initial) | "repeat-x" | "repeat-y" | "no-repeat"
 	BackgroundPosition BackgroundPos  // initial 0% 0% (top-left)
 	BackgroundSize     BackgroundSize // initial auto
@@ -132,6 +153,29 @@ type ComputedStyle struct {
 	// behaviors by WhiteSpaceFlags (collapse spaces, preserve newlines, wrap).
 	WhiteSpace string
 
+	// OverflowWrap is the CSS overflow-wrap property: "normal" (initial) |
+	// "break-word" | "anywhere". Inherited. The legacy alias `word-wrap` — still
+	// extremely common in real stylesheets, and the name IE shipped the feature under —
+	// sets the same field. It permits breaking WITHIN a word as a LAST RESORT: only when
+	// the word would overflow the line box even on a line of its own.
+	//
+	// "break-word" and "anywhere" differ in exactly one respect: "anywhere" also affects
+	// intrinsic (min-content) sizing, so a box sized from its content can shrink to a
+	// single grapheme cluster, while "break-word" leaves min-content at the widest word.
+	// See WordBreakMode in pkg/layout/inline.
+	OverflowWrap string
+
+	// WordBreak is the CSS word-break property: "normal" (initial) | "break-all" |
+	// "keep-all". Inherited. Unlike overflow-wrap it is EAGER: "break-all" makes every
+	// grapheme-cluster boundary an ordinary break opportunity, so a word is chopped at
+	// the line edge even when it would have fitted on the following line by itself.
+	//
+	// "keep-all" forbids the implicit between-ideograph opportunities CJK text would
+	// otherwise get. This engine generates no such opportunities (its only implicit ones
+	// are spaces), so keep-all's observable effect here is that it suppresses
+	// overflow-wrap breaking of the affected text.
+	WordBreak string
+
 	// List + counter properties. ListStyleType/ListStylePosition are inherited
 	// (initial "disc"/"outside"); the counter ops and Content are not inherited.
 	ListStyleType     string        // "disc" | "circle" | "square" | "decimal" | "lower-roman" | ... | "none"
@@ -147,6 +191,15 @@ type ComputedStyle struct {
 	BorderTopWidth, BorderRightWidth, BorderBottomWidth, BorderLeftWidth Length
 	BorderTopColor, BorderRightColor, BorderBottomColor, BorderLeftColor color.RGBA
 	BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle string
+
+	// Border corner radii (CSS Backgrounds 3 §5), one elliptical radius per corner.
+	// Each is a PAIR of unresolved Lengths rather than one number because a corner's
+	// two semi-axes resolve against different dimensions — horizontal against the
+	// border box's width, vertical against its height — so they cannot be collapsed
+	// before layout knows the box. A zero pair (the initial value) is a square
+	// corner. Not inherited. See borderradius.go.
+	BorderTopLeftRadius, BorderTopRightRadius       CornerRadius
+	BorderBottomRightRadius, BorderBottomLeftRadius CornerRadius
 
 	Width, Height Length // UnitAuto = "auto"
 
@@ -348,6 +401,17 @@ func (r *Resolver) ComputeRoot(n Node) ComputedStyle {
 	return r.Compute(n, initialStyle())
 }
 
+// matchedDecl is one declaration that matched an element, carried with the three
+// keys the cascade sorts on (origin, specificity, source order). It is package
+// scope rather than local to Compute so the custom-property pass can range over
+// the same already-sorted slices without copying them into a second type.
+type matchedDecl struct {
+	decl   Declaration
+	origin Origin
+	spec   Specificity
+	order  int
+}
+
 // Compute returns node n's ComputedStyle. parentStyle is the already-computed
 // style of n's parent; for a root element (no parent) call ComputeRoot, which
 // supplies the CSS initial values as the base. The cascade orders matching
@@ -357,13 +421,7 @@ func (r *Resolver) ComputeRoot(n Node) ComputedStyle {
 func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	cs := inheritFrom(parentStyle)
 
-	type matched struct {
-		decl   Declaration
-		origin Origin
-		spec   Specificity
-		order  int
-	}
-	var normal, important []matched
+	var normal, important []matchedDecl
 
 	order := 0
 	for si := range r.sheets {
@@ -379,7 +437,7 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 				continue
 			}
 			for _, d := range rule.Declarations {
-				m := matched{decl: d, origin: origin, spec: spec, order: order}
+				m := matchedDecl{decl: d, origin: origin, spec: spec, order: order}
 				if d.Important {
 					important = append(important, m)
 				} else {
@@ -395,7 +453,7 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	// author) with zero specificity, so an author rule or inline style always wins. A
 	// document with no such attributes contributes nothing here (byte-identical).
 	for _, d := range presentationalHints(n) {
-		normal = append(normal, matched{decl: d, origin: OriginPresentationalHint, order: order})
+		normal = append(normal, matchedDecl{decl: d, origin: OriginPresentationalHint, order: order})
 		order++
 	}
 	if dirAutoRequested(n) {
@@ -426,8 +484,8 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 		return 3 // author
 	}
 
-	lessBy := func(rank func(Origin) int) func(a, b matched) bool {
-		return func(a, b matched) bool {
+	lessBy := func(rank func(Origin) int) func(a, b matchedDecl) bool {
+		return func(a, b matchedDecl) bool {
 			ra, rb := rank(a.origin), rank(b.origin)
 			if ra != rb {
 				return ra < rb
@@ -444,8 +502,27 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 
 	// 1. normal declarations, lowest to highest.
 	sort.SliceStable(normal, func(i, j int) bool { return lessBy(normalRank)(normal[i], normal[j]) })
+
+	// Custom properties resolve in a SEPARATE, EARLIER pass over the same sorted
+	// declarations (CSS Variables 1 §3). They must all be known before any var()
+	// is substituted, because a var() may reference a custom property declared
+	// later in the stylesheet than the property using it:
+	//
+	//	.a { color: var(--fg) }   /* uses --fg ... */
+	//	:root { --fg: red }       /* ... declared after */
+	//
+	// Substituting during the single normal pass would resolve --fg against a
+	// half-built map and drop the colour. The passes are ordered, not
+	// interleaved: custom properties (normal, then inline, then important) settle
+	// first, then every other property substitutes against the final map.
+	applyCustomProps(&cs, normal, n, important)
+
+	// Assemble the full application order — normal rules, then inline normal
+	// declarations, then !important — as ONE list, so the var()-failure pass
+	// below can see which declaration actually wins each property.
+	ordered := make([]Declaration, 0, len(normal)+len(important))
 	for _, m := range normal {
-		applyDeclaration(&cs, m.decl)
+		ordered = append(ordered, m.decl)
 	}
 
 	// 2. inline style="" (author origin). Normal inline declarations overlay all
@@ -454,23 +531,234 @@ func (r *Resolver) Compute(n Node, parentStyle ComputedStyle) ComputedStyle {
 	if styleAttr, ok := n.Attr("style"); ok {
 		for _, d := range ParseDeclarations(styleAttr) {
 			if d.Important {
-				important = append(important, matched{
+				important = append(important, matchedDecl{
 					decl: d, origin: OriginAuthor,
 					spec: Specificity{IDs: inlineImportantIDs}, order: order,
 				})
 				order++
 				continue
 			}
-			applyDeclaration(&cs, d)
+			ordered = append(ordered, d)
 		}
 	}
 
 	// 3. important declarations overlay last.
 	sort.SliceStable(important, func(i, j int) bool { return lessBy(importantRank)(important[i], important[j]) })
 	for _, m := range important {
-		applyDeclaration(&cs, m.decl)
+		ordered = append(ordered, m.decl)
+	}
+
+	// A declaration whose var() cannot be substituted is invalid at
+	// computed-value time: it wins the cascade and THEN fails, leaving the
+	// property at its inherited/initial value rather than at any earlier
+	// declaration's value (see resolveDeclValue for the spec text). Since the
+	// last write to a property is the one that wins here, a property whose FINAL
+	// declaration fails must have every earlier declaration suppressed too —
+	// otherwise the loser would show through, which is precisely the outcome the
+	// spec rules out.
+	//
+	// The set is keyed by property name, so `background-color` failing does not
+	// suppress `background`; a shorthand and its longhands are distinct entries,
+	// matching how applyDeclaration already treats them.
+	var invalidated map[string]bool
+	for _, d := range ordered {
+		if IsCustomProperty(d.Property) || !containsVar(d.Value) {
+			continue
+		}
+		if !declSurvivesSubstitution(d, cs.CustomProps) {
+			if invalidated == nil {
+				invalidated = make(map[string]bool)
+			}
+			invalidated[d.Property] = true
+		} else if invalidated != nil {
+			// A later VALID declaration for the same property re-establishes it:
+			// only the winner's fate matters, and this one wins over the earlier
+			// failure.
+			delete(invalidated, d.Property)
+		}
+	}
+
+	for _, d := range ordered {
+		if invalidated[d.Property] {
+			continue
+		}
+		resolved, ok := resolveDeclValue(d, cs.CustomProps)
+		if !ok {
+			continue
+		}
+		applyDeclaration(&cs, resolved)
 	}
 	return cs
+}
+
+// resolveDeclValue substitutes any var() in d's value, reporting whether the
+// declaration survives. ok=false means the declaration is INVALID AT
+// COMPUTED-VALUE TIME (CSS Variables 1 §3.1) and must not be applied.
+//
+// This failure mode is genuinely unlike every other parse failure in this
+// engine, which is why Compute handles it in a dedicated pre-pass rather than by
+// simply skipping the declaration:
+//
+//	div { background-color: red }              /* a valid declaration */
+//	div { background-color: var(--undefined) } /* wins the cascade, THEN fails */
+//
+// The result is NOT red. A var() that cannot be substituted is not detectable at
+// parse time — the declaration is syntactically valid — so it enters and WINS
+// the cascade, and only then fails. The spec requires the computed value to be
+//
+//	"either the property's inherited value or its initial value depending on
+//	 whether the property is inherited or not, respectively, as if the
+//	 property's value had been specified as the unset keyword"
+//
+// and its own worked example gives transparent (background-color's initial
+// value) for exactly the markup above. The spec draws the contrast explicitly: a
+// PLAIN syntax error (`background-color: 20px`) is discarded at parse time and
+// so DOES leave red in place. Verified against Chrome, which agrees on all three
+// cases (var-undefined => transparent, syntax error => red, inherited property
+// => the inherited value).
+func resolveDeclValue(d Declaration, props CustomProps) (Declaration, bool) {
+	if !containsVar(d.Value) {
+		return d, true
+	}
+	substituted, ok := substituteVars(d.Value, props)
+	if !ok {
+		return d, false
+	}
+	d.Value = substituted
+	return d, true
+}
+
+// probeContrastStyle returns a ComputedStyle that differs from initialStyle() in
+// every field, for use as the second probe in declSurvivesSubstitution.
+//
+// It is built by reflection rather than by hand so it cannot drift as fields are
+// added to ComputedStyle: a new field that this function forgot to perturb would
+// silently agree between the two probes and make every declaration look valid.
+// Correctness here needs only "differs from the initial value in every field",
+// not any particular value, so the perturbation is deliberately crude.
+func probeContrastStyle() ComputedStyle {
+	cs := initialStyle()
+	v := reflect.ValueOf(&cs).Elem()
+	perturb(v)
+	return cs
+}
+
+// perturb walks a value and changes every settable leaf field it finds,
+// recursing into nested structs (Length, BackgroundPos, …) so their fields are
+// perturbed individually rather than left at a struct-level zero.
+func perturb(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			f := v.Field(i)
+			if f.CanSet() {
+				perturb(f)
+			}
+		}
+	case reflect.String:
+		v.SetString(v.String() + "\x00probe")
+	case reflect.Bool:
+		v.SetBool(!v.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(v.Int() ^ 0x5f5f)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(v.Uint() ^ 0x5f)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(v.Float() + 1234.5)
+	}
+	// Slices, maps and interfaces are left alone: no property writes one from a
+	// declaration value, so they cannot distinguish applied from dropped.
+}
+
+// declSurvivesSubstitution reports whether a var()-bearing declaration ends up
+// valid, covering BOTH ways CSS Variables 1 §3.1 makes one invalid at
+// computed-value time:
+//
+//	--x: 20px;  background-color: var(--x)   /* substitutes fine, 20px is no colour */
+//	            background-color: var(--nope) /* does not substitute at all */
+//
+// The spec's own worked example is the first form, so handling only the second
+// would leave `background-color: red` showing where the spec requires
+// transparent.
+//
+// Whether the substituted value parses is answered by applying it: a value the
+// engine cannot parse leaves the style untouched (every branch of
+// applyDeclaration drops a malformed value rather than writing a zero), so
+// applying to a probe and comparing detects the failure without duplicating any
+// property's grammar here. The probe is seeded with a value the declaration
+// cannot itself produce, so "unchanged" unambiguously means "not applied".
+func declSurvivesSubstitution(d Declaration, props CustomProps) bool {
+	resolved, ok := resolveDeclValue(d, props)
+	if !ok {
+		return false
+	}
+	// An empty substitution result (`--x: ; color: var(--x)`) is a valid
+	// substitution of nothing, which leaves the property with no value at all —
+	// invalid at computed-value time, per the same section.
+	if strings.TrimSpace(resolved.Value) == "" {
+		return false
+	}
+
+	// Two probes seeded differently in every field the cascade can write. A
+	// successful apply overwrites the property's fields in both, so the probes
+	// AGREE on them afterwards; a dropped value leaves both probes at their
+	// distinct seeds. Testing for agreement rather than for change is what makes
+	// this correct when the substituted value happens to equal one probe's seed
+	// (`color: var(--x)` with `--x: black`, black being the initial colour) —
+	// a single-probe "did anything change?" test reports that valid declaration
+	// as invalid.
+	// Apply to a probe whose every field differs from the initial style, and ask
+	// whether ANY field moved. A value the engine cannot parse is dropped by
+	// every branch of applyDeclaration, leaving the probe untouched; a value it
+	// can parse writes at least one field, and — because the probe's fields all
+	// start at deliberately non-initial values — that write is visible even when
+	// the parsed value happens to equal the CSS initial value. (Seeding from
+	// initialStyle() instead would make `color: var(--x)` with `--x: black`
+	// indistinguishable from a dropped declaration.)
+	probe := probeContrastStyle()
+	before := probe
+	applyDeclaration(&probe, resolved)
+
+	// DeepEqual rather than ==: ComputedStyle holds slice fields (counters,
+	// content, grid track lists) and the custom-property map, so it is not a
+	// comparable type.
+	return !reflect.DeepEqual(probe, before)
+}
+
+// applyCustomProps runs the custom-property pass of the cascade, writing every
+// declared custom property onto cs.CustomProps before any var() is substituted.
+//
+// It mirrors Compute's own three-stage ordering (sorted normal rules, then
+// inline style, then sorted !important rules) so a custom property cascades by
+// exactly the same rules as every other property. The declaration slices arrive
+// ALREADY SORTED from the caller; re-sorting here would be redundant work on the
+// hot path.
+//
+// Custom-property VALUES are stored raw. They are token streams, not typed
+// values, so there is nothing to parse until substitution — and a value that
+// itself contains var() is resolved lazily at substitution time, which is what
+// lets `--a: var(--b)` work regardless of declaration order.
+func applyCustomProps(cs *ComputedStyle, normal []matchedDecl, n Node, important []matchedDecl) {
+	for _, m := range normal {
+		if IsCustomProperty(m.decl.Property) {
+			cs.CustomProps.set(m.decl.Property, m.decl.Value)
+		}
+	}
+	if styleAttr, ok := n.Attr("style"); ok {
+		for _, d := range ParseDeclarations(styleAttr) {
+			// Inline !important custom properties are collected into the
+			// important slice by Compute and applied below, so skip them here to
+			// avoid applying them a stage too early.
+			if IsCustomProperty(d.Property) && !d.Important {
+				cs.CustomProps.set(d.Property, d.Value)
+			}
+		}
+	}
+	for _, m := range important {
+		if IsCustomProperty(m.decl.Property) {
+			cs.CustomProps.set(m.decl.Property, m.decl.Value)
+		}
+	}
 }
 
 // bestMatch returns the highest specificity among a rule's selectors that match
@@ -496,6 +784,10 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	// This function is the single source of truth for which fields inherit; a
 	// property added to ComputedStyle but omitted here silently resets to initial
 	// instead of inheriting.
+	// Custom properties inherit. The map is handed over BY REFERENCE and
+	// CustomProps.set clones before mutating, so a subtree that declares no new
+	// variable shares one map with its ancestor instead of copying it per element.
+	cs.CustomProps = parent.CustomProps
 	cs.Color = parent.Color
 	cs.FontFamily = parent.FontFamily
 	cs.FontSizePt = parent.FontSizePt
@@ -508,6 +800,8 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.TextDecorationLine = parent.TextDecorationLine
 	cs.TextTransform = parent.TextTransform
 	cs.WhiteSpace = parent.WhiteSpace
+	cs.OverflowWrap = parent.OverflowWrap // CSS Text 3: overflow-wrap is inherited
+	cs.WordBreak = parent.WordBreak       // CSS Text 3: word-break is inherited
 	cs.ListStyleType = parent.ListStyleType
 	cs.ListStylePosition = parent.ListStylePosition
 	cs.BorderCollapse = parent.BorderCollapse
@@ -548,6 +842,8 @@ func initialStyle() ComputedStyle {
 		TextDecorationLine: "none",
 		TextTransform:      "none",
 		WhiteSpace:         "normal",
+		OverflowWrap:       "normal",
+		WordBreak:          "normal",
 		ListStyleType:      "disc",
 		ListStylePosition:  "outside",
 		BackgroundRepeat:   "repeat",
@@ -610,6 +906,13 @@ func initialStyle() ComputedStyle {
 // outside the supported normal-flow subset are ignored (left for later
 // sub-projects). Malformed values are dropped, leaving the prior value intact.
 func applyDeclaration(cs *ComputedStyle, d Declaration) {
+	// Custom properties were already applied by applyCustomProps, in their own
+	// earlier pass. Returning here keeps them out of the property switch, where
+	// they would otherwise fall through to the default no-op anyway.
+	if IsCustomProperty(d.Property) {
+		return
+	}
+
 	switch d.Property {
 	case "display":
 		cs.Display = d.Value
@@ -622,8 +925,13 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.BackgroundColor = c
 		}
 	case "background-image":
-		if ref, ok := parseBackgroundImage(d.Value); ok {
-			cs.BackgroundImage = ref
+		// Both fields are assigned together so the two <image> forms stay
+		// mutually exclusive: a gradient replacing an earlier url() must clear
+		// the url(), and vice versa. ok=false leaves BOTH untouched, which is
+		// what makes an unimplemented <image> keep the prior value rather than
+		// silently resetting the property to none.
+		if ref, grad, ok := parseBackgroundImage(d.Value); ok {
+			cs.BackgroundImage, cs.BackgroundGradient = ref, grad
 		}
 	case "filter":
 		// Kept RAW (see ComputedStyle.Filter): the grammar is parsed by
@@ -729,6 +1037,21 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "normal", "nowrap", "pre", "pre-wrap", "pre-line":
 			cs.WhiteSpace = d.Value
+		}
+	case "overflow-wrap", "word-wrap":
+		// `word-wrap` is the legacy alias overflow-wrap was standardized from; CSS Text 3
+		// requires user agents to treat it as a shorthand for the same property, and it is
+		// still what a lot of real stylesheets say. Both spellings land in the same field,
+		// so later declarations of either name override earlier ones — which is the
+		// cascade behavior an author gets in a browser.
+		switch d.Value {
+		case "normal", "break-word", "anywhere":
+			cs.OverflowWrap = d.Value
+		}
+	case "word-break":
+		switch d.Value {
+		case "normal", "break-all", "keep-all":
+			cs.WordBreak = d.Value
 		}
 	case "list-style-type":
 		cs.ListStyleType = strings.TrimSpace(d.Value)
@@ -960,6 +1283,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "border-left":
 		applyBorderSide(cs, d.Value,
 			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
+	case "border-radius":
+		applyBorderRadius(cs, d.Value)
+	case "border-top-left-radius":
+		applyCornerRadius(&cs.BorderTopLeftRadius, d.Value)
+	case "border-top-right-radius":
+		applyCornerRadius(&cs.BorderTopRightRadius, d.Value)
+	case "border-bottom-right-radius":
+		applyCornerRadius(&cs.BorderBottomRightRadius, d.Value)
+	case "border-bottom-left-radius":
+		applyCornerRadius(&cs.BorderBottomLeftRadius, d.Value)
 	case "flex-direction":
 		switch d.Value {
 		case "row", "row-reverse", "column", "column-reverse":

@@ -567,6 +567,32 @@ body {
   font-size: 13px;
 }
 
+/* ----- overflow-wrap / word-break -------------------------------------------- */
+
+/* A deliberately narrow box: every demo below puts the SAME overlong token in one of
+   these, so the only variable between them is the breaking property. It is NOT clipped
+   (overflow stays visible), so the default case visibly runs past the right edge —
+   which is the behaviour the properties exist to fix. */
+.wrapbox {
+  width: 190px;
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 8px 10px;
+  margin: 0 0 6px 0;
+  font-family: "Inconsolata", monospace;
+  font-size: 12px;
+  color: #1a1a18;
+}
+/* Two boxes side by side so a property and its control can be compared directly. The
+   tracks are sized to the demo box's BORDER box (190px content + 10px padding + 1px
+   border per side) so both columns are identical and the only difference the reader
+   sees between them is where the text breaks. */
+.wrapcols {
+  display: grid;
+  grid-template-columns: 212px 212px;
+  gap: 14px;
+}
+
 /* ----- lists ----------------------------------------------------------------- */
 
 /* Two columns side by side so the unordered nest and the ordered styles sit
@@ -736,6 +762,290 @@ a.seen:visited { color: #6a9a3a; }
 /* Composition: the list applies LEFT TO RIGHT, each function consuming the
    previous one's output. */
 .f-chain     .fxtile { filter: grayscale(1) brightness(1.5) contrast(1.4); }
+
+/* ---------------------------------------------------------------------------
+   CSS gradients (linear-gradient / radial-gradient as a background image)
+
+   Each swatch is one gradient declaration on an otherwise identical tile, so the
+   grid reads as a comparison of the GRAMMAR rather than of the tiles. The tiles
+   are deliberately NON-SQUARE (wider than tall): a `to <corner>` gradient's line
+   is only 45 degrees on a square, so a square swatch would hide the one piece of
+   this geometry most likely to be got wrong.
+   --------------------------------------------------------------------------- */
+.gxgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 4px;
+}
+
+.gx {
+  width: 116px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* ----- custom properties & var() --------------------------------------------- */
+
+/* The palette is declared ONCE here and referenced by every swatch below. Custom
+   properties inherit, so a :root declaration reaches every descendant without
+   being redeclared — the pattern nearly every themed stylesheet is built on, and
+   the one whose absence collapses a dark theme to black-on-white.
+
+   --indirect holds another var(), which is substituted recursively at use time;
+   --rule is a whole shorthand value, proving substitution happens before value
+   parsing rather than per-property. */
+:root {
+  --brand: #2f5fbf;
+  --accent: #d9a521;
+  --muted: #6d6a63;
+  --indirect: var(--brand);
+  --rule: 4px solid var(--accent);
+}
+
+.vargrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
+  margin: 16px 0 22px 0;
+}
+
+.vsw {
+  width: 150px;
+  padding: 14px 10px;
+  color: #ffffff;
+  font-size: 12px;
+  text-align: center;
+}
+
+.v-brand    { background-color: var(--brand); }
+.v-accent   { background-color: var(--accent); }
+.v-muted    { background-color: var(--muted); }
+/* An undeclared property falls to the fallback rather than dropping the
+   declaration. */
+.v-fallback { background-color: var(--absent, #7a5cff); }
+.v-indirect { background-color: var(--indirect); }
+/* Redeclaring --brand on the element itself: the SAME var(--brand) reference
+   resolves differently here than in .v-brand, because custom properties cascade
+   and inherit like any other property. */
+.v-override {
+  --brand: #b03030;
+  background-color: var(--brand);
+}
+
+/* A shorthand built entirely from a variable. */
+.varbox {
+  border: var(--rule);
+  padding: 12px 14px;
+  margin: 6px 0 0 0;
+  font-size: 12px;
+}
+
+/* --- 20 / COLOUR: alpha-bearing values ------------------------------------
+   Every swatch is the SAME brand blue, written a different way, painted over a
+   two-tone backdrop so a wrong alpha is visible rather than merely plausible:
+   over the pale half a too-opaque fill reads far darker than its neighbours,
+   and over the dark half a dropped alpha reads far lighter. A value the parser
+   REJECTS paints nothing at all, so the backdrop shows through unchanged —
+   that is the failure this section exists to catch. */
+.colgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin: 16px 0 22px 0;
+}
+
+.col {
+  width: 118px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* 116x58 — a 2:1 box, so the corner gradients below are visibly not 45 degrees. */
+.gx .gxtile {
+  height: 58px;
+  border: 1px solid #8a8272;
+  margin-bottom: 5px;
+}
+
+/* Direction: the default (`to bottom`), the four sides, an angle, and the two
+   corner forms whose line angle depends on the box's aspect ratio. */
+.g-default  .gxtile { background: linear-gradient(#2f6fb0, #d9a521); }
+.g-right    .gxtile { background: linear-gradient(to right, #2f6fb0, #d9a521); }
+.g-left     .gxtile { background: linear-gradient(to left, #2f6fb0, #d9a521); }
+.g-top      .gxtile { background: linear-gradient(to top, #2f6fb0, #d9a521); }
+.g-45deg    .gxtile { background: linear-gradient(45deg, #2f6fb0, #d9a521); }
+.g-turn     .gxtile { background: linear-gradient(0.75turn, #2f6fb0, #d9a521); }
+.g-corner   .gxtile { background: linear-gradient(to bottom right, #2f6fb0, #d9a521); }
+.g-corner2  .gxtile { background: linear-gradient(to top right, #2f6fb0, #d9a521); }
+
+/* Colour stops: several colours, explicit positions, two stops sharing a
+   position (a hard break), and a fade to `transparent` — which is the case that
+   proves the interpolation is PREMULTIPLIED, since a straight-alpha ramp shows a
+   grey band through the middle of it. */
+.g-multi    .gxtile { background: linear-gradient(to right, #b03030, #d9a521, #3a7d5a, #2f6fb0); }
+.g-stops    .gxtile { background: linear-gradient(to right, #2f6fb0 25%, #d9a521 75%); }
+.g-hard     .gxtile { background: linear-gradient(to right, #2f6fb0 50%, #b03030 50%); }
+.g-bands    .gxtile {
+  background: linear-gradient(to right,
+    #b03030 0 25%, #d9a521 25% 50%, #3a7d5a 50% 75%, #2f6fb0 75% 100%);
+}
+.g-alpha    .gxtile { background: linear-gradient(to right, #b03030, transparent); }
+
+/* Radial: the ending shape's two keyword axes (circle/ellipse) crossed with the
+   sizing rules, plus an off-centre `at <position>`. */
+.g-radial   .gxtile { background: radial-gradient(#d9a521, #2f6fb0); }
+.g-circle   .gxtile { background: radial-gradient(circle, #d9a521, #2f6fb0); }
+.g-cside    .gxtile { background: radial-gradient(closest-side, #d9a521, #2f6fb0); }
+.g-fside    .gxtile { background: radial-gradient(circle farthest-side, #d9a521, #2f6fb0); }
+.g-at       .gxtile { background: radial-gradient(circle at 20% 30%, #d9a521, #2f6fb0); }
+
+/* Repeating: the ramp's own stop range becomes the repeat PERIOD, so these tile
+   the pattern rather than stretching it across the box. */
+.g-replin   .gxtile {
+  background: repeating-linear-gradient(to right, #2f6fb0 0 8px, #d9a521 8px 16px);
+}
+.g-repang   .gxtile {
+  background: repeating-linear-gradient(45deg, #3a7d5a 0 6px, #efe9d8 6px 12px);
+}
+.g-reprad   .gxtile {
+  background: repeating-radial-gradient(circle, #b03030 0 7px, #efe9d8 7px 14px);
+}
+
+/* A gradient is a background IMAGE, so background-size / -position / -repeat all
+   apply to it exactly as they do to a bitmap. */
+.g-sized    .gxtile {
+  background: linear-gradient(to right, #2f6fb0, #d9a521);
+  background-size: 40px 100%;
+}
+.g-norepeat .gxtile {
+  background: linear-gradient(to right, #2f6fb0, #d9a521);
+  background-size: 60% 60%;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+/* The backdrop: a pale field with a dark block at its right, so one swatch
+   composites against both extremes at once. */
+.col .colback {
+  height: 46px;
+  background: #eceff3;
+  border: 1px solid #c4ccd6;
+  margin-bottom: 5px;
+  position: relative;
+}
+
+.col .colback .dark {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 58px;
+  height: 46px;
+  background: #24313f;
+}
+
+/* The swatch itself straddles the light/dark boundary. */
+.col .colback .sw {
+  position: absolute;
+  left: 22px;
+  top: 9px;
+  width: 74px;
+  height: 28px;
+}
+
+/* One declaration per swatch. The first is the opaque reference; the rest are
+   the alpha-bearing and CSS Color 4 spellings that the engine's older colour
+   parser dropped outright. */
+.c-opaque   .sw { background: #4f9cff; }
+.c-rgba     .sw { background: rgba(79, 156, 255, 0.35); }
+.c-hex8     .sw { background: #4f9cff59; }
+.c-hex4     .sw { background: #4bf6; }
+.c-hsl      .sw { background: hsl(214, 100%, 65%); }
+.c-hsla     .sw { background: hsla(214, 100%, 65%, 0.35); }
+.c-slash    .sw { background: rgb(79 156 255 / 35%); }
+.c-hslslash .sw { background: hsl(214deg 100% 65% / 35%); }
+.c-named    .sw { background: rebeccapurple; }
+/* transparent is a COLOUR, not a parse failure: it paints nothing while still
+   counting as a valid value, so it overrides the red before it. */
+.c-trans    .sw { background-color: #b03030; background-color: transparent; }
+/* A malformed value must DROP, leaving the previous declaration standing — this
+   swatch must therefore render solid red, not blank.
+
+   NOTE the longhand. Through the `background` SHORTHAND this case behaves
+   differently: applyBackground resets every sub-property to its initial value
+   before classifying components, and it deliberately tolerates a component it
+   cannot classify, so an unparseable colour there leaves the reset transparent
+   rather than restoring the previous declaration. That is a known divergence
+   from CSS whole-declaration error handling in the shorthand, not in the colour
+   grammar, so this swatch demonstrates the grammar's contract on the longhand
+   where it actually holds rather than implying a behaviour the engine lacks. */
+.c-bad      .sw { background-color: #b03030; background-color: rgb(nope, 0, 0); }
+/* Alpha is not only a background concern: the same one grammar feeds borders
+   and text colour too. */
+.c-border   .sw { border: 7px solid rgba(176, 48, 48, 0.5); }
+.c-text     .sw { color: rgba(20, 30, 45, 0.4); font-family: "TeX Gyre Heros", sans-serif; font-size: 19px; font-weight: bold; }
+
+/* ---------- 19 / BORDER RADIUS ---------- */
+/* Each tile is the SAME box — a filled rectangle with a monospace label — under a
+   different `border-radius` declaration, so the grid reads as a direct comparison of
+   the shorthand's forms. The tiles are deliberately WIDER THAN TALL: a percentage
+   radius resolves its horizontal component against the width and its vertical one
+   against the height, and on a square box that difference is invisible. */
+.radgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
+  margin: 16px 0 22px 0;
+}
+
+.rad {
+  width: 104px;
+  height: 74px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* box-sizing:border-box keeps every tile the SAME OUTER SIZE whatever its border
+   width, so the four border tiles below compare like for like -- and it keeps the
+   label centred in the tile's remaining interior rather than being pushed out by a
+   thick border. */
+.rad .radtile {
+  box-sizing: border-box;
+  width: 96px;
+  height: 46px;
+  margin-bottom: 4px;
+  background: #d8cfae;
+  color: #2a2a24;
+  font-size: 11px;
+  text-align: center;
+  padding-top: 15px;
+}
+
+/* The radius forms. r-none is the control: the same tile with square corners. */
+.r-none    .radtile { }
+.r-small   .radtile { border-radius: 8px; }
+/* A radius far larger than the box: the overlap correction clamps it to exactly
+   half the SHORT side, which is what makes a "pill". */
+.r-pill    .radtile { border-radius: 999px; }
+/* 50% of a 96x46 border box = 48 horizontally, 23 vertically -> a true ellipse. */
+.r-circle  .radtile { border-radius: 50%; }
+/* The slash form states the two semi-axes explicitly. */
+.r-ellipse .radtile { border-radius: 30px / 12px; }
+/* Four values run clockwise from the TOP-LEFT corner. */
+.r-corners .radtile { border-radius: 2px 10px 20px 10px; }
+
+/* Rounded BORDERS. The inner curve's radius is the outer radius minus the border
+   width, floored at zero -- so r-b-square's inner corner is fully square while its
+   outside stays round. */
+.r-b-thin   .radtile { background: #efe9d8; border: 2px solid #6a5f3a; border-radius: 14px; }
+.r-b-thick  .radtile { background: #efe9d8; border: 10px solid #6a5f3a; border-radius: 14px; }
+.r-b-square .radtile { background: #efe9d8; border: 12px solid #6a5f3a; border-radius: 6px; }
+.r-over     .radtile { background: #efe9d8; border: 3px solid #6a5f3a; border-radius: 200px; }
 
 /* ===================== 19 · BOX-SHADOW =====================
    Each swatch carries the SAME plain tile under a different `box-shadow`

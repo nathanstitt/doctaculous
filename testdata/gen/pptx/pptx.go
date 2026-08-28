@@ -23,8 +23,7 @@ type Builder struct {
 }
 
 type slide struct {
-	xml    string
-	hidden bool
+	xml string
 	// imageRels lists media indices this slide references as rId100+i.
 	imageRels []int
 }

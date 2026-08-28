@@ -153,12 +153,15 @@ func parseOneBoxShadow(tz *tokenizer) (sh BoxShadow, more, ok bool) {
 		}
 
 		// Anything else — a #hash, a named-colour ident, `rgb(` — must be the
-		// shadow's <color>. Rewind so parseColor starts at the token itself.
+		// shadow's <color>. Rewind so the colour parse starts at the token
+		// itself. parseColorToken, not parseColor: this grammar is an && list, so
+		// the colour may be followed by more of the shadow (`2px 3px red inset`),
+		// and parseColor would consume the remainder as part of the colour.
 		if sawColor {
 			return sh, false, false // a second colour is not `<color>?`
 		}
 		*tz = save
-		c, cok := parseColor(tz)
+		c, cok := parseColorToken(tz)
 		if !cok {
 			return sh, false, false
 		}

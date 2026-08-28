@@ -10,9 +10,9 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
-// black is the colour every shadow below paints in, so a pixel assertion reads
-// as "is there ink here" rather than as a colour comparison.
-var black = color.RGBA{A: 0xff}
+// black — the colour every shadow below paints in, so a pixel assertion reads as
+// "is there ink here" rather than as a colour comparison — is declared once for
+// the package in borderradius_test.go.
 
 // shadowPage wraps one shadow item (and optionally the box's own background
 // after it, in CSS paint order) into a page for rasterization.

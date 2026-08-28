@@ -708,20 +708,22 @@ func TestCSSFilterSurfaceIsBounded(t *testing.T) {
 	gray := []filtereffects.Function{{Kind: filtereffects.FuncGrayscale, Amount: 1}}
 
 	// A colossal box on a page-sized device clips to the device and still runs.
-	fs, _, ok := cssFilterSurface(
+	fs, _, reason := cssFilterSurface(
 		&layout.FilterItem{Funcs: gray, WPt: 1e9, HPt: 1e9}, nil, render.Identity, 800, 600)
-	if !ok {
-		t.Fatal("a 1e9-point box on an 800x600 device should clip to the device, not be rejected")
+	if reason != surfaceOK {
+		t.Fatalf("a 1e9-point box on an 800x600 device should clip to the device, not be rejected (%v)", reason)
 	}
 	if fs.size != (image.Point{X: 800, Y: 600}) {
 		t.Errorf("surface size = %v, want the device's own 800x600 (clipped)", fs.size)
 	}
 
 	// The same box on a device larger than the cap IS rejected, so no
-	// multi-gigabyte buffer is ever allocated.
-	if _, _, ok := cssFilterSurface(
-		&layout.FilterItem{Funcs: gray, WPt: 1e9, HPt: 1e9}, nil, render.Identity, 4000, 4000); ok {
-		t.Errorf("a 16M-pixel surface should exceed the %d-pixel cap", maxCSSFilterPixels)
+	// multi-gigabyte buffer is ever allocated. The reason must be the CAP
+	// specifically: it is the one a real document hits (a full-page filter above
+	// ~150 DPI), and it is what the painter's log line names.
+	if _, _, reason := cssFilterSurface(
+		&layout.FilterItem{Funcs: gray, WPt: 1e9, HPt: 1e9}, nil, render.Identity, 4000, 4000); reason != surfaceOverCap {
+		t.Errorf("a 16M-pixel surface should exceed the %d-pixel cap; reason = %v", maxCSSFilterPixels, reason)
 	}
 
 	// A coordinate beyond int range must be REJECTED, not converted. On amd64 a
@@ -732,7 +734,7 @@ func TestCSSFilterSurfaceIsBounded(t *testing.T) {
 		{Funcs: gray, XPt: 1e300, YPt: 1e300, WPt: 10, HPt: 10},
 		{Funcs: gray, XPt: -1e300, YPt: -1e300, WPt: 10, HPt: 10},
 	} {
-		if _, _, ok := cssFilterSurface(&fi, nil, render.Identity, 800, 600); ok {
+		if _, _, reason := cssFilterSurface(&fi, nil, render.Identity, 800, 600); reason == surfaceOK {
 			t.Errorf("a box at (%g,%g), entirely beyond int range and off the device, was accepted", fi.XPt, fi.YPt)
 		}
 	}
@@ -740,18 +742,18 @@ func TestCSSFilterSurfaceIsBounded(t *testing.T) {
 	// margin is clamped to the device, and pkg/svg/filter caps the deviation
 	// itself (MaxBlurStdDeviation), so the result is a full-device blur rather
 	// than an unbounded allocation.
-	if _, _, ok := cssFilterSurface(
+	if _, _, reason := cssFilterSurface(
 		&layout.FilterItem{Funcs: []filtereffects.Function{{Kind: filtereffects.FuncBlur, StdDeviation: 1e300}},
-			WPt: 10, HPt: 10}, nil, render.Identity, 800, 600); !ok {
-		t.Error("a huge blur margin should clamp to the device, not be rejected")
+			WPt: 10, HPt: 10}, nil, render.Identity, 800, 600); reason != surfaceOK {
+		t.Errorf("a huge blur margin should clamp to the device, not be rejected (%v)", reason)
 	}
 
 	// A small box FAR from the origin allocates only its own area, not its far
 	// corner's: the shift is what makes the two agree.
-	fs, _, ok = cssFilterSurface(
+	fs, _, reason = cssFilterSurface(
 		&layout.FilterItem{Funcs: gray, XPt: 3900, YPt: 3900, WPt: 50, HPt: 50}, nil, render.Identity, 4000, 4000)
-	if !ok {
-		t.Fatal("a 50x50 box at (3900,3900) should be filterable")
+	if reason != surfaceOK {
+		t.Fatalf("a 50x50 box at (3900,3900) should be filterable (%v)", reason)
 	}
 	if fs.size.X > 64 || fs.size.Y > 64 {
 		t.Errorf("surface size = %v for a 50x50 box; the origin shift is not being applied", fs.size)

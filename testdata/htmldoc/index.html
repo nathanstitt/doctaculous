@@ -703,9 +703,323 @@ newline is kept.</p>
       picture of itself.</p>
   </section>
 
-  <!-- ===================== 19 · BOX-SHADOW ===================== -->
+
   <section class="section break">
-    <span class="kicker">19 / BOX-SHADOW</span>
+    <span class="kicker">19 / CUSTOM PROPERTIES</span>
+    <h2>Custom properties and <code>var()</code></h2>
+    <p class="lede">The palette below is declared <em>once</em> on <code>:root</code> and
+      reached by every swatch through <code>var()</code>. Custom properties inherit, so a
+      value set at the document root is visible to any descendant without being
+      redeclared &mdash; the pattern almost every themed stylesheet is built on.</p>
+
+    <div class="vargrid">
+      <div class="vsw v-brand">var(--brand)</div>
+      <div class="vsw v-accent">var(--accent)</div>
+      <div class="vsw v-muted">var(--muted)</div>
+      <div class="vsw v-fallback">var(--absent, &#35;7a5cff)</div>
+      <div class="vsw v-indirect">var(--indirect)</div>
+      <div class="vsw v-override">scoped override</div>
+    </div>
+
+    <p class="caption">Look for: the last two swatches. <em>Indirect</em> resolves
+      <code>--indirect: var(--brand)</code> &mdash; a custom property whose own value is
+      another <code>var()</code>, substituted recursively. <em>Scoped override</em>
+      redeclares <code>--brand</code> on the swatch itself, so the same
+      <code>var(--brand)</code> reference resolves differently there than in the first
+      swatch: custom properties cascade and inherit exactly like any other property, and
+      the nearest declaration wins.</p>
+
+    <p>Substitution happens between the cascade and value parsing, so <code>var()</code>
+      works in <em>any</em> property, shorthands included &mdash; the rule below draws its
+      whole border from one variable. A reference that cannot be resolved is
+      <em>invalid at computed&#8209;value time</em>, which is not the same as a syntax
+      error: rather than leaving an earlier declaration showing, the property falls back
+      to its inherited or initial value, as though <code>unset</code> had been
+      specified.</p>
+
+    <div class="varbox">border: var(--rule)</div>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">20 / COLOUR</span>
+    <h2>Alpha-bearing colour values</h2>
+    <p class="lede">The engine has one CSS Color&nbsp;4 colour grammar, shared by the HTML
+      cascade and the SVG parser. Every swatch below straddles a pale field and a dark
+      block, so an alpha channel that is honoured looks <em>different on each side</em>
+      while one that is dropped looks the same on both.</p>
+
+    <div class="colgrid">
+      <div class="col c-opaque"><div class="colback"><div class="dark"></div><div class="sw"></div></div>#4f9cff <em>(opaque reference)</em></div>
+      <div class="col c-rgba"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rgba(79,156,255,0.35)</div>
+      <div class="col c-hex8"><div class="colback"><div class="dark"></div><div class="sw"></div></div>#4f9cff59</div>
+      <div class="col c-hex4"><div class="colback"><div class="dark"></div><div class="sw"></div></div>#4bf6</div>
+      <div class="col c-hsl"><div class="colback"><div class="dark"></div><div class="sw"></div></div>hsl(214,100%,65%)</div>
+      <div class="col c-hsla"><div class="colback"><div class="dark"></div><div class="sw"></div></div>hsla(214,100%,65%,0.35)</div>
+      <div class="col c-slash"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rgb(79 156 255 / 35%)</div>
+      <div class="col c-hslslash"><div class="colback"><div class="dark"></div><div class="sw"></div></div>hsl(214deg 100% 65% / 35%)</div>
+      <div class="col c-named"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rebeccapurple</div>
+      <div class="col c-border"><div class="colback"><div class="dark"></div><div class="sw"></div></div>border rgba(176,48,48,0.5)</div>
+      <div class="col c-text"><div class="colback"><div class="dark"></div><div class="sw">Aa</div></div>color rgba(20,30,45,0.4)</div>
+      <div class="col c-trans"><div class="colback"><div class="dark"></div><div class="sw"></div></div>transparent <em>(valid, paints nothing)</em></div>
+      <div class="col c-bad"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rgb(nope,0,0) <em>(dropped &rarr; red stands)</em></div>
+    </div>
+
+    <p class="caption">Look for: <code>rgba(79,156,255,0.35)</code>,
+      <code>#4f9cff59</code> and <code>rgb(79 156 255 / 35%)</code> are the SAME colour at
+      the same alpha spelled three ways &mdash; 0.35 and 35&nbsp;% and the hex byte
+      <code>59</code> all resolve to an alpha of 89 &mdash; so those three swatches must be
+      pixel-identical. The two <code>hsl</code> swatches sit one step away at (77,154,255)
+      rather than (79,156,255): that is the honest result of converting HSL to RGB and
+      rounding, not a parsing error. <code>#4bf6</code> is deliberately a
+      <em>different</em> colour (#44bbff at alpha 102) to show the four-digit form
+      expanding each nibble. Every alpha-bearing swatch must read pale over the light
+      field and muted-blue over the dark block; a swatch that looks the same on both
+      halves has lost its alpha, and a swatch that is not there at all means the value
+      failed to parse and the declaration was dropped.</p>
+
+    <p class="caption">The last two swatches are the error cases, and they use the
+      <code>background-color</code> longhand deliberately. <code>transparent</code> is a
+      <em>valid</em> colour and correctly paints nothing. The malformed
+      <code>rgb(nope,0,0)</code> is dropped per CSS whole-declaration error handling, so
+      the earlier red declaration stays in force and the swatch renders solid red &mdash;
+      a blank swatch there would mean the engine had wrongly accepted the bad value and
+      painted transparent black. Through the <code>background</code> <em>shorthand</em>
+      the same bad value behaves differently, because that expander resets each
+      sub-property before classifying components and tolerates a component it cannot
+      classify; that divergence lives in the shorthand, not in the colour grammar.</p>
+
+    <p>Alpha survives the whole pipeline because the paint stack carries a live alpha
+      channel: parsing produces an RGBA, the painter hands it to the device unchanged, and
+      the rasteriser composites it over whatever it lands on. In PDF output the same
+      colours are emitted through the writer's own colour handling rather than being
+      pre-blended, so the text above stays selectable and the fills stay vector.</p>
+  </section>
+
+  <!-- ===================== 21 · MISSING GLYPHS ===================== -->
+  <section class="section break">
+    <span class="kicker">21 / MISSING GLYPHS</span>
+    <h2>Characters No Font Can Draw</h2>
+    <p class="lede">No bundled face covers emoji or Devanagari, and none ever will
+      &mdash; the bundle is a handful of permissively&#8209;licensed Latin, Hebrew and
+      Arabic substitutes. A character none of them maps now draws
+      <code>.notdef</code>, the &ldquo;tofu&rdquo; box, exactly as a browser does.</p>
+
+    <p>Nine weather emoji. Every one is unmappable, so every one is a box:</p>
+    <p style="font-size: 22px;">&#127752;&#127780;&#127781;&#127782;&#127783;&#127784;&#127785;&#127786;&#127787;</p>
+
+    <p>The box is not a placeholder pasted over the line &mdash; it is a glyph, and it
+      shapes like one. Below, unmappable characters sit inline with text that resolves
+      normally, and the correct text keeps its own metrics on either side:</p>
+    <p>Latin, then Devanagari &#2325;&#2326;&#2327;, then Latin again.</p>
+
+    <p>Whether the mark is drawn by the font or by us depends on the font. A face that
+      ships its own <code>.notdef</code> gets <em>its</em> glyph &mdash; DejaVu draws a
+      hollow box, Noto draws a box containing the code point's hex digits. The bundled
+      TeX&nbsp;Gyre substitutes ship a <code>.notdef</code> that is <em>blank</em>, so
+      for the boxes above the geometry is synthesized. Each distinct missing character
+      is also reported once through the layout log, which is the half that makes a font
+      gap diagnosable rather than merely visible.</p>
+
+    <p>Invisible characters are deliberately excluded. A no&#8209;break space, a
+      zero&#8209;width joiner or a variation selector draws no ink even in a font that
+      maps it, so giving it a box would invent a mark the author never wrote. The
+      sentence you are reading contains a U+202F&#8239;NARROW NO&#8209;BREAK SPACE that
+      no bundled face maps; it renders as space, and nothing is logged, because nothing
+      is wrong.</p>
+    <p class="caption">Look for: the boxes have a side bearing, so they read as
+      separate marks rather than one bar, and they sit on the baseline with the text
+      around them. This matters more than it looks. Before <code>.notdef</code>, an
+      unmappable character rendered as <em>nothing</em> &mdash; and because the
+      surrounding text was untouched, a page with a font gap looked like a page with a
+      <em>layout</em> bug. It is worse when only some characters of a set are missing:
+      the report behind this section was a board carrying only DejaVu and Liberation,
+      where three of nine weather emoji drew and six vanished.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">22 / GRADIENTS</span>
+    <h2>CSS <code>linear-gradient()</code> and <code>radial-gradient()</code></h2>
+    <p class="lede">A gradient is a generated <em>background image</em>, not a colour:
+      it is painted by the same shading engine SVG paint servers use, evaluated per
+      device pixel rather than baked into a bitmap. Every tile below is 116&times;58
+      &mdash; deliberately not square, because a <code>to &lt;corner&gt;</code>
+      gradient's line is only 45&deg; on a square.</p>
+
+    <h3>Direction</h3>
+    <div class="gxgrid">
+      <div class="gx g-default"><div class="gxtile"></div>(none) &rarr; to bottom</div>
+      <div class="gx g-right"><div class="gxtile"></div>to right</div>
+      <div class="gx g-left"><div class="gxtile"></div>to left</div>
+      <div class="gx g-top"><div class="gxtile"></div>to top</div>
+      <div class="gx g-45deg"><div class="gxtile"></div>45deg</div>
+      <div class="gx g-turn"><div class="gxtile"></div>0.75turn</div>
+      <div class="gx g-corner"><div class="gxtile"></div>to bottom right</div>
+      <div class="gx g-corner2"><div class="gxtile"></div>to top right</div>
+    </div>
+    <p class="caption">Look for: the two corner swatches. Their bands are <em>not</em>
+      at 45&deg;. CSS angles the gradient line so the perpendicular through each end
+      lands exactly on a corner, which on a 2:1 box makes the line noticeably shallower
+      &mdash; and puts the two <em>other</em> corners at precisely the midpoint colour.
+      <code>0deg</code> points up and angles run clockwise, so <code>0.75turn</code>
+      (270&deg;) matches <code>to left</code>.</p>
+
+    <h3>Colour stops</h3>
+    <div class="gxgrid">
+      <div class="gx g-multi"><div class="gxtile"></div>four colours, no positions</div>
+      <div class="gx g-stops"><div class="gxtile"></div>25% &hellip; 75%</div>
+      <div class="gx g-hard"><div class="gxtile"></div>two stops at 50% (hard break)</div>
+      <div class="gx g-bands"><div class="gxtile"></div>four hard bands</div>
+      <div class="gx g-alpha"><div class="gxtile"></div>&rarr; transparent</div>
+    </div>
+    <p class="caption">Look for: stops with no position are spread <em>evenly</em>
+      between the ones that have them, so the four-colour swatch changes at 33% and 67%
+      without being told to. Two stops sharing a position give a hard edge with no blend
+      at all &mdash; the mechanism behind the four-band swatch. The last swatch fades to
+      <code>transparent</code> and stays <em>red</em> the whole way: interpolation runs
+      in premultiplied alpha, which is what keeps a grey band from appearing through the
+      middle of it.</p>
+
+    <h3>Radial</h3>
+    <div class="gxgrid">
+      <div class="gx g-radial"><div class="gxtile"></div>ellipse (default)</div>
+      <div class="gx g-circle"><div class="gxtile"></div>circle</div>
+      <div class="gx g-cside"><div class="gxtile"></div>closest-side</div>
+      <div class="gx g-fside"><div class="gxtile"></div>circle farthest-side</div>
+      <div class="gx g-at"><div class="gxtile"></div>circle at 20% 30%</div>
+    </div>
+    <p class="caption">Look for: the default ending shape is an <em>ellipse</em> sized
+      to the farthest corner, so it stretches with the box; adding <code>circle</code>
+      makes both radii equal and the rings become round. The sizing keyword picks which
+      box feature the shape must reach &mdash; <code>closest-side</code> lands the end
+      colour on the nearest edges, so the corners sit beyond the ramp and are solid.</p>
+
+  </section>
+
+  <section class="section break">
+    <span class="kicker">23 / GRADIENTS, CONTINUED</span>
+    <h2>Repeating gradients, and the <code>background-*</code> properties</h2>
+    <p class="lede">A gradient is a generated <em>image</em>, so it answers to the same
+      sizing, tiling and positioning properties a bitmap does. These swatches are the
+      proof: the same declarations that place a <code>url()</code> background place a
+      gradient one.</p>
+
+    <div class="gxgrid">
+      <div class="gx g-replin"><div class="gxtile"></div>repeating, 16px period</div>
+      <div class="gx g-repang"><div class="gxtile"></div>repeating at 45deg</div>
+      <div class="gx g-reprad"><div class="gxtile"></div>repeating radial</div>
+      <div class="gx g-sized"><div class="gxtile"></div>background-size: 40px</div>
+      <div class="gx g-norepeat"><div class="gxtile"></div>60% size, centered, no-repeat</div>
+    </div>
+    <p class="caption">Look for: a repeating gradient takes its <em>stop range</em> as
+      the period, so the ramp tiles rather than stretching once. The last two swatches
+      show a gradient really is a background image &mdash; <code>background-size</code>
+      resizes its box, and the result tiles or is placed by
+      <code>background-position</code> exactly as a bitmap would.</p>
+  </section>
+
+  <!-- ===================== 24 · BORDER RADIUS ===================== -->
+  <section class="section break">
+    <span class="kicker">24 / BORDER RADIUS</span>
+    <h2>Rounded Corners</h2>
+    <p class="lede">Every form of <code>border-radius</code>: circular and elliptical
+      corners, the four per&#8209;corner longhands, percentage radii, the
+      overlap&#8209;correction rule, and rounded borders with their true inner curve.</p>
+
+    <div class="radgrid">
+      <div class="rad r-none"><div class="radtile">none</div>no radius</div>
+      <div class="rad r-small"><div class="radtile">8px</div>border-radius: 8px</div>
+      <div class="rad r-pill"><div class="radtile">pill</div>border-radius: 999px</div>
+      <div class="rad r-circle"><div class="radtile">50%</div>border-radius: 50%</div>
+      <div class="rad r-ellipse"><div class="radtile">30/12</div>border-radius: 30px / 12px</div>
+      <div class="rad r-corners"><div class="radtile">4 vals</div>2px 10px 20px 10px</div>
+    </div>
+    <p class="caption">Look for: the <code>50%</code> tile is a true ellipse rather than a
+      circle, because its box is wider than it is tall &mdash; a percentage resolves the
+      horizontal radius against the box's <em>width</em> and the vertical one against its
+      <em>height</em>. The <code>30px / 12px</code> tile shows the same asymmetry written
+      explicitly with the slash form, and the last tile gives all four corners a different
+      radius in one declaration.</p>
+
+    <div class="radgrid">
+      <div class="rad r-b-thin"><div class="radtile">thin</div>2px border, 14px radius</div>
+      <div class="rad r-b-thick"><div class="radtile">thick</div>10px border, 14px radius</div>
+      <div class="rad r-b-square"><div class="radtile">inner</div>12px border, 6px radius</div>
+      <div class="rad r-over"><div class="radtile">over</div>radius 200px, corrected</div>
+    </div>
+    <p class="caption">Look for: the inner curve. A rounded border is not the outer path
+      stroked &mdash; the inner edge's radius is the outer radius <em>minus</em> the border
+      width, so the thick tile's hole is far less round than its outside, and in the third
+      tile the border is thicker than the radius, which squares the inner corner completely
+      while the outside stays round. The last tile asks for a 200px radius on a box far
+      smaller than that; the corners cannot overlap, so every radius scales down by one
+      shared factor until they exactly meet.</p>
+
+    <p>The overlap correction (CSS Backgrounds&nbsp;3 &sect;5.1) is what makes an
+      over&#8209;large radius degrade gracefully rather than producing self&#8209;crossing
+      arcs: each side compares its length against the sum of the two radii meeting along
+      it, and the <em>smallest</em> of those ratios scales all eight radius components at
+      once. That single shared factor is why <code>border-radius: 999px</code> on the pill
+      above resolves to exactly half the box's height on every corner.</p>
+
+    <p>Backgrounds and borders both follow the rounded outline, and a background
+      <em>image</em> is clipped to it. In PDF output the corners stay genuinely curved: the
+      writer emits the same cubic curve path natively, so a rounded box remains vector
+      rather than being flattened to a picture. A rounded border is filled as one ring in a
+      single colour, so a dashed or multi&#8209;coloured rounded border paints solid &mdash;
+      the engine logs that substitution rather than making it silently.</p>
+  </section>
+
+  <!-- ===================== 25 · OVERFLOW-WRAP / WORD-BREAK ===================== -->
+  <section class="section break">
+    <span class="kicker">25 / MID-WORD BREAKING</span>
+    <h2>The <code>overflow-wrap</code> &amp; <code>word-break</code> Properties</h2>
+    <p class="lede">Where a line may break <em>inside</em> a word. Normal wrapping only
+      breaks at spaces, so a single long token &mdash; a URL, a hash, a compound noun
+      &mdash; runs straight past the edge of its box. These two properties add
+      opportunities between characters, and they differ in when they take them.</p>
+
+    <h4>The problem &mdash; one unbreakable token</h4>
+    <div class="wrapbox">https://example.com/very/long/path/to/a/private/calendar/feed.ics</div>
+    <p class="caption">Default <code>overflow-wrap:normal</code>: the token has no space
+      in it, so there is nowhere to break and it overflows the box on a single line.</p>
+
+    <h4><code>overflow-wrap: break-word</code> &mdash; break only as a last resort</h4>
+    <div class="wrapbox" style="overflow-wrap:break-word">https://example.com/very/long/path/to/a/private/calendar/feed.ics</div>
+    <p class="caption">The same token now breaks between characters and stays inside the
+      box. The legacy alias <code>word-wrap:break-word</code> is accepted for the same
+      effect.</p>
+
+    <h4>Last resort vs. eager &mdash; the distinction that matters</h4>
+    <div class="wrapcols">
+      <div>
+        <div class="wrapbox" style="overflow-wrap:break-word">wrap this sesquipedalian</div>
+        <p class="caption"><code>break-word</code> moves a word that <em>fits on a line of
+          its own</em> down whole, breaking it only when it cannot fit anywhere.</p>
+      </div>
+      <div>
+        <div class="wrapbox" style="word-break:break-all">wrap this sesquipedalian</div>
+        <p class="caption"><code>break-all</code> is eager: every character boundary is an
+          ordinary opportunity, so the word is chopped at the line edge regardless.</p>
+      </div>
+    </div>
+
+    <h4><code>word-break: keep-all</code> &mdash; suppress mid&#8209;word breaking</h4>
+    <div class="wrapbox" style="word-break:keep-all;overflow-wrap:break-word">https://example.com/very/long/path/to/a/private/calendar/feed.ics</div>
+    <p class="caption"><code>keep-all</code> forbids breaking the affected text, so it
+      overrides <code>overflow-wrap</code> and the token overflows again.</p>
+
+    <p class="caption">Every mid&#8209;word break lands on a grapheme&#8209;cluster
+      boundary (UAX&nbsp;#29), so a combining mark is never separated from its base
+      letter and an emoji ZWJ sequence or a flag is never split in half.
+      <code>overflow-wrap:anywhere</code> breaks in the same places as
+      <code>break-word</code> but additionally shrinks a box's intrinsic
+      <em>min&#8209;content</em> width, which is visible in flex and grid sizing rather
+      than in the line breaking itself.</p>
+  </section>
+
+  <!-- ===================== 26 · BOX-SHADOW ===================== -->
+  <section class="section break">
+    <span class="kicker">26 / BOX-SHADOW</span>
     <h2>CSS <code>box-shadow</code></h2>
     <p class="lede">Every tile below is identical &mdash; a flat fill inside a hairline
       border &mdash; under a different <code>box-shadow</code> declaration. Unlike a

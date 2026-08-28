@@ -917,3 +917,128 @@ func TestBidiEndToEndArabicParagraph(t *testing.T) {
 		t.Errorf("painted order = %q, want %q", got, want)
 	}
 }
+
+// lineRightEdge returns the rightmost x reached by any glyph on ln (its pen origin plus
+// its advance) — the line's painted right extent.
+func lineRightEdge(ln LineFragment) float64 {
+	right := 0.0
+	for _, g := range ln.Glyphs {
+		if e := g.X + g.AdvancePt; e > right {
+			right = e
+		}
+	}
+	return right
+}
+
+// TestOverflowWrapBreaksLongToken is the end-to-end motivating case: an unbreakable
+// token far wider than its box overflows by default and is broken by overflow-wrap.
+func TestOverflowWrapBreaksLongToken(t *testing.T) {
+	const token = "AAAAAAAAAAAAAAAAAAAA"
+
+	plain := layoutOne(t, reset+`<p style="width:60px">`+token+`</p>`, 1000)
+	if len(plain.Lines) != 1 {
+		t.Fatalf("default lines = %d, want 1 (the token overflows unbroken)", len(plain.Lines))
+	}
+	if got := lineRightEdge(plain.Lines[0]); got <= plain.X+60 {
+		t.Fatalf("default right edge = %v, want > %v — the premise is that it OVERFLOWS",
+			got, plain.X+60)
+	}
+
+	for _, decl := range []string{
+		"overflow-wrap:break-word", "word-wrap:break-word", // the legacy alias must work too
+		"overflow-wrap:anywhere", "word-break:break-all",
+	} {
+		p := layoutOne(t, reset+`<p style="width:60px;`+decl+`">`+token+`</p>`, 1000)
+		if len(p.Lines) < 2 {
+			t.Errorf("%s: lines = %d, want >= 2 (the token must break)", decl, len(p.Lines))
+			continue
+		}
+		for i, ln := range p.Lines {
+			if len(ln.Glyphs) == 0 {
+				continue
+			}
+			// Allow a hair of slack for the final glyph's advance vs. its ink.
+			if right := lineRightEdge(ln); right > p.X+60+0.5 {
+				t.Errorf("%s: line %d right edge = %v, want <= %v (must stay in the box)",
+					decl, i, right, p.X+60)
+			}
+		}
+	}
+}
+
+// TestOverflowWrapLastResortVsWordBreakEager is the CSS distinction end to end: a word
+// that FITS on a line of its own must be moved down whole by overflow-wrap:break-word,
+// but chopped at the line edge by word-break:break-all.
+func TestOverflowWrapLastResortVsWordBreakEager(t *testing.T) {
+	// "AAAAA" at the default 16pt serif is wider than the 60px line ONCE "xx " precedes
+	// it, but fits on a line of its own — the exact window in which the two properties
+	// disagree. The control below asserts that premise rather than assuming it, since it
+	// depends on the bundled face's metrics.
+	alone := layoutOne(t, reset+
+		`<p style="width:60px;overflow-wrap:break-word">AAAAA</p>`, 1000)
+	if len(alone.Lines) != 1 {
+		t.Fatalf("premise broken: the token alone takes %d lines, want 1 (it must FIT alone "+
+			"for the last-resort rule to be observable)", len(alone.Lines))
+	}
+
+	word := layoutOne(t, reset+
+		`<p style="width:60px;overflow-wrap:break-word">xx AAAAA</p>`, 1000)
+	if len(word.Lines) != 2 {
+		t.Errorf("break-word lines = %d, want 2 (the word moves down WHOLE — break-word is "+
+			"a last resort and must not split a word that fits alone)", len(word.Lines))
+	}
+	all := layoutOne(t, reset+
+		`<p style="width:60px;word-break:break-all">xx AAAAA</p>`, 1000)
+	if len(all.Lines) < 2 {
+		t.Fatalf("break-all lines = %d, want >= 2", len(all.Lines))
+	}
+	// break-all fills the first line to the edge, so its first line carries MORE glyphs
+	// than break-word's (which stops after "xx").
+	if len(all.Lines[0].Glyphs) <= len(word.Lines[0].Glyphs) {
+		t.Errorf("break-all first line has %d glyphs, break-word %d — break-all must fill "+
+			"the line eagerly rather than deferring the word",
+			len(all.Lines[0].Glyphs), len(word.Lines[0].Glyphs))
+	}
+}
+
+// TestKeepAllSuppressesOverflowWrapEndToEnd: word-break:keep-all forbids breaking the
+// affected text, which overrides overflow-wrap.
+func TestKeepAllSuppressesOverflowWrapEndToEnd(t *testing.T) {
+	p := layoutOne(t, reset+
+		`<p style="width:60px;word-break:keep-all;overflow-wrap:break-word">AAAAAAAAAAAAAAAAAAAA</p>`, 1000)
+	if len(p.Lines) != 1 {
+		t.Errorf("keep-all lines = %d, want 1 (breaking suppressed)", len(p.Lines))
+	}
+}
+
+// TestOverflowWrapInheritsToInlineDescendants: the properties are inherited, so setting
+// break-word on a container breaks a long token inside a nested <span>.
+func TestOverflowWrapInheritsToInlineDescendants(t *testing.T) {
+	p := layoutOne(t, reset+
+		`<p style="width:60px;overflow-wrap:break-word">x <span>AAAAAAAAAAAAAAAAAAAA</span></p>`, 1000)
+	if len(p.Lines) < 3 {
+		t.Errorf("lines = %d, want >= 3 (the span's token must break, inheriting the property)",
+			len(p.Lines))
+	}
+}
+
+// TestLongURLBreaksInNarrowPanel is the downstream case this feature exists for: a fetch
+// error whose URL is one unbroken token must stay inside its panel rather than running
+// off the edge, or the diagnostic is unreadable exactly when it matters.
+func TestLongURLBreaksInNarrowPanel(t *testing.T) {
+	const msg = `ical(Personal): GET https://calendar.example.com/very/long/path/to/a/private/feed.ics: 401 Unauthorized`
+	p := layoutOne(t, reset+
+		`<p style="width:200px;overflow-wrap:break-word">`+msg+`</p>`, 1000)
+	if len(p.Lines) < 3 {
+		t.Fatalf("lines = %d, want >= 3", len(p.Lines))
+	}
+	for i, ln := range p.Lines {
+		if len(ln.Glyphs) == 0 {
+			continue
+		}
+		if right := lineRightEdge(ln); right > p.X+200+0.5 {
+			t.Errorf("line %d right edge = %v, want <= %v — the URL escaped the panel",
+				i, right, p.X+200)
+		}
+	}
+}
