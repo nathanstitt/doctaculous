@@ -836,5 +836,86 @@ newline is kept.</p>
       where three of nine weather emoji drew and six vanished.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">22 / GRADIENTS</span>
+    <h2>CSS <code>linear-gradient()</code> and <code>radial-gradient()</code></h2>
+    <p class="lede">A gradient is a generated <em>background image</em>, not a colour:
+      it is painted by the same shading engine SVG paint servers use, evaluated per
+      device pixel rather than baked into a bitmap. Every tile below is 116&times;58
+      &mdash; deliberately not square, because a <code>to &lt;corner&gt;</code>
+      gradient's line is only 45&deg; on a square.</p>
+
+    <h3>Direction</h3>
+    <div class="gxgrid">
+      <div class="gx g-default"><div class="gxtile"></div>(none) &rarr; to bottom</div>
+      <div class="gx g-right"><div class="gxtile"></div>to right</div>
+      <div class="gx g-left"><div class="gxtile"></div>to left</div>
+      <div class="gx g-top"><div class="gxtile"></div>to top</div>
+      <div class="gx g-45deg"><div class="gxtile"></div>45deg</div>
+      <div class="gx g-turn"><div class="gxtile"></div>0.75turn</div>
+      <div class="gx g-corner"><div class="gxtile"></div>to bottom right</div>
+      <div class="gx g-corner2"><div class="gxtile"></div>to top right</div>
+    </div>
+    <p class="caption">Look for: the two corner swatches. Their bands are <em>not</em>
+      at 45&deg;. CSS angles the gradient line so the perpendicular through each end
+      lands exactly on a corner, which on a 2:1 box makes the line noticeably shallower
+      &mdash; and puts the two <em>other</em> corners at precisely the midpoint colour.
+      <code>0deg</code> points up and angles run clockwise, so <code>0.75turn</code>
+      (270&deg;) matches <code>to left</code>.</p>
+
+    <h3>Colour stops</h3>
+    <div class="gxgrid">
+      <div class="gx g-multi"><div class="gxtile"></div>four colours, no positions</div>
+      <div class="gx g-stops"><div class="gxtile"></div>25% &hellip; 75%</div>
+      <div class="gx g-hard"><div class="gxtile"></div>two stops at 50% (hard break)</div>
+      <div class="gx g-bands"><div class="gxtile"></div>four hard bands</div>
+      <div class="gx g-alpha"><div class="gxtile"></div>&rarr; transparent</div>
+    </div>
+    <p class="caption">Look for: stops with no position are spread <em>evenly</em>
+      between the ones that have them, so the four-colour swatch changes at 33% and 67%
+      without being told to. Two stops sharing a position give a hard edge with no blend
+      at all &mdash; the mechanism behind the four-band swatch. The last swatch fades to
+      <code>transparent</code> and stays <em>red</em> the whole way: interpolation runs
+      in premultiplied alpha, which is what keeps a grey band from appearing through the
+      middle of it.</p>
+
+    <h3>Radial</h3>
+    <div class="gxgrid">
+      <div class="gx g-radial"><div class="gxtile"></div>ellipse (default)</div>
+      <div class="gx g-circle"><div class="gxtile"></div>circle</div>
+      <div class="gx g-cside"><div class="gxtile"></div>closest-side</div>
+      <div class="gx g-fside"><div class="gxtile"></div>circle farthest-side</div>
+      <div class="gx g-at"><div class="gxtile"></div>circle at 20% 30%</div>
+    </div>
+    <p class="caption">Look for: the default ending shape is an <em>ellipse</em> sized
+      to the farthest corner, so it stretches with the box; adding <code>circle</code>
+      makes both radii equal and the rings become round. The sizing keyword picks which
+      box feature the shape must reach &mdash; <code>closest-side</code> lands the end
+      colour on the nearest edges, so the corners sit beyond the ramp and are solid.</p>
+
+  </section>
+
+  <section class="section break">
+    <span class="kicker">23 / GRADIENTS, CONTINUED</span>
+    <h2>Repeating gradients, and the <code>background-*</code> properties</h2>
+    <p class="lede">A gradient is a generated <em>image</em>, so it answers to the same
+      sizing, tiling and positioning properties a bitmap does. These swatches are the
+      proof: the same declarations that place a <code>url()</code> background place a
+      gradient one.</p>
+
+    <div class="gxgrid">
+      <div class="gx g-replin"><div class="gxtile"></div>repeating, 16px period</div>
+      <div class="gx g-repang"><div class="gxtile"></div>repeating at 45deg</div>
+      <div class="gx g-reprad"><div class="gxtile"></div>repeating radial</div>
+      <div class="gx g-sized"><div class="gxtile"></div>background-size: 40px</div>
+      <div class="gx g-norepeat"><div class="gxtile"></div>60% size, centered, no-repeat</div>
+    </div>
+    <p class="caption">Look for: a repeating gradient takes its <em>stop range</em> as
+      the period, so the ramp tiles rather than stretching once. The last two swatches
+      show a gradient really is a background image &mdash; <code>background-size</code>
+      resizes its box, and the result tiles or is placed by
+      <code>background-position</code> exactly as a bitmap would.</p>
+
+
 </body>
 </html>

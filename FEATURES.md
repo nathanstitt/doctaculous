@@ -155,6 +155,35 @@ bullet's design rationale is in its PR:
   synthetic bullet outlines.
 - **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
   `url(..)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
+- **CSS gradients as a background image** (`pkg/css/gradient.go`, `pkg/layout/gradient.go`,
+  `pkg/layout/paint/gradient.go`): `linear-gradient()`, `radial-gradient()` and both
+  `repeating-*` forms. Linear takes an `<angle>` in any CSS unit (`deg`/`grad`/`rad`/`turn`),
+  `to <side>`, or `to <corner>` — the corner case computes the spec's aspect-dependent
+  gradient line (perpendicular to the box's other diagonal), **not** 45°, which is only
+  right on a square. Radial supports `circle`/`ellipse` crossed with
+  `closest-side`/`closest-corner`/`farthest-side`/`farthest-corner`, explicit
+  `<length-percentage>` radii, and `at <position>`. Colour stops take positions in `%` or
+  lengths, with the full CSS normalization: omitted endpoints default to 0%/100%, an
+  unpositioned run is spread evenly between its bracketing stops, and a decreasing position
+  is corrected UP to the running maximum (a forward clamp producing a hard break — never a
+  sort, which would reorder the author's colours). Two stops at one position give a hard
+  colour break. Interpolation is in **premultiplied alpha**, matching browsers: fading to
+  `transparent` stays in its own hue instead of showing the grey/black band a straight-RGBA
+  ramp produces.
+  Gradients paint through the **same shading seam SVG paint servers use**
+  (`raster.NewAxialShader`/`NewRadialShader` → `render.Device.FillShading`), so they are
+  evaluated per device pixel rather than baked to a bitmap, and the PDF writer emits a native
+  `/Shading` dictionary for them. A gradient has no intrinsic size, so it takes the
+  background-origin box's — which makes `background-size`/`-position`/`-repeat`/`-origin`/
+  `-clip` all apply to it through the unchanged geometry path (its geometry is resolved in
+  TILE space, so a resized gradient really is resized).
+  **Degrades honestly:** a colour hint (a bare `<length-percentage>` between two stops)
+  needs a non-linear ramp the shared seam cannot express and is REJECTED at parse time, as
+  are `conic-gradient()`, a unitless angle, and a one-stop list — the declaration is dropped,
+  so the background colour still paints rather than a subtly wrong ramp appearing. An ending
+  shape with a zero radius (e.g. `closest-side` centred on a box corner) establishes no
+  geometry: nothing paints, the background colour remains, and the skip is logged via
+  `warnOnce`.
 - **CSS Color 4 colour values — ONE grammar for the whole engine** (`pkg/css/color.go`; `pkg/svg`
   delegates to it): the full 148-keyword named table (via `golang.org/x/image/colornames` +
   `rebeccapurple` + `transparent`), all four hex forms (`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`), and

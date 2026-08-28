@@ -504,6 +504,7 @@ func applyBackground(cs *ComputedStyle, value string) {
 	// color: `background: url(x)` with no color resets background-color to transparent).
 	cs.BackgroundColor = color.RGBA{}
 	cs.BackgroundImage = ""
+	cs.BackgroundGradient = nil
 	cs.BackgroundRepeat = "repeat"
 	cs.BackgroundPosition = initialBackgroundPosition()
 	cs.BackgroundSize = BackgroundSize{}
@@ -527,7 +528,7 @@ func applyBackground(cs *ComputedStyle, value string) {
 		lc := strings.ToLower(comp)
 		switch lc {
 		case "none":
-			cs.BackgroundImage = ""
+			cs.BackgroundImage, cs.BackgroundGradient = "", nil
 		case "repeat", "repeat-x", "repeat-y", "no-repeat":
 			cs.BackgroundRepeat = lc
 		case "scroll", "fixed", "local":
@@ -541,8 +542,8 @@ func applyBackground(cs *ComputedStyle, value string) {
 			}
 			boxSeen++
 		default:
-			if ref, ok := parseBackgroundImage(comp); ok && ref != "" {
-				cs.BackgroundImage = ref
+			if ref, grad, ok := parseBackgroundImage(comp); ok && (ref != "" || grad != nil) {
+				cs.BackgroundImage, cs.BackgroundGradient = ref, grad
 			} else if c, ok := parseColor(newTokenizer(comp)); ok {
 				cs.BackgroundColor = c
 			} else {

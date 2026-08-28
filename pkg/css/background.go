@@ -138,23 +138,28 @@ func parseBackgroundSize(value string) (BackgroundSize, bool) {
 	return sz, true
 }
 
-// parseBackgroundImage parses a CSS background-image value, returning the resolved
-// url() reference. "none" yields ("", true) to clear the image. A gradient or other
-// unsupported <image> (linear-gradient(...), image-set(...), etc.) yields ok=false so
-// the caller leaves the prior value — gradients are a separate feature, not an error.
-func parseBackgroundImage(value string) (ref string, ok bool) {
+// parseBackgroundImage parses a CSS background-image value into whichever of the
+// two <image> forms this engine paints: a url() reference (ref) or a <gradient>
+// (grad). At most one is ever non-empty/non-nil; "none" yields both empty with
+// ok=true, which CLEARS the property. An <image> this engine does not implement
+// (image-set(), cross-fade(), conic-gradient(), element()) yields ok=false so the
+// caller leaves the prior value untouched rather than treating it as `none`.
+func parseBackgroundImage(value string) (ref string, grad *Gradient, ok bool) {
 	v := strings.TrimSpace(value)
 	if strings.EqualFold(v, "none") || v == "" {
-		return "", true
+		return "", nil, true
 	}
 	// url() is case-insensitive (URL(...)/Url(...) are legal). takeFunc matches the
 	// function name case-sensitively, so normalize just the leading "url(" prefix.
 	if len(v) >= 4 && strings.EqualFold(v[:4], "url(") {
 		if u, _, found := takeFunc("url("+v[4:], "url"); found {
-			return unquote(strings.TrimSpace(u)), true
+			return unquote(strings.TrimSpace(u)), nil, true
 		}
 	}
-	return "", false
+	if g, found := parseGradient(v); found {
+		return "", g, true
+	}
+	return "", nil, false
 }
 
 // pctLen builds a percentage Length.
