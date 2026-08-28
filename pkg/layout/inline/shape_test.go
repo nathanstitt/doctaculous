@@ -18,21 +18,30 @@ func TestShapeHardBreakRun(t *testing.T) {
 	}
 }
 
-func TestShapeMissingFamilySkippedAndLogged(t *testing.T) {
+// A run naming a family the host does not have still SHAPES, using the face cache's
+// bundled terminal fallback. It used to yield no glyphs at all, which rendered a page
+// whose every font-family was unavailable as an empty box — a font failure that read
+// as a layout failure. The substitution is logged by the face cache (see
+// pkg/layout/font.TestResolveTerminalFallbackLogsOnce), not here.
+func TestShapeMissingFamilyFallsBackToBundled(t *testing.T) {
 	faces := layoutfont.NewFaceCache()
-	logged := 0
-	logf := func(string, ...any) { logged++ }
 	glyphs := Shape(faces, []Run{{
 		Text:   "hello",
 		Family: "NoSuchFontXYZ",
 		SizePt: 12,
 		Color:  color.RGBA{A: 0xff},
-	}}, logf)
-	if len(glyphs) != 0 {
-		t.Errorf("glyphs = %d, want 0 (missing family yields nothing)", len(glyphs))
+	}}, nil)
+	if len(glyphs) != len("hello") {
+		t.Fatalf("glyphs = %d, want %d (missing family falls back to the bundled face)", len(glyphs), len("hello"))
 	}
-	if logged == 0 {
-		t.Errorf("expected logf to be invoked for the missing family")
+	// The glyphs must be drawable, not just present: real advances and real outlines.
+	for i, g := range glyphs {
+		if g.Advance <= 0 {
+			t.Errorf("glyph %d has advance %v; want > 0", i, g.Advance)
+		}
+		if g.Outline == nil {
+			t.Errorf("glyph %d has no outline; the fallback face produced no ink", i)
+		}
 	}
 }
 

@@ -777,3 +777,23 @@ tracking moves words
 tracking moves words
 
 The same text in the same box. The spacing is folded into each glyph's advance, so the greedy line breaker sees the wider run and pushes a word down with no change to the breaker itself — the same mechanism that makes _min‑content_ and _max‑content_ account for tracking.
+
+**29 / UNRESOLVABLE FONT FAMILIES**
+
+## Text always renders, even with no matching font
+
+A `font-family` naming only families the host does not have used to render _nothing at all_ — the run was skipped, so the page came out an empty box. Every line below names at least one unavailable family; all of them draw.
+
+A family that exists nowhere.
+
+The whole list is unresolvable, so it degrades to the bundled serif and is logged once. Previously: no ink whatsoever.
+
+An absent family, then a generic.
+
+The generic keyword still terminates the list the way CSS says it should — this line was always fine, and is the control proving the fallback above did not simply replace normal resolution.
+
+**Bold** and _italic_ survive the substitution.
+
+The fallback is style‑aware: the bundled bold and italic faces are selected, rather than every run collapsing to one regular face. (The weight and slant are set with CSS rather than `<strong>` and `<em>` because the UA stylesheet carries no rule for those tags yet — a separate gap, tracked in the remediation plan.)
+
+A related failure sat one layer down. The OS font matcher never reports a miss — asked for a family it does not have, it confidently returns some other installed font. A request for `DejaVu Sans` came back as Lucida Grande, and `Roboto`, `IBM Plex Mono` and a deliberately nonexistent name all returned the identical Arial Unicode bytes. Each resolved face is now checked against the family its own `name` table declares, so a wrong answer becomes an honest miss and falls through to the bundled face above.

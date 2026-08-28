@@ -608,6 +608,19 @@ body {
   color: #1a1a18;
 }
 
+/* The unresolvable-family demo. Deliberately NO font-family here: each box sets its
+   own, so the declared family is inherited by nested <strong>/<em> too — sharing a
+   class that already names a resolvable family would leave the children resolving
+   through THAT list and quietly contradict what the boxes claim to show. */
+.absentbox {
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 7px 10px;
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  color: #1a1a18;
+}
+
 /* The right-aligned pair that makes the TRAILING-SPACING rule visible. Both boxes are
    the same width and both are right-aligned, so the tracked line visibly stops one
    tracking-width short of the right edge — the browser behavior this engine matches,

@@ -36,6 +36,21 @@ list and known approximations — lives in the per-subsystem docs: [docs/PDF.md]
   `--bundled-fonts` (CLI), `RasterOptions.BundledFonts` / `PDFOptions.BundledFonts` /
   `WithBundledFonts()` (library); the golden tests pin it. An explicit
   `RasterOptions.FontProvider` (or reflow `WithSystemFontProvider`) still overrides both.
+  A system match is **verified against the face's own `name` table** (`Face.FamilyName`) and
+  rejected when it names a different family: `sysfont.Match` never reports a miss, so without the
+  check a request for an absent family came back as some unrelated installed font (measured: `DejaVu
+  Sans` → Lucida Grande; `Roboto`, `IBM Plex Mono` and a nonexistent name → the same Arial Unicode
+  bytes). A declared name may extend the request with style words (`Barlow Condensed SemiBold`
+  satisfies `Barlow Condensed`), but a merely-shared prefix does not (`Times New Roman` ≠ `Times`).
+  A face that declares no readable family is accepted rather than rejected. **This does not find
+  fonts the matcher cannot identify at all** — it identifies installed files by filename against a
+  fixed registry, so an unregistered family (Roboto, Barlow, IBM Plex on many hosts) stays unfound;
+  `@font-face` with `url()` is the reliable route for non-standard families.
+- **Font-family terminal fallback** (`pkg/layout/font/cache.go`): a `font-family` list where **no**
+  candidate resolves degrades to the bundled serif and logs once per (list, style), instead of
+  resolving to nothing and having the caller skip the run — which rendered a page whose every
+  family was unavailable as an empty box. The fallback is style-aware (bold/italic select the
+  matching bundled face). A list ending in a generic keyword is unaffected; showcase §29.
 - **Transparency**: ExtGState alpha `/ca`/`/CA` + all PDF blend modes (separable + non-separable)
   via `/BM` (`pkg/render/raster/blend.go`).
 - **Shadings** (`pkg/render/raster/shading.go`, `render.Shader`): axial/radial/function-based via

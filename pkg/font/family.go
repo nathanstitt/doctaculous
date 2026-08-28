@@ -1,6 +1,8 @@
 package font
 
 import (
+	"strings"
+
 	"github.com/benoitkugler/textlayout/fonts"
 	"github.com/benoitkugler/textlayout/fonts/truetype"
 
@@ -191,6 +193,36 @@ func (f *Face) OpenTypeFont() (*truetype.Font, bool) {
 		return nil, false
 	}
 	return tt.f, true
+}
+
+// FamilyName returns the family the face's own 'name' table declares, or ok=false
+// for a face with no readable name table (a classic Type1 face, or an sfnt whose
+// name table is absent or empty).
+//
+// It prefers the typographic family (name ID 16) over the legacy family (ID 1),
+// because per-weight files from some foundries put a style-qualified name in ID 1 —
+// Google's BarlowCondensed-SemiBold.ttf declares ID 1 "Barlow Condensed SemiBold"
+// but ID 16 "Barlow Condensed". ID 16 is optional and is omitted by fonts whose
+// family/style pair already fits the legacy four-style model, so ID 1 is the
+// fallback rather than the other way round.
+//
+// This exists so a caller can VERIFY that a font resolved by name is actually the
+// font it asked for: the OS matcher is fuzzy and answers even when nothing matches
+// (see pkg/layout/font.OSFontProvider), so the declared name is the only trustworthy
+// evidence of identity.
+func (f *Face) FamilyName() (string, bool) {
+	tt, ok := f.OpenTypeFont()
+	if !ok {
+		return "", false
+	}
+	for _, id := range [...]truetype.NameID{truetype.NamePreferredFamily, truetype.NameFontFamily} {
+		if e := tt.Names.SelectEntry(id); e != nil {
+			if name := strings.TrimSpace(e.String()); name != "" {
+				return name, true
+			}
+		}
+	}
+	return "", false
 }
 
 // UnitsPerEm returns the face's units-per-em (always > 0).

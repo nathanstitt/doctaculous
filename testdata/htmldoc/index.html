@@ -1126,5 +1126,43 @@ newline is kept.</p>
       <em>min&#8209;content</em> and <em>max&#8209;content</em> account for tracking.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">29 / UNRESOLVABLE FONT FAMILIES</span>
+    <h2>Text always renders, even with no matching font</h2>
+    <p class="lede">A <code>font-family</code> naming only families the host does not
+      have used to render <em>nothing at all</em> &mdash; the run was skipped, so the
+      page came out an empty box. Every line below names at least one unavailable
+      family; all of them draw.</p>
+
+    <div class="absentbox" style="font-family:'Totally Absent Face XYZ'">
+      A family that exists nowhere.</div>
+    <p class="caption">The whole list is unresolvable, so it degrades to the bundled
+      serif and is logged once. Previously: no ink whatsoever.</p>
+
+    <div class="absentbox" style="font-family:'Totally Absent Face XYZ', sans-serif">
+      An absent family, then a generic.</div>
+    <p class="caption">The generic keyword still terminates the list the way CSS says
+      it should &mdash; this line was always fine, and is the control proving the
+      fallback above did not simply replace normal resolution.</p>
+
+    <div class="absentbox" style="font-family:'Totally Absent Face XYZ'">
+      <span style="font-weight:bold">Bold</span> and
+      <span style="font-style:italic">italic</span> survive the substitution.</div>
+    <p class="caption">The fallback is style&#8209;aware: the bundled bold and italic
+      faces are selected, rather than every run collapsing to one regular face. (The
+      weight and slant are set with CSS rather than <code>&lt;strong&gt;</code> and
+      <code>&lt;em&gt;</code> because the UA stylesheet carries no rule for those tags
+      yet &mdash; a separate gap, tracked in the remediation plan.)</p>
+
+    <p class="caption">A related failure sat one layer down. The OS font matcher never
+      reports a miss &mdash; asked for a family it does not have, it confidently returns
+      some other installed font. A request for <code>DejaVu&nbsp;Sans</code> came back as
+      Lucida&nbsp;Grande, and <code>Roboto</code>, <code>IBM&nbsp;Plex&nbsp;Mono</code>
+      and a deliberately nonexistent name all returned the identical Arial&nbsp;Unicode
+      bytes. Each resolved face is now checked against the family its own
+      <code>name</code> table declares, so a wrong answer becomes an honest miss and
+      falls through to the bundled face above.</p>
+  </section>
+
 </body>
 </html>

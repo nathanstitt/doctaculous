@@ -45,9 +45,15 @@ type FaceCache struct {
 	logf      func(string, ...any)
 }
 
-// NewFaceCache returns an empty cache ready for use.
+// NewFaceCache returns an empty cache ready for use. Its logf is a no-op; use
+// NewFaceCacheWithFonts to observe degradation.
 func NewFaceCache() *FaceCache {
-	return &FaceCache{faces: make(map[faceKey]cacheEntry)}
+	return &FaceCache{
+		faces: make(map[faceKey]cacheEntry),
+		// Non-nil so every resolution path can log unconditionally, matching the
+		// invariant NewFaceCacheWithFonts establishes.
+		logf: func(string, ...any) {},
+	}
 }
 
 // NewFaceCacheWithFonts returns a cache that resolves @font-face families to
@@ -80,10 +86,13 @@ func normalizeFamily(s string) string { return strings.ToLower(strings.TrimSpace
 // bundled look-alike via pkg/font. family may be a CSS font-family fallback list
 // (comma-separated, as cleaned by the cascade); each candidate is tried in order —
 // @font-face sources first, then a bundled substitute — and the first that
-// resolves wins (a generic keyword like serif always resolves, so it acts as the
-// terminal fallback). ok is false only when no candidate resolves (the caller
-// skips affected runs). Results — including misses — are cached under the whole
-// list string, so repeated calls for the same (list, style) are cheap.
+// resolves wins.
+//
+// A list that resolves to nothing degrades to the bundled serif (logged), so text is
+// never silently dropped for want of a font; see resolveList. ok is therefore false
+// only when the bundle itself cannot be loaded, which callers still treat as "skip
+// the run". Results — including misses — are cached under the whole list string, so
+// repeated calls for the same (list, style) are cheap and the fallback logs once.
 func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
 	key := faceKey{family: normalizeFamily(family), style: style}
 
@@ -146,6 +155,13 @@ func fallbackScriptOf(r rune) (string, bool) {
 // the same name), then the injected Provider's style-aware lookup (system/disk fonts,
 // including weighted real faces and families the bundle has no look-alike for), then
 // the bundled substitute. Caller holds c.mu.
+//
+// When NO candidate resolves, it falls back to the bundled serif rather than reporting
+// a miss, because the caller's response to a miss is to skip the run — i.e. to render
+// no text at all. A list that names only families the host lacks ("Roboto", with no
+// trailing generic) would otherwise produce a blank page, which reads as a layout bug
+// rather than a font one. Browsers substitute a default face here, and so do we; the
+// substitution is logged once per (list, style) because Resolve caches this result.
 func (c *FaceCache) resolveList(family string, style pkgfont.Style) (*pkgfont.Face, bool) {
 	for _, name := range splitFamilyList(family) {
 		if face, ok := c.resolveFontFace(name, style); ok {
@@ -158,8 +174,21 @@ func (c *FaceCache) resolveList(family string, style pkgfont.Style) (*pkgfont.Fa
 			return face, true
 		}
 	}
+	// Terminal fallback. defaultFallbackFamily is a generic keyword, which
+	// LoadStandard always resolves, so this fails only if the bundle itself is
+	// unusable — and then there is genuinely nothing to draw with.
+	if face, ok := pkgfont.LoadStandard(defaultFallbackFamily, style); ok {
+		c.logf("font: no face for %q; substituting bundled %s", family, defaultFallbackFamily)
+		return face, true
+	}
 	return nil, false
 }
+
+// defaultFallbackFamily is the generic used when a font-family list resolves to
+// nothing. CSS leaves the initial font-family up to the UA; serif matches this
+// engine's own initial value, so an unresolvable list degrades to the same face an
+// unstyled document already uses rather than introducing a third typeface.
+const defaultFallbackFamily = "serif"
 
 // resolveProvider consults the injected Provider (when the configured sys also
 // implements pkgfont.Provider) for a style-aware, non-@font-face face: the disk or
