@@ -714,8 +714,10 @@ verify correctly under substitution regardless of which face is used.
 - **`textLength`/`lengthAdjust` (16), `letter-spacing`/`word-spacing` (19),
   the baseline attributes (62), `text-decoration`** — a later task.
 - **Emoji (`text/emojis`, `compound-emojis`, and the coordinate-list
-  variants)** — no emoji font is bundled, so these render nothing. Correct
-  graceful degradation, but there is no geometry left to assert.
+  variants)** — no emoji font is bundled, so every code point misses and each
+  one now draws a `.notdef` box (they used to render nothing at all). The
+  degradation is correct and visible, but a row of identical tofu boxes
+  asserts only the advance, not the geometry these fixtures are about.
 - **`font-family/cursive`, `fantasy`, `noto-sans`, `source-sans-pro`** — the
   named family has no bundled analogue, so the fixture would only assert
   which fallback was picked.
@@ -815,11 +817,18 @@ baseline, and decoration properties:
 - **`letter-spacing/filter-bbox`** — needs filters. Its `<desc>` is still
   load-bearing evidence (see below), just not as a golden.
 - **`letter-spacing/on-Arabic`, `mixed-scripts`, `non-ASCII-character`,
-  `textLength/arabic`, `arabic-with-lengthAdjust`,
-  `dominant-baseline/hanging` (Devanagari)** — Amiri / Mplus 1p / Noto Sans
-  Devanagari are not bundled, and `on-Arabic` additionally asserts the
-  cursive-tracking rule (letter-spacing is IGNORED for joined scripts, CSS
-  Text 3 §8.2), which this engine does not implement.
+  `textLength/arabic`, `arabic-with-lengthAdjust`** — Amiri / Mplus 1p are
+  not bundled, and `on-Arabic` additionally asserts the cursive-tracking rule
+  (letter-spacing is IGNORED for joined scripts, CSS Text 3 §8.2), which this
+  engine does not implement.
+
+  `dominant-baseline/hanging` (Devanagari `क`) IS vendored despite the same
+  missing-font problem, because it now asserts something real: with no bundled
+  Devanagari face the character misses and draws a `.notdef` box, and the box
+  is placed by the same baseline math a real glyph would use. The golden shows
+  it hanging below the crosshair, which is exactly the fixture's claim. Before
+  `.notdef` existed the golden was the bare crosshair — a picture of the
+  silent-drop bug, asserting nothing.
 
 ### What the reference sweep settled
 
