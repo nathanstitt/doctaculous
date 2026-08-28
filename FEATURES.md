@@ -142,6 +142,38 @@ bullet's design rationale is in its PR:
   synthetic bullet outlines.
 - **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
   `url(..)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
+- **`box-shadow`, outer and `inset`** (CSS Backgrounds 3 §6 — `pkg/css/boxshadow.go`,
+  `pkg/layout/css/boxshadow.go`, `pkg/layout/paint/boxshadow.go`). The full grammar, including the
+  `&&` combinator: `inset`, the 2–4 lengths and the colour may appear in **any order**, so
+  `inset red 2px 2px` and `2px 2px inset red` are the same shadow. Comma-separated **lists** paint
+  in the spec's order — the **first shadow is on top** — and CSS error handling is the engine's
+  usual: one malformed entry invalidates the whole declaration (a negative *blur* is an error; a
+  negative *spread* is legal and shrinks the shadow). An omitted colour, and the `currentColor`
+  keyword, resolve to the element's own `color` at layout time, where the cascade is reachable.
+  **`inset` is a genuinely different rendering, not a sign flip**: an outer shadow fills the region
+  OUTSIDE the border box (so a transparent box shows a ring, never a filled blob) while an inset one
+  fills the part of the PADDING box its own shape does not cover and can never escape the box,
+  however far it is offset — and its spread sign is inverted, because shrinking the lit interior
+  thickens the band. The two also sit in **different slots of the paint order** (outer behind the
+  background, inset over both backgrounds but under the border), so a list carrying both shows both.
+  The blur is `sigma = radius/2`, per the spec's "the shadow's edge transitions over a distance
+  equal to the blur radius, centred on the edge", and it runs through **`pkg/svg/filter`'s existing
+  `feGaussianBlur`** — the repo has exactly one blur implementation, shared by SVG filters, the CSS
+  `filter` shorthand and now this. Square corners only: `border-radius` is not implemented, and the
+  single integration point for it is documented at `paint.shadowOutline`.
+- **A `box-shadow` with no blur stays fully vector, including in PDF** — it is a plain even-odd
+  fill of the box's shape, so the common patterns (a hard offset, a spread ring, an `inset` colour
+  spine) cost no rasterization anywhere. A **blurred** shadow needs an offscreen raster surface via
+  `render.Device.RenderOffscreen`, which `pkg/render/pdfwrite` returns nil from by design (PDF has
+  no blur operator and a blur has no vector representation). There — and whenever the surface would
+  be degenerate, off-canvas, or over the per-shadow pixel cap — the shadow **degrades to the same
+  shape with a HARD edge**, at the same place and size. That is the "a visible approximation beats a
+  blank" rule the CSS `filter` path already follows, and deliberately NOT a rasterization of the
+  page. **That degradation is currently SILENT**: `pkg/layout/paint` has no logger to report it
+  through (`PaintPage` takes only a Device, a Page and a Matrix), exactly as the CSS-filter
+  pixel-cap degradation in the same package does. **DOCX output carries no shadow at all** —
+  `pkg/render/docxwrite` consumes the `cssbox` tree directly rather than the painted item list, so
+  it never sees a shadow item and has no `box-shadow` analogue to map one onto.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/

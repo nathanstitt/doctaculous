@@ -703,5 +703,57 @@ newline is kept.</p>
       picture of itself.</p>
   </section>
 
+  <!-- ===================== 19 · BOX-SHADOW ===================== -->
+  <section class="section break">
+    <span class="kicker">19 / BOX-SHADOW</span>
+    <h2>CSS <code>box-shadow</code></h2>
+    <p class="lede">Every tile below is identical &mdash; a flat fill inside a hairline
+      border &mdash; under a different <code>box-shadow</code> declaration. Unlike a
+      <code>filter</code>, a shadow is not computed from the box's pixels: it is the
+      box's own <em>shape</em>, displaced, grown and blurred, so it costs nothing to
+      draw and stays sharp at any resolution.</p>
+
+    <div class="bsgrid">
+      <div class="bs"><div class="bstile"></div>none</div>
+      <div class="bs bs-offset"><div class="bstile"></div>6px 6px</div>
+      <div class="bs bs-blur"><div class="bstile"></div>6px 6px 8px</div>
+      <div class="bs bs-spread"><div class="bstile"></div>0 0 0 5px</div>
+      <div class="bs bs-shrink"><div class="bstile"></div>8px 8px 4px &minus;4px</div>
+      <div class="bs bs-current"><div class="bstile"></div>5px 5px 4px<br>(currentColor)</div>
+      <div class="bs bs-inset"><div class="bstile"></div>inset 6px 6px 6px</div>
+      <div class="bs bs-spine"><div class="bstile"></div>inset 5px 0 0</div>
+      <div class="bs bs-ring"><div class="bstile"></div>inset 0 0 0 5px</div>
+      <div class="bs bs-stack"><div class="bstile"></div>three offsets,<br>comma&#8209;separated</div>
+      <div class="bs bs-both"><div class="bstile"></div>outer + inset<br>in one list</div>
+    </div>
+
+    <p class="caption">Look for: the four arguments separating cleanly. <em>offset</em>
+      moves the shape; <em>blur</em> softens its edge over a distance equal to the
+      radius, centred on the edge; <em>spread</em> grows the shape on all four sides
+      before that blur; and a <em>negative</em> spread shrinks it &mdash; the
+      &minus;4px swatch casts a visibly narrower shadow than its 8px offset alone
+      would. The swatch with no colour written takes the element's own
+      <code>color</code>.</p>
+
+    <p>The <code>inset</code> keyword is a genuinely different rendering, not a sign
+      flip. An outer shadow fills the region <em>outside</em> the border box &mdash; so
+      a tile with a transparent background shows a ring, never a filled blob &mdash;
+      while an inset shadow fills the part of the <em>padding</em> box its own shape
+      does not cover, and can never escape the box however far it is offset. That is
+      why an inset spread runs the other way: growing the shape shrinks the lit
+      interior, which <em>thickens</em> the band. The last two swatches show a
+      comma&#8209;separated list, where the first shadow in the list paints on top of
+      the ones after it, and where an outer and an inset shadow coexist because they
+      sit in different slots of the box's paint order &mdash; outer behind the
+      background, inset over the background but under the border.</p>
+
+    <p>A shadow with no blur is a plain vector fill, so the common patterns &mdash; a
+      hard offset, a spread ring, an <code>inset</code> colour spine &mdash; stay
+      fully vector in PDF output. A <em>blurred</em> shadow needs an offscreen raster
+      surface, which a PDF writer does not have and PDF has no operator for; there it
+      degrades to the same shadow with a hard edge, at the same place and size, rather
+      than rasterising the page or dropping the decoration.</p>
+  </section>
+
 </body>
 </html>

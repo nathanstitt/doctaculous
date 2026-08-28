@@ -113,6 +113,8 @@ func paintItem(dev render.Device, it *layout.Item, mat render.Matrix) {
 		dev.Restore()
 	case layout.VectorKind:
 		paintVector(dev, &it.Vector, mat)
+	case layout.ShadowKind:
+		paintShadow(dev, &it.Shadow, mat)
 	}
 }
 
