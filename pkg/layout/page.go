@@ -243,6 +243,22 @@ type GlyphItem struct {
 type RuleItem struct {
 	XPt, YPt, WPt, HPt float64
 	Color              color.RGBA
+
+	// Radii rounds the rectangle's corners (CSS border-radius), already resolved to
+	// absolute points and already overlap-corrected for this rectangle. The zero
+	// value — every corner square — is the common case and makes the painter emit
+	// exactly the four-line path it emitted before radii existed, which is what
+	// keeps untouched output byte-identical.
+	//
+	// It rides on RuleItem rather than only on a clip bracket because a rounded
+	// BACKGROUND is a filled rounded rect, not a square fill behind a clip: filling
+	// the shape directly antialiases its own edge, whereas clipping a square fill
+	// would hard-cut it against the clip mask and leave the corners visibly
+	// staircased on the raster backend.
+	//
+	// It is unused for RuleKind (underlines/strikes are never rounded); only the
+	// BackgroundKind and ClipPushKind carriers set it.
+	Radii CornerRadii
 }
 
 // BorderItem is one border edge: the edge's own rectangle (the strip) in page
@@ -254,6 +270,44 @@ type BorderItem struct {
 	Color              color.RGBA
 	Style              BorderStyle
 	Side               EdgeSide
+
+	// Ring, when non-nil, makes this item the box's WHOLE rounded border ring
+	// rather than one flat edge strip: a rounded border cannot be drawn as four
+	// independent rectangles, because each corner's ink is shared between two
+	// adjacent edges and follows an arc neither strip contains.
+	//
+	// A box with any rounded corner therefore emits ONE BorderKind item carrying
+	// Ring (with XPt..HPt spanning the whole border box and Side/Style/Color taken
+	// from the top edge) in place of the up-to-four strip items. A box with square
+	// corners keeps emitting strips and leaves Ring nil, so that path — every
+	// existing document — is untouched.
+	Ring *BorderRing
+}
+
+// BorderRing is a rounded border drawn as a single ring: the area between the
+// outer (border-box) rounded rectangle and the inner (padding-box) one, filled with
+// the even-odd rule so the interior falls out as a hole.
+//
+// Filling the ring is what makes the corners correct. Stroking the outer path with
+// the border width would keep a CONSTANT thickness around the arc and centre the
+// ink on the path (half of it spilling outside the border box); the true shape has
+// the outer and inner curves at DIFFERENT radii — the inner one reduced by the
+// border width and floored at zero (see CornerRadii.Inset) — which only a two-path
+// fill reproduces.
+//
+// Per-side colours and non-solid styles are a documented degradation: the ring is
+// filled with one colour and treated as solid. A box whose rounded sides disagree
+// in colour or style paints with the first present side's, and the CSS engine logs
+// it. Painting them properly needs each side's ink clipped to its own mitre wedge —
+// deferred; see docs/CSS-LAYOUT.md.
+type BorderRing struct {
+	// Outer is the border box's already-corrected radii; Inner is the padding
+	// box's, normally Outer.Inset(widths) but carried explicitly so the painter
+	// never has to re-derive it.
+	Outer, Inner CornerRadii
+	// Top/Right/Bottom/Left are the four border widths in points. The inner
+	// rectangle is the outer one deflated by these.
+	Top, Right, Bottom, Left float64
 }
 
 // ImageItem is a decoded raster image to draw into a content box. The rectangle
@@ -308,8 +362,25 @@ type BackgroundImageItem struct {
 	// SceneW, SceneH are Scene's own authored viewport size in points, which the
 	// painter needs to scale the scene into the tile rect. Meaningful only when
 	// Scene is set.
-	SceneW, SceneH         float64
-	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector source's intrinsic size), > 0
+	SceneW, SceneH float64
+
+	// Gradient is set INSTEAD of Img and Scene when the background image is a CSS
+	// <gradient>. Exactly one of the three sources is ever set.
+	//
+	// A gradient has NO INTRINSIC SIZE (CSS Images 3: it is a generated image
+	// with no natural dimensions), so unlike a bitmap or an SVG it cannot supply
+	// IntrinsicW/IntrinsicH from its content. The layout engine therefore sets
+	// them to the ORIGIN BOX's size, which is exactly what `background-size:
+	// auto` must resolve to for a sizeless image — that one substitution makes
+	// every other background property (size, position, repeat, origin, clip)
+	// work on a gradient through the unchanged geometry path, rather than needing
+	// a parallel set of rules.
+	//
+	// The gradient's own coordinates live in TILE space, so a `background-size`
+	// that shrinks the tile correctly shrinks the gradient with it.
+	Gradient *BackgroundGradient
+
+	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector/generated source's intrinsic size), > 0
 
 	// Origin box: where the image is sized and positioned (background-origin box).
 	OriginX, OriginY, OriginW, OriginH float64

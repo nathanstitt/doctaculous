@@ -42,7 +42,9 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	}
 
 	// 2. Shape once (width-independent).
-	glyphs := inline.Shape(e.faces, runs, e.logf)
+	// ShapeContext, not Shape: this is the one call that can run long before the
+	// per-line loop below is ever reached (see the cancellation note there).
+	glyphs := inline.ShapeContext(ctx, e.faces, runs, e.logf)
 	align := effectiveTextAlign(b)
 	// Used direction for this IFC: resolves start/end alignment (inside
 	// effectiveTextAlign) and the edge the first-line indent insets from. NOTE: this
@@ -79,6 +81,23 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	indent := textIndentPt(b, contentW)
 	firstLine := true
 	for len(rest) > 0 {
+		// Cancellation: checked PER LINE, not per glyph. This loop is the second
+		// unbounded walk in the engine (layoutBlockChildren is the first): a single
+		// paragraph holding megabytes of text is ONE block child, so the check
+		// between block children never fires while this loop runs — line breaking a
+		// pathological run could spin here for a long time with no way out. One
+		// ctx.Err() per emitted line is negligible against the BreakNextWrap +
+		// MakeVisualLine + per-glyph emit that follows it; putting it in the inner
+		// `for gi := range line.Glyphs` loop instead would place an atomic load on
+		// the hottest path in layout, which is exactly the regression to avoid.
+		//
+		// Degrade rather than propagate, matching layoutBlockChildren: stop adding
+		// lines and return what is built. The open boundary (htmlDocument /
+		// docxDocument) turns a cancelled ctx into a hard error, so a caller never
+		// receives the truncated result silently.
+		if ctx.Err() != nil {
+			break
+		}
 		bandY := bandOriginY + (penY - contentTopY) // this line's Y in the BFC-root frame
 		availLeft := fc.leftEdge(bandY, lineHGuess)
 		if availLeft < cbLeft {

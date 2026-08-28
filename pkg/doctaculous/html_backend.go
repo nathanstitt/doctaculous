@@ -197,6 +197,15 @@ func OpenHTML(path string) (*Document, error) {
 // WithPageSize(LetterWidthPt, LetterHeightPt) paginates the file, and a caller's own
 // WithResourceLoader overrides the directory loader.
 func OpenHTMLFile(path string, opts ...HTMLOption) (*Document, error) {
+	return OpenHTMLFileContext(context.Background(), path, opts...)
+}
+
+// OpenHTMLFileContext is OpenHTMLFile with a caller-supplied context bounding box
+// generation, sub-resource loading, and layout. The os.ReadFile of path itself is
+// not interruptible (the standard library offers no ctx-taking form), so ctx
+// takes effect from parsing onward — which is where a pathological document
+// spends its time anyway.
+func OpenHTMLFileContext(ctx context.Context, path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: open html %q: %w", path, err)
@@ -206,7 +215,7 @@ func OpenHTMLFile(path string, opts ...HTMLOption) (*Document, error) {
 		WithResourceLoader(resource.DirLoader{Base: dir}),
 		WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
 	}, opts...)
-	return OpenHTMLBytes(data, all...)
+	return OpenHTMLBytesContext(ctx, data, all...)
 }
 
 // ErrUnsupportedScheme is returned (wrapped) by OpenURL when rawURL uses a scheme
@@ -224,6 +233,16 @@ var ErrUnsupportedScheme = errors.New("unsupported URL scheme")
 // local font directory), so @font-face local() sources do not match unless one is
 // supplied.
 func OpenURL(rawURL string, opts ...HTMLOption) (*Document, error) {
+	return OpenURLContext(context.Background(), rawURL, opts...)
+}
+
+// OpenURLContext is OpenURL with a caller-supplied context. Unlike OpenURL it
+// bounds BOTH halves of the fetch-then-render: ctx is passed to the HTTP fetch of
+// rawURL itself (so a server that never responds is a deadline, not a hang) and
+// then threaded into box generation, sub-resource loading, and layout. This is
+// the entry point to prefer for untrusted URLs — a remote host controls both how
+// slowly it answers and how pathological the document it returns is.
+func OpenURLContext(ctx context.Context, rawURL string, opts ...HTMLOption) (*Document, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("doctaculous: open url: empty URL")
 	}
@@ -234,23 +253,44 @@ func OpenURL(rawURL string, opts ...HTMLOption) (*Document, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("doctaculous: open url %q: %w (%q)", rawURL, ErrUnsupportedScheme, u.Scheme)
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	loader := resource.HTTPLoader{Base: u}
-	data, _, err := loader.Load(context.Background(), "")
+	data, _, err := loader.Load(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("doctaculous: open url %q: %w", rawURL, err)
 	}
 	allOpts := append([]HTMLOption{WithResourceLoader(loader)}, opts...)
-	return OpenHTMLBytes(data, allOpts...)
+	return OpenHTMLBytesContext(ctx, data, allOpts...)
 }
 
 // OpenHTMLBytes parses and renders in-memory HTML, applying any options, and
-// returns a Document ready to rasterize.
+// returns a Document ready to rasterize. It lays out under context.Background():
+// the open cannot be cancelled or time-bounded. Use OpenHTMLBytesContext when a
+// pathological document must not be able to wedge the calling goroutine.
 func OpenHTMLBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 	cfg := defaultOpenConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 	return htmlDocument(data, cfg)
+}
+
+// OpenHTMLBytesContext is OpenHTMLBytes with a caller-supplied context bounding
+// box generation, resource loading, and layout — the ctx-taking form matching
+// OpenReader/OpenReaderAs. A document whose layout runs long can be abandoned by
+// cancelling ctx or giving it a deadline; the open then fails with an error
+// wrapping context.Canceled / context.DeadlineExceeded rather than returning a
+// silently truncated document (the layout engine degrades to partial output, and
+// htmlDocument converts that into a hard error at the open boundary).
+//
+// ctx rides in as the unexported withOpenContext option, PREPENDED so a caller
+// that passes their own (there is no exported way to, today) would still win —
+// the same ordering openReflowFrontend uses. A nil ctx is ignored and the default
+// (context.Background()) stands.
+func OpenHTMLBytesContext(ctx context.Context, data []byte, opts ...HTMLOption) (*Document, error) {
+	return OpenHTMLBytes(data, append([]HTMLOption{withOpenContext(ctx)}, opts...)...)
 }
 
 // htmlDocument runs the HTML pipeline — parse → box generation → CSS layout —

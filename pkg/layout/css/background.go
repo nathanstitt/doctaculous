@@ -20,15 +20,33 @@ import (
 // initial origin) and content box are derived. The clip box defaults to the border box.
 func (e *Engine) resolveBackgroundImage(ctx context.Context, b *cssbox.Box, borderX, borderY, borderW, borderH float64, ed edges) *BackgroundImageContent {
 	ref := b.Style.BackgroundImage
-	if ref == "" {
+	grad := b.Style.BackgroundGradient
+	if ref == "" && grad == nil {
 		return nil
 	}
-	bg := e.backgroundSource(ctx, ref)
+
+	ox0, oy0, ow0, oh0 := bgBox(b.Style.BackgroundOrigin, borderX, borderY, borderW, borderH, ed)
+
+	var bg *BackgroundImageContent
+	if grad != nil {
+		// A gradient has NO intrinsic size, so it takes the ORIGIN BOX's size as
+		// its intrinsic one. That single substitution is what lets every
+		// background-* property keep working through the unchanged geometry path:
+		// `background-size: auto` then resolves to the origin box (the CSS rule
+		// for a sizeless generated image), cover/contain become no-ops, and an
+		// explicit size still overrides both.
+		if ow0 <= 0 || oh0 <= 0 {
+			return nil
+		}
+		bg = &BackgroundImageContent{IntrinsicW: ow0, IntrinsicH: oh0}
+	} else {
+		bg = e.backgroundSource(ctx, ref)
+	}
 	if bg == nil {
 		return nil // missing/undecodable: the background color (if any) still paints
 	}
 
-	ox, oy, ow, oh := bgBox(b.Style.BackgroundOrigin, borderX, borderY, borderW, borderH, ed)
+	ox, oy, ow, oh := ox0, oy0, ow0, oh0
 	cx, cy, cw, ch := bgBox(b.Style.BackgroundClip, borderX, borderY, borderW, borderH, ed)
 	if ow <= 0 || oh <= 0 || cw <= 0 || ch <= 0 {
 		return nil
@@ -69,7 +87,122 @@ func (e *Engine) resolveBackgroundImage(ctx context.Context, b *cssbox.Box, bord
 			"css layout: background-repeat of an SVG background is not supported; painting %q once", ref)
 		bg.RepeatX, bg.RepeatY = false, false
 	}
+
+	if grad != nil {
+		// Resolve the gradient LAST: its geometry is laid out inside one tile,
+		// and the tile's size is only known once background-size has been
+		// resolved against the origin box above. TileSize is the same
+		// computation the painter uses, so the gradient box the author sees
+		// matches the cell the painter tiles.
+		tw, th := (&layout.BackgroundImageItem{
+			IntrinsicW: bg.IntrinsicW, IntrinsicH: bg.IntrinsicH,
+			OriginW: ow, OriginH: oh,
+			SizeKind: bg.SizeKind, SizeW: bg.SizeW, SizeH: bg.SizeH,
+		}).TileSize()
+		rg, ok := resolveGradient(grad, tw, th, fs)
+		if !ok {
+			// A gradient that cannot establish geometry (a degenerate tile, or a
+			// zero-radius ending shape) paints nothing. The background COLOUR, if
+			// any, still paints — the same degradation an undecodable url() gets.
+			e.warnOnce("bg-gradient-degenerate",
+				"css layout: background gradient has degenerate geometry (tile %gx%g); not painting it", tw, th)
+			return nil
+		}
+		bg.Gradient = rg
+	}
 	return bg
+}
+
+// resolveGradient converts a parsed CSS gradient into the painter's tile-space
+// geometry for a tile of tileW x tileH points. fontSizePt resolves an em stop
+// position or radius.
+//
+// ok=false means no geometry can be established (a degenerate tile, a zero-length
+// gradient line, or a zero-radius ending shape) and nothing should paint.
+func resolveGradient(g *gcss.Gradient, tileW, tileH, fontSizePt float64) (*layout.BackgroundGradient, bool) {
+	if tileW <= 0 || tileH <= 0 {
+		return nil, false
+	}
+	out := &layout.BackgroundGradient{Repeating: g.Repeating}
+
+	// lineLen is what an ABSOLUTE stop position ("black 20px") is a fraction of.
+	// For a linear gradient it is the gradient line's own length; for a radial
+	// one CSS defines stop positions against the ending shape's HORIZONTAL
+	// radius, which is the ray the ramp is parameterized along.
+	var lineLen float64
+
+	switch g.Kind {
+	case gcss.GradientRadial:
+		out.Kind = layout.GradientRadial
+		cx := resolvePosAxis(g.Center.X, tileW, fontSizePt)
+		cy := resolvePosAxis(g.Center.Y, tileH, fontSizePt)
+		rx, ry := g.RadialRadii(tileW, tileH, cx, cy, fontSizePt)
+		if rx <= 0 || ry <= 0 {
+			return nil, false
+		}
+		out.CX, out.CY, out.RX, out.RY = cx, cy, rx, ry
+		lineLen = rx
+
+	default:
+		out.Kind = layout.GradientLinear
+		x0, y0, x1, y1, l := g.GradientLine(tileW, tileH)
+		if l <= 0 {
+			return nil, false
+		}
+		out.X0, out.Y0, out.X1, out.Y1 = x0, y0, x1, y1
+		lineLen = l
+	}
+
+	resolved := gcss.NormalizeStops(g.Stops, lineLen, fontSizePt)
+	if len(resolved) < 2 {
+		return nil, false
+	}
+	if g.Repeating {
+		// A repeating gradient's ramp must be re-parameterized so its stop range
+		// becomes exactly [0,1] — the range the shader's repeat spread folds
+		// into. Without this, `repeating-linear-gradient(red 0, blue 20px)` on a
+		// 100px line would repeat every 100px (the whole line) instead of every
+		// 20px, which is the entire point of the property.
+		//
+		// A ZERO-LENGTH stop range cannot be re-parameterized (every stop at the
+		// same position leaves nothing to repeat), and CSS says to render such a
+		// gradient as a solid of the last colour. Declining here would drop the
+		// paint entirely, so it degrades to the equivalent NON-repeating gradient
+		// instead, which paints that solid colour.
+		lo, hi := resolved[0].Pos, resolved[len(resolved)-1].Pos
+		if span := hi - lo; span > 0 {
+			for i := range resolved {
+				resolved[i].Pos = (resolved[i].Pos - lo) / span
+			}
+			// Re-parameterizing moved the ramp's start to 0, so the gradient
+			// line must move with it or the first repetition lands in the wrong
+			// place. Shift the line's start to where the first stop actually was
+			// and its end to where the last was.
+			out.Reparameterize(lo, hi)
+		} else {
+			out.Repeating = false
+		}
+	}
+
+	out.Stops = make([]layout.GradientStop, len(resolved))
+	for i, s := range resolved {
+		out.Stops[i] = layout.GradientStop{Pos: s.Pos, Color: s.Color}
+	}
+	return out, true
+}
+
+// resolvePosAxis resolves one `at <position>` component against the tile axis it
+// is measured along. It mirrors bgPosAxis, but resolves a percentage IMMEDIATELY
+// (against the full axis) rather than deferring it: a gradient centre's
+// percentage is a fraction of the gradient BOX, with no tile-size subtraction —
+// unlike background-position, whose percentage is a fraction of the free space
+// left over after the tile is placed.
+func resolvePosAxis(l gcss.Length, axis, fontSizePt float64) float64 {
+	if l.Unit == gcss.UnitPercent {
+		return l.Value / 100 * axis
+	}
+	v, _ := resolveLen(l, fontSizePt, axis)
+	return v
 }
 
 // backgroundSource resolves a background-image ref to its paint source: the VECTOR

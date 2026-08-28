@@ -37,6 +37,18 @@ type Fragment struct {
 	BgImage    *BackgroundImageContent // decoded CSS background image (set when the box has a decodable background-image), painted behind content
 	DebugTag   string                  // optional label for test lookup; not used in paint
 
+	// Radii is the box's border-radius resolved against THIS fragment's border box
+	// and already overlap-corrected (CSS Backgrounds 3 §5.1). It is resolved at
+	// fragment-build time rather than at paint time because the percentages resolve
+	// against the used border-box size, which only layout knows, and because the
+	// correction factor depends on that same size — a paint-time resolution would
+	// have to re-derive both.
+	//
+	// The zero value (every corner square) is the initial value and the common case;
+	// every consumer checks Radii.Zero() first and takes its pre-existing
+	// square-cornered path, so documents without radii are unaffected.
+	Radii layout.CornerRadii
+
 	// Box is the source cssbox.Box this fragment was produced from, retained so the
 	// flatten/paint stage can read style-driven paint facts that are not pre-resolved
 	// onto the fragment — today the stacking z-index (Box.Style.ZIndex/ZIndexAuto),
@@ -210,8 +222,14 @@ type BackgroundImageContent struct {
 	// stays vector all the way to the backend. SceneW/SceneH are the scene's own
 	// authored viewport size, which the painter needs in order to scale it into the
 	// computed tile rectangle.
-	Scene                              layout.VectorScene
-	SceneW, SceneH                     float64
+	Scene          layout.VectorScene
+	SceneW, SceneH float64
+
+	// Gradient is set INSTEAD of Img and Scene when background-image is a CSS
+	// <gradient>. Its geometry is already resolved into TILE space, so it
+	// travels to the painter needing nothing further from the cascade.
+	Gradient *layout.BackgroundGradient
+
 	IntrinsicW, IntrinsicH             float64
 	OriginX, OriginY, OriginW, OriginH float64
 	ClipX, ClipY, ClipW, ClipH         float64
@@ -493,17 +511,31 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	if f.Background.A > 0 {
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundKind,
-			Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Color: f.Background},
+			Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Color: f.Background, Radii: f.Radii},
 		})
 	}
 	// Background image paints after the background color and before the border (CSS
 	// Backgrounds 3 paint order).
-	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil) {
+	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil || bg.Gradient != nil) {
+		// A rounded box clips its background IMAGE to the rounded border box. Unlike
+		// the background COLOR — a single fill this engine can round directly — a
+		// background image is an arbitrary number of tiles drawn by DrawImage, which
+		// has no shape parameter, so the only way to round it is a clip bracket around
+		// the whole tiling run. A gradient takes the same path: it paints as a
+		// background image, so it rounds by the same bracket rather than needing the
+		// shader to know about corners.
+		if !f.Radii.Zero() {
+			dst = append(dst, layout.Item{
+				Kind: layout.ClipPushKind,
+				Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Radii: f.Radii},
+			})
+		}
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundImageKind,
 			BgImage: layout.BackgroundImageItem{
-				Img:   bg.Img,
-				Scene: bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
+				Img:      bg.Img,
+				Gradient: bg.Gradient,
+				Scene:    bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
 				IntrinsicW: bg.IntrinsicW, IntrinsicH: bg.IntrinsicH,
 				OriginX: bg.OriginX, OriginY: bg.OriginY, OriginW: bg.OriginW, OriginH: bg.OriginH,
 				ClipX: bg.ClipX, ClipY: bg.ClipY, ClipW: bg.ClipW, ClipH: bg.ClipH,
@@ -514,6 +546,15 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 				RepeatX: bg.RepeatX, RepeatY: bg.RepeatY,
 			},
 		})
+		if !f.Radii.Zero() {
+			dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
+		}
+	}
+	if !f.Radii.Zero() {
+		if ring, ok := f.borderRing(); ok {
+			return append(dst, ring)
+		}
+		return dst
 	}
 	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
 		e := f.Border[s]
@@ -523,6 +564,62 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 		dst = append(dst, layout.Item{Kind: layout.BorderKind, Border: f.edgeStrip(s, e)})
 	}
 	return dst
+}
+
+// borderRing builds the single BorderKind item that draws a ROUNDED box's whole
+// border, or ok=false when the box has no visible border at all.
+//
+// A rounded border cannot be four independent strips: each corner's ink is shared
+// between two adjacent edges and follows an arc that neither strip's rectangle
+// contains. The ring — outer rounded rect minus inner rounded rect, filled even-odd
+// — is the shape that is actually correct, and it is drawn as one item.
+//
+// DEGRADATION (logged by the caller's engine, and stated in FEATURES.md): the ring
+// carries ONE colour and is always filled solid. A rounded box whose sides disagree
+// in colour, or whose style is dashed/dotted/double/ridge/groove/inset/outset, is
+// painted as a solid ring in the first visible side's colour. Rendering those
+// properly needs each side's ink clipped to its own corner-mitre wedge, and the
+// non-solid styles need the dash pattern walked along a curve — both deferred (see
+// docs/CSS-LAYOUT.md). The approximation is deliberate: a solid rounded ring reads
+// far closer to the intent than four square strips with the corners missing.
+func (f *Fragment) borderRing() (layout.Item, bool) {
+	var first *BorderEdge
+	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
+		if e := f.Border[s]; e.Width > 0 && e.Style != layout.BorderNone {
+			edge := e
+			first = &edge
+			break
+		}
+	}
+	if first == nil {
+		return layout.Item{}, false // no visible border: background only
+	}
+	// A side with no visible style contributes no width to the ring, so the inner
+	// rectangle only deflates by the sides that actually paint.
+	width := func(s layout.EdgeSide) float64 {
+		if e := f.Border[s]; e.Style != layout.BorderNone && e.Width > 0 {
+			return e.Width
+		}
+		return 0
+	}
+	t, r := width(layout.EdgeTop), width(layout.EdgeRight)
+	b, l := width(layout.EdgeBottom), width(layout.EdgeLeft)
+
+	// The inner curve's radii shrink by the border widths and floor at zero, then are
+	// re-corrected against the INNER box: correcting against the outer box would let
+	// two inner radii still overlap along a side the deflation shortened.
+	inner := f.Radii.Inset(t, r, b, l).Correct(f.W-l-r, f.H-t-b)
+	return layout.Item{
+		Kind: layout.BorderKind,
+		Border: layout.BorderItem{
+			XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H,
+			Color: first.Color, Style: first.Style, Side: layout.EdgeTop,
+			Ring: &layout.BorderRing{
+				Outer: f.Radii, Inner: inner,
+				Top: t, Right: r, Bottom: b, Left: l,
+			},
+		},
+	}, true
 }
 
 // appendDecoRules emits one RuleKind item per contiguous run of glyphs for which sel

@@ -320,6 +320,8 @@ func (e *Engine) replacedFragment(ctx context.Context, b *cssbox.Box, w, h, bord
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
 	frag.Border[layout.EdgeLeft] = BorderEdge{Width: ed.bL, Color: b.Style.BorderLeftColor, Style: mapBorderStyle(b.Style.BorderLeftStyle)}
+	frag.Radii = usedRadii(&b.Style, borderW, borderH)
+	e.logRoundedBorderDegradation(frag)
 	return frag
 }
 
