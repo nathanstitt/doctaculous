@@ -23,7 +23,7 @@ var htmlDocDir = filepath.Join("..", "..", "testdata", "htmldoc")
 // asserted so an accidental reflow that adds or drops a page fails loudly (not just
 // a per-page pixel diff). Update it (and regenerate goldens) when the document
 // intentionally changes length.
-const htmlDocPages = 20
+const htmlDocPages = 22
 
 // TestHTMLDocShowcase renders the multi-file "uber" specimen document over HTTP and
 // compares every paginated page to a committed PNG (htmldoc-p<i>.png). It is the one

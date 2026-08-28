@@ -14,6 +14,7 @@
 package inline
 
 import (
+	"context"
 	"image/color"
 
 	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
@@ -131,7 +132,34 @@ type Color struct{ R, G, B, A uint8 }
 // yields one hard-break glyph; an Atomic run yields one atomic glyph whose Advance is
 // AtomicItem.WidthPt. A zero-alpha Run.Color is shaped opaque. logf may be nil. Shape
 // never panics on malformed input.
+//
+// Shape is uninterruptible; use ShapeContext when the caller needs to bound how
+// long shaping may run.
 func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) []Glyph {
+	return ShapeContext(context.Background(), faces, runs, logf)
+}
+
+// shapeCancelStride is how many runes Shape processes between cancellation
+// checks. The per-rune body (face lookup, outline extraction, advance
+// accumulation) is the hottest loop in layout, so a ctx.Err() on every rune
+// would be a measurable tax on every document — while a check every 1024 runes
+// is far below the noise floor and still bounds the worst case to a fraction of
+// a millisecond of extra work after cancellation. A power of two so the
+// remainder test is a mask.
+const shapeCancelStride = 1024
+
+// ShapeContext is Shape with a context bounding the work. Shaping a single very
+// large text run is the longest uninterruptible stretch on the layout path — it
+// happens BEFORE line breaking, so the per-line cancellation check in the CSS
+// engine's layoutInline cannot help until shaping finishes. Without a check here
+// a pathological paragraph pins a core for the whole shaping pass regardless of
+// the caller's deadline.
+//
+// On cancellation it returns the glyphs shaped so far rather than an error: this
+// mirrors the layout engine's degrade-don't-propagate convention (see
+// layoutBlockChildren), and the open boundary converts a cancelled ctx into a
+// hard error so a truncated result is never handed to a caller silently.
+func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) []Glyph {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -152,6 +180,11 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 	// used to compute tab-stop advances. It re-bases to 0 at each hard break.
 	lineCol := 0.0
 	for _, r := range runs {
+		// Between runs: cheap (a document with many small runs checks often, and
+		// each check is dwarfed by the face resolution that follows).
+		if ctx.Err() != nil {
+			return out
+		}
 		if r.Break {
 			lineCol = 0
 			out = append(out, Glyph{Break: true})
@@ -192,6 +225,14 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		runes := []rune(r.Text)
 		skipTo := 0
 		for ri := 0; ri < len(runes); ri++ {
+			// One check per shapeCancelStride runes. The between-runs check above
+			// does nothing for the case that matters most here — a single run
+			// holding the entire document's text — so the stride is what actually
+			// bounds shaping latency, without putting an atomic load in the
+			// per-rune path.
+			if ri&(shapeCancelStride-1) == 0 && ctx.Err() != nil {
+				return out
+			}
 			rn := runes[ri]
 			if ri < skipTo {
 				continue

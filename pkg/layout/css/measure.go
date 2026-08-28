@@ -93,7 +93,9 @@ func (e *Engine) measureInline(ctx context.Context, b *cssbox.Box, wantMax bool)
 	if len(runs) == 0 {
 		return 0
 	}
-	glyphs := inline.Shape(e.faces, runs, e.logf)
+	// Intrinsic measurement shapes the whole subtree's text, so it is as long a
+	// stretch as layout proper and needs the same bound.
+	glyphs := inline.ShapeContext(ctx, e.faces, runs, e.logf)
 	if wantMax {
 		return inline.VisibleWidth(glyphs)
 	}

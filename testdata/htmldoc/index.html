@@ -703,9 +703,101 @@ newline is kept.</p>
       picture of itself.</p>
   </section>
 
-  <!-- ===================== 19 · MISSING GLYPHS ===================== -->
+
   <section class="section break">
-    <span class="kicker">19 / MISSING GLYPHS</span>
+    <span class="kicker">19 / CUSTOM PROPERTIES</span>
+    <h2>Custom properties and <code>var()</code></h2>
+    <p class="lede">The palette below is declared <em>once</em> on <code>:root</code> and
+      reached by every swatch through <code>var()</code>. Custom properties inherit, so a
+      value set at the document root is visible to any descendant without being
+      redeclared &mdash; the pattern almost every themed stylesheet is built on.</p>
+
+    <div class="vargrid">
+      <div class="vsw v-brand">var(--brand)</div>
+      <div class="vsw v-accent">var(--accent)</div>
+      <div class="vsw v-muted">var(--muted)</div>
+      <div class="vsw v-fallback">var(--absent, &#35;7a5cff)</div>
+      <div class="vsw v-indirect">var(--indirect)</div>
+      <div class="vsw v-override">scoped override</div>
+    </div>
+
+    <p class="caption">Look for: the last two swatches. <em>Indirect</em> resolves
+      <code>--indirect: var(--brand)</code> &mdash; a custom property whose own value is
+      another <code>var()</code>, substituted recursively. <em>Scoped override</em>
+      redeclares <code>--brand</code> on the swatch itself, so the same
+      <code>var(--brand)</code> reference resolves differently there than in the first
+      swatch: custom properties cascade and inherit exactly like any other property, and
+      the nearest declaration wins.</p>
+
+    <p>Substitution happens between the cascade and value parsing, so <code>var()</code>
+      works in <em>any</em> property, shorthands included &mdash; the rule below draws its
+      whole border from one variable. A reference that cannot be resolved is
+      <em>invalid at computed&#8209;value time</em>, which is not the same as a syntax
+      error: rather than leaving an earlier declaration showing, the property falls back
+      to its inherited or initial value, as though <code>unset</code> had been
+      specified.</p>
+
+    <div class="varbox">border: var(--rule)</div>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">20 / COLOUR</span>
+    <h2>Alpha-bearing colour values</h2>
+    <p class="lede">The engine has one CSS Color&nbsp;4 colour grammar, shared by the HTML
+      cascade and the SVG parser. Every swatch below straddles a pale field and a dark
+      block, so an alpha channel that is honoured looks <em>different on each side</em>
+      while one that is dropped looks the same on both.</p>
+
+    <div class="colgrid">
+      <div class="col c-opaque"><div class="colback"><div class="dark"></div><div class="sw"></div></div>#4f9cff <em>(opaque reference)</em></div>
+      <div class="col c-rgba"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rgba(79,156,255,0.35)</div>
+      <div class="col c-hex8"><div class="colback"><div class="dark"></div><div class="sw"></div></div>#4f9cff59</div>
+      <div class="col c-hex4"><div class="colback"><div class="dark"></div><div class="sw"></div></div>#4bf6</div>
+      <div class="col c-hsl"><div class="colback"><div class="dark"></div><div class="sw"></div></div>hsl(214,100%,65%)</div>
+      <div class="col c-hsla"><div class="colback"><div class="dark"></div><div class="sw"></div></div>hsla(214,100%,65%,0.35)</div>
+      <div class="col c-slash"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rgb(79 156 255 / 35%)</div>
+      <div class="col c-hslslash"><div class="colback"><div class="dark"></div><div class="sw"></div></div>hsl(214deg 100% 65% / 35%)</div>
+      <div class="col c-named"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rebeccapurple</div>
+      <div class="col c-border"><div class="colback"><div class="dark"></div><div class="sw"></div></div>border rgba(176,48,48,0.5)</div>
+      <div class="col c-text"><div class="colback"><div class="dark"></div><div class="sw">Aa</div></div>color rgba(20,30,45,0.4)</div>
+      <div class="col c-trans"><div class="colback"><div class="dark"></div><div class="sw"></div></div>transparent <em>(valid, paints nothing)</em></div>
+      <div class="col c-bad"><div class="colback"><div class="dark"></div><div class="sw"></div></div>rgb(nope,0,0) <em>(dropped &rarr; red stands)</em></div>
+    </div>
+
+    <p class="caption">Look for: <code>rgba(79,156,255,0.35)</code>,
+      <code>#4f9cff59</code> and <code>rgb(79 156 255 / 35%)</code> are the SAME colour at
+      the same alpha spelled three ways &mdash; 0.35 and 35&nbsp;% and the hex byte
+      <code>59</code> all resolve to an alpha of 89 &mdash; so those three swatches must be
+      pixel-identical. The two <code>hsl</code> swatches sit one step away at (77,154,255)
+      rather than (79,156,255): that is the honest result of converting HSL to RGB and
+      rounding, not a parsing error. <code>#4bf6</code> is deliberately a
+      <em>different</em> colour (#44bbff at alpha 102) to show the four-digit form
+      expanding each nibble. Every alpha-bearing swatch must read pale over the light
+      field and muted-blue over the dark block; a swatch that looks the same on both
+      halves has lost its alpha, and a swatch that is not there at all means the value
+      failed to parse and the declaration was dropped.</p>
+
+    <p class="caption">The last two swatches are the error cases, and they use the
+      <code>background-color</code> longhand deliberately. <code>transparent</code> is a
+      <em>valid</em> colour and correctly paints nothing. The malformed
+      <code>rgb(nope,0,0)</code> is dropped per CSS whole-declaration error handling, so
+      the earlier red declaration stays in force and the swatch renders solid red &mdash;
+      a blank swatch there would mean the engine had wrongly accepted the bad value and
+      painted transparent black. Through the <code>background</code> <em>shorthand</em>
+      the same bad value behaves differently, because that expander resets each
+      sub-property before classifying components and tolerates a component it cannot
+      classify; that divergence lives in the shorthand, not in the colour grammar.</p>
+
+    <p>Alpha survives the whole pipeline because the paint stack carries a live alpha
+      channel: parsing produces an RGBA, the painter hands it to the device unchanged, and
+      the rasteriser composites it over whatever it lands on. In PDF output the same
+      colours are emitted through the writer's own colour handling rather than being
+      pre-blended, so the text above stays selectable and the fills stay vector.</p>
+  </section>
+
+  <!-- ===================== 21 · MISSING GLYPHS ===================== -->
+  <section class="section break">
+    <span class="kicker">21 / MISSING GLYPHS</span>
     <h2>Characters No Font Can Draw</h2>
     <p class="lede">No bundled face covers emoji or Devanagari, and none ever will
       &mdash; the bundle is a handful of permissively&#8209;licensed Latin, Hebrew and
