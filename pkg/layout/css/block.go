@@ -396,6 +396,12 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	// worker. nil (the common case) leaves every unfiltered document's item stream
 	// byte-identical.
 	frag.Filter, frag.FilterShadows = e.filterChain(b)
+	// box-shadow: resolved here for the same reason, but carrying only the
+	// shadow's PARAMETERS — the shadow box is derived from the fragment's own
+	// geometry at flatten time, so a pagination shift moves it for free (see
+	// Fragment.Shadows). nil for an unshadowed box leaves its item stream
+	// byte-identical.
+	frag.Shadows = e.boxShadows(b)
 	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
 	if len(in.collapsedBorders) > 0 {
 		// The collapsed grid strips were built from the interior's cell fragments —
@@ -418,6 +424,8 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	frag.Border[layout.EdgeRight] = BorderEdge{Width: ed.bR, Color: b.Style.BorderRightColor, Style: mapBorderStyle(b.Style.BorderRightStyle)}
 	frag.Border[layout.EdgeBottom] = BorderEdge{Width: ed.bB, Color: b.Style.BorderBottomColor, Style: mapBorderStyle(b.Style.BorderBottomStyle)}
 	frag.Border[layout.EdgeLeft] = BorderEdge{Width: ed.bL, Color: b.Style.BorderLeftColor, Style: mapBorderStyle(b.Style.BorderLeftStyle)}
+	frag.Radii = usedRadii(&b.Style, borderW, borderH)
+	e.logRoundedBorderDegradation(frag)
 
 	// overflow≠visible: this box clips its content to its padding box (the border box
 	// deflated by the border widths). The stacking pass brackets the fragment's
@@ -1107,6 +1115,80 @@ func usedEdges(b *cssbox.Box, cbWidth float64) edges {
 		bR: border(s.BorderRightWidth, s.BorderRightStyle),
 		bB: border(s.BorderBottomWidth, s.BorderBottomStyle),
 		bL: border(s.BorderLeftWidth, s.BorderLeftStyle),
+	}
+}
+
+// usedRadii resolves a box's four border-radius corners against its USED border box
+// (w×h in points) and applies the CSS Backgrounds 3 §5.1 overlap correction.
+//
+// The two components of one corner resolve against DIFFERENT bases — a horizontal
+// semi-axis against the border box's WIDTH, a vertical one against its HEIGHT
+// (§5.1). Using one basis for both is the classic bug here: it is invisible on a
+// square box and wrong on every other, so the two resolveLen calls below
+// deliberately take different pctBasis arguments.
+//
+// em radii resolve against the box's own font size, like every other length in this
+// engine (resolveLen). A negative value cannot reach here — the parser rejects it —
+// but a zero-or-negative box makes every radius meaningless, so it returns square.
+func usedRadii(s *gcss.ComputedStyle, w, h float64) layout.CornerRadii {
+	if w <= 0 || h <= 0 {
+		return layout.CornerRadii{}
+	}
+	fs := s.FontSizePt
+	corner := func(c gcss.CornerRadius) [2]float64 {
+		hv, _ := resolveLen(c.H, fs, w) // horizontal semi-axis: % of WIDTH
+		vv, _ := resolveLen(c.V, fs, h) // vertical semi-axis:   % of HEIGHT
+		if hv < 0 {
+			hv = 0
+		}
+		if vv < 0 {
+			vv = 0
+		}
+		return [2]float64{hv, vv}
+	}
+	r := layout.CornerRadii{
+		TL: corner(s.BorderTopLeftRadius),
+		TR: corner(s.BorderTopRightRadius),
+		BR: corner(s.BorderBottomRightRadius),
+		BL: corner(s.BorderBottomLeftRadius),
+	}
+	if r.Zero() {
+		return layout.CornerRadii{}
+	}
+	return r.Correct(w, h)
+}
+
+// logRoundedBorderDegradation reports, once per affected fragment, the two ways a
+// ROUNDED border is approximated: the ring carries a single colour and is always
+// filled solid (see Fragment.borderRing). A square-cornered box is unaffected —
+// it still paints four independent, fully-styled edge strips — so this stays
+// silent for every box that does not opt into a radius.
+//
+// This exists because the engine's degradation rule is that an approximation must
+// announce itself. Painting a dashed rounded border as solid without a word would
+// look like a rendering bug rather than a known gap.
+func (e *Engine) logRoundedBorderDegradation(f *Fragment) {
+	if f.Radii.Zero() {
+		return
+	}
+	var seen *BorderEdge
+	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
+		e2 := f.Border[s]
+		if e2.Width <= 0 || e2.Style == layout.BorderNone {
+			continue
+		}
+		if seen == nil {
+			edge := e2
+			seen = &edge
+			if e2.Style != layout.BorderSolid {
+				e.logf("css layout: rounded border painted solid; %v style is not followed around a corner", e2.Style)
+			}
+			continue
+		}
+		if e2.Color != seen.Color {
+			e.logf("css layout: rounded border painted in one colour; per-side border colours are not followed around a corner")
+			return
+		}
 	}
 }
 

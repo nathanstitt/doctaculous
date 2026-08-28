@@ -1,6 +1,7 @@
 package paint
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -38,13 +39,11 @@ import (
 // degrades to unfiltered — measured: the same document renders filtered at 72
 // and 150 DPI and unfiltered at 300.
 //
-// That degradation is currently SILENT, because pkg/layout/paint has no logger
-// to report it through (PaintPage takes only a Device, a Page, and a Matrix).
-// The SVG side logs the equivalent caps (pkg/svg/draw/filter.go's
-// logFilterRegionCapOnce / logFilterNestingCapOnce) because a Renderer carries
-// a Logf. Threading one into the paint path is a public API change and is
-// tracked separately rather than smuggled in here; until then FEATURES.md must
-// say plainly that these two paths do not log, and it does.
+// That degradation is REPORTED when the caller supplies one:
+// PaintPageWithOptions's Options.Logf receives it once per page, alongside the
+// nesting cap, matching what the SVG side logs through Renderer.Logf
+// (pkg/svg/draw/filter.go's logFilterRegionCapOnce / logFilterNestingCapOnce).
+// Plain PaintPage still has no logger and stays silent by construction.
 const maxCSSFilterPixels = 4 << 20
 
 // filterMargin is how far, in multiples of a blur's standard deviation, the
@@ -76,25 +75,80 @@ type filterSurface struct {
 	origin image.Point
 }
 
+// surfaceReason says whether a filter surface could be built, and if not, WHY.
+//
+// It replaced a bare ok bool once the painter grew a logger: every one of these
+// causes degrades to the same visible outcome (the bracket paints unfiltered),
+// but they are wildly different things to read in a log. "region exceeded 4M
+// pixels" points at a page rendered above 150 DPI and a DPI knob that fixes it;
+// "the filtered box has zero or negative extent" points at the layout that
+// produced the box. Collapsing them into one message would send a reader
+// looking in the wrong place, which is the same reason the SVG side keeps its
+// region and nesting notices separate.
+type surfaceReason int
+
+const (
+	// surfaceOK is the only value for which the returned filterSurface is usable.
+	surfaceOK surfaceReason = iota
+	// surfaceNoDevice: the device reported a zero or negative pixel size, so
+	// there is nothing to rasterize into (a non-raster backend, or a degenerate
+	// page).
+	surfaceNoDevice
+	// surfaceBadScale: mat carries no usable page-point-to-pixel scale, so the
+	// chain's lengths could not be converted.
+	surfaceBadScale
+	// surfaceDegenerateBox: the filtered box has zero or negative extent, or
+	// maps to non-finite device coordinates.
+	surfaceDegenerateBox
+	// surfaceOffDevice: the region is finite but lands entirely outside the
+	// device, so no pixel of it could ever be seen.
+	surfaceOffDevice
+	// surfaceOverCap: the region exceeds maxCSSFilterPixels. This is the one a
+	// real document actually hits — a full-page filter at 300 DPI — so its
+	// message names both the cap and the fix.
+	surfaceOverCap
+)
+
+// String renders the reason as the clause a log line embeds. It is phrased to
+// complete "CSS filter surface unavailable (%s)".
+func (r surfaceReason) String() string {
+	switch r {
+	case surfaceOK:
+		return "ok"
+	case surfaceNoDevice:
+		return "the device has no pixel surface"
+	case surfaceBadScale:
+		return "the page matrix has no usable scale factor"
+	case surfaceDegenerateBox:
+		return "the filtered box is degenerate or maps to non-finite coordinates"
+	case surfaceOffDevice:
+		return "the filtered region falls entirely outside the page"
+	case surfaceOverCap:
+		return fmt.Sprintf("the filtered region exceeds the %d-pixel cap; render at a lower DPI to filter it", maxCSSFilterPixels)
+	}
+	return "unknown"
+}
+
 // cssFilterSurface computes the offscreen surface for a filter bracket whose
 // border box maps through mat to device space, on a device of devW x devH
 // pixels.
 //
-// ok=false means the filter cannot run at all — a degenerate or fully
-// off-device region, or one exceeding maxCSSFilterPixels — and the caller must
-// degrade to painting the bracketed content unfiltered.
+// Any reason other than surfaceOK means the filter cannot run at all — a
+// degenerate or fully off-device region, or one exceeding maxCSSFilterPixels —
+// and the caller must degrade to painting the bracketed content unfiltered,
+// naming the reason in its log.
 //
 // scale is the device pixels per page point that the chain's lengths
 // (blur's stdDeviation, drop-shadow's offsets) must be multiplied by, taken
 // from mat's own scale factor so a filter rasterizes at the resolution the
 // page is actually drawn at.
-func cssFilterSurface(fi *layout.FilterItem, inner []layout.Item, mat matrixLike, devW, devH int) (fs filterSurface, scale float64, ok bool) {
+func cssFilterSurface(fi *layout.FilterItem, inner []layout.Item, mat matrixLike, devW, devH int) (fs filterSurface, scale float64, reason surfaceReason) {
 	if devW <= 0 || devH <= 0 {
-		return fs, 0, false
+		return fs, 0, surfaceNoDevice
 	}
 	scale = mat.ScaleFactor()
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
-		return fs, 0, false
+		return fs, 0, surfaceBadScale
 	}
 	// A degenerate border box (zero or NEGATIVE extent) has no region to filter.
 	// Rejecting it here rather than letting the hull below absorb it is what keeps
@@ -103,7 +157,7 @@ func cssFilterSurface(fi *layout.FilterItem, inner []layout.Item, mat matrixLike
 	// not contain the content and composite back a near-blank — a silent content
 	// loss dressed up as a filter.
 	if !(fi.WPt > 0) || !(fi.HPt > 0) {
-		return fs, 0, false
+		return fs, 0, surfaceDegenerateBox
 	}
 
 	// The surface covers the border box UNIONED with what the bracketed items
@@ -130,7 +184,7 @@ func cssFilterSurface(fi *layout.FilterItem, inner []layout.Item, mat matrixLike
 	// Taking all four corners (rather than mapping the top-left and adding a
 	// scaled size) keeps this correct under any matrix the page transform carries.
 	if !addRect(fi.XPt, fi.YPt, fi.XPt+fi.WPt, fi.YPt+fi.HPt) {
-		return fs, 0, false
+		return fs, 0, surfaceDegenerateBox
 	}
 	addItemExtents(inner, addRect)
 
@@ -152,7 +206,11 @@ func cssFilterSurface(fi *layout.FilterItem, inner []layout.Item, mat matrixLike
 	minX, minY = math.Max(math.Floor(minX), 0), math.Max(math.Floor(minY), 0)
 	maxX, maxY = math.Min(math.Ceil(maxX), dw), math.Min(math.Ceil(maxY), dh)
 	if !(maxX > minX) || !(maxY > minY) {
-		return fs, 0, false
+		// The clamp above collapsed the region to nothing, which means it sat
+		// entirely off one edge of the device (or was non-finite in a way the
+		// clamp absorbed) — not that the box itself was degenerate, since that
+		// was rejected earlier.
+		return fs, 0, surfaceOffDevice
 	}
 	// Confine to what can actually land on the device, so an enormous box costs
 	// only the pixels that could ever be seen. This is also what makes the pixel
@@ -160,16 +218,16 @@ func cssFilterSurface(fi *layout.FilterItem, inner []layout.Item, mat matrixLike
 	rect := image.Rect(int(minX), int(minY), int(maxX), int(maxY)).
 		Intersect(image.Rect(0, 0, devW, devH))
 	if rect.Empty() {
-		return fs, 0, false
+		return fs, 0, surfaceOffDevice
 	}
 	if rect.Dx()*rect.Dy() > maxCSSFilterPixels {
-		return fs, 0, false
+		return fs, 0, surfaceOverCap
 	}
 
 	fs.origin = rect.Min
 	fs.rect = rect.Sub(rect.Min) // shifted to the origin; see maxCSSFilterPixels
 	fs.size = image.Point{X: fs.rect.Dx(), Y: fs.rect.Dy()}
-	return fs, scale, true
+	return fs, scale, surfaceOK
 }
 
 // matrixLike is the slice of render.Matrix cssFilterSurface needs, named so the
@@ -225,6 +283,19 @@ func addItemExtents(items []layout.Item, add func(x0, y0, x1, y1 float64) bool) 
 		case layout.FilterPushKind:
 			f := &it.Filter
 			add(f.XPt, f.YPt, f.XPt+f.WPt, f.YPt+f.HPt)
+		case layout.ShadowKind:
+			// A box-shadow reaches outside its box by its offset, its spread and
+			// its blur, and an INSET one never leaves the padding box at all.
+			// Covering the union of the shadow box and the shape's own blurred
+			// extent keeps a filtered box's shadow from being cropped at the
+			// surface edge, which would read as a shadow that fades out early.
+			sh := &it.Shadow
+			add(sh.XPt, sh.YPt, sh.XPt+sh.WPt, sh.YPt+sh.HPt)
+			if !sh.Inset {
+				reach := sh.Spread + filterMargin*layout.ShadowSigma(sh.Blur)
+				add(sh.XPt+sh.OffsetX-reach, sh.YPt+sh.OffsetY-reach,
+					sh.XPt+sh.WPt+sh.OffsetX+reach, sh.YPt+sh.HPt+sh.OffsetY+reach)
+			}
 		}
 	}
 }

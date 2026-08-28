@@ -3,8 +3,10 @@ package doctaculous
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 )
 
@@ -148,4 +150,46 @@ func closeRGBA(got, want color.RGBA, tol int) bool {
 	}
 	return d(got.R, want.R) <= tol && d(got.G, want.G) <= tol &&
 		d(got.B, want.B) <= tol && d(got.A, want.A) <= tol
+}
+
+// TestHTMLFilterOverCapReachesTheCallersLogf is the end-to-end guard on the
+// painter's diagnostics wiring: an over-cap filter must reach the LOGGER THE
+// PUBLIC API CALLER PASSED, not merely a logger somewhere inside pkg/layout/paint.
+//
+// It is the degradation a real user actually hits — maxCSSFilterPixels is 4M and
+// a full-page filter at 300 DPI is well past it, so the same document filters at
+// 150 DPI and stops filtering at 300 with nothing in the output to explain why.
+// The unit tests in pkg/layout/paint prove the notice is emitted; only this one
+// proves RasterOptions.Logf is actually threaded through to the painter.
+func TestHTMLFilterOverCapReachesTheCallersLogf(t *testing.T) {
+	// A full-page filtered box. At 300 DPI this page rasterizes to far more than
+	// the 4M-pixel cap, so the bracket degrades to unfiltered.
+	src := `<html><body style="margin:0;background:#fff">` +
+		`<div style="width:100%;height:1000px;background-color:#369;filter:grayscale(1)">x</div>` +
+		`</body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithViewportWidth(1200), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("OpenHTMLBytes: %v", err)
+	}
+	var lines []string
+	if _, err := doc.RasterizePage(context.Background(), 0, RasterOptions{
+		DPI:          300,
+		BundledFonts: true,
+		Logf:         func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
+	}); err != nil {
+		t.Fatalf("RasterizePage: %v", err)
+	}
+	var found string
+	for _, l := range lines {
+		if strings.Contains(l, "CSS filter surface unavailable") {
+			found = l
+			break
+		}
+	}
+	if found == "" {
+		t.Fatalf("the over-cap filter degradation never reached the caller's Logf; got %q", lines)
+	}
+	if !strings.Contains(found, "pixel cap") {
+		t.Errorf("notice %q should name the pixel cap so the reader knows a lower DPI would filter it", found)
+	}
 }

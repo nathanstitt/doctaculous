@@ -452,7 +452,217 @@ Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach 
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
 
-**19 / MID-WORD BREAKING**
+**19 / CUSTOM PROPERTIES**
+
+## Custom properties and `var()`
+
+The palette below is declared _once_ on `:root` and reached by every swatch through `var()`. Custom properties inherit, so a value set at the document root is visible to any descendant without being redeclared — the pattern almost every themed stylesheet is built on.
+
+var(--brand)
+
+var(--accent)
+
+var(--muted)
+
+var(--absent, #7a5cff)
+
+var(--indirect)
+
+scoped override
+
+Look for: the last two swatches. _Indirect_ resolves `--indirect: var(--brand)` — a custom property whose own value is another `var()`, substituted recursively. _Scoped override_ redeclares `--brand` on the swatch itself, so the same `var(--brand)` reference resolves differently there than in the first swatch: custom properties cascade and inherit exactly like any other property, and the nearest declaration wins.
+
+Substitution happens between the cascade and value parsing, so `var()` works in _any_ property, shorthands included — the rule below draws its whole border from one variable. A reference that cannot be resolved is _invalid at computed‑value time_, which is not the same as a syntax error: rather than leaving an earlier declaration showing, the property falls back to its inherited or initial value, as though `unset` had been specified.
+
+border: var(--rule)
+
+**20 / COLOUR**
+
+## Alpha-bearing colour values
+
+The engine has one CSS Color 4 colour grammar, shared by the HTML cascade and the SVG parser. Every swatch below straddles a pale field and a dark block, so an alpha channel that is honoured looks _different on each side_ while one that is dropped looks the same on both.
+
+#4f9cff _(opaque reference)_
+
+rgba(79,156,255,0.35)
+
+#4f9cff59
+
+#4bf6
+
+hsl(214,100%,65%)
+
+hsla(214,100%,65%,0.35)
+
+rgb(79 156 255 / 35%)
+
+hsl(214deg 100% 65% / 35%)
+
+rebeccapurple
+
+border rgba(176,48,48,0.5)
+
+**Aa**
+
+color rgba(20,30,45,0.4)
+
+transparent _(valid, paints nothing)_
+
+rgb(nope,0,0) _(dropped → red stands)_
+
+Look for: `rgba(79,156,255,0.35)`, `#4f9cff59` and `rgb(79 156 255 / 35%)` are the SAME colour at the same alpha spelled three ways — 0.35 and 35 % and the hex byte `59` all resolve to an alpha of 89 — so those three swatches must be pixel-identical. The two `hsl` swatches sit one step away at (77,154,255) rather than (79,156,255): that is the honest result of converting HSL to RGB and rounding, not a parsing error. `#4bf6` is deliberately a _different_ colour (#44bbff at alpha 102) to show the four-digit form expanding each nibble. Every alpha-bearing swatch must read pale over the light field and muted-blue over the dark block; a swatch that looks the same on both halves has lost its alpha, and a swatch that is not there at all means the value failed to parse and the declaration was dropped.
+
+The last two swatches are the error cases, and they use the `background-color` longhand deliberately. `transparent` is a _valid_ colour and correctly paints nothing. The malformed `rgb(nope,0,0)` is dropped per CSS whole-declaration error handling, so the earlier red declaration stays in force and the swatch renders solid red — a blank swatch there would mean the engine had wrongly accepted the bad value and painted transparent black. Through the `background` _shorthand_ the same bad value behaves differently, because that expander resets each sub-property before classifying components and tolerates a component it cannot classify; that divergence lives in the shorthand, not in the colour grammar.
+
+Alpha survives the whole pipeline because the paint stack carries a live alpha channel: parsing produces an RGBA, the painter hands it to the device unchanged, and the rasteriser composites it over whatever it lands on. In PDF output the same colours are emitted through the writer's own colour handling rather than being pre-blended, so the text above stays selectable and the fills stay vector.
+
+**21 / MISSING GLYPHS**
+
+## Characters No Font Can Draw
+
+No bundled face covers emoji or Devanagari, and none ever will — the bundle is a handful of permissively‑licensed Latin, Hebrew and Arabic substitutes. A character none of them maps now draws `.notdef`, the “tofu” box, exactly as a browser does.
+
+Nine weather emoji. Every one is unmappable, so every one is a box:
+
+🌈🌤🌥🌦🌧🌨🌩🌪🌫
+
+The box is not a placeholder pasted over the line — it is a glyph, and it shapes like one. Below, unmappable characters sit inline with text that resolves normally, and the correct text keeps its own metrics on either side:
+
+Latin, then Devanagari कखग, then Latin again.
+
+Whether the mark is drawn by the font or by us depends on the font. A face that ships its own `.notdef` gets _its_ glyph — DejaVu draws a hollow box, Noto draws a box containing the code point's hex digits. The bundled TeX Gyre substitutes ship a `.notdef` that is _blank_, so for the boxes above the geometry is synthesized. Each distinct missing character is also reported once through the layout log, which is the half that makes a font gap diagnosable rather than merely visible.
+
+Invisible characters are deliberately excluded. A no‑break space, a zero‑width joiner or a variation selector draws no ink even in a font that maps it, so giving it a box would invent a mark the author never wrote. The sentence you are reading contains a U+202F NARROW NO‑BREAK SPACE that no bundled face maps; it renders as space, and nothing is logged, because nothing is wrong.
+
+Look for: the boxes have a side bearing, so they read as separate marks rather than one bar, and they sit on the baseline with the text around them. This matters more than it looks. Before `.notdef`, an unmappable character rendered as _nothing_ — and because the surrounding text was untouched, a page with a font gap looked like a page with a _layout_ bug. It is worse when only some characters of a set are missing: the report behind this section was a board carrying only DejaVu and Liberation, where three of nine weather emoji drew and six vanished.
+
+**22 / GRADIENTS**
+
+## CSS `linear-gradient()` and `radial-gradient()`
+
+A gradient is a generated _background image_, not a colour: it is painted by the same shading engine SVG paint servers use, evaluated per device pixel rather than baked into a bitmap. Every tile below is 116×58 — deliberately not square, because a `to <corner>` gradient's line is only 45° on a square.
+
+### Direction
+
+(none) → to bottom
+
+to right
+
+to left
+
+to top
+
+45deg
+
+0.75turn
+
+to bottom right
+
+to top right
+
+Look for: the two corner swatches. Their bands are _not_ at 45°. CSS angles the gradient line so the perpendicular through each end lands exactly on a corner, which on a 2:1 box makes the line noticeably shallower — and puts the two _other_ corners at precisely the midpoint colour. `0deg` points up and angles run clockwise, so `0.75turn` (270°) matches `to left`.
+
+### Colour stops
+
+four colours, no positions
+
+25% … 75%
+
+two stops at 50% (hard break)
+
+four hard bands
+
+→ transparent
+
+Look for: stops with no position are spread _evenly_ between the ones that have them, so the four-colour swatch changes at 33% and 67% without being told to. Two stops sharing a position give a hard edge with no blend at all — the mechanism behind the four-band swatch. The last swatch fades to `transparent` and stays _red_ the whole way: interpolation runs in premultiplied alpha, which is what keeps a grey band from appearing through the middle of it.
+
+### Radial
+
+ellipse (default)
+
+circle
+
+closest-side
+
+circle farthest-side
+
+circle at 20% 30%
+
+Look for: the default ending shape is an _ellipse_ sized to the farthest corner, so it stretches with the box; adding `circle` makes both radii equal and the rings become round. The sizing keyword picks which box feature the shape must reach — `closest-side` lands the end colour on the nearest edges, so the corners sit beyond the ramp and are solid.
+
+**23 / GRADIENTS, CONTINUED**
+
+## Repeating gradients, and the `background-*` properties
+
+A gradient is a generated _image_, so it answers to the same sizing, tiling and positioning properties a bitmap does. These swatches are the proof: the same declarations that place a `url()` background place a gradient one.
+
+repeating, 16px period
+
+repeating at 45deg
+
+repeating radial
+
+background-size: 40px
+
+60% size, centered, no-repeat
+
+Look for: a repeating gradient takes its _stop range_ as the period, so the ramp tiles rather than stretching once. The last two swatches show a gradient really is a background image — `background-size` resizes its box, and the result tiles or is placed by `background-position` exactly as a bitmap would.
+
+**24 / BORDER RADIUS**
+
+## Rounded Corners
+
+Every form of `border-radius`: circular and elliptical corners, the four per‑corner longhands, percentage radii, the overlap‑correction rule, and rounded borders with their true inner curve.
+
+none
+
+no radius
+
+8px
+
+border-radius: 8px
+
+pill
+
+border-radius: 999px
+
+50%
+
+border-radius: 50%
+
+30/12
+
+border-radius: 30px / 12px
+
+4 vals
+
+2px 10px 20px 10px
+
+Look for: the `50%` tile is a true ellipse rather than a circle, because its box is wider than it is tall — a percentage resolves the horizontal radius against the box's _width_ and the vertical one against its _height_. The `30px / 12px` tile shows the same asymmetry written explicitly with the slash form, and the last tile gives all four corners a different radius in one declaration.
+
+thin
+
+2px border, 14px radius
+
+thick
+
+10px border, 14px radius
+
+inner
+
+12px border, 6px radius
+
+over
+
+radius 200px, corrected
+
+Look for: the inner curve. A rounded border is not the outer path stroked — the inner edge's radius is the outer radius _minus_ the border width, so the thick tile's hole is far less round than its outside, and in the third tile the border is thicker than the radius, which squares the inner corner completely while the outside stays round. The last tile asks for a 200px radius on a box far smaller than that; the corners cannot overlap, so every radius scales down by one shared factor until they exactly meet.
+
+The overlap correction (CSS Backgrounds 3 §5.1) is what makes an over‑large radius degrade gracefully rather than producing self‑crossing arcs: each side compares its length against the sum of the two radii meeting along it, and the _smallest_ of those ratios scales all eight radius components at once. That single shared factor is why `border-radius: 999px` on the pill above resolves to exactly half the box's height on every corner.
+
+Backgrounds and borders both follow the rounded outline, and a background _image_ is clipped to it. In PDF output the corners stay genuinely curved: the writer emits the same cubic curve path natively, so a rounded box remains vector rather than being flattened to a picture. A rounded border is filled as one ring in a single colour, so a dashed or multi‑coloured rounded border paints solid — the engine logs that substitution rather than making it silently.
+
+**25 / MID-WORD BREAKING**
 
 ## The `overflow-wrap` & `word-break` Properties
 
@@ -488,7 +698,41 @@ https://example.com/very/long/path/to/a/private/calendar/feed.ics
 
 Every mid‑word break lands on a grapheme‑cluster boundary (UAX #29), so a combining mark is never separated from its base letter and an emoji ZWJ sequence or a flag is never split in half. `overflow-wrap:anywhere` breaks in the same places as `break-word` but additionally shrinks a box's intrinsic _min‑content_ width, which is visible in flex and grid sizing rather than in the line breaking itself.
 
-**20 / TRACKING**
+**26 / BOX-SHADOW**
+
+## CSS `box-shadow`
+
+Every tile below is identical — a flat fill inside a hairline border — under a different `box-shadow` declaration. Unlike a `filter`, a shadow is not computed from the box's pixels: it is the box's own _shape_, displaced, grown and blurred, so it costs nothing to draw and stays sharp at any resolution.
+
+none
+
+6px 6px
+
+6px 6px 8px
+
+0 0 0 5px
+
+8px 8px 4px −4px
+
+5px 5px 4px (currentColor)
+
+inset 6px 6px 6px
+
+inset 5px 0 0
+
+inset 0 0 0 5px
+
+three offsets, comma‑separated
+
+outer + inset in one list
+
+Look for: the four arguments separating cleanly. _offset_ moves the shape; _blur_ softens its edge over a distance equal to the radius, centred on the edge; _spread_ grows the shape on all four sides before that blur; and a _negative_ spread shrinks it — the −4px swatch casts a visibly narrower shadow than its 8px offset alone would. The swatch with no colour written takes the element's own `color`.
+
+The `inset` keyword is a genuinely different rendering, not a sign flip. An outer shadow fills the region _outside_ the border box — so a tile with a transparent background shows a ring, never a filled blob — while an inset shadow fills the part of the _padding_ box its own shape does not cover, and can never escape the box however far it is offset. That is why an inset spread runs the other way: growing the shape shrinks the lit interior, which _thickens_ the band. The last two swatches show a comma‑separated list, where the first shadow in the list paints on top of the ones after it, and where an outer and an inset shadow coexist because they sit in different slots of the box's paint order — outer behind the background, inset over the background but under the border.
+
+A shadow with no blur is a plain vector fill, so the common patterns — a hard offset, a spread ring, an `inset` colour spine — stay fully vector in PDF output. A _blurred_ shadow needs an offscreen raster surface, which a PDF writer does not have and PDF has no operator for; there it degrades to the same shadow with a hard edge, at the same place and size, rather than rasterising the page or dropping the decoration.
+
+**27 / TRACKING**
 
 ## The `letter-spacing` & `word-spacing` Properties
 
@@ -522,7 +766,7 @@ flush right
 
 Both boxes are right‑aligned. CSS Text 3 words `letter-spacing` as spacing _between_ characters, but every shipping browser adds it after _every_ character including the last — which is why the tracked line stops one tracking‑width short of the right edge. This engine matches the browsers. SVG deliberately does _not_: SVG 1.1's wording adds no trailing gap, so `pkg/svg` keeps its trailing edge flush. Two specs, not an inconsistency.
 
-**21 / TRACKING, CONTINUED**
+**28 / TRACKING, CONTINUED**
 
 ## Tracking changes where lines break
 

@@ -37,6 +37,18 @@ type Fragment struct {
 	BgImage    *BackgroundImageContent // decoded CSS background image (set when the box has a decodable background-image), painted behind content
 	DebugTag   string                  // optional label for test lookup; not used in paint
 
+	// Radii is the box's border-radius resolved against THIS fragment's border box
+	// and already overlap-corrected (CSS Backgrounds 3 §5.1). It is resolved at
+	// fragment-build time rather than at paint time because the percentages resolve
+	// against the used border-box size, which only layout knows, and because the
+	// correction factor depends on that same size — a paint-time resolution would
+	// have to re-derive both.
+	//
+	// The zero value (every corner square) is the initial value and the common case;
+	// every consumer checks Radii.Zero() first and takes its pre-existing
+	// square-cornered path, so documents without radii are unaffected.
+	Radii layout.CornerRadii
+
 	// Box is the source cssbox.Box this fragment was produced from, retained so the
 	// flatten/paint stage can read style-driven paint facts that are not pre-resolved
 	// onto the fragment — today the stacking z-index (Box.Style.ZIndex/ZIndexAuto),
@@ -140,6 +152,32 @@ type Fragment struct {
 	// the shared, document-agnostic parse result and deliberately leaves a colour
 	// token unparsed for its caller to resolve.
 	FilterShadows []color.RGBA
+
+	// Shadows holds the box's resolved `box-shadow` list (nil — the common case
+	// — means no shadow, so every shadowless document's item stream stays
+	// byte-identical to before the property existed). Entries are in SOURCE
+	// order; appendSelfDecorations reverses them, because CSS paints the FIRST
+	// shadow on top.
+	//
+	// Each entry carries only the shadow's own PARAMETERS (offset, blur,
+	// spread, colour, inset) — deliberately NOT an absolute rectangle. The
+	// shadow box is derived at flatten time from the fragment's own X/Y/W/H and
+	// its border widths, exactly as the Filter bracket's rectangle is, so a
+	// pagination shift or a fragment split can never leave a shadow behind at a
+	// stale position. Storing a resolved rect here would need its own entry in
+	// translateFragment, which is precisely the bookkeeping this avoids.
+	Shadows []ShadowSpec
+}
+
+// ShadowSpec is one `box-shadow` entry with its lengths resolved to points and
+// its colour resolved against the box, but WITHOUT geometry: the shadow box
+// comes from the owning Fragment at flatten time (see Fragment.Shadows).
+type ShadowSpec struct {
+	OffsetX, OffsetY float64
+	Blur             float64 // non-negative; a negative blur invalidates the declaration at parse time
+	Spread           float64 // may be negative, which shrinks the shadow
+	Color            color.RGBA
+	Inset            bool
 }
 
 // PositionedInfo is one entry of a Fragment's PositionedInfo slice (parallel to
@@ -210,8 +248,14 @@ type BackgroundImageContent struct {
 	// stays vector all the way to the backend. SceneW/SceneH are the scene's own
 	// authored viewport size, which the painter needs in order to scale it into the
 	// computed tile rectangle.
-	Scene                              layout.VectorScene
-	SceneW, SceneH                     float64
+	Scene          layout.VectorScene
+	SceneW, SceneH float64
+
+	// Gradient is set INSTEAD of Img and Scene when background-image is a CSS
+	// <gradient>. Its geometry is already resolved into TILE space, so it
+	// travels to the painter needing nothing further from the cascade.
+	Gradient *layout.BackgroundGradient
+
 	IntrinsicW, IntrinsicH             float64
 	OriginX, OriginY, OriginW, OriginH float64
 	ClipX, ClipY, ClipW, ClipH         float64
@@ -489,21 +533,50 @@ func (f *Fragment) appendContent(dst []layout.Item) []layout.Item {
 
 // appendSelfDecorations emits this fragment's own background then border edges (no
 // recursion).
+//
+// CSS Backgrounds 3 §6 fixes where the two kinds of box-shadow sit in that
+// sequence, and they are NOT adjacent:
+//
+//	outer shadows → background colour → background image → INSET shadows → border
+//
+// An outer shadow paints BEHIND everything the box draws (so an opaque
+// background hides the part of the shadow that falls under the box); an inset
+// shadow paints over both backgrounds but UNDER the border (so a border is never
+// darkened by the box's own inner shadow). Emitting both at one point would get
+// one of the two wrong, which is why the list is walked twice.
+//
+// Within each group the list is walked in REVERSE, because CSS paints the FIRST
+// shadow in the list on TOP and this item stream is painted front-to-back last.
 func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
+	dst = f.appendShadows(dst, false)
 	if f.Background.A > 0 {
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundKind,
-			Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Color: f.Background},
+			Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Color: f.Background, Radii: f.Radii},
 		})
 	}
 	// Background image paints after the background color and before the border (CSS
 	// Backgrounds 3 paint order).
-	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil) {
+	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil || bg.Gradient != nil) {
+		// A rounded box clips its background IMAGE to the rounded border box. Unlike
+		// the background COLOR — a single fill this engine can round directly — a
+		// background image is an arbitrary number of tiles drawn by DrawImage, which
+		// has no shape parameter, so the only way to round it is a clip bracket around
+		// the whole tiling run. A gradient takes the same path: it paints as a
+		// background image, so it rounds by the same bracket rather than needing the
+		// shader to know about corners.
+		if !f.Radii.Zero() {
+			dst = append(dst, layout.Item{
+				Kind: layout.ClipPushKind,
+				Rule: layout.RuleItem{XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H, Radii: f.Radii},
+			})
+		}
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundImageKind,
 			BgImage: layout.BackgroundImageItem{
-				Img:   bg.Img,
-				Scene: bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
+				Img:      bg.Img,
+				Gradient: bg.Gradient,
+				Scene:    bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
 				IntrinsicW: bg.IntrinsicW, IntrinsicH: bg.IntrinsicH,
 				OriginX: bg.OriginX, OriginY: bg.OriginY, OriginW: bg.OriginW, OriginH: bg.OriginH,
 				ClipX: bg.ClipX, ClipY: bg.ClipY, ClipW: bg.ClipW, ClipH: bg.ClipH,
@@ -514,13 +587,94 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 				RepeatX: bg.RepeatX, RepeatY: bg.RepeatY,
 			},
 		})
+		if !f.Radii.Zero() {
+			dst = append(dst, layout.Item{Kind: layout.ClipPopKind})
+		}
 	}
+	if !f.Radii.Zero() {
+		if ring, ok := f.borderRing(); ok {
+			return append(dst, ring)
+		}
+		return dst
+	}
+	dst = f.appendShadows(dst, true)
 	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
 		e := f.Border[s]
 		if e.Width <= 0 || e.Style == layout.BorderNone {
 			continue
 		}
 		dst = append(dst, layout.Item{Kind: layout.BorderKind, Border: f.edgeStrip(s, e)})
+	}
+	return dst
+}
+
+// borderRing builds the single BorderKind item that draws a ROUNDED box's whole
+// border, or ok=false when the box has no visible border at all.
+//
+// A rounded border cannot be four independent strips: each corner's ink is shared
+// between two adjacent edges and follows an arc that neither strip's rectangle
+// contains. The ring — outer rounded rect minus inner rounded rect, filled even-odd
+// — is the shape that is actually correct, and it is drawn as one item.
+//
+// DEGRADATION (logged by the caller's engine, and stated in FEATURES.md): the ring
+// carries ONE colour and is always filled solid. A rounded box whose sides disagree
+// in colour, or whose style is dashed/dotted/double/ridge/groove/inset/outset, is
+// painted as a solid ring in the first visible side's colour. Rendering those
+// properly needs each side's ink clipped to its own corner-mitre wedge, and the
+// non-solid styles need the dash pattern walked along a curve — both deferred (see
+// docs/CSS-LAYOUT.md). The approximation is deliberate: a solid rounded ring reads
+// far closer to the intent than four square strips with the corners missing.
+func (f *Fragment) borderRing() (layout.Item, bool) {
+	var first *BorderEdge
+	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
+		if e := f.Border[s]; e.Width > 0 && e.Style != layout.BorderNone {
+			edge := e
+			first = &edge
+			break
+		}
+	}
+	if first == nil {
+		return layout.Item{}, false // no visible border: background only
+	}
+	// A side with no visible style contributes no width to the ring, so the inner
+	// rectangle only deflates by the sides that actually paint.
+	width := func(s layout.EdgeSide) float64 {
+		if e := f.Border[s]; e.Style != layout.BorderNone && e.Width > 0 {
+			return e.Width
+		}
+		return 0
+	}
+	t, r := width(layout.EdgeTop), width(layout.EdgeRight)
+	b, l := width(layout.EdgeBottom), width(layout.EdgeLeft)
+
+	// The inner curve's radii shrink by the border widths and floor at zero, then are
+	// re-corrected against the INNER box: correcting against the outer box would let
+	// two inner radii still overlap along a side the deflation shortened.
+	inner := f.Radii.Inset(t, r, b, l).Correct(f.W-l-r, f.H-t-b)
+	return layout.Item{
+		Kind: layout.BorderKind,
+		Border: layout.BorderItem{
+			XPt: f.X, YPt: f.Y, WPt: f.W, HPt: f.H,
+			Color: first.Color, Style: first.Style, Side: layout.EdgeTop,
+			Ring: &layout.BorderRing{
+				Outer: f.Radii, Inner: inner,
+				Top: t, Right: r, Bottom: b, Left: l,
+			},
+		},
+	}, true
+}
+
+// appendShadows emits f's box-shadows of one kind (inset or outer) in PAINT
+// order, which is the source list REVERSED: CSS Backgrounds 3 §6 says "the
+// first shadow is on top", and items later in this stream paint later, i.e. on
+// top. A shadowless fragment appends nothing, so its item stream is unchanged.
+func (f *Fragment) appendShadows(dst []layout.Item, inset bool) []layout.Item {
+	for i := len(f.Shadows) - 1; i >= 0; i-- {
+		s := f.Shadows[i]
+		if s.Inset != inset {
+			continue
+		}
+		dst = append(dst, layout.Item{Kind: layout.ShadowKind, Shadow: f.shadowItem(s)})
 	}
 	return dst
 }
@@ -710,6 +864,12 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 			// offset with the content it filters — exactly like a ClipPushKind's rect.
 			dst[i].Filter.XPt += dx
 			dst[i].Filter.YPt += dy
+		case layout.ShadowKind:
+			// The shadow box is the offset box's own border (or padding) box, so
+			// it rides the paint-time offset with the box it decorates. Only the
+			// box's origin moves: the offset, spread and blur are relative to it.
+			dst[i].Shadow.XPt += dx
+			dst[i].Shadow.YPt += dy
 		case layout.ClipPopKind, layout.FilterPopKind:
 			// No coordinates; nothing to translate (each is paired with its push).
 		}

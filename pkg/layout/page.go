@@ -158,6 +158,17 @@ const (
 	// the result (render.Device.EndGroup). Carries no geometry of its own — the
 	// geometry and the chain live on the matching push.
 	FilterPopKind
+	// ShadowKind is one CSS `box-shadow` (Item.Shadow is set). It is a single
+	// item per shadow rather than a bracket, because a box-shadow is not a
+	// filter over the box's pixels: it is a fill of the box's own SHAPE, offset
+	// and blurred, which the painter can derive from the geometry alone without
+	// ever rasterizing the box.
+	//
+	// An OUTER shadow is emitted BEFORE the box's background (it paints behind
+	// everything the box draws); an INSET shadow is emitted between the
+	// background image and the border (it paints over the background but under
+	// the border). See pkg/layout/css's appendSelfDecorations.
+	ShadowKind
 )
 
 // Item is one drawing primitive on a page. It is a small tagged union rather than
@@ -176,7 +187,50 @@ type Item struct {
 	// the bracketed subtree, plus the box's border-box rectangle. Unused (zero) for
 	// FilterPopKind, which carries no geometry.
 	Filter FilterItem
+	// Shadow is set when Kind is ShadowKind: one CSS box-shadow.
+	Shadow ShadowItem
 }
+
+// ShadowItem is one CSS `box-shadow` (CSS Backgrounds 3 §6), fully resolved to
+// page space (points, Y-down, top-left origin) at layout time.
+//
+// XPt,YPt,WPt,HPt is the SHADOW BOX — the rectangle whose shape the shadow
+// takes. For an OUTER shadow that is the box's BORDER box; for an INSET shadow
+// it is the box's PADDING box. The distinction is made at layout time because
+// only the layout engine knows the box's border widths, and carrying the border
+// box plus the edges here would make the painter re-derive geometry it has no
+// other use for.
+//
+// OffsetX/OffsetY, Blur and Spread are the shadow's own parameters in points,
+// already resolved from their authored units. Blur is non-negative (a negative
+// blur invalidates the declaration at parse time); Spread may be negative,
+// which shrinks the shadow.
+type ShadowItem struct {
+	XPt, YPt, WPt, HPt float64
+	OffsetX, OffsetY   float64
+	Blur               float64
+	Spread             float64
+	Color              color.RGBA
+	// Inset selects the inner-shadow rendering: the shadow fills the region of
+	// the padding box that the offset/spread/blurred shape does NOT cover, i.e.
+	// the complement of the outer case, clipped to the padding box. It is not a
+	// sign flip — see pkg/layout/paint's paintShadow.
+	Inset bool
+}
+
+// ShadowSigma is the Gaussian standard deviation a blur radius of blurPt
+// corresponds to.
+//
+// CSS Backgrounds 3 §6 defines the blur radius as the DISTANCE the shadow's
+// edge transitions over, centred on the edge: half the radius outside the
+// shape, half inside. A Gaussian whose transition spans a distance d has
+// sigma = d/2, which is the factor every browser uses (Blink, WebKit and Gecko
+// all halve the CSS radius before handing it to their blur).
+//
+// Getting this wrong is not subtle in the numbers but IS subtle on screen: a
+// sigma of blurPt would spread the shadow twice as far as authored, which reads
+// as "our shadows are soft" rather than as an off-by-two.
+func ShadowSigma(blurPt float64) float64 { return blurPt / 2 }
 
 // FilterItem is a CSS `filter` bracket's payload, carried on the FilterPushKind
 // item that opens the group. Funcs is the already-parsed function list (see
@@ -243,6 +297,22 @@ type GlyphItem struct {
 type RuleItem struct {
 	XPt, YPt, WPt, HPt float64
 	Color              color.RGBA
+
+	// Radii rounds the rectangle's corners (CSS border-radius), already resolved to
+	// absolute points and already overlap-corrected for this rectangle. The zero
+	// value — every corner square — is the common case and makes the painter emit
+	// exactly the four-line path it emitted before radii existed, which is what
+	// keeps untouched output byte-identical.
+	//
+	// It rides on RuleItem rather than only on a clip bracket because a rounded
+	// BACKGROUND is a filled rounded rect, not a square fill behind a clip: filling
+	// the shape directly antialiases its own edge, whereas clipping a square fill
+	// would hard-cut it against the clip mask and leave the corners visibly
+	// staircased on the raster backend.
+	//
+	// It is unused for RuleKind (underlines/strikes are never rounded); only the
+	// BackgroundKind and ClipPushKind carriers set it.
+	Radii CornerRadii
 }
 
 // BorderItem is one border edge: the edge's own rectangle (the strip) in page
@@ -254,6 +324,44 @@ type BorderItem struct {
 	Color              color.RGBA
 	Style              BorderStyle
 	Side               EdgeSide
+
+	// Ring, when non-nil, makes this item the box's WHOLE rounded border ring
+	// rather than one flat edge strip: a rounded border cannot be drawn as four
+	// independent rectangles, because each corner's ink is shared between two
+	// adjacent edges and follows an arc neither strip contains.
+	//
+	// A box with any rounded corner therefore emits ONE BorderKind item carrying
+	// Ring (with XPt..HPt spanning the whole border box and Side/Style/Color taken
+	// from the top edge) in place of the up-to-four strip items. A box with square
+	// corners keeps emitting strips and leaves Ring nil, so that path — every
+	// existing document — is untouched.
+	Ring *BorderRing
+}
+
+// BorderRing is a rounded border drawn as a single ring: the area between the
+// outer (border-box) rounded rectangle and the inner (padding-box) one, filled with
+// the even-odd rule so the interior falls out as a hole.
+//
+// Filling the ring is what makes the corners correct. Stroking the outer path with
+// the border width would keep a CONSTANT thickness around the arc and centre the
+// ink on the path (half of it spilling outside the border box); the true shape has
+// the outer and inner curves at DIFFERENT radii — the inner one reduced by the
+// border width and floored at zero (see CornerRadii.Inset) — which only a two-path
+// fill reproduces.
+//
+// Per-side colours and non-solid styles are a documented degradation: the ring is
+// filled with one colour and treated as solid. A box whose rounded sides disagree
+// in colour or style paints with the first present side's, and the CSS engine logs
+// it. Painting them properly needs each side's ink clipped to its own mitre wedge —
+// deferred; see docs/CSS-LAYOUT.md.
+type BorderRing struct {
+	// Outer is the border box's already-corrected radii; Inner is the padding
+	// box's, normally Outer.Inset(widths) but carried explicitly so the painter
+	// never has to re-derive it.
+	Outer, Inner CornerRadii
+	// Top/Right/Bottom/Left are the four border widths in points. The inner
+	// rectangle is the outer one deflated by these.
+	Top, Right, Bottom, Left float64
 }
 
 // ImageItem is a decoded raster image to draw into a content box. The rectangle
@@ -308,8 +416,25 @@ type BackgroundImageItem struct {
 	// SceneW, SceneH are Scene's own authored viewport size in points, which the
 	// painter needs to scale the scene into the tile rect. Meaningful only when
 	// Scene is set.
-	SceneW, SceneH         float64
-	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector source's intrinsic size), > 0
+	SceneW, SceneH float64
+
+	// Gradient is set INSTEAD of Img and Scene when the background image is a CSS
+	// <gradient>. Exactly one of the three sources is ever set.
+	//
+	// A gradient has NO INTRINSIC SIZE (CSS Images 3: it is a generated image
+	// with no natural dimensions), so unlike a bitmap or an SVG it cannot supply
+	// IntrinsicW/IntrinsicH from its content. The layout engine therefore sets
+	// them to the ORIGIN BOX's size, which is exactly what `background-size:
+	// auto` must resolve to for a sizeless image — that one substitution makes
+	// every other background property (size, position, repeat, origin, clip)
+	// work on a gradient through the unchanged geometry path, rather than needing
+	// a parallel set of rules.
+	//
+	// The gradient's own coordinates live in TILE space, so a `background-size`
+	// that shrinks the tile correctly shrinks the gradient with it.
+	Gradient *BackgroundGradient
+
+	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector/generated source's intrinsic size), > 0
 
 	// Origin box: where the image is sized and positioned (background-origin box).
 	OriginX, OriginY, OriginW, OriginH float64

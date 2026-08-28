@@ -14,6 +14,7 @@
 package inline
 
 import (
+	"context"
 	"image/color"
 
 	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
@@ -176,19 +177,65 @@ type Color struct{ R, G, B, A uint8 }
 
 // Shape turns styled runs into a flat slice of shaped glyphs, resolving each run's
 // face through faces and measuring every rune at the run's size. A run whose family
-// has no bundled face is skipped (logged via logf); a rune the face cannot map is
-// skipped. A Break run yields one hard-break glyph; an Atomic run yields one atomic
-// glyph whose Advance is AtomicItem.WidthPt. A zero-alpha Run.Color is shaped
-// opaque. logf may be nil. Shape never panics on malformed input.
+// has no bundled face is skipped (logged via logf); a rune that neither the run's
+// face nor any script fallback can map yields a .notdef glyph — the font's own glyph
+// 0, or a synthesized tofu box — and is logged once per rune per call. A Break run
+// yields one hard-break glyph; an Atomic run yields one atomic glyph whose Advance is
+// AtomicItem.WidthPt. A zero-alpha Run.Color is shaped opaque. logf may be nil. Shape
+// never panics on malformed input.
+//
+// Shape is uninterruptible; use ShapeContext when the caller needs to bound how
+// long shaping may run.
 func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) []Glyph {
+	return ShapeContext(context.Background(), faces, runs, logf)
+}
+
+// shapeCancelStride is how many runes Shape processes between cancellation
+// checks. The per-rune body (face lookup, outline extraction, advance
+// accumulation) is the hottest loop in layout, so a ctx.Err() on every rune
+// would be a measurable tax on every document — while a check every 1024 runes
+// is far below the noise floor and still bounds the worst case to a fraction of
+// a millisecond of extra work after cancellation. A power of two so the
+// remainder test is a mask.
+const shapeCancelStride = 1024
+
+// ShapeContext is Shape with a context bounding the work. Shaping a single very
+// large text run is the longest uninterruptible stretch on the layout path — it
+// happens BEFORE line breaking, so the per-line cancellation check in the CSS
+// engine's layoutInline cannot help until shaping finishes. Without a check here
+// a pathological paragraph pins a core for the whole shaping pass regardless of
+// the caller's deadline.
+//
+// On cancellation it returns the glyphs shaped so far rather than an error: this
+// mirrors the layout engine's degrade-don't-propagate convention (see
+// layoutBlockChildren), and the open boundary converts a cancelled ctx into a
+// hard error so a truncated result is never handed to a caller silently.
+func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) []Glyph {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
 	var out []Glyph
+	// warnedRunes records which missing runes have already been logged, so a document
+	// with 500 unmappable emoji emits a bounded number of lines instead of 500. It is
+	// per-CALL rather than per-engine on purpose: Shape is the only place that knows
+	// the rune is missing, it is called once per paragraph/measure pass, and a set
+	// scoped here needs no lock and cannot leak between documents. The cost is that a
+	// rune missing in several paragraphs logs once per paragraph — bounded by the
+	// paragraph count, which is the property that matters, and it keeps the report
+	// attached to where the text actually is. (The CSS engine also shapes during
+	// intrinsic-width measurement, so a missing rune inside a table cell or flex item
+	// can be reported by the measure pass as well as the layout pass — still bounded,
+	// and still one line per rune per pass rather than one per occurrence.)
+	warnedRunes := map[rune]bool{}
 	// lineCol tracks the current column x-position (points) since the last line start,
 	// used to compute tab-stop advances. It re-bases to 0 at each hard break.
 	lineCol := 0.0
 	for _, r := range runs {
+		// Between runs: cheap (a document with many small runs checks often, and
+		// each check is dwarfed by the face resolution that follows).
+		if ctx.Err() != nil {
+			return out
+		}
 		if r.Break {
 			lineCol = 0
 			out = append(out, Glyph{Break: true})
@@ -236,11 +283,15 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 			}
 			return adv
 		}
-		// Space advance (for tab stops) in points: the face's ' ' advance × size.
-		spaceAdv := r.SizePt * 0.25 // fallback if the face has no space glyph
+		// spaceEm is the face's ' ' advance in EM units, kept unscaled so it can serve
+		// both the tab-stop math below and the advance given to an unmapped invisible
+		// character — deriving the latter by dividing the scaled value back down would
+		// produce NaN at a zero font-size, which SVG's zero-size fixtures do reach.
+		spaceEm := 0.25 // fallback if the face has no space glyph
 		if _, sa, ok := face.Glyph(' '); ok {
-			spaceAdv = sa * r.SizePt
+			spaceEm = sa
 		}
+		spaceAdv := spaceEm * r.SizePt
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
 		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, WordBreak: r.WordBreak, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
 		// Complex-script segments (Arabic and friends) are shaped as whole runs through
@@ -250,6 +301,14 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		runes := []rune(r.Text)
 		skipTo := 0
 		for ri := 0; ri < len(runes); ri++ {
+			// One check per shapeCancelStride runes. The between-runs check above
+			// does nothing for the case that matters most here — a single run
+			// holding the entire document's text — so the stride is what actually
+			// bounds shaping latency, without putting an atomic load in the
+			// per-rune path.
+			if ri&(shapeCancelStride-1) == 0 && ctx.Err() != nil {
+				return out
+			}
 			rn := runes[ri]
 			if ri < skipTo {
 				continue
@@ -366,8 +425,49 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 						}
 					}
 				}
-				if !ok {
-					continue
+				// missing marks a rune NO face could map AND that would have drawn ink.
+				// Two very different cases hide behind an unmapped rune:
+				//
+				//   - An INVISIBLE character (a space variant like U+202F NARROW NO-BREAK
+				//     SPACE, a format control, a variation selector). It draws nothing even
+				//     in a font that maps it, so a tofu box would INVENT a mark the author
+				//     never asked for — a regression, not a fix. Browsers render an unmapped
+				//     invisible character as blank. It gets an advance and no outline, and no
+				//     warning: nothing about the page is wrong.
+				//   - A VISIBLE character the available fonts genuinely cannot draw. This is
+				//     the case .notdef exists for.
+				//
+				// Distinguishing them is the whole reason invisibleRune exists; without it,
+				// turning on .notdef sprays boxes through documents that render correctly
+				// today (this repo's own showcase carries a U+202F).
+				missing := !ok && !invisibleRune(rn)
+				switch {
+				case missing:
+					// Historically the rune was DROPPED here, which renders as empty space —
+					// and because the surrounding text is unaffected, the result reads as a
+					// layout bug rather than a font problem. It is worse still when only SOME
+					// runes of a set are missing (three of nine weather emoji drawing, six
+					// vanishing), which is exactly what happened on a board carrying only
+					// DejaVu and Liberation.
+					//
+					// Draw .notdef instead, as a browser does. Face.NotdefGlyph picks the
+					// font's own glyph 0 when it has geometry and synthesizes a tofu box when
+					// it does not (the bundled substitutes all ship a BLANK .notdef, so the
+					// synthesized box is what usually shows).
+					//
+					// The mark comes from the RUN's face, not a script fallback: the fallback
+					// search has already failed, and the run's face is the one whose size and
+					// metrics the rest of the line uses, so its .notdef is the mark that
+					// visually belongs in this text.
+					outline, advEm = face.NotdefGlyph()
+					glyphFace = face
+					warnMissingGlyph(logf, warnedRunes, rn, r.Family)
+				case !ok:
+					// Invisible and unmapped: occupy space, draw nothing. The advance uses the
+					// face's space advance — the closest available approximation, and the value
+					// the tab-stop code above already trusts for exactly this purpose — so the
+					// character still separates its neighbours instead of collapsing the line.
+					outline, advEm, glyphFace = nil, spaceEm, face
 				}
 				g := base
 				g.Face = glyphFace
@@ -387,10 +487,26 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 				// NOTE: this resolves against glyphFace, which for a fallback glyph is the
 				// covering script face, not the run's own — a GID is only meaningful
 				// against the face it came from.
-				if gid, ok := glyphFace.GID(rn); ok {
+				//
+				// A .notdef glyph takes that same outline route, unconditionally — hence the
+				// `missing` guard rather than relying on GID lookup to fail. The reason is on
+				// Face.NotdefGlyph: handing a text backend Face+GID 0 would have the PDF
+				// writer embed and emit the font's own .notdef, which in every bundled
+				// substitute is BLANK, so the box would show in a raster and vanish in a PDF
+				// of the same page.
+				//
+				// Runes IS still set for a .notdef glyph, so the bidi pass sees the real
+				// character's class — rather than the U+FFFC placeholder lineText substitutes
+				// for a runeless glyph, which reorders differently — and so SVG's
+				// glyph-to-character mapping still locates the box.
+				switch gid, gidOK := glyphFace.GID(rn); {
+				case missing:
+					g.Face = nil
+					g.Runes = []rune{rn}
+				case gidOK:
 					g.GID = gid
 					g.Runes = []rune{rn}
-				} else {
+				default:
 					g.Face = nil
 				}
 				out = append(out, g)
@@ -399,6 +515,78 @@ func Shape(faces *layoutfont.FaceCache, runs []Run, logf func(string, ...any)) [
 		}
 	}
 	return out
+}
+
+// invisibleRune reports whether r is a character that draws NOTHING even in a font
+// that maps it, so an unmappable one must degrade to blank space rather than to a
+// .notdef box. Drawing tofu for an invisible character would invent a visible mark
+// where the correctly-rendered page has none — the opposite of the fidelity the
+// .notdef mark is there to provide.
+//
+// It covers, by Unicode general category and by name:
+//
+//   - Zs SPACE SEPARATOR beyond U+0020: the no-break, en/em/thin/hair quad family
+//     (U+00A0, U+2000..U+200A), U+202F NARROW NO-BREAK SPACE, U+205F MEDIUM
+//     MATHEMATICAL SPACE, and U+3000 IDEOGRAPHIC SPACE. These appear in ordinary
+//     well-formed text — U+202F alone occurs in this repo's own showcase — and the
+//     bundled substitutes map only a few of them.
+//   - Zl/Zp LINE and PARAGRAPH SEPARATOR (U+2028, U+2029).
+//   - Cf FORMAT: the zero-width set (U+200B..U+200F), the bidi controls
+//     (U+202A..U+202E, U+2060..U+2064, U+2066..U+2069), U+00AD SOFT HYPHEN, the
+//     variation selectors (U+FE00..U+FE0F), and U+FEFF ZERO WIDTH NO-BREAK SPACE.
+//   - Cc CONTROL (U+0000..U+001F, U+007F..U+009F), which has no printable form.
+//
+// The bidi controls are listed for completeness; in practice isBidiControlRune
+// intercepts them earlier in Shape, since they must keep a zero-width slot for the
+// reorder rather than a space-sized advance.
+//
+// The list is only consulted for a rune NOTHING maps, so a font's own decision wins
+// where it has one. U+00AD SOFT HYPHEN is the instructive case: the bundled faces
+// DO map it, to a visible hyphen — which is exactly right, since a soft hyphen that
+// has been broken at renders as one — so it never reaches this function at all.
+//
+// Unicode's own tables are not consulted because pkg/layout/inline deliberately
+// carries no Unicode-database dependency, and this set is small, stable, and
+// exactly the characters a text run actually contains.
+func invisibleRune(r rune) bool {
+	switch {
+	case r <= 0x001F, r >= 0x007F && r <= 0x009F: // Cc control
+		return true
+	case r == 0x00A0, r == 0x00AD: // NBSP, SOFT HYPHEN
+		return true
+	case r >= 0x2000 && r <= 0x200F: // en/em/thin/hair spaces, ZWSP..RLM
+		return true
+	case r == 0x2028, r == 0x2029: // LINE/PARAGRAPH SEPARATOR
+		return true
+	case r >= 0x202A && r <= 0x202F: // bidi embedding/override, NNBSP
+		return true
+	case r == 0x205F, r == 0x3000: // MEDIUM MATHEMATICAL, IDEOGRAPHIC SPACE
+		return true
+	case r >= 0x2060 && r <= 0x2064, r >= 0x2066 && r <= 0x2069: // word joiner, isolates
+		return true
+	case r >= 0xFE00 && r <= 0xFE0F: // variation selectors
+		return true
+	case r == 0xFEFF: // ZERO WIDTH NO-BREAK SPACE / BOM
+		return true
+	}
+	return false
+}
+
+// warnMissingGlyph logs that rn has no glyph in any face reachable from family, the
+// first time this Shape call sees rn. seen is the call's warn-once set; logf is never
+// nil here (Shape substitutes a no-op).
+//
+// The rune is reported as U+XXXX rather than as the character itself, because the
+// whole point is that the character does not render — a log line whose diagnostic
+// content is an unprintable box in the reader's terminal helps nobody. The family is
+// included because it is the actionable half: the fix is almost always to install or
+// embed a font for that text, and the family name says which request went unmet.
+func warnMissingGlyph(logf func(string, ...any), seen map[rune]bool, rn rune, family string) {
+	if seen[rn] {
+		return
+	}
+	seen[rn] = true
+	logf("layout: no glyph for U+%04X in family %q or any fallback; drawing .notdef", rn, family)
 }
 
 // isWordSeparator reports whether rn is one of the word-separator characters CSS

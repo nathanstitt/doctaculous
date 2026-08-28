@@ -56,6 +56,19 @@ bullet's design rationale is in its PR:
 - **CSS parse + cascade** (`pkg/css`): dependency-free tokenizer/parser, selector matching +
   specificity, full cascade (specificity + source order + inheritance + `!important` + inline
   `style` + origins), shorthand expansion.
+- **Custom properties + `var()`** (CSS Variables 1; `pkg/css/customprop.go`, `varsubst.go`):
+  `--*` properties cascade by the normal rules and INHERIT, stored as raw token streams (the
+  treatment `filter` already gets) and substituted at computed-value time. Substitution sits
+  between the cascade and value parsing, so `var()` works in every property including
+  shorthands — `border: var(--rule)` expands normally once substituted. Supports fallbacks
+  (`var(--x, blue)`), nested fallbacks, recursive substitution (`--a: var(--b)`), and the
+  case-sensitivity rule that makes `--Foo` and `--foo` distinct. Cycles are detected exactly
+  (an active-reference set, not a depth guess) and a non-cyclic exponential fan-out is bounded
+  by a depth cap. An unresolvable reference is **invalid at computed-value time**, not a
+  dropped declaration: per spec the property falls back to its inherited-or-initial value as
+  though `unset` were specified, rather than leaving an earlier declaration showing — the one
+  case where this engine must NOT treat a bad value as "keep the previous one". `:root` also
+  landed here (`pkg/css/selector.go`), since it is where a palette is normally declared.
 - **HTML frontend — box generation** (`pkg/html`, `pkg/layout/cssbox`): owned DOM, UA stylesheet,
   anonymous-box fixups, whitespace collapsing, `display:none` pruning; `<link>` via
   `pkg/resource.ResourceLoader`.
@@ -176,6 +189,105 @@ bullet's design rationale is in its PR:
   synthetic bullet outlines.
 - **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
   `url(..)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
+- **CSS gradients as a background image** (`pkg/css/gradient.go`, `pkg/layout/gradient.go`,
+  `pkg/layout/paint/gradient.go`): `linear-gradient()`, `radial-gradient()` and both
+  `repeating-*` forms. Linear takes an `<angle>` in any CSS unit (`deg`/`grad`/`rad`/`turn`),
+  `to <side>`, or `to <corner>` — the corner case computes the spec's aspect-dependent
+  gradient line (perpendicular to the box's other diagonal), **not** 45°, which is only
+  right on a square. Radial supports `circle`/`ellipse` crossed with
+  `closest-side`/`closest-corner`/`farthest-side`/`farthest-corner`, explicit
+  `<length-percentage>` radii, and `at <position>`. Colour stops take positions in `%` or
+  lengths, with the full CSS normalization: omitted endpoints default to 0%/100%, an
+  unpositioned run is spread evenly between its bracketing stops, and a decreasing position
+  is corrected UP to the running maximum (a forward clamp producing a hard break — never a
+  sort, which would reorder the author's colours). Two stops at one position give a hard
+  colour break. Interpolation is in **premultiplied alpha**, matching browsers: fading to
+  `transparent` stays in its own hue instead of showing the grey/black band a straight-RGBA
+  ramp produces.
+  Gradients paint through the **same shading seam SVG paint servers use**
+  (`raster.NewAxialShader`/`NewRadialShader` → `render.Device.FillShading`), so they are
+  evaluated per device pixel rather than baked to a bitmap, and the PDF writer emits a native
+  `/Shading` dictionary for them. A gradient has no intrinsic size, so it takes the
+  background-origin box's — which makes `background-size`/`-position`/`-repeat`/`-origin`/
+  `-clip` all apply to it through the unchanged geometry path (its geometry is resolved in
+  TILE space, so a resized gradient really is resized).
+  **Degrades honestly:** a colour hint (a bare `<length-percentage>` between two stops)
+  needs a non-linear ramp the shared seam cannot express and is REJECTED at parse time, as
+  are `conic-gradient()`, a unitless angle, and a one-stop list — the declaration is dropped,
+  so the background colour still paints rather than a subtly wrong ramp appearing. An ending
+  shape with a zero radius (e.g. `closest-side` centred on a box corner) establishes no
+  geometry: nothing paints, the background colour remains, and the skip is logged via
+  `warnOnce`.
+- **CSS Color 4 colour values — ONE grammar for the whole engine** (`pkg/css/color.go`; `pkg/svg`
+  delegates to it): the full 148-keyword named table (via `golang.org/x/image/colornames` +
+  `rebeccapurple` + `transparent`), all four hex forms (`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`), and
+  `rgb()`/`rgba()`/`hsl()`/`hsla()` in both the legacy comma syntax and the modern space syntax with
+  `/` alpha, with integer or percentage channels. Alpha is LIVE end to end — parsing yields a
+  `color.RGBA` the painter hands to the device unchanged and the rasteriser composites (verified by
+  pixel: `background:rgba(0,0,0,0.9)` on an 80×80 box went from 0 painted pixels to 6400).
+  Previously `pkg/css` had a hand-written parser covering only `#rgb`/`#rrggbb`/`rgb()` and eight
+  keywords while `pkg/svg` carried a complete implementation, so any alpha-bearing value failed the
+  cascade, the declaration was dropped per CSS error handling, and the element painted *nothing*.
+  Merged into `pkg/css` (not the reverse) because `pkg/svg` already depends on it and `pkg/css`
+  depends on no internal package. Malformed values still yield `ok=false` so the declaration drops
+  and the prior value stands. **Known divergence:** through the `background` SHORTHAND an
+  unparseable colour leaves the sub-property at its reset value rather than restoring the previous
+  declaration — `applyBackground` resets every longhand before classifying components and
+  deliberately tolerates ones it cannot classify. That is a shorthand-expander gap, not a colour-
+  grammar one; the longhands (`background-color`, `color`, `border-*-color`) drop correctly.
+- **`border-radius`** (`pkg/css/borderradius.go`, `pkg/layout/borderradius.go`,
+  `usedRadii` in `pkg/layout/css/block.go` + paint): CSS Backgrounds 3 §5 in full — the shorthand
+  (1–4 values in CORNER order, i.e. diagonal pairing, not `expandBox`'s clockwise side rule), the
+  `/` form for elliptical corners, all four longhands, and percentages. A corner's two semi-axes
+  resolve against DIFFERENT bases (horizontal against the border box's width, vertical against its
+  height), which is why radii stay unresolved `Length` pairs until layout. The §5.1 overlap
+  correction scales all eight components by one shared factor `f = min` over sides, so
+  `border-radius:100px` on an 80×80 box yields a true circle rather than four separately-clamped
+  arcs. Backgrounds fill the rounded path directly (so the backend antialiases the arcs itself);
+  background IMAGES are bracketed by a rounded clip, since `DrawImage` has no shape parameter.
+  Borders paint as one even-odd RING (outer rounded rect minus inner), the inner radius being the
+  outer minus the border width floored at zero — a uniformly-thick rounded border is NOT the outer
+  path stroked, and a border thicker than its radius correctly squares the inner corner while the
+  outside stays round. PDF keeps real curves (`pdfwrite` emits the same Béziers as `c` operators
+  natively, for both the fill and the `W n` clip); DOCX is unaffected, as that writer builds a
+  document model rather than painting and has no rounded-box primitive to target.
+  **Degradations, logged by the layout engine and covered by tests:** a rounded border is filled in
+  ONE colour as SOLID, so per-side border colours and the non-solid styles (dashed/dotted/double/
+  ridge/groove/inset/outset) are approximated on a rounded box — square-cornered boxes still paint
+  four fully-styled strips and are byte-identical.
+
+- **`box-shadow`, outer and `inset`** (CSS Backgrounds 3 §6 — `pkg/css/boxshadow.go`,
+  `pkg/layout/css/boxshadow.go`, `pkg/layout/paint/boxshadow.go`). The full grammar, including the
+  `&&` combinator: `inset`, the 2–4 lengths and the colour may appear in **any order**, so
+  `inset red 2px 2px` and `2px 2px inset red` are the same shadow. Comma-separated **lists** paint
+  in the spec's order — the **first shadow is on top** — and CSS error handling is the engine's
+  usual: one malformed entry invalidates the whole declaration (a negative *blur* is an error; a
+  negative *spread* is legal and shrinks the shadow). An omitted colour, and the `currentColor`
+  keyword, resolve to the element's own `color` at layout time, where the cascade is reachable.
+  **`inset` is a genuinely different rendering, not a sign flip**: an outer shadow fills the region
+  OUTSIDE the border box (so a transparent box shows a ring, never a filled blob) while an inset one
+  fills the part of the PADDING box its own shape does not cover and can never escape the box,
+  however far it is offset — and its spread sign is inverted, because shrinking the lit interior
+  thickens the band. The two also sit in **different slots of the paint order** (outer behind the
+  background, inset over both backgrounds but under the border), so a list carrying both shows both.
+  The blur is `sigma = radius/2`, per the spec's "the shadow's edge transitions over a distance
+  equal to the blur radius, centred on the edge", and it runs through **`pkg/svg/filter`'s existing
+  `feGaussianBlur`** — the repo has exactly one blur implementation, shared by SVG filters, the CSS
+  `filter` shorthand and now this. Square corners only: `border-radius` is not implemented, and the
+  single integration point for it is documented at `paint.shadowOutline`.
+- **A `box-shadow` with no blur stays fully vector, including in PDF** — it is a plain even-odd
+  fill of the box's shape, so the common patterns (a hard offset, a spread ring, an `inset` colour
+  spine) cost no rasterization anywhere. A **blurred** shadow needs an offscreen raster surface via
+  `render.Device.RenderOffscreen`, which `pkg/render/pdfwrite` returns nil from by design (PDF has
+  no blur operator and a blur has no vector representation). There — and whenever the surface would
+  be degenerate, off-canvas, or over the per-shadow pixel cap — the shadow **degrades to the same
+  shape with a HARD edge**, at the same place and size. That is the "a visible approximation beats a
+  blank" rule the CSS `filter` path already follows, and deliberately NOT a rasterization of the
+  page. **That degradation is currently SILENT**: `pkg/layout/paint` has no logger to report it
+  through (`PaintPage` takes only a Device, a Page and a Matrix), exactly as the CSS-filter
+  pixel-cap degradation in the same package does. **DOCX output carries no shadow at all** —
+  `pkg/render/docxwrite` consumes the `cssbox` tree directly rather than the painted item list, so
+  it never sees a shadow item and has no `box-shadow` analogue to map one onto.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
@@ -215,6 +327,23 @@ bullet's design rationale is in its PR:
   paragraph now shapes instead of being silently dropped. Results cache per (script, style); the
   fallback consults bundled faces only. A fallback glyph carries the face it resolved from, since a
   GID is only meaningful against its own face.
+- **`.notdef` for unmappable runes** (`pkg/font/notdef.go`, `pkg/layout/inline/shape.go`): a rune that
+  neither the run's family nor any script fallback can map now draws the tofu box instead of rendering
+  as NOTHING. `Face.NotdefGlyph` follows the browser order — the font's own glyph 0 when it has
+  geometry (DejaVu draws a hollow box, Noto a box of hex digits), a synthesized hollow rectangle when
+  it does not, which is the branch the bundled TeX Gyre substitutes take since all of them ship a
+  BLANK `.notdef`. The box carries a non-zero advance so line-breaking measures the text at its true
+  width, and `Glyph.Runes` is retained so bidi sees the character's real class and SVG's
+  glyph→character mapping still locates it; `Glyph.Face` is cleared so every backend fills the same
+  outline (handing a text backend GID 0 would emit the font's blank `.notdef`, making the box visible
+  in a raster and invisible in a PDF of the same page). **Each distinct missing rune is warned about
+  exactly once per `Shape` call** via the `logf` the CSS engine and the SVG text path already thread
+  in — the shaper is one of the degradation sites that genuinely has a logger, so this really does log
+  rather than only claiming to. Invisible characters are excluded (`invisibleRune`): a space variant,
+  format control, or variation selector draws no ink even where it IS mapped, so giving it a box would
+  invent a mark the author never wrote — this repo's own showcase carries a U+202F that regressed
+  exactly that way before the exclusion existed. Applies to the shared CSS/SVG text path; DOCX/PDF and
+  any page whose glyphs all resolve stay byte-identical. Showcase §19.
 - **Inline bidi reordering** (`pkg/layout/inline/bidi.go`) — RTL slice 3 of 5: shaping and breaking stay
   in LOGICAL order; `MakeVisualLine` applies UAX#9 rule L2 per line after the break is chosen, plus rule
   L4 bracket mirroring (`Glyph.Runes` keeps the ORIGINAL character so `/ToUnicode` recovers the authored
@@ -381,6 +510,22 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   truncated document (boundary check; the engine itself degrades); `Convert`/`ConvertFile` now
   pass their ctx to open; `MarkdownOptions.MaxBytes` rune-safe text-output cap (search-index
   extraction). Capability gate for hosts = `FormatFromMIME(mt).ValidInput()`.
+
+- **Cancellable HTML render, end to end.** Ctx-taking twins for the HTML entry points that had
+  none — `OpenHTMLBytesContext`/`OpenHTMLFileContext`/`OpenURLContext` (`OpenURLContext` also
+  bounds the HTTP fetch of the page itself, which `OpenURL` ran under `context.Background()`).
+  The no-ctx originals are unchanged and delegate with `context.Background()`, so every existing
+  caller is source- and byte-compatible. Rasterization now actually honors its context:
+  `reflowRenderer.renderPage` took `_ context.Context` and dropped it, so `RasterizePage`
+  advertised a cancellation it never performed — it now checks before the allocation/paint and
+  again after paint. Layout gained the two checks that bound the real worst case: `inline`'s new
+  `ShapeContext` (checked between runs and every 1024 runes — shaping runs BEFORE line breaking,
+  so it was the longest uninterruptible stretch) and a per-line check in the CSS engine's
+  `layoutInline` (a single huge paragraph is one block child, which the pre-existing
+  between-children check never revisits). Measured on a ~3s pathological layout, cancellation
+  latency went from ~2.6s to ~2ms; the normal path is unchanged (benchstat over 12 runs: raster
+  -1.3%, shape -2.0%, open flat). Cancellation degrades in the engine and hardens to an error at
+  the open boundary, so a truncated document is never returned silently.
 
 **DOCX reader fidelity — the public-model PR 1/3** (`pkg/docx`, toward a supported read+write
 document model consumed externally by tinycld/text):
@@ -1275,11 +1420,10 @@ read+write vocabulary for the tinycld text adoption path):
   **byte-identical** to a document with no declaration, since an invalid declaration is ignored
   ENTIRELY rather than applying the entries that did parse.
 
-Honest degradations. The first three log; the last two are **silent**, and that is
-stated rather than glossed — `pkg/layout/paint` has no logger to report through
-(`PaintPage` takes only a Device, a Page, and a Matrix), unlike the SVG side whose
-Renderer carries a `Logf`. Threading one in is a public API change, tracked
-separately:
+Honest degradations. Every one of them logs on the raster path; the one place a
+cap stays silent is named explicitly below rather than glossed. `pkg/layout/paint`
+carries the same optional `Logf` the rest of the engine uses — see the painter's
+own entry further down:
 
 - **PDF output paints filtered content UNFILTERED.** `pkg/render/pdfwrite`'s `RenderOffscreen`
   declines by design — PDF has no filter operator and a blur has no vector representation — so the
@@ -1296,14 +1440,36 @@ separately:
   an HTML box tree cannot resolve. The surrounding shorthand functions still apply.
 - A degenerate, off-device, or over-cap region (`maxCSSFilterPixels`, 4M pixels — the same bound the
   SVG side uses, and meaningful for the same reason: the surface is clipped to the device and its
-  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered,
-  **silently**. Note 4M is NOT above every legitimate page: a 300 DPI A4 page is ~8.7M pixels, so a
-  full-page filter renders filtered at 72 and 150 DPI and unfiltered at 300. The surface also covers
-  the border box UNIONED with the bracketed content's extents (CSS does not clip a filter's input),
-  so one far-flung positioned descendant inflates the hull and can reach the cap on an otherwise
-  modest box.
-- Filters nested more than 4 deep degrade to unfiltered, **silently**, matching the SVG side's
-  nesting bound — each live level holds its own offscreen surface, so depth bounds concurrent memory
-  rather than just CPU.
+  origin shifted to (0,0) before allocating) degrades to painting the content unfiltered, **logged
+  once per page** with the specific cause named (over-cap, off-device, and degenerate-box are three
+  different problems and read as three different lines). Note 4M is NOT above every legitimate page:
+  a 300 DPI A4 page is ~8.7M pixels, so a full-page filter renders filtered at 72 and 150 DPI and
+  unfiltered at 300 — the over-cap line names the cap and points at the DPI, since that outcome is
+  otherwise unexplainable from the output. The surface also covers the border box UNIONED with the
+  bracketed content's extents (CSS does not clip a filter's input), so one far-flung positioned
+  descendant inflates the hull and can reach the cap on an otherwise modest box.
+- Filters nested more than 4 deep degrade to unfiltered, **logged once per page**, matching the SVG
+  side's nesting bound — each live level holds its own offscreen surface, so depth bounds concurrent
+  memory rather than just CPU.
+- **Still silent, deliberately:** the two caps above do NOT log on the **PDF** path. `pkg/render/
+  pdfwrite` calls plain `PaintPage`, because its `RenderOffscreen` always declines and it already
+  reports once per document that every filter in the file paints unfiltered — a second, narrower
+  reason for a subset of brackets would annotate an outcome already stated for all of them, and it
+  would have to fire from the concurrent per-band render phase, where the once-per-page flags are
+  per-band and so could repeat. A PDF caller therefore learns THAT its filters were not applied, but
+  not that a particular one would also have exceeded a cap.
 - Not implemented: `backdrop-filter` (it needs the backdrop, not the element's own pixels — a
   different mechanism entirely), and native PDF filter emulation via soft masks.
+
+**`paint.PaintPageWithOptions` — an optional diagnostics logger on the painter.** `PaintPage` gained
+a sibling entry point taking `paint.Options{Logf: ...}`, rather than a widened signature, so all
+existing callers stay source-compatible and byte-identical; the zero `Options` is exactly the old
+behavior. The `Logf func(string, ...any)` signature matches every other degradation logger in the
+engine (`svg/draw.Renderer.Logf`, `raster.Options.Logf`, `pdfwrite.Options.Logf`), so one func
+threads through the whole pipeline. With no logger the warn-once state is a **nil pointer** — nothing
+is allocated and nothing is captured on the per-page hot path, and the logger-less path is pinned by
+a test. Notices are warn-once **per cause, per page**, allocated per call and never stored, so the
+concurrent page fan-out cannot race on them or suppress each other's first line. The raster/reflow
+backend passes the caller's `Logf` through automatically. A test asserts the *captured output* of
+each degradation (not merely that the branch runs), and another pins that attaching a logger moves
+no pixels.

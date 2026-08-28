@@ -16,11 +16,22 @@ func TestBackgroundImageLonghand(t *testing.T) {
 	if cs.BackgroundImage != "" {
 		t.Errorf("background-image:none = %q, want empty", cs.BackgroundImage)
 	}
-	// A gradient is not a url(): left unchanged (prior value kept).
+	// A gradient is a valid <image> and REPLACES a prior url(): the two forms are
+	// mutually exclusive, so setting one clears the other. (This assertion
+	// previously required a gradient to be IGNORED, back when the engine could
+	// not paint one — see TestCascadeBackgroundGradientMutualExclusion in
+	// gradient_test.go for the exchange asserted in both directions.)
 	cs.BackgroundImage = "keep.png"
 	applyDeclaration(&cs, Declaration{Property: "background-image", Value: "linear-gradient(red, blue)"})
+	if cs.BackgroundImage != "" || cs.BackgroundGradient == nil {
+		t.Errorf("gradient should replace the url: image=%q gradient set=%v",
+			cs.BackgroundImage, cs.BackgroundGradient != nil)
+	}
+	// An <image> the engine still cannot paint leaves the prior value alone.
+	cs.BackgroundImage, cs.BackgroundGradient = "keep.png", nil
+	applyDeclaration(&cs, Declaration{Property: "background-image", Value: "image-set(a.png 1x)"})
 	if cs.BackgroundImage != "keep.png" {
-		t.Errorf("gradient should be ignored, got %q", cs.BackgroundImage)
+		t.Errorf("unsupported <image> should be ignored, got %q", cs.BackgroundImage)
 	}
 	// url() is case-insensitive.
 	applyDeclaration(&cs, Declaration{Property: "background-image", Value: `URL("up.png")`})
