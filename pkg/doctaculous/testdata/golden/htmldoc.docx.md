@@ -451,3 +451,67 @@ grayscale(1) brightness(1.5) contrast(1.4)
 Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach _outside_ the tile's border box — CSS, unlike SVG, does not clip a filter to a region — while the eight colour adjustments recolour each pixel in place. The last swatch chains three functions, which apply left to right: grey first, then brighten that result, then raise its contrast.
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
+
+**19 / CUSTOM PROPERTIES**
+
+## Custom properties and `var()`
+
+The palette below is declared _once_ on `:root` and reached by every swatch through `var()`. Custom properties inherit, so a value set at the document root is visible to any descendant without being redeclared — the pattern almost every themed stylesheet is built on.
+
+var(--brand)
+
+var(--accent)
+
+var(--muted)
+
+var(--absent, #7a5cff)
+
+var(--indirect)
+
+scoped override
+
+Look for: the last two swatches. _Indirect_ resolves `--indirect: var(--brand)` — a custom property whose own value is another `var()`, substituted recursively. _Scoped override_ redeclares `--brand` on the swatch itself, so the same `var(--brand)` reference resolves differently there than in the first swatch: custom properties cascade and inherit exactly like any other property, and the nearest declaration wins.
+
+Substitution happens between the cascade and value parsing, so `var()` works in _any_ property, shorthands included — the rule below draws its whole border from one variable. A reference that cannot be resolved is _invalid at computed‑value time_, which is not the same as a syntax error: rather than leaving an earlier declaration showing, the property falls back to its inherited or initial value, as though `unset` had been specified.
+
+border: var(--rule)
+
+**20 / COLOUR**
+
+## Alpha-bearing colour values
+
+The engine has one CSS Color 4 colour grammar, shared by the HTML cascade and the SVG parser. Every swatch below straddles a pale field and a dark block, so an alpha channel that is honoured looks _different on each side_ while one that is dropped looks the same on both.
+
+#4f9cff _(opaque reference)_
+
+rgba(79,156,255,0.35)
+
+#4f9cff59
+
+#4bf6
+
+hsl(214,100%,65%)
+
+hsla(214,100%,65%,0.35)
+
+rgb(79 156 255 / 35%)
+
+hsl(214deg 100% 65% / 35%)
+
+rebeccapurple
+
+border rgba(176,48,48,0.5)
+
+**Aa**
+
+color rgba(20,30,45,0.4)
+
+transparent _(valid, paints nothing)_
+
+rgb(nope,0,0) _(dropped → red stands)_
+
+Look for: `rgba(79,156,255,0.35)`, `#4f9cff59` and `rgb(79 156 255 / 35%)` are the SAME colour at the same alpha spelled three ways — 0.35 and 35 % and the hex byte `59` all resolve to an alpha of 89 — so those three swatches must be pixel-identical. The two `hsl` swatches sit one step away at (77,154,255) rather than (79,156,255): that is the honest result of converting HSL to RGB and rounding, not a parsing error. `#4bf6` is deliberately a _different_ colour (#44bbff at alpha 102) to show the four-digit form expanding each nibble. Every alpha-bearing swatch must read pale over the light field and muted-blue over the dark block; a swatch that looks the same on both halves has lost its alpha, and a swatch that is not there at all means the value failed to parse and the declaration was dropped.
+
+The last two swatches are the error cases, and they use the `background-color` longhand deliberately. `transparent` is a _valid_ colour and correctly paints nothing. The malformed `rgb(nope,0,0)` is dropped per CSS whole-declaration error handling, so the earlier red declaration stays in force and the swatch renders solid red — a blank swatch there would mean the engine had wrongly accepted the bad value and painted transparent black. Through the `background` _shorthand_ the same bad value behaves differently, because that expander resets each sub-property before classifying components and tolerates a component it cannot classify; that divergence lives in the shorthand, not in the colour grammar.
+
+Alpha survives the whole pipeline because the paint stack carries a live alpha channel: parsing produces an RGBA, the painter hands it to the device unchanged, and the rasteriser composites it over whatever it lands on. In PDF output the same colours are emitted through the writer's own colour handling rather than being pre-blended, so the text above stays selectable and the fills stay vector.

@@ -215,9 +215,14 @@ func (r *reflowRenderer) renderPage(ctx context.Context, index int, opts RasterO
 	// Page space is already points, Y-down, origin top-left, so the transform to
 	// device pixels is a single uniform scale — no Y-flip (unlike PDF).
 	mat := render.Scale(scale, scale)
-	paint.PaintPage(dev, pg, mat)
+	// Hand the painter the SAME Logf the device already carries, so the CSS
+	// filter caps it can hit surface on the caller's logger instead of vanishing.
+	// This is the path where they actually bite: maxCSSFilterPixels is 4M and a
+	// 300 DPI A4 page is ~8.7M, so a full-page filter degrades to unfiltered at
+	// print resolution and the user otherwise has no way to learn why.
+	paint.PaintPageWithOptions(dev, pg, mat, paint.Options{Logf: opts.Logf})
 	// Re-check after paint: a very large page (up to the maxRasterPixels cap) can
-	// spend real time inside PaintPage, and PaintPage itself takes no ctx. Reporting
+	// spend real time inside the painter, which takes no ctx of its own. Reporting
 	// the cancellation here means a caller that gave up mid-paint gets the context
 	// error rather than an image it no longer wants — and, unlike the layout engine,
 	// nothing downstream needs the partial raster, so erroring loses nothing.
