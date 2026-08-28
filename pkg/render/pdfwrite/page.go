@@ -233,6 +233,14 @@ func renderBand(b band, index int, embed *fontEmbedder, opts Options) renderedPa
 	dev := newPageDeviceWithEmbedder(b.pdfW, b.pdfH, embed)
 	dev.logf = opts.Logf
 	mat := render.Translate(b.marginPt, b.marginPt-b.topPt)
+	// Deliberately plain PaintPage, NOT PaintPageWithOptions: this writer's
+	// RenderOffscreen always declines, so EVERY filter in a PDF paints unfiltered
+	// and logFilterDegradation already says so once per document, in the
+	// sequential pre-pass. Adding the painter's per-cap notices here would
+	// annotate a subset of brackets with a second, narrower reason for an outcome
+	// that was already reported for all of them — and would do it from the
+	// concurrent render phase, where the once-per-page flags live on separate
+	// per-band structs and so could fire once per band.
 	paint.PaintPage(dev, b.page, mat)
 	return renderedPage{
 		index:      index,
