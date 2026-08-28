@@ -396,6 +396,12 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	// worker. nil (the common case) leaves every unfiltered document's item stream
 	// byte-identical.
 	frag.Filter, frag.FilterShadows = e.filterChain(b)
+	// box-shadow: resolved here for the same reason, but carrying only the
+	// shadow's PARAMETERS — the shadow box is derived from the fragment's own
+	// geometry at flatten time, so a pagination shift moves it for free (see
+	// Fragment.Shadows). nil for an unshadowed box leaves its item stream
+	// byte-identical.
+	frag.Shadows = e.boxShadows(b)
 	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
 	if len(in.collapsedBorders) > 0 {
 		// The collapsed grid strips were built from the interior's cell fragments —

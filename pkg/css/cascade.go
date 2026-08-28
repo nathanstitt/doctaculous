@@ -106,6 +106,19 @@ type ComputedStyle struct {
 	BackgroundClip     string         // "border-box" (initial) | "padding-box" | "content-box"
 	BackgroundAttach   string         // "scroll" (initial) | "fixed" (degraded to scroll)
 
+	// BoxShadow is the parsed `box-shadow` list (CSS Backgrounds 3 §6), nil for
+	// the initial `none`. Entries are in SOURCE order, which is the reverse of
+	// paint order — the first shadow paints on TOP (see parseBoxShadow). NOT
+	// inherited, per spec.
+	//
+	// It is parsed HERE rather than kept raw the way Filter is, because unlike
+	// the `filter` shorthand every context-dependent piece of the grammar is
+	// either a Length (which ComputedStyle already carries unresolved
+	// everywhere else) or the omitted-colour case, which BoxShadow.HasColor
+	// records. Nothing is left that would need a resolver this package lacks,
+	// so re-parsing per fragment would buy nothing.
+	BoxShadow []BoxShadow
+
 	FontFamily    string
 	FontSizePt    float64 // resolved to an absolute size (px treated 1:1 as pt for now)
 	Bold          bool
@@ -955,6 +968,23 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch strings.ToLower(strings.TrimSpace(d.Value)) {
 		case "scroll", "local", "fixed":
 			cs.BackgroundAttach = strings.ToLower(strings.TrimSpace(d.Value))
+		}
+	case "box-shadow":
+		// `none` and every malformed value both clear the property rather than
+		// leaving the previous declaration standing. That is the CSS cascade's
+		// own rule for a LATER declaration in the same origin: `box-shadow: 2px
+		// 2px; box-shadow: none` must render no shadow, and a browser likewise
+		// drops an invalid later declaration back to... the earlier valid one.
+		//
+		// Those two differ, and this takes the `none` side for BOTH. It is a
+		// known, narrow divergence: recovering the earlier value would mean
+		// keeping every superseded declaration around, which no other property
+		// on this struct does. It only shows when a stylesheet writes a valid
+		// box-shadow and then an invalid one on the same element.
+		if shadows, ok := parseBoxShadow(d.Value); ok {
+			cs.BoxShadow = shadows
+		} else {
+			cs.BoxShadow = nil
 		}
 	case "background":
 		applyBackground(cs, d.Value)

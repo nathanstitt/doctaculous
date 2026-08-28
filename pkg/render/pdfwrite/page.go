@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math"
 	"runtime"
 	"sync"
 
@@ -428,6 +429,18 @@ func itemIntervals(lp *layout.Page) []vinterval {
 			// A vector scene is indivisible (it clips to its viewport), so it counts
 			// as one straddling extent exactly like an image.
 			out = append(out, vinterval{it.Vector.YPt, it.Vector.YPt + it.Vector.HPt})
+		case layout.ShadowKind:
+			// A shadow's extent is its shadow box UNIONED with the offset,
+			// spread shape — it reaches wherever either does. The BLUR is
+			// deliberately not added: a blurred shadow paints hard-edged into a
+			// PDF (see pkg/layout/paint's paintShadow, and pdfwrite's own
+			// RenderOffscreen returning nil), so its painted extent here is
+			// exactly the shape's, and padding for a blur that never renders
+			// would pull band cuts up for no reason.
+			sh := &it.Shadow
+			top := math.Min(sh.YPt, sh.YPt+sh.OffsetY-sh.Spread)
+			bottom := math.Max(sh.YPt+sh.HPt, sh.YPt+sh.HPt+sh.OffsetY+sh.Spread)
+			out = append(out, vinterval{top, bottom})
 		}
 	}
 	return out
@@ -475,6 +488,12 @@ func itemsExtent(lp *layout.Page) float64 {
 			y = it.BgImage.ClipY + it.BgImage.ClipH
 		case layout.VectorKind:
 			y = it.Vector.YPt + it.Vector.HPt
+		case layout.ShadowKind:
+			// The lowest edge the shadow can paint at: its own box's bottom, or
+			// the offset/spread shape's, whichever is lower. As in itemIntervals
+			// the blur is not added, because it does not render in PDF.
+			sh := &it.Shadow
+			y = math.Max(sh.YPt+sh.HPt, sh.YPt+sh.HPt+sh.OffsetY+sh.Spread)
 		}
 		if y > max {
 			max = y

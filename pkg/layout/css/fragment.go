@@ -152,6 +152,32 @@ type Fragment struct {
 	// the shared, document-agnostic parse result and deliberately leaves a colour
 	// token unparsed for its caller to resolve.
 	FilterShadows []color.RGBA
+
+	// Shadows holds the box's resolved `box-shadow` list (nil — the common case
+	// — means no shadow, so every shadowless document's item stream stays
+	// byte-identical to before the property existed). Entries are in SOURCE
+	// order; appendSelfDecorations reverses them, because CSS paints the FIRST
+	// shadow on top.
+	//
+	// Each entry carries only the shadow's own PARAMETERS (offset, blur,
+	// spread, colour, inset) — deliberately NOT an absolute rectangle. The
+	// shadow box is derived at flatten time from the fragment's own X/Y/W/H and
+	// its border widths, exactly as the Filter bracket's rectangle is, so a
+	// pagination shift or a fragment split can never leave a shadow behind at a
+	// stale position. Storing a resolved rect here would need its own entry in
+	// translateFragment, which is precisely the bookkeeping this avoids.
+	Shadows []ShadowSpec
+}
+
+// ShadowSpec is one `box-shadow` entry with its lengths resolved to points and
+// its colour resolved against the box, but WITHOUT geometry: the shadow box
+// comes from the owning Fragment at flatten time (see Fragment.Shadows).
+type ShadowSpec struct {
+	OffsetX, OffsetY float64
+	Blur             float64 // non-negative; a negative blur invalidates the declaration at parse time
+	Spread           float64 // may be negative, which shrinks the shadow
+	Color            color.RGBA
+	Inset            bool
 }
 
 // PositionedInfo is one entry of a Fragment's PositionedInfo slice (parallel to
@@ -507,7 +533,22 @@ func (f *Fragment) appendContent(dst []layout.Item) []layout.Item {
 
 // appendSelfDecorations emits this fragment's own background then border edges (no
 // recursion).
+//
+// CSS Backgrounds 3 §6 fixes where the two kinds of box-shadow sit in that
+// sequence, and they are NOT adjacent:
+//
+//	outer shadows → background colour → background image → INSET shadows → border
+//
+// An outer shadow paints BEHIND everything the box draws (so an opaque
+// background hides the part of the shadow that falls under the box); an inset
+// shadow paints over both backgrounds but UNDER the border (so a border is never
+// darkened by the box's own inner shadow). Emitting both at one point would get
+// one of the two wrong, which is why the list is walked twice.
+//
+// Within each group the list is walked in REVERSE, because CSS paints the FIRST
+// shadow in the list on TOP and this item stream is painted front-to-back last.
 func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
+	dst = f.appendShadows(dst, false)
 	if f.Background.A > 0 {
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundKind,
@@ -556,6 +597,7 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 		}
 		return dst
 	}
+	dst = f.appendShadows(dst, true)
 	for _, s := range [...]layout.EdgeSide{layout.EdgeTop, layout.EdgeRight, layout.EdgeBottom, layout.EdgeLeft} {
 		e := f.Border[s]
 		if e.Width <= 0 || e.Style == layout.BorderNone {
@@ -620,6 +662,21 @@ func (f *Fragment) borderRing() (layout.Item, bool) {
 			},
 		},
 	}, true
+}
+
+// appendShadows emits f's box-shadows of one kind (inset or outer) in PAINT
+// order, which is the source list REVERSED: CSS Backgrounds 3 §6 says "the
+// first shadow is on top", and items later in this stream paint later, i.e. on
+// top. A shadowless fragment appends nothing, so its item stream is unchanged.
+func (f *Fragment) appendShadows(dst []layout.Item, inset bool) []layout.Item {
+	for i := len(f.Shadows) - 1; i >= 0; i-- {
+		s := f.Shadows[i]
+		if s.Inset != inset {
+			continue
+		}
+		dst = append(dst, layout.Item{Kind: layout.ShadowKind, Shadow: f.shadowItem(s)})
+	}
+	return dst
 }
 
 // appendDecoRules emits one RuleKind item per contiguous run of glyphs for which sel
@@ -807,6 +864,12 @@ func translateItems(dst []layout.Item, start int, dx, dy float64) {
 			// offset with the content it filters — exactly like a ClipPushKind's rect.
 			dst[i].Filter.XPt += dx
 			dst[i].Filter.YPt += dy
+		case layout.ShadowKind:
+			// The shadow box is the offset box's own border (or padding) box, so
+			// it rides the paint-time offset with the box it decorates. Only the
+			// box's origin moves: the offset, spread and blur are relative to it.
+			dst[i].Shadow.XPt += dx
+			dst[i].Shadow.YPt += dy
 		case layout.ClipPopKind, layout.FilterPopKind:
 			// No coordinates; nothing to translate (each is paired with its push).
 		}

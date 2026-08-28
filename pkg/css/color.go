@@ -91,6 +91,52 @@ func parseColor(tz *tokenizer) (color.RGBA, bool) {
 	return ParseColorValue(tz.rest())
 }
 
+// parseColorToken reads exactly ONE colour from a tokenizer that may hold more
+// value after it, leaving the tokenizer positioned just past the colour and
+// rewinding it untouched on failure.
+//
+// parseColor above cannot serve this: it hands tz.rest() to the string grammar,
+// which is exact only when the whole remainder is the colour. `box-shadow` is
+// the case that is not — its grammar is an && list, so a colour can sit in the
+// middle (`2px 3px inset red`) or at the front (`inset red 2px 3px`), and
+// consuming the rest would swallow the lengths and reject the declaration.
+//
+// A colour is a single token — a #hash or a keyword ident — unless it is a
+// function, where the whole rgb(…)/hsl(…) call including its parentheses is one
+// colour. The nesting counter walks to the matching ")" so a comma or a nested
+// function inside the arguments does not end it early.
+func parseColorToken(tz *tokenizer) (color.RGBA, bool) {
+	start := tz.pos
+	tok := nextNonWhitespace(tz)
+	if tok.Kind != TokenHash && tok.Kind != TokenIdent {
+		tz.pos = start
+		return color.RGBA{}, false
+	}
+	if tok.Kind == TokenIdent {
+		save := tz.pos
+		if nextNonWhitespace(tz).Kind == TokenLParen {
+			for depth := 1; depth > 0; {
+				switch tz.next().Kind {
+				case TokenLParen:
+					depth++
+				case TokenRParen:
+					depth--
+				case TokenEOF:
+					tz.pos = start
+					return color.RGBA{}, false
+				}
+			}
+		} else {
+			tz.pos = save // a bare keyword: the colour was just the ident
+		}
+	}
+	c, ok := ParseColorValue(strings.TrimSpace(tz.src[start:tz.pos]))
+	if !ok {
+		tz.pos = start
+	}
+	return c, ok
+}
+
 // parseHexColor parses #rgb, #rgba, #rrggbb, and #rrggbbaa forms. Lengths other
 // than 3/4/6/8 nibbles, and any non-hex digit, are rejected.
 func parseHexColor(s string) (color.RGBA, bool) {

@@ -1046,3 +1046,69 @@ a.seen:visited { color: #6a9a3a; }
 .r-b-thick  .radtile { background: #efe9d8; border: 10px solid #6a5f3a; border-radius: 14px; }
 .r-b-square .radtile { background: #efe9d8; border: 12px solid #6a5f3a; border-radius: 6px; }
 .r-over     .radtile { background: #efe9d8; border: 3px solid #6a5f3a; border-radius: 200px; }
+
+/* ===================== 19 · BOX-SHADOW =====================
+   Each swatch carries the SAME plain tile under a different `box-shadow`
+   declaration, so the grid reads as a direct comparison of the property's four
+   arguments, its `inset` keyword, and its comma-separated list form. */
+.bsgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 22px;
+  margin: 18px 0 26px 0;
+}
+
+/* Each swatch needs generous room AROUND the tile: an outer shadow paints
+   entirely outside the border box, so a tightly-packed grid would let one
+   swatch's shadow reach into its neighbour and misread as that neighbour's. */
+.bs {
+  width: 104px;
+  height: 104px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* A deliberately PLAIN tile — one flat fill, a thin border, no bands — because
+   here the decoration under test is the shadow, not the tile. */
+.bs .bstile {
+  height: 56px;
+  border: 1px solid #1a1a18;
+  background: #e8e2d4;
+  margin-bottom: 8px;
+}
+
+/* The four arguments, isolated one at a time.
+   offset only: the shape displaced, hard-edged. */
+.bs-offset  .bstile { box-shadow: 6px 6px #7a6a2a; }
+/* blur: the edge transitions over the radius, centred on it (sigma = radius/2). */
+.bs-blur    .bstile { box-shadow: 6px 6px 8px #7a6a2a; }
+/* spread: the shape grown on all four sides BEFORE the blur. */
+.bs-spread  .bstile { box-shadow: 0 0 0 5px #7a6a2a; }
+/* A negative spread SHRINKS the shape — a narrower shadow than the offset alone. */
+.bs-shrink  .bstile { box-shadow: 8px 8px 4px -4px #7a6a2a; }
+/* An omitted colour is `currentColor`, i.e. the element's own `color`. */
+.bs-current { color: #2f6fb0; }
+.bs-current .bstile { box-shadow: 5px 5px 4px; }
+
+/* inset: painted INSIDE the padding box, over the background but UNDER the
+   border. Its spread sign is inverted — a positive spread thickens the band. */
+.bs-inset   .bstile { box-shadow: inset 6px 6px 6px #7a6a2a; }
+/* The calendar-spine pattern: a hard inset band down one edge. */
+.bs-spine   .bstile { box-shadow: inset 5px 0 0 #b03030; }
+/* An inset ring: no offset, spread only, so the band hugs all four edges. */
+.bs-ring    .bstile { box-shadow: inset 0 0 0 5px #7a6a2a; }
+
+/* A comma-separated LIST. The FIRST shadow paints on TOP, and every outer
+   shadow paints behind the box's own background. */
+.bs-stack   .bstile { box-shadow: 4px 4px 0 #b03030, 9px 9px 0 #d9a521, 14px 14px 0 #2f6fb0; }
+/* A shadow does NOT affect layout (CSS Backgrounds 3 §6) — correct, and what
+   browsers do — so this swatch's 14px stack reaches past the tile's 8px bottom
+   margin and into its own caption. The extra clearance is a legibility choice
+   for the specimen, not a workaround: the swatch exists to show the shadow
+   escaping the box, and that escape is the behaviour under test. */
+.bs-stack   .bstile { margin-bottom: 22px; }
+/* Outer and inset in one list: they occupy different slots in the paint order,
+   so both are visible at once. */
+.bs-both    .bstile { box-shadow: 6px 6px 5px #7a6a2a, inset 0 0 6px #b03030; }

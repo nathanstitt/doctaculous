@@ -158,6 +158,17 @@ const (
 	// the result (render.Device.EndGroup). Carries no geometry of its own — the
 	// geometry and the chain live on the matching push.
 	FilterPopKind
+	// ShadowKind is one CSS `box-shadow` (Item.Shadow is set). It is a single
+	// item per shadow rather than a bracket, because a box-shadow is not a
+	// filter over the box's pixels: it is a fill of the box's own SHAPE, offset
+	// and blurred, which the painter can derive from the geometry alone without
+	// ever rasterizing the box.
+	//
+	// An OUTER shadow is emitted BEFORE the box's background (it paints behind
+	// everything the box draws); an INSET shadow is emitted between the
+	// background image and the border (it paints over the background but under
+	// the border). See pkg/layout/css's appendSelfDecorations.
+	ShadowKind
 )
 
 // Item is one drawing primitive on a page. It is a small tagged union rather than
@@ -176,7 +187,50 @@ type Item struct {
 	// the bracketed subtree, plus the box's border-box rectangle. Unused (zero) for
 	// FilterPopKind, which carries no geometry.
 	Filter FilterItem
+	// Shadow is set when Kind is ShadowKind: one CSS box-shadow.
+	Shadow ShadowItem
 }
+
+// ShadowItem is one CSS `box-shadow` (CSS Backgrounds 3 §6), fully resolved to
+// page space (points, Y-down, top-left origin) at layout time.
+//
+// XPt,YPt,WPt,HPt is the SHADOW BOX — the rectangle whose shape the shadow
+// takes. For an OUTER shadow that is the box's BORDER box; for an INSET shadow
+// it is the box's PADDING box. The distinction is made at layout time because
+// only the layout engine knows the box's border widths, and carrying the border
+// box plus the edges here would make the painter re-derive geometry it has no
+// other use for.
+//
+// OffsetX/OffsetY, Blur and Spread are the shadow's own parameters in points,
+// already resolved from their authored units. Blur is non-negative (a negative
+// blur invalidates the declaration at parse time); Spread may be negative,
+// which shrinks the shadow.
+type ShadowItem struct {
+	XPt, YPt, WPt, HPt float64
+	OffsetX, OffsetY   float64
+	Blur               float64
+	Spread             float64
+	Color              color.RGBA
+	// Inset selects the inner-shadow rendering: the shadow fills the region of
+	// the padding box that the offset/spread/blurred shape does NOT cover, i.e.
+	// the complement of the outer case, clipped to the padding box. It is not a
+	// sign flip — see pkg/layout/paint's paintShadow.
+	Inset bool
+}
+
+// ShadowSigma is the Gaussian standard deviation a blur radius of blurPt
+// corresponds to.
+//
+// CSS Backgrounds 3 §6 defines the blur radius as the DISTANCE the shadow's
+// edge transitions over, centred on the edge: half the radius outside the
+// shape, half inside. A Gaussian whose transition spans a distance d has
+// sigma = d/2, which is the factor every browser uses (Blink, WebKit and Gecko
+// all halve the CSS radius before handing it to their blur).
+//
+// Getting this wrong is not subtle in the numbers but IS subtle on screen: a
+// sigma of blurPt would spread the shadow twice as far as authored, which reads
+// as "our shadows are soft" rather than as an off-by-two.
+func ShadowSigma(blurPt float64) float64 { return blurPt / 2 }
 
 // FilterItem is a CSS `filter` bracket's payload, carried on the FilterPushKind
 // item that opens the group. Funcs is the already-parsed function list (see

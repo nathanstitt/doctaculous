@@ -690,3 +690,37 @@ https://example.com/very/long/path/to/a/private/calendar/feed.ics
 keep-all forbids breaking the affected text, so it overrides overflow-wrap and the token overflows again.
 
 Every mid‑word break lands on a grapheme‑cluster boundary (UAX #29), so a combining mark is never separated from its base letter and an emoji ZWJ sequence or a flag is never split in half. overflow-wrap:anywhere breaks in the same places as break-word but additionally shrinks a box's intrinsic min‑content width, which is visible in flex and grid sizing rather than in the line breaking itself.
+
+26 / BOX-SHADOW
+
+CSS box-shadow
+
+Every tile below is identical — a flat fill inside a hairline border — under a different box-shadow declaration. Unlike a filter, a shadow is not computed from the box's pixels: it is the box's own shape, displaced, grown and blurred, so it costs nothing to draw and stays sharp at any resolution.
+
+none
+
+6px 6px
+
+6px 6px 8px
+
+0 0 0 5px
+
+8px 8px 4px −4px
+
+5px 5px 4px (currentColor)
+
+inset 6px 6px 6px
+
+inset 5px 0 0
+
+inset 0 0 0 5px
+
+three offsets, comma‑separated
+
+outer + inset in one list
+
+Look for: the four arguments separating cleanly. offset moves the shape; blur softens its edge over a distance equal to the radius, centred on the edge; spread grows the shape on all four sides before that blur; and a negative spread shrinks it — the −4px swatch casts a visibly narrower shadow than its 8px offset alone would. The swatch with no colour written takes the element's own color.
+
+The inset keyword is a genuinely different rendering, not a sign flip. An outer shadow fills the region outside the border box — so a tile with a transparent background shows a ring, never a filled blob — while an inset shadow fills the part of the padding box its own shape does not cover, and can never escape the box however far it is offset. That is why an inset spread runs the other way: growing the shape shrinks the lit interior, which thickens the band. The last two swatches show a comma‑separated list, where the first shadow in the list paints on top of the ones after it, and where an outer and an inset shadow coexist because they sit in different slots of the box's paint order — outer behind the background, inset over the background but under the border.
+
+A shadow with no blur is a plain vector fill, so the common patterns — a hard offset, a spread ring, an inset colour spine — stay fully vector in PDF output. A blurred shadow needs an offscreen raster surface, which a PDF writer does not have and PDF has no operator for; there it degrades to the same shadow with a hard edge, at the same place and size, rather than rasterising the page or dropping the decoration.

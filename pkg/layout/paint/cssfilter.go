@@ -283,6 +283,19 @@ func addItemExtents(items []layout.Item, add func(x0, y0, x1, y1 float64) bool) 
 		case layout.FilterPushKind:
 			f := &it.Filter
 			add(f.XPt, f.YPt, f.XPt+f.WPt, f.YPt+f.HPt)
+		case layout.ShadowKind:
+			// A box-shadow reaches outside its box by its offset, its spread and
+			// its blur, and an INSET one never leaves the padding box at all.
+			// Covering the union of the shadow box and the shape's own blurred
+			// extent keeps a filtered box's shadow from being cropped at the
+			// surface edge, which would read as a shadow that fades out early.
+			sh := &it.Shadow
+			add(sh.XPt, sh.YPt, sh.XPt+sh.WPt, sh.YPt+sh.HPt)
+			if !sh.Inset {
+				reach := sh.Spread + filterMargin*layout.ShadowSigma(sh.Blur)
+				add(sh.XPt+sh.OffsetX-reach, sh.YPt+sh.OffsetY-reach,
+					sh.XPt+sh.WPt+sh.OffsetX+reach, sh.YPt+sh.HPt+sh.OffsetY+reach)
+			}
 		}
 	}
 }
