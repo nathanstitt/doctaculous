@@ -508,7 +508,11 @@ circle at 20% 30%
 
 Look for: the default ending shape is an _ellipse_ sized to the farthest corner, so it stretches with the box; adding `circle` makes both radii equal and the rings become round. The sizing keyword picks which box feature the shape must reach — `closest-side` lands the end colour on the nearest edges, so the corners sit beyond the ramp and are solid.
 
-### Repeating, and the background-\* properties
+**20 / GRADIENTS, CONTINUED**
+
+## Repeating gradients, and the `background-*` properties
+
+A gradient is a generated _image_, so it answers to the same sizing, tiling and positioning properties a bitmap does. These swatches are the proof: the same declarations that place a `url()` background place a gradient one.
 
 repeating, 16px period
 
