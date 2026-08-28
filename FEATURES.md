@@ -330,10 +330,22 @@ bullet's design rationale is in its PR:
   spells the weight `bold`, not the spec's `bolder`: the cascade's `font-weight` is the binary
   bold/normal the four-style bundled families can express and rejects the relative keywords, so
   `bolder` would be dropped as invalid and the emphasis would stay invisible (a test pins this).
-  `<small>`/`<big>` are omitted rather than given a hardcoded px size, and `<mark>` is omitted
-  because **backgrounds do not paint on non-replaced inline boxes** — an inline `<span>` with an
-  explicit `background-color` paints nothing, while the same span at `display:inline-block` paints;
-  a `mark` rule would cascade and do nothing. Showcase §30.
+  `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
+  yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
+  cascaded and painted nothing). Showcase §30.
+- **Inline-box backgrounds and borders** (`pkg/layout/inline` `InlineBoxStyle`,
+  `pkg/layout/css/fragment.go` `appendInlineBoxDecorations`): `background-color`, a uniform solid
+  `border`, and horizontal `padding` on a non-replaced inline box (`<span>`, `<em>`, `<a>`…). Line
+  breaking flattens inline boxes into glyph runs, so the box's identity is carried onto every glyph
+  and consecutive glyphs are coalesced **per line box** — a span that wraps paints one rect per
+  line, the same shape `text-decoration` uses. Identity is a POINTER, not a color: two adjacent
+  spans with the same background stay two rects. Inkless glyphs are retained for this pass so a
+  background stays continuous across intra-span spaces. Padding is part of LAYOUT, riding on a
+  zero-ink edge glyph at each boundary, so the breaker/intrinsic sizing/alignment reserve it by
+  reading advances alone. The rect is the content area (tallest ascent + deepest descent among its
+  glyphs), so a span mixing font sizes is sized to its largest. Not modeled: background images,
+  vertical padding/margins (which per CSS 10.6.1 overflow the line box rather than growing it), and
+  per-edge or rounded inline borders. Showcase §32.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
   `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… mapped to
   CSS below author rules (HN renders with its bgcolor).

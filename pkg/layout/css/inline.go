@@ -168,12 +168,22 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 				if frag, ok := g.Atomic.Ref.(*Fragment); ok && frag != nil {
 					translateFragment(frag, (x+g.Atomic.MarginLeftPt)-frag.X, (baselineY-g.Atomic.BaselinePt)-frag.Y)
 				}
-			case g.Outline != nil:
+			// A glyph with ink is emitted; so is an INKLESS one (a space) that sits
+			// inside a decorated inline box, because the box's background has to stay
+			// continuous across the spaces in "<span>Hello world</span>" rather than
+			// painting as two rects with a hole between them. Blank marks the latter so
+			// the paint loop keeps skipping it — only the decoration pass reads it.
+			case g.Outline != nil || g.InlineBox.Paints() || g.Edge != inline.EdgeNone:
 				emitted = append(emitted, GlyphFragment{
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
 					Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 					Underline:       g.Underline,
 					Strike:          g.Strike,
+					InlineBox:       g.InlineBox,
+					Edge:            g.Edge,
+					AscentPt:        g.AscentPt,
+					DescentPt:       g.DescentPt,
+					Blank:           g.Outline == nil,
 					BaselineShiftPt: g.BaselineShiftPt,
 					Face:            g.Face, GID: g.GID, Runes: g.Runes,
 				})
@@ -225,6 +235,13 @@ func (e *Engine) lineHeightGuess(b *cssbox.Box) float64 {
 // auto widths against. It recurses into inline element boxes (whose text leaves
 // already carry the correct cascaded style) and never panics on an unexpected box.
 func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW float64, runs *[]inline.Run, atomics *[]*Fragment) {
+	e.gatherInlineRunsIn(ctx, b, contentW, runs, atomics, nil)
+}
+
+// gatherInlineRunsIn is gatherInlineRuns carrying the innermost decorated inline box
+// down the recursion. box is nil at the top and for undecorated ancestors, so an
+// ordinary paragraph produces exactly the runs it always did.
+func (e *Engine) gatherInlineRunsIn(ctx context.Context, b *cssbox.Box, contentW float64, runs *[]inline.Run, atomics *[]*Fragment, box *inline.InlineBoxStyle) {
 	for _, child := range b.Children {
 		switch {
 		case child.Kind == cssbox.BoxText:
@@ -243,6 +260,7 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				WordSpacingPt:   spacingPt(child.Style.WordSpacing, child.Style.FontSizePt),
 				Underline:       child.Style.TextDecorationLine == "underline",
 				Strike:          child.Style.TextDecorationLine == "line-through",
+				InlineBox:       box,
 				BaselineShiftPt: baselineShiftPt(child.Style),
 			})
 		case child.Kind == cssbox.BoxReplaced:
@@ -290,8 +308,27 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			*runs = append(*runs, atomicRunFor(child, frag, atomCBWidth))
 		case child.Kind == cssbox.BoxInline || child.Kind == cssbox.BoxAnonInline:
 			// Descend into the inline element box; its text leaves carry the correct
-			// cascaded font/color. Inline-box decoration is deferred (see layoutInline).
-			e.gatherInlineRuns(ctx, child, contentW, runs, atomics)
+			// cascaded font/color. The box's own background/border/padding are not on
+			// those leaves (background-color does not inherit), so its decoration is
+			// captured here and carried down as the runs' identity. A box with nothing
+			// to paint keeps the ancestor's, so an undecorated <em> inside a decorated
+			// <span> stays part of the span's rect rather than splitting it.
+			inner := box
+			if d := inlineBoxStyleFor(child); d != nil {
+				inner = d
+			}
+			// A box with its own decoration brackets its content with edge runs, which
+			// is what reserves its horizontal padding+border in the line. A box that
+			// merely inherits the ancestor's identity (an undecorated <em> inside a
+			// decorated <span>) adds no edges — it is part of the span's run, not a
+			// separate box.
+			if inner != box && inner.Reserves() {
+				*runs = append(*runs, edgeRun(child, inner, inline.EdgeLead))
+			}
+			e.gatherInlineRunsIn(ctx, child, contentW, runs, atomics, inner)
+			if inner != box && inner.Reserves() {
+				*runs = append(*runs, edgeRun(child, inner, inline.EdgeTrail))
+			}
 		default:
 			// A block-level child in an inline formatting context violates the box-gen
 			// invariant; skip it defensively rather than misplacing it.
@@ -817,4 +854,53 @@ func translateFragment(f *Fragment, dx, dy float64) {
 	// AFTER the Children/Floats recursion so an abs/fixed Positioned entry — present only
 	// here, never in Children — moves exactly once. See shiftFragmentExtras.
 	shiftFragmentExtras(f, dx, dy)
+}
+
+// inlineBoxStyleFor builds the paintable decoration of a non-replaced inline box, or
+// nil when the box paints nothing — which is the overwhelmingly common case, so an
+// ordinary paragraph allocates nothing and produces byte-identical runs.
+//
+// Only what the inline paint path honors is read. CSS also gives inline boxes vertical
+// padding and margins, which overflow the line box without growing it, and background
+// images; those are deliberately left out rather than half-applied, so the rect that
+// paints is exactly the rect this describes. See appendInlineBoxDecorations.
+func inlineBoxStyleFor(b *cssbox.Box) *inline.InlineBoxStyle {
+	st := &b.Style
+	// A border paints only when it has a width, a visible style, and a visible color —
+	// the same three-way test the block border path applies.
+	borderW := 0.0
+	if st.BorderLeftStyle != "" && st.BorderLeftStyle != "none" && st.BorderLeftStyle != "hidden" {
+		if w, _ := resolveLen(st.BorderLeftWidth, st.FontSizePt, 0); w > 0 {
+			borderW = w
+		}
+	}
+	d := &inline.InlineBoxStyle{
+		Background:    st.BackgroundColor,
+		BorderColor:   st.BorderLeftColor,
+		BorderWidthPt: borderW,
+	}
+	// Horizontal padding resolves against the containing block's WIDTH in CSS. The
+	// percentage basis is not threaded into this helper, so a PERCENTAGE inline padding
+	// resolves to 0 rather than being guessed against the wrong basis — a known limit,
+	// not a silently wrong value.
+	d.PaddingLeftPt, _ = resolveLen(st.PaddingLeft, st.FontSizePt, 0)
+	d.PaddingRightPt, _ = resolveLen(st.PaddingRight, st.FontSizePt, 0)
+	if !d.Paints() && !d.Reserves() {
+		return nil
+	}
+	return d
+}
+
+// edgeRun builds the zero-ink run carrying one side's padding+border. It takes the
+// box's font so the edge glyph carries the same metrics as its text, which is what
+// gives an empty or all-whitespace decorated span a rect with a height.
+func edgeRun(b *cssbox.Box, style *inline.InlineBoxStyle, edge inline.InlineEdge) inline.Run {
+	return inline.Run{
+		Family:        b.Style.FontFamily,
+		Bold:          b.Style.Bold,
+		Italic:        b.Style.Italic,
+		SizePt:        b.Style.FontSizePt,
+		InlineBox:     style,
+		InlineBoxEdge: edge,
+	}
 }

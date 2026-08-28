@@ -17,7 +17,7 @@ the fix follows the measurement, not the report.
 | 6 | `color-mix()` unimplemented | **Real** | — |
 | 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
 | 8 | *(found while fixing #1)* | **Real — FIXED** | `<strong>`/`<b>`/`<em>`/`<i>` rendered with no bold or italic — the UA stylesheet had no rule for them. |
-| 9 | *(found while fixing #8)* | **Real** | Backgrounds do not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` paints nothing. |
+| 9 | *(found while fixing #8)* | **Real — FIXED** | Backgrounds did not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` painted nothing. |
 
 ### How these were measured
 
@@ -496,6 +496,23 @@ that fragmentation is the reason this is a real piece of work rather than a one-
 **Priority:** above #6 (`color-mix`), below the clipping work. A background on a `<span>`
 is common in real documents, and today it is silently dropped.
 
+**STATUS: DONE** — `feat/inline-box-backgrounds`, stacked on branch 3. Showcase §32,
+plus `<mark>` in the UA sheet now that its rule paints.
+
+Scope note worth recording. A first pass shipped background + border but dropped
+PADDING, on the reasoning that padding must also widen the box's advance and that was
+"layout work this slice does not do". That was scope-cutting dressed as a design
+decision: a padded rect that layout does not reserve space for draws a background wider
+than the text it sits behind, and the neighbouring text runs underneath it. The right
+fix was to make padding part of layout — a zero-ink EDGE GLYPH at each box boundary
+whose advance is padding+border. Because the breaker, VisibleWidth, intrinsic sizing,
+and alignment all read `Glyph.Advance` and nothing else, they reserve the space with no
+knowledge of inline boxes. It is the same trick `LetterSpacingPt` already used.
+
+The RTF specimen golden moved: RTF `\highlight` emits `background-color` on a `<span>`,
+so the corpus had been silently dropping highlights all along. That golden change is the
+feature landing on a real format, not a regression.
+
 ## Sequencing
 
 Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI is green.
@@ -509,7 +526,7 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |
 | 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |
 | 2 | `fix/ua-emphasis-defaults` | #8 | **DONE** — stacked on branch 1. Regenerated goldens across every format. |
-| — | `feat/inline-box-backgrounds` | #9 | Found during #8. Needs per-line-fragment painting; `<mark>`'s UA rule lands with it. |
+| 4 | `feat/inline-box-backgrounds` | #9 | **DONE** — stacked on branch 3. `<mark>`'s UA rule landed with it. |
 
 Docs task alongside: #4c (verify line pitch, document in `docs/CSS-LAYOUT.md`), and a
 FEATURES.md entry per landed item — including the honest limits (#2 does not cross

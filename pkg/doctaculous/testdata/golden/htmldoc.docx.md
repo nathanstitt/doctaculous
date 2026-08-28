@@ -835,3 +835,31 @@ A 320×320 child in each. All three cut it at the padding box, identically to th
 `max-height` was only ever applied on the fixed‑height path, which runs when `height` is _not_ auto — so `max-height` alone never bounded anything. It now clamps the auto height too, after float enclosure and before the clip rect is built, so the box, its clip, and its parent's advance all agree. `min-height` still applies after `max-height` per CSS 10.7, so a min above the max wins.
 
 Anonymous boxes are deliberately exempt. They carry a copy of the parent's computed style so inherited text properties reach their inline content, but CSS 9.2.1.1 gives them no properties of their own — clamping them truncated boxes the author never sized. A WPT reftest caught it.
+
+**32 / INLINE BOX DECORATION**
+
+## Backgrounds and borders on inline boxes
+
+A background on a `<span>` used to paint nothing at all. The property parsed and cascaded; the paint step simply had no geometry for a non‑replaced inline box, so the most common highlight idiom on the web was dropped in silence.
+
+Highlighted words sit inside ordinary prose, and the rect follows the text rather than the line box.
+
+One spanthen another, adjacent and distinct. Samecolour stays two boxes too.
+
+A span whose text is long enough to wrap paints one rect per line, which falls out of coalescing per line box rather than any explicit bookkeeping.
+
+Padded​|​unpadded​| — the bar after the first span sits past its padding, not under it.
+
+A bordered inline and big TALL text, whose rect grows to its tallest glyph.
+
+The `<mark>` element finally works: marked text.
+
+#### Why this was not a one-liner
+
+An inline box has no single rectangle. It is flattened into glyph runs during line breaking, so the box identity is gone by paint time — and a box that wraps needs _one rect per line_. The fix carries the innermost inline box's identity onto every glyph and coalesces consecutive glyphs per line, the same shape `text-decoration` already uses for underlines.
+
+Identity is a _pointer_, not a colour. Two adjacent spans with the same background are still two boxes; a colour comparison would merge them and a plain boolean — how underline does it — could not tell them apart at all. Inkless glyphs are retained for this pass too, or the space in “two words” would split one rect into two.
+
+Padding is part of _layout_, not just paint. It rides on a zero‑ink edge glyph at each boundary, so the line breaker, intrinsic sizing, and alignment all reserve the space by reading advances — none of them needs to know inline boxes exist. Painting a padded rect without that would draw a background wider than the layout ever agreed to.
+
+Still absent, deliberately: background _images_, vertical padding and margins (which per CSS 10.6.1 overflow the line box instead of growing it), and per‑edge or rounded inline borders. Each needs layout work this slice does not do, so each is omitted rather than half‑applied.

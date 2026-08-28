@@ -66,6 +66,28 @@ type Run struct {
 	// zero value (WordBreakNormal) is the CSS initial state and the historical behavior,
 	// so a caller that never sets it (e.g. the DOCX engine) is unaffected.
 	WordBreak WordBreakMode
+	// InlineBox identifies the innermost non-replaced INLINE box (a <span>, <em>, <a>…)
+	// this run came from, or nil when the run's nearest box is the block itself. Like
+	// Underline it is carried opaquely onto every glyph (Glyph.InlineBox); the shaper
+	// does nothing with it.
+	//
+	// It exists so the engine can paint an inline box's background and border, which
+	// need the box's EXTENT rather than a per-glyph flag: an inline box spanning a line
+	// break paints one rect per line, and the identity is what lets consecutive glyphs
+	// be coalesced into those rects (see appendInlineBoxDecorations). A plain color
+	// would not do — two ADJACENT spans with the same background are different boxes,
+	// and merging them would lose the gap their padding creates.
+	//
+	// Nil (the default) means no inline decoration, so a caller that never sets it
+	// (e.g. the DOCX engine) is byte-identical.
+	InlineBox *InlineBoxStyle
+	// InlineBoxEdge marks this run as an inline box's leading (EdgeLead) or trailing
+	// (EdgeTrail) edge rather than text: it produces exactly one zero-ink glyph whose
+	// advance is the box's padding+border on that side. That is what makes inline
+	// padding part of LAYOUT — the breaker, VisibleWidth, intrinsic sizing, and
+	// alignment all read Glyph.Advance and so account for it with no knowledge of
+	// inline boxes. EdgeNone (the zero value) is an ordinary run.
+	InlineBoxEdge InlineEdge
 	// LetterSpacingPt is CSS letter-spacing in points, already resolved against this
 	// run's font size. It is added to the advance of EVERY glyph the run produces,
 	// including the last one, and may be negative (tightening). Zero — the default —
@@ -108,6 +130,114 @@ type Run struct {
 
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
 // unit of a fixed width. The IFC lays out its own fragment separately; the line
+// InlineBoxStyle is the paintable decoration of one non-replaced inline box — its
+// background, border, and horizontal padding — plus the identity that lets the engine
+// tell one inline box from another.
+//
+// It is shared by POINTER, and the pointer IS the identity: every run generated from a
+// given <span> carries the same *InlineBoxStyle, and two different spans always carry
+// different pointers even when they are styled identically. That is what makes
+// "consecutive glyphs belonging to the same inline box" a well-defined run to coalesce,
+// which comparing colors could not do — two adjacent spans with the same background are
+// still two boxes, and merging them would erase the gap their padding creates.
+//
+// Horizontal padding and border are part of LAYOUT, not just paint: they widen the
+// inline box's advance, via the zero-ink edge glyphs produced from an InlineBoxEdge run
+// at each boundary. Everything downstream — the greedy breaker, VisibleWidth,
+// min/max-content measurement, alignment — reads only Glyph.Advance, so folding the edge
+// width into an advance is what makes padding compose with line breaking without any of
+// them learning about inline boxes. It is the same trick LetterSpacingPt uses.
+//
+// Not modeled: background images, and VERTICAL padding/margins — which per CSS 10.6.1
+// overflow the line box rather than growing it, so honoring them would need the line to
+// track an overflowing paint extent separate from its advance. Per-edge and rounded
+// inline borders are likewise absent (they would need the block path's ring machinery).
+// Each is absent rather than half-applied, so the rect that paints is exactly the rect
+// this describes. See appendInlineBoxDecorations.
+type InlineBoxStyle struct {
+	// Background is the fill painted behind the box's text. A zero-alpha value means
+	// no background (the CSS initial "transparent"), which is the common case.
+	Background color.RGBA
+
+	// BorderColor and BorderWidthPt describe a uniform solid border painted around the
+	// box's fragment on each line. A zero width means no border.
+	BorderColor   color.RGBA
+	BorderWidthPt float64
+
+	// PaddingLeftPt / PaddingRightPt are CSS padding-left/right, already resolved to
+	// points. With the border they set the box's leading and trailing edge advances, so
+	// text after a padded span starts past its padding rather than under it.
+	PaddingLeftPt, PaddingRightPt float64
+}
+
+// InlineEdge marks an InlineBoxEdge run as a box's leading or trailing edge.
+type InlineEdge uint8
+
+const (
+	// EdgeNone is an ordinary run (the zero value).
+	EdgeNone InlineEdge = iota
+	// EdgeLead is the run holding an inline box's left padding + border.
+	EdgeLead
+	// EdgeTrail is the run holding an inline box's right padding + border.
+	EdgeTrail
+)
+
+// LeadEdgePt is the horizontal space the box reserves before its first glyph: its left
+// padding plus its border. It is both the advance of the leading edge glyph and the
+// amount the painted rect extends left of the glyphs, so layout and paint agree by
+// construction.
+func (s *InlineBoxStyle) LeadEdgePt() float64 {
+	if s == nil {
+		return 0
+	}
+	return s.PaddingLeftPt + s.borderPt()
+}
+
+// TrailEdgePt mirrors LeadEdgePt for the box's trailing side.
+func (s *InlineBoxStyle) TrailEdgePt() float64 {
+	if s == nil {
+		return 0
+	}
+	return s.PaddingRightPt + s.borderPt()
+}
+
+// borderPt is the painted border width, or 0 when the border would not paint.
+func (s *InlineBoxStyle) borderPt() float64 {
+	if s.BorderWidthPt > 0 && s.BorderColor.A > 0 {
+		return s.BorderWidthPt
+	}
+	return 0
+}
+
+// EdgePt returns the reserved width on the given side.
+func (s *InlineBoxStyle) EdgePt(e InlineEdge) float64 {
+	switch e {
+	case EdgeLead:
+		return s.LeadEdgePt()
+	case EdgeTrail:
+		return s.TrailEdgePt()
+	}
+	return 0
+}
+
+// Paints reports whether the style has anything to draw, so the engine can skip the
+// coalescing pass entirely for the overwhelmingly common undecorated inline box.
+func (s *InlineBoxStyle) Paints() bool {
+	if s == nil {
+		return false
+	}
+	return s.Background.A > 0 || s.borderPt() > 0
+}
+
+// Reserves reports whether the box takes horizontal space in the line, which a box with
+// padding does even when it paints nothing.
+func (s *InlineBoxStyle) Reserves() bool {
+	if s == nil {
+		return false
+	}
+	return s.LeadEdgePt() != 0 || s.TrailEdgePt() != 0
+}
+
 // only needs its advance and baseline placement. Carried opaquely through shaping.
 //
 // WidthPt is the item's full inline advance INCLUDING its horizontal margins;
@@ -156,6 +286,15 @@ type Glyph struct {
 	// engine's line emitter to paint as a mid-glyph rule. The shaper does not act on it.
 	// Zero (false) for callers that don't set Run.Strike (e.g. DOCX).
 	Strike bool
+	// InlineBox carries the run's innermost inline box identity onto the glyph, for the
+	// engine's line emitter to coalesce into per-line background/border rects. The
+	// shaper does not act on it. Nil for callers that don't set Run.InlineBox (e.g.
+	// DOCX) and for text whose nearest box is the block itself.
+	InlineBox *InlineBoxStyle
+	// Edge marks this glyph as an inline box's leading or trailing edge: it has no ink,
+	// and its Advance is the box's padding+border on that side. EdgeNone (the zero
+	// value) is an ordinary glyph.
+	Edge InlineEdge
 	// BaselineShiftPt carries the run's vertical-align: super/sub shift (points, positive
 	// = up) onto the glyph, for the engine's line emitter to offset the glyph's paint Y
 	// from the line baseline. The shaper does not act on it. Zero for callers that don't
@@ -252,6 +391,25 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 			continue
 		}
 		asc, desc, gap := face.Metrics()
+		// An inline box's edge: one zero-ink glyph whose ADVANCE is the box's padding +
+		// border on that side. Emitting it as a glyph is what puts inline padding into
+		// layout — the breaker and every measurement read Advance and nothing else, so
+		// they reserve the space without knowing inline boxes exist. It carries the
+		// box's font metrics too, so a rect for an empty or all-space span still has a
+		// height, and NoWrap so a break is never taken between an edge and its text.
+		if r.InlineBoxEdge != EdgeNone {
+			out = append(out, Glyph{
+				Advance:   r.InlineBox.EdgePt(r.InlineBoxEdge),
+				SizePt:    r.SizePt,
+				AscentPt:  asc * r.SizePt,
+				DescentPt: desc * r.SizePt,
+				LineGapPt: gap * r.SizePt,
+				InlineBox: r.InlineBox,
+				Edge:      r.InlineBoxEdge,
+				NoWrap:    true,
+			})
+			continue
+		}
 		col := Color{R: r.Color.R, G: r.Color.G, B: r.Color.B, A: r.Color.A}
 		if r.Color.A == 0 {
 			col.A = 0xff // a zero-alpha color is unset; treat as opaque
@@ -293,7 +451,7 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 		}
 		spaceAdv := spaceEm * r.SizePt
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
-		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, WordBreak: r.WordBreak, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
+		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, WordBreak: r.WordBreak, Underline: r.Underline, Strike: r.Strike, InlineBox: r.InlineBox, BaselineShiftPt: r.BaselineShiftPt, Face: face}
 		// Complex-script segments (Arabic and friends) are shaped as whole runs through
 		// harfbuzz rather than rune-at-a-time, since a letter's form depends on its
 		// neighbours. runes carries the run's text once so segments can be sliced from
