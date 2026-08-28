@@ -736,3 +736,62 @@ a.seen:visited { color: #6a9a3a; }
 /* Composition: the list applies LEFT TO RIGHT, each function consuming the
    previous one's output. */
 .f-chain     .fxtile { filter: grayscale(1) brightness(1.5) contrast(1.4); }
+
+/* ---------- 19 / BORDER RADIUS ---------- */
+/* Each tile is the SAME box — a filled rectangle with a monospace label — under a
+   different `border-radius` declaration, so the grid reads as a direct comparison of
+   the shorthand's forms. The tiles are deliberately WIDER THAN TALL: a percentage
+   radius resolves its horizontal component against the width and its vertical one
+   against the height, and on a square box that difference is invisible. */
+.radgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
+  margin: 16px 0 22px 0;
+}
+
+.rad {
+  width: 104px;
+  height: 74px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* box-sizing:border-box keeps every tile the SAME OUTER SIZE whatever its border
+   width, so the four border tiles below compare like for like -- and it keeps the
+   label centred in the tile's remaining interior rather than being pushed out by a
+   thick border. */
+.rad .radtile {
+  box-sizing: border-box;
+  width: 96px;
+  height: 46px;
+  margin-bottom: 4px;
+  background: #d8cfae;
+  color: #2a2a24;
+  font-size: 11px;
+  text-align: center;
+  padding-top: 15px;
+}
+
+/* The radius forms. r-none is the control: the same tile with square corners. */
+.r-none    .radtile { }
+.r-small   .radtile { border-radius: 8px; }
+/* A radius far larger than the box: the overlap correction clamps it to exactly
+   half the SHORT side, which is what makes a "pill". */
+.r-pill    .radtile { border-radius: 999px; }
+/* 50% of a 96x46 border box = 48 horizontally, 23 vertically -> a true ellipse. */
+.r-circle  .radtile { border-radius: 50%; }
+/* The slash form states the two semi-axes explicitly. */
+.r-ellipse .radtile { border-radius: 30px / 12px; }
+/* Four values run clockwise from the TOP-LEFT corner. */
+.r-corners .radtile { border-radius: 2px 10px 20px 10px; }
+
+/* Rounded BORDERS. The inner curve's radius is the outer radius minus the border
+   width, floored at zero -- so r-b-square's inner corner is fully square while its
+   outside stays round. */
+.r-b-thin   .radtile { background: #efe9d8; border: 2px solid #6a5f3a; border-radius: 14px; }
+.r-b-thick  .radtile { background: #efe9d8; border: 10px solid #6a5f3a; border-radius: 14px; }
+.r-b-square .radtile { background: #efe9d8; border: 12px solid #6a5f3a; border-radius: 6px; }
+.r-over     .radtile { background: #efe9d8; border: 3px solid #6a5f3a; border-radius: 200px; }

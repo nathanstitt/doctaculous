@@ -451,3 +451,57 @@ grayscale(1) brightness(1.5) contrast(1.4)
 Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach _outside_ the tile's border box — CSS, unlike SVG, does not clip a filter to a region — while the eight colour adjustments recolour each pixel in place. The last swatch chains three functions, which apply left to right: grey first, then brighten that result, then raise its contrast.
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
+
+**19 / BORDER RADIUS**
+
+## Rounded Corners
+
+Every form of `border-radius`: circular and elliptical corners, the four per‑corner longhands, percentage radii, the overlap‑correction rule, and rounded borders with their true inner curve.
+
+none
+
+no radius
+
+8px
+
+border-radius: 8px
+
+pill
+
+border-radius: 999px
+
+50%
+
+border-radius: 50%
+
+30/12
+
+border-radius: 30px / 12px
+
+4 vals
+
+2px 10px 20px 10px
+
+Look for: the `50%` tile is a true ellipse rather than a circle, because its box is wider than it is tall — a percentage resolves the horizontal radius against the box's _width_ and the vertical one against its _height_. The `30px / 12px` tile shows the same asymmetry written explicitly with the slash form, and the last tile gives all four corners a different radius in one declaration.
+
+thin
+
+2px border, 14px radius
+
+thick
+
+10px border, 14px radius
+
+inner
+
+12px border, 6px radius
+
+over
+
+radius 200px, corrected
+
+Look for: the inner curve. A rounded border is not the outer path stroked — the inner edge's radius is the outer radius _minus_ the border width, so the thick tile's hole is far less round than its outside, and in the third tile the border is thicker than the radius, which squares the inner corner completely while the outside stays round. The last tile asks for a 200px radius on a box far smaller than that; the corners cannot overlap, so every radius scales down by one shared factor until they exactly meet.
+
+The overlap correction (CSS Backgrounds 3 §5.1) is what makes an over‑large radius degrade gracefully rather than producing self‑crossing arcs: each side compares its length against the sum of the two radii meeting along it, and the _smallest_ of those ratios scales all eight radius components at once. That single shared factor is why `border-radius: 999px` on the pill above resolves to exactly half the box's height on every corner.
+
+Backgrounds and borders both follow the rounded outline, and a background _image_ is clipped to it. In PDF output the corners stay genuinely curved: the writer emits the same Bézier path natively, so a rounded box remains vector rather than being flattened to a picture. A rounded border is filled as one ring in a single colour, so a dashed or multi‑coloured rounded border paints solid — the engine logs that substitution rather than making it silently.

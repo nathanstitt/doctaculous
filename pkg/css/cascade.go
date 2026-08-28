@@ -135,6 +135,15 @@ type ComputedStyle struct {
 	BorderTopColor, BorderRightColor, BorderBottomColor, BorderLeftColor color.RGBA
 	BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle string
 
+	// Border corner radii (CSS Backgrounds 3 §5), one elliptical radius per corner.
+	// Each is a PAIR of unresolved Lengths rather than one number because a corner's
+	// two semi-axes resolve against different dimensions — horizontal against the
+	// border box's width, vertical against its height — so they cannot be collapsed
+	// before layout knows the box. A zero pair (the initial value) is a square
+	// corner. Not inherited. See borderradius.go.
+	BorderTopLeftRadius, BorderTopRightRadius       CornerRadius
+	BorderBottomRightRadius, BorderBottomLeftRadius CornerRadius
+
 	Width, Height Length // UnitAuto = "auto"
 
 	MinWidth, MaxWidth   Length // MinWidth: UnitPx zero = no min; MaxWidth: UnitAuto = "none" (no max)
@@ -930,6 +939,16 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "border-left":
 		applyBorderSide(cs, d.Value,
 			borderSide{&cs.BorderLeftWidth, &cs.BorderLeftColor, &cs.BorderLeftStyle})
+	case "border-radius":
+		applyBorderRadius(cs, d.Value)
+	case "border-top-left-radius":
+		applyCornerRadius(&cs.BorderTopLeftRadius, d.Value)
+	case "border-top-right-radius":
+		applyCornerRadius(&cs.BorderTopRightRadius, d.Value)
+	case "border-bottom-right-radius":
+		applyCornerRadius(&cs.BorderBottomRightRadius, d.Value)
+	case "border-bottom-left-radius":
+		applyCornerRadius(&cs.BorderBottomLeftRadius, d.Value)
 	case "flex-direction":
 		switch d.Value {
 		case "row", "row-reverse", "column", "column-reverse":

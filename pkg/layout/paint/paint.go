@@ -108,7 +108,7 @@ func paintItem(dev render.Device, it *layout.Item, mat render.Matrix) {
 		// through the page matrix). A degenerate rect makes clipRect a no-op push, but
 		// Save/Restore still balance, so the stream stays well-formed.
 		dev.Save()
-		clipRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.XPt+it.Rule.WPt, it.Rule.YPt+it.Rule.HPt)
+		clipRoundedRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.WPt, it.Rule.HPt, it.Rule.Radii)
 	case layout.ClipPopKind:
 		dev.Restore()
 	case layout.VectorKind:
@@ -229,9 +229,42 @@ func paintGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) {
 	}, "")
 }
 
-// paintRule fills an axis-aligned rectangle (underline/background) in page space.
+// paintRule fills an axis-aligned rectangle (underline/background) in page space,
+// rounding its corners when the item carries border radii.
 func paintRule(dev render.Device, r *layout.RuleItem, mat render.Matrix) {
+	if !r.Radii.Zero() {
+		fillRoundedRect(dev, mat, r.XPt, r.YPt, r.WPt, r.HPt, r.Radii, r.Color)
+		return
+	}
 	fillRect(dev, mat, r.XPt, r.YPt, r.XPt+r.WPt, r.YPt+r.HPt, r.Color)
+}
+
+// fillRoundedRect fills the rounded rectangle at (x,y) sized w×h with c. The radii
+// arrive already overlap-corrected from the layout engine, so this is a pure
+// path-build-and-fill. Filling the rounded path DIRECTLY (rather than clipping a
+// square fill to it) is what lets the backend antialias the arcs with its own
+// coverage rasterizer.
+func fillRoundedRect(dev render.Device, mat render.Matrix, x, y, w, h float64, r layout.CornerRadii, c color.RGBA) {
+	p := roundedRectPath(mat, x, y, w, h, r)
+	if p == nil {
+		return
+	}
+	dev.Fill(p, render.FillPaint{Color: c, Rule: render.NonZero})
+}
+
+// roundedRectPath builds the device-space path for a rounded rectangle, or nil for
+// a degenerate one. It is the single place the painter turns layout radii into
+// geometry, so the fill, the clip, and the border ring cannot drift apart.
+func roundedRectPath(mat render.Matrix, x, y, w, h float64, r layout.CornerRadii) *render.Path {
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	p := &render.Path{}
+	layout.AppendRoundedRect(p, x, y, w, h, r, mat.Apply)
+	if p.Empty() {
+		return nil
+	}
+	return p
 }
 
 // fillRect fills the axis-aligned page-space rectangle [x0,x1]×[y0,y1] with c,
@@ -268,6 +301,10 @@ func fillRect(dev render.Device, mat render.Matrix, x0, y0, x1, y1 float64, c co
 // (thickness along X, length along Y).
 func paintBorder(dev render.Device, b *layout.BorderItem, mat render.Matrix) {
 	if b.Style == layout.BorderNone || b.WPt <= 0 || b.HPt <= 0 {
+		return
+	}
+	if b.Ring != nil {
+		paintBorderRing(dev, b, mat)
 		return
 	}
 	x0, y0 := b.XPt, b.YPt
@@ -345,6 +382,51 @@ func paintBorder(dev render.Device, b *layout.BorderItem, mat render.Matrix) {
 			fillRect(dev, mat, x0, y0, mid, y1, outer)
 			fillRect(dev, mat, mid, y0, x1, y1, inner)
 		}
+	}
+}
+
+// paintBorderRing fills a rounded box's whole border as ONE even-odd path: the
+// outer (border-box) rounded rectangle followed by the inner (padding-box) one, so
+// the interior falls out as a hole and only the ring is inked.
+//
+// The even-odd rule is what makes the hole appear. Both sub-paths are emitted in
+// the same (clockwise) direction by AppendRoundedRect, so under the nonzero rule
+// their windings would ADD and the whole outer shape would fill solid — the ring
+// would vanish into a filled box. Reversing the inner path to make nonzero work is
+// the usual alternative; even-odd is chosen instead because it needs no second
+// traversal order and both backends that consume this (raster's coverage
+// rasterizer, pdfwrite's `f*`) implement it natively.
+//
+// A fully-collapsed inner rectangle (borders thicker than the box) simply yields no
+// hole, so the box fills solid — which is what a border that consumes the whole box
+// should look like.
+func paintBorderRing(dev render.Device, b *layout.BorderItem, mat render.Matrix) {
+	ring := b.Ring
+	outer := roundedRectPath(mat, b.XPt, b.YPt, b.WPt, b.HPt, ring.Outer)
+	if outer == nil {
+		return
+	}
+	ix := b.XPt + ring.Left
+	iy := b.YPt + ring.Top
+	iw := b.WPt - ring.Left - ring.Right
+	ih := b.HPt - ring.Top - ring.Bottom
+	// A nil inner path (borders meet or overlap) leaves `outer` alone: no hole.
+	if inner := roundedRectPath(mat, ix, iy, iw, ih, ring.Inner); inner != nil {
+		outer.Segments = append(outer.Segments, inner.Segments...)
+	}
+	dev.Fill(outer, render.FillPaint{Color: b.Color, Rule: render.EvenOdd})
+}
+
+// clipRoundedRect intersects the device clip with a rounded rectangle, falling back
+// to the plain rectangular clip when no corner is rounded so the square-cornered
+// path stays exactly as it was.
+func clipRoundedRect(dev render.Device, mat render.Matrix, x, y, w, h float64, r layout.CornerRadii) {
+	if r.Zero() {
+		clipRect(dev, mat, x, y, x+w, y+h)
+		return
+	}
+	if p := roundedRectPath(mat, x, y, w, h, r); p != nil {
+		dev.PushClip(p, render.NonZero)
 	}
 }
 
