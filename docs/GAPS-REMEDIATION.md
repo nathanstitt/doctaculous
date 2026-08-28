@@ -12,7 +12,7 @@ the fix follows the measurement, not the report.
 | 1 | `font-family` must end in a generic | **Real** | Not about the generic. Any family that fails to resolve deletes its text; the generic is merely the only *guaranteed* resolution. |
 | 2 | CSS does not style inline `<svg>` children | **Real, narrower** | Inline `style=` on a child **does** work, and so does `<style>` inside the `<svg>`. Only the *HTML document* stylesheet is lost. |
 | 3 | `sysfont` registry lacks most families | **Real, worse** | `sysfont` *does* walk the font dirs, but identifies files by **filename** against a registry, and `Match` **never returns nil** — so the miss path in `osfont.go` is dead code. |
-| 4 | `max-height` / `overflow:clip` do not clip | **Real** | Two independent causes, not one. |
+| 4 | `max-height` / `overflow:clip` do not clip | **Real — FIXED** | Two independent causes, not one. |
 | 5 | `-webkit-line-clamp` unimplemented | **Real, larger** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
 | 6 | `color-mix()` unimplemented | **Real** | — |
 | 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
@@ -283,6 +283,23 @@ Golden + unit per case: `max-height`+`hidden` clips; `overflow:clip` clips;
 `overflow-x`/`overflow-y`; `height` with no `overflow` still overflows (falsifiability —
 this must **not** change); `min-height` still floors.
 
+**STATUS: DONE** — `fix/overflow-clip-and-max-height`, stacked on branch 2. Showcase §31
+plus an `overflow-clip-and-max-height` HTML golden showing all three spellings clipping
+identically.
+
+One trap worth recording. The first version of the `max-height` clamp keyed only on
+`heightAuto`, which `isHeightAuto` reports **true for anonymous boxes**. Anonymous boxes
+carry a COPY of the parent's `ComputedStyle` (so inherited text properties reach their
+inline content), so they inherited the parent's `max-height` and got clamped — CSS
+9.2.1.1 gives them no properties of their own. That blew up 160k+ pixels on showcase page
+0 and broke the `block-img` WPT reftest (a 70px column rendering 40px tall). The fix is
+the `!isAnonymous(b)` guard, and `TestAnonymousBoxIgnoresParentMaxHeight` pins it.
+
+The lesson generalizes: the golden churn was the *symptom of a regression*, not evidence
+of intended change. Regenerating those goldens would have baked the bug in. After the
+guard, the correct diff for this branch is **zero golden changes** outside the two new
+cases.
+
 ---
 
 ## 5. No CSS line truncation — `-webkit-line-clamp` *and* `text-overflow`
@@ -486,7 +503,7 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | Order | Branch | Items | Why here |
 | --- | --- | --- | --- |
 | 1 | `fix/font-terminal-fallback` | #1 + #3 | Same failure in the field; #3 makes #1's fallback reachable. Highest value: blank pages become text. |
-| 2 | `fix/overflow-clip-and-max-height` | #4a, #4b | Small, self-contained, no dependencies. |
+| 3 | `fix/overflow-clip-and-max-height` | #4a, #4b | **DONE** — stacked on branch 2. |
 | 3 | `feat/css-color-mix` | #6 | Self-contained, cheap. |
 | 4 | `feat/svg-host-cascade` | #2 | Medium; touches three signatures + a cache key. |
 | 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |

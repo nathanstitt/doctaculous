@@ -1201,5 +1201,56 @@ newline is kept.</p>
       inline&#8209;background work instead.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">31 / CLAMPING CONTENT</span>
+    <h2>The other three ways to clamp a box</h2>
+    <p class="lede">Only <code>height</code> plus <code>overflow:&nbsp;hidden</code> used
+      to clip. The other spellings parsed, cascaded, and then quietly did nothing, so an
+      author who reached for <code>max-height</code> got an unclipped box and no
+      diagnostic &mdash; a content overflow that reads as a layout bug.</p>
+
+    <div style="display:flex; gap:18px; flex-wrap:wrap;">
+      <div>
+        <h4><code>max-height</code> + <code>overflow:hidden</code></h4>
+        <div class="clampbox" style="max-height:80px; overflow:hidden">
+          <div class="oversized"></div></div>
+      </div>
+      <div>
+        <h4><code>height</code> + <code>overflow:clip</code></h4>
+        <div class="clampbox" style="height:80px; overflow:clip">
+          <div class="oversized"></div></div>
+      </div>
+      <div>
+        <h4><code>max-height</code> + <code>overflow-y</code></h4>
+        <div class="clampbox" style="max-height:80px; overflow-y:hidden">
+          <div class="oversized"></div></div>
+      </div>
+    </div>
+    <p class="caption">A 320&times;320 child in each. All three cut it at the padding box,
+      identically to the <code>overflow:&nbsp;hidden</code> window in &sect;7 &mdash;
+      before this, every one of them painted the full 320px.</p>
+
+    <h4>What each fix was</h4>
+    <p class="caption"><code>overflow:&nbsp;clip</code> was dropped by the value check, so
+      the property kept its <code>visible</code> initial. It clips exactly like
+      <code>hidden</code> here: the two differ only in forbidding programmatic scrolling
+      and allowing <code>overflow-clip-margin</code>, and this engine's single tall page
+      has neither. <code>overflow-x</code>/<code>overflow-y</code> and the two&#8209;value
+      shorthand now fold onto the same clip flag, with the <em>clipping</em> keyword
+      winning when the axes disagree &mdash; a deliberate over&#8209;clip on
+      <code>visible&nbsp;hidden</code>, since dropping the clip entirely is the worse
+      error.</p>
+    <p class="caption"><code>max-height</code> was only ever applied on the fixed&#8209;height
+      path, which runs when <code>height</code> is <em>not</em> auto &mdash; so
+      <code>max-height</code> alone never bounded anything. It now clamps the auto height
+      too, after float enclosure and before the clip rect is built, so the box, its clip,
+      and its parent's advance all agree. <code>min-height</code> still applies after
+      <code>max-height</code> per CSS&nbsp;10.7, so a min above the max wins.</p>
+    <p class="caption">Anonymous boxes are deliberately exempt. They carry a copy of the
+      parent's computed style so inherited text properties reach their inline content, but
+      CSS&nbsp;9.2.1.1 gives them no properties of their own &mdash; clamping them
+      truncated boxes the author never sized. A WPT reftest caught it.</p>
+  </section>
+
 </body>
 </html>

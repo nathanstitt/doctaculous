@@ -203,6 +203,28 @@ var htmlGoldens = []struct {
 </body></html>`,
 	},
 	{
+		// The three clamp spellings that silently did NOT clip. Each row is 120x70 with
+		// a navy border and an oversized green child, exactly like overflow-hidden
+		// above, but sized/clipped a different way: max-height instead of height,
+		// overflow:clip instead of hidden, and overflow-y instead of the shorthand.
+		// Eyeball that all three cut the green at the padding-box edge identically —
+		// before this they each rendered the full 300px child, overflowing the page.
+		name:       "overflow-clip-and-max-height",
+		viewportPx: 200,
+		html: `<!DOCTYPE html><html><head><style>
+  body { margin: 0; }
+  .col { width: 120px; border: 12px solid #002255; margin-bottom: 10px; }
+  .a { max-height: 70px; overflow: hidden; }
+  .b { height: 70px; overflow: clip; }
+  .c { max-height: 70px; overflow-y: hidden; }
+  .big { width: 300px; height: 300px; background: #33aa33; }
+</style></head><body>
+  <div class="col a"><div class="big"></div></div>
+  <div class="col b"><div class="big"></div></div>
+  <div class="col c"><div class="big"></div></div>
+</body></html>`,
+	},
+	{
 		// Float-height enclosure (the overflow:hidden "clearfix"): three left-floated
 		// swatches inside an overflow:hidden wrapper. Eyeball that the wrapper has real
 		// height (encloses the floats) and shows the three swatches in a row — the case
@@ -975,6 +997,7 @@ func quadPNG(size int) []byte {
 // compares it to a committed PNG, mirroring TestDOCXGolden. Run with -update to
 // regenerate the goldens, then eyeball every changed PNG in review.
 func TestHTMLGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -585,7 +585,7 @@ func TestPositionNotInherited(t *testing.T) {
 // TestApplyOverflow: each valid overflow keyword is accepted; an invalid one is
 // dropped (the prior value is preserved).
 func TestApplyOverflow(t *testing.T) {
-	for _, kw := range []string{"visible", "hidden", "scroll", "auto"} {
+	for _, kw := range []string{"visible", "hidden", "scroll", "auto", "clip"} {
 		cs := initialStyle()
 		applyDeclaration(&cs, Declaration{Property: "overflow", Value: kw})
 		if cs.Overflow != kw {
@@ -594,9 +594,56 @@ func TestApplyOverflow(t *testing.T) {
 	}
 	cs := initialStyle()
 	cs.Overflow = "hidden"
-	applyDeclaration(&cs, Declaration{Property: "overflow", Value: "clip"}) // unsupported
+	applyDeclaration(&cs, Declaration{Property: "overflow", Value: "sideways"}) // unsupported
 	if cs.Overflow != "hidden" {
 		t.Errorf("overflow after invalid keyword = %q, want hidden preserved", cs.Overflow)
+	}
+}
+
+// The two-value overflow shorthand folds onto the single clip flag this engine models,
+// with the clipping keyword winning: a box clipping on either axis clips here, so
+// resolving "visible hidden" to visible would drop a clip the author asked for.
+func TestApplyOverflowShorthandTwoValues(t *testing.T) {
+	cases := []struct{ value, want string }{
+		{"hidden auto", "hidden"},
+		{"visible hidden", "hidden"},
+		{"hidden visible", "hidden"},
+		{"visible visible", "visible"},
+		{"clip visible", "clip"},
+	}
+	for _, c := range cases {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "overflow", Value: c.value})
+		if cs.Overflow != c.want {
+			t.Errorf("overflow %q = %q, want %q", c.value, cs.Overflow, c.want)
+		}
+	}
+	// An invalid component invalidates the whole declaration.
+	cs := initialStyle()
+	cs.Overflow = "hidden"
+	applyDeclaration(&cs, Declaration{Property: "overflow", Value: "auto sideways"})
+	if cs.Overflow != "hidden" {
+		t.Errorf("overflow with an invalid second component = %q, want hidden preserved", cs.Overflow)
+	}
+}
+
+// overflow-x / overflow-y map onto the same single clip flag. A clipping value on
+// either axis clips; "visible" on one axis must not UNDO a clip already set, since the
+// engine cannot express a per-axis clip.
+func TestApplyOverflowPerAxis(t *testing.T) {
+	for _, prop := range []string{"overflow-x", "overflow-y"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: prop, Value: "hidden"})
+		if cs.Overflow != "hidden" {
+			t.Errorf("%s:hidden = %q, want hidden", prop, cs.Overflow)
+		}
+		// visible on one axis leaves an existing clip alone.
+		cs = initialStyle()
+		cs.Overflow = "hidden"
+		applyDeclaration(&cs, Declaration{Property: prop, Value: "visible"})
+		if cs.Overflow != "hidden" {
+			t.Errorf("%s:visible cleared an existing clip (= %q), want hidden preserved", prop, cs.Overflow)
+		}
 	}
 }
 

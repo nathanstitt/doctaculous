@@ -99,7 +99,19 @@ bullet's design rationale is in its PR:
 - **Positioning** (`pkg/layout/css/positioning.go`): relative (paint-time offset) + absolute/fixed
   (out-of-flow, two-pass against containing block), stacking contexts.
 - **Overflow clipping** (`pkg/css` `overflow`, `layout.ClipPush/PopKind`): clip to padding box +
-  BFC establishment + deferred float interactions.
+  BFC establishment + deferred float interactions. All four clip keywords are honored —
+  `hidden`/`scroll`/`auto`/**`clip`** (`clip` differs only in forbidding programmatic scrolling and
+  allowing `overflow-clip-margin`, neither of which exists in the single-tall-page model) — as are
+  **`overflow-x`/`overflow-y`** and the **two-value shorthand**, which fold onto the one clip flag
+  this engine models with the *clipping* keyword winning when the axes disagree (a deliberate
+  over-clip on `visible hidden`; dropping the clip is the worse error). Showcase §31.
+- **`max-height`/`min-height` on auto-height blocks** (`pkg/layout/css/block.go` `clampAutoHeight`):
+  `max-height` previously applied only on the fixed-height path, so `max-height` *without* `height`
+  never bounded anything and a clip built from that height clipped nothing. It now clamps the auto
+  height after float enclosure and before the clip rect, so box, clip, and parent advance agree;
+  `min-height` applies after `max-height` per CSS 10.7. Anonymous boxes are exempt — they copy the
+  parent's computed style for inherited text properties but have no properties of their own
+  (CSS 9.2.1.1), and clamping them truncated boxes the author never sized.
 - **Full z-index stacking** (`pkg/layout/css/fragment.go`): Appendix E bands (negative-z behind
   in-flow, then auto/0 doc order, then positive), relative clip-escape (sub-project 6b).
 - **CSS 2.1 §17 tables** (`pkg/layout/css/table.go`+`tableborder.go`+`tablefix.go`+`measure.go`):

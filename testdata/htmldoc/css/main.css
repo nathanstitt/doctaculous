@@ -444,6 +444,20 @@ body {
   background: #d9a521;
 }
 
+/* The clamp-spelling row (§31): the same window three ways. Each carries only the
+   border and width here; the height/overflow pair that does the clipping is set per
+   box so the declaration under test is visible in the markup. */
+.clampbox {
+  width: 130px;
+  border: 8px solid #3a4a5a;
+  margin-top: 10px;
+}
+.clampbox .oversized {
+  width: 320px;
+  height: 320px;
+  background: #d9a521;
+}
+
 /* z-index stack: three overlapping absolute boxes, higher z on top. */
 .zstack {
   position: relative;

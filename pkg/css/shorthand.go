@@ -645,6 +645,52 @@ func splitBackgroundSlash(value string) (posPart, sizePart string) {
 	return value, ""
 }
 
+// parseOverflowKeyword validates a single CSS overflow keyword. "clip" is accepted
+// alongside the scrolling keywords: it differs from "hidden" only in forbidding
+// programmatic scrolling and allowing overflow-clip-margin, neither of which exists in
+// this engine's single-tall-page model, so its USED behavior here is exactly hidden's.
+// Before it was accepted, "overflow: clip" fell through the value check and left the
+// property at its "visible" initial, so the box silently did not clip at all.
+func parseOverflowKeyword(v string) (string, bool) {
+	switch v {
+	case "visible", "hidden", "scroll", "auto", "clip":
+		return v, true
+	}
+	return "", false
+}
+
+// clipsOverflow reports whether an overflow keyword clips the box's content. Every
+// value except "visible" clips in this model (scroll/auto have no scroll affordance,
+// clip has no separate semantics — see parseOverflowKeyword).
+func clipsOverflow(v string) bool { return v != "" && v != "visible" }
+
+// parseOverflowShorthand parses the `overflow` shorthand, which takes one or two
+// keywords (`overflow: hidden auto` sets overflow-x then overflow-y). Both axes are
+// folded into the single clip flag this engine models, so when the two differ the
+// CLIPPING one wins: a box that clips on either axis clips its content here, and
+// resolving `visible auto` to "visible" would drop a clip the author asked for.
+func parseOverflowShorthand(value string) (string, bool) {
+	comps := splitComponents(value)
+	if len(comps) == 0 || len(comps) > 2 {
+		return "", false
+	}
+	first, ok := parseOverflowKeyword(comps[0])
+	if !ok {
+		return "", false
+	}
+	if len(comps) == 1 {
+		return first, true
+	}
+	second, ok := parseOverflowKeyword(comps[1])
+	if !ok {
+		return "", false // an invalid second component invalidates the whole declaration
+	}
+	if clipsOverflow(first) {
+		return first, true
+	}
+	return second, true
+}
+
 // parseObjectPosition parses a CSS object-position value into (x, y) fractions of the
 // content box's free space [0,1] (0=left/top, 0.5=center, 1=right/bottom). It handles the
 // common forms: one or two space-separated components, each a keyword (left/center/right

@@ -236,12 +236,19 @@ type ComputedStyle struct {
 	ObjectPositionX, ObjectPositionY float64
 
 	// Overflow is the CSS overflow shorthand: "visible" (default) | "hidden" |
-	// "scroll" | "auto". Not inherited. overflow≠visible establishes a block
+	// "scroll" | "auto" | "clip". Not inherited. overflow≠visible establishes a block
 	// formatting context and clips the box's content to its padding box. In this
 	// no-scrollbars single-tall-page model, scroll/auto clip exactly like hidden
-	// (there is no scroll position or scrollbar chrome). overflow-x/overflow-y are
-	// not modeled (a single shorthand value suffices since every clip keyword clips
-	// identically here).
+	// (there is no scroll position or scrollbar chrome), and clip likewise differs
+	// only in forbidding programmatic scrolling and allowing overflow-clip-margin —
+	// neither of which exists here.
+	//
+	// One field covers both axes: this engine has no per-axis clipping, so
+	// overflow-x/overflow-y and the two-value shorthand fold into it, with the
+	// CLIPPING keyword winning when they differ (a box clipping on either axis clips
+	// its content here). That is a deliberate over-clip in the mixed
+	// "visible hidden" case, which browsers resolve to auto on the visible axis;
+	// dropping the clip entirely would be the worse error.
 	Overflow string
 
 	// BreakBefore / BreakAfter are the CSS fragmentation break hints (break-before /
@@ -1149,9 +1156,20 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.ObjectPositionX, cs.ObjectPositionY = x, y
 		}
 	case "overflow":
-		switch d.Value {
-		case "visible", "hidden", "scroll", "auto":
-			cs.Overflow = d.Value
+		// The shorthand takes one or two values ("overflow: hidden auto" sets x then
+		// y). Every non-visible keyword clips identically in this model, so the
+		// stronger of the two wins: "visible auto" must still clip, because a box that
+		// clips on either axis clips its content here.
+		if v, ok := parseOverflowShorthand(d.Value); ok {
+			cs.Overflow = v
+		}
+	case "overflow-x", "overflow-y":
+		// Modeled as the same single clip flag as the shorthand: this engine has no
+		// per-axis clipping, and a box clipping on one axis still needs a clip rect
+		// and a BFC. Ignoring them entirely meant "overflow-x: hidden" silently did
+		// nothing, which is worse than clipping both axes.
+		if v, ok := parseOverflowKeyword(d.Value); ok && clipsOverflow(v) {
+			cs.Overflow = v
 		}
 	case "break-before", "page-break-before":
 		switch d.Value {

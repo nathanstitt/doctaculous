@@ -371,6 +371,20 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 		contentH = in.floatsBottom
 	}
 
+	// min-height / max-height on an AUTO-height box. The fixed-height path already
+	// clamps inside resolveFixedHeight, but that runs only when `height` is not auto,
+	// so `max-height` alone never bounded anything: the box grew to fit its content and
+	// the clip rect below (built from borderH) was never smaller than the content.
+	// Applied after float enclosure so it clamps the final content height, and before
+	// borderH so the clip rect, the fragment, and the parent's advance all agree.
+	// Anonymous boxes are excluded: they carry a COPY of their parent's ComputedStyle
+	// for inherited text properties, but CSS 9.2.1.1 gives them no properties of their
+	// own, so applying the parent's max-height here would clamp a box the author never
+	// sized — and clamp it once per anonymous wrapper in the chain.
+	if heightAuto && !isAnonymous(b) {
+		contentH = clampAutoHeight(b, contentH, cbWidth, ed)
+	}
+
 	borderH := contentH + ed.pT + ed.pB + ed.bT + ed.bB
 
 	// Position: border-box top-left in page space.
@@ -1361,6 +1375,46 @@ func isHeightAuto(b *cssbox.Box) bool {
 	}
 	_, isAuto := resolveLen(b.Style.Height, b.Style.FontSizePt, 0)
 	return isAuto
+}
+
+// clampAutoHeight applies min-height/max-height to a block whose height is auto,
+// returning the clamped CONTENT height. It mirrors resolveFixedHeight's conversions
+// (box-sizing, cbWidth percentage basis) so the two paths agree on what a given
+// max-height means; the difference is only which height it constrains.
+//
+// CSS 10.7 applies max-height before min-height, so a min larger than the max wins.
+// contentH is returned unchanged when neither property is set, which is the common
+// case and keeps every existing box byte-identical.
+func clampAutoHeight(b *cssbox.Box, contentH, cbWidth float64, ed edges) float64 {
+	fs := b.Style.FontSizePt
+	insets := ed.pT + ed.pB + ed.bT + ed.bB
+	borderBox := b.Style.BoxSizing == "border-box"
+
+	if maxL := b.Style.MaxHeight; maxL.Unit != gcss.UnitAuto {
+		maxH, _ := resolveLen(maxL, fs, cbWidth)
+		if borderBox {
+			maxH -= insets
+		}
+		if maxH < 0 {
+			maxH = 0
+		}
+		if contentH > maxH {
+			contentH = maxH
+		}
+	}
+	if minL := b.Style.MinHeight; minL.Unit != gcss.UnitAuto {
+		minH, _ := resolveLen(minL, fs, cbWidth)
+		if borderBox {
+			minH -= insets
+		}
+		if contentH < minH {
+			contentH = minH
+		}
+	}
+	if contentH < 0 {
+		contentH = 0
+	}
+	return contentH
 }
 
 // resolveFixedHeight resolves a block's fixed (non-auto) content height against a

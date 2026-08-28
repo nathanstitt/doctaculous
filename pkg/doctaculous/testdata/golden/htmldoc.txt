@@ -806,3 +806,25 @@ A bold line where strong is nested inside.
 Nesting does not flatten: <strong> inside already‑bold text stays bold. The HTML spec spells these defaults bolder and smaller, but this engine's font-weight is the binary bold/normal its four‑style bundled families can express and its font-size takes a length, so neither relative keyword parses — they would be dropped as invalid and the emphasis would stay invisible. The sheet uses bold, the honest spelling of what the renderer can do, and a test pins that choice.
 
 <small> and <big> are deliberately absent rather than given a hardcoded pixel size, which would be wrong at every font‑size but the default. <mark> is absent too: its default is a background, and backgrounds do not paint on non‑replaced inline boxes here — an inline <span> with an explicit background-color paints nothing, while the same span at display:inline-block paints. A <mark> rule would cascade and then do nothing, which reads as support; it belongs with the inline‑background work instead.
+
+31 / CLAMPING CONTENT
+
+The other three ways to clamp a box
+
+Only height plus overflow: hidden used to clip. The other spellings parsed, cascaded, and then quietly did nothing, so an author who reached for max-height got an unclipped box and no diagnostic — a content overflow that reads as a layout bug.
+
+max-height + overflow:hidden
+
+height + overflow:clip
+
+max-height + overflow-y
+
+A 320×320 child in each. All three cut it at the padding box, identically to the overflow: hidden window in §7 — before this, every one of them painted the full 320px.
+
+What each fix was
+
+overflow: clip was dropped by the value check, so the property kept its visible initial. It clips exactly like hidden here: the two differ only in forbidding programmatic scrolling and allowing overflow-clip-margin, and this engine's single tall page has neither. overflow-x/overflow-y and the two‑value shorthand now fold onto the same clip flag, with the clipping keyword winning when the axes disagree — a deliberate over‑clip on visible hidden, since dropping the clip entirely is the worse error.
+
+max-height was only ever applied on the fixed‑height path, which runs when height is not auto — so max-height alone never bounded anything. It now clamps the auto height too, after float enclosure and before the clip rect is built, so the box, its clip, and its parent's advance all agree. min-height still applies after max-height per CSS 10.7, so a min above the max wins.
+
+Anonymous boxes are deliberately exempt. They carry a copy of the parent's computed style so inherited text properties reach their inline content, but CSS 9.2.1.1 gives them no properties of their own — clamping them truncated boxes the author never sized. A WPT reftest caught it.

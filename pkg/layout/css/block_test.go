@@ -515,7 +515,7 @@ func TestClipsPredicate(t *testing.T) {
 	mk := func(ov string) *cssbox.Box {
 		return &cssbox.Box{Style: gcss.ComputedStyle{Overflow: ov}}
 	}
-	for _, ov := range []string{"hidden", "scroll", "auto"} {
+	for _, ov := range []string{"hidden", "scroll", "auto", "clip"} {
 		if !clips(mk(ov)) {
 			t.Errorf("clips(overflow:%q) = false, want true", ov)
 		}
@@ -534,5 +534,90 @@ func TestOverflowEstablishesBFC(t *testing.T) {
 	}
 	if establishesNewBFC(&cssbox.Box{Style: gcss.ComputedStyle{Overflow: "visible"}}) {
 		t.Errorf("overflow:visible establishes a BFC, want it not to")
+	}
+}
+
+// clampAutoHeight applies max-height (then min-height, per CSS 10.7) to a box whose
+// height is auto. Before it existed, max-height was only honored on the fixed-height
+// path, so `max-height` WITHOUT `height` never bounded anything: the box grew to fit
+// its content and an overflow clip built from that height clipped nothing.
+func TestClampAutoHeight(t *testing.T) {
+	px := func(v float64) gcss.Length { return gcss.Length{Value: v, Unit: gcss.UnitPx} }
+	auto := gcss.Length{Unit: gcss.UnitAuto}
+
+	cases := []struct {
+		name      string
+		min, max  gcss.Length
+		borderBox bool
+		contentH  float64
+		want      float64
+	}{
+		{name: "no constraints is a no-op", min: px(0), max: auto, contentH: 100, want: 100},
+		{name: "max clamps", min: px(0), max: px(48), contentH: 100, want: 48},
+		{name: "max larger than content is a no-op", min: px(0), max: px(400), contentH: 100, want: 100},
+		{name: "min floors", min: px(150), max: auto, contentH: 100, want: 150},
+		// CSS 10.7: max-height applies first, then min-height, so a min above the max wins.
+		{name: "min beats max", min: px(120), max: px(20), contentH: 100, want: 120},
+		{name: "negative max floors at zero", min: px(0), max: px(-10), contentH: 100, want: 0},
+		// border-box: the declared max includes padding+border, so the CONTENT clamp is
+		// the declared value minus the insets (10 here).
+		{name: "border-box subtracts insets", min: px(0), max: px(58), borderBox: true, contentH: 100, want: 48},
+	}
+	for _, c := range cases {
+		st := gcss.ComputedStyle{MinHeight: c.min, MaxHeight: c.max, FontSizePt: 16}
+		if c.borderBox {
+			st.BoxSizing = "border-box"
+		}
+		b := &cssbox.Box{Style: st}
+		ed := edges{}
+		if c.borderBox {
+			ed.pT, ed.pB = 5, 5
+		}
+		if got := clampAutoHeight(b, c.contentH, 200, ed); got != c.want {
+			t.Errorf("%s: clampAutoHeight(%v) = %v, want %v", c.name, c.contentH, got, c.want)
+		}
+	}
+}
+
+// A percentage max-height resolves against the containing block's WIDTH, matching
+// resolveFixedHeight's single-axis convention — the two paths must agree on what a
+// given max-height means.
+func TestClampAutoHeightPercentage(t *testing.T) {
+	b := &cssbox.Box{Style: gcss.ComputedStyle{
+		MinHeight:  gcss.Length{Value: 0, Unit: gcss.UnitPx},
+		MaxHeight:  gcss.Length{Value: 25, Unit: gcss.UnitPercent},
+		FontSizePt: 16,
+	}}
+	if got := clampAutoHeight(b, 100, 200, edges{}); got != 50 {
+		t.Errorf("clampAutoHeight with max-height:25%% of cbWidth 200 = %v, want 50", got)
+	}
+}
+
+// An ANONYMOUS box must not be clamped by its parent's max-height. Anonymous boxes
+// carry a copy of the parent's ComputedStyle so inherited text properties reach their
+// inline content, but CSS 9.2.1.1 gives them no properties of their own. Clamping them
+// truncated layouts the author never sized — it collapsed the anonymous block wrapping
+// an inline-block sibling of a display:block <img>, which the block-img WPT reftest
+// caught as a 70px column rendering 40px tall.
+func TestAnonymousBoxIgnoresParentMaxHeight(t *testing.T) {
+	st := gcss.ComputedStyle{
+		MinHeight:  gcss.Length{Value: 0, Unit: gcss.UnitPx},
+		MaxHeight:  gcss.Length{Value: 10, Unit: gcss.UnitPx},
+		FontSizePt: 16,
+	}
+	for _, kind := range []cssbox.BoxKind{
+		cssbox.BoxAnonBlock, cssbox.BoxAnonInline,
+		cssbox.BoxAnonFlexItem, cssbox.BoxAnonGridItem, cssbox.BoxAnonTablePart,
+	} {
+		b := &cssbox.Box{Kind: kind, Style: st}
+		if !isAnonymous(b) {
+			t.Fatalf("kind %v not reported anonymous; the layout guard would clamp it", kind)
+		}
+	}
+	// The non-anonymous control: the same style on a real box DOES clamp, proving the
+	// guard above is what spares the anonymous ones rather than the style being inert.
+	real := &cssbox.Box{Style: st}
+	if got := clampAutoHeight(real, 100, 200, edges{}); got != 10 {
+		t.Errorf("non-anonymous box: clampAutoHeight = %v, want 10 (the max-height)", got)
 	}
 }
