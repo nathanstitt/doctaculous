@@ -189,6 +189,15 @@ bullet's design rationale is in its PR:
   synthetic bullet outlines.
 - **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
   `url(..)`, `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
+- **The `background` shorthand validates before it commits** (`parseBackgroundShorthand` in
+  `pkg/css/shorthand.go`): every component must classify, and if any one does not the WHOLE
+  declaration is discarded with no longhand touched — CSS 2.1 §4.2 and CSS Syntax 3, which
+  treat an invalid declaration as never having entered the cascade. This is what makes the
+  standard fallback idiom work (`background: red` then `background: linear-gradient(…)` leaves
+  red standing on an engine that cannot parse the gradient); an expander that reset first and
+  tolerated unknown components would turn every such fallback transparent. Verified against
+  Blink and Gecko, including the case where a bad component sits beside a good one
+  (`notacolour url(x.png)` applies neither).
 - **CSS gradients as a background image** (`pkg/css/gradient.go`, `pkg/layout/gradient.go`,
   `pkg/layout/paint/gradient.go`): `linear-gradient()`, `radial-gradient()` and both
   `repeating-*` forms. Linear takes an `<angle>` in any CSS unit (`deg`/`grad`/`rad`/`turn`),
@@ -230,11 +239,8 @@ bullet's design rationale is in its PR:
   cascade, the declaration was dropped per CSS error handling, and the element painted *nothing*.
   Merged into `pkg/css` (not the reverse) because `pkg/svg` already depends on it and `pkg/css`
   depends on no internal package. Malformed values still yield `ok=false` so the declaration drops
-  and the prior value stands. **Known divergence:** through the `background` SHORTHAND an
-  unparseable colour leaves the sub-property at its reset value rather than restoring the previous
-  declaration — `applyBackground` resets every longhand before classifying components and
-  deliberately tolerates ones it cannot classify. That is a shorthand-expander gap, not a colour-
-  grammar one; the longhands (`background-color`, `color`, `border-*-color`) drop correctly.
+  and the prior value stands — through the `background` shorthand as well as through the
+  longhands (`background-color`, `color`, `border-*-color`).
 - **`border-radius`** (`pkg/css/borderradius.go`, `pkg/layout/borderradius.go`,
   `usedRadii` in `pkg/layout/css/block.go` + paint): CSS Backgrounds 3 §5 in full — the shorthand
   (1–4 values in CORNER order, i.e. diagonal pairing, not `expandBox`'s clockwise side rule), the

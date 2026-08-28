@@ -55,6 +55,77 @@ func TestBackgroundShorthandResetsColor(t *testing.T) {
 	}
 }
 
+// TestBackgroundShorthandDropsInvalidDeclarations locks the rule that a
+// `background` value the engine cannot fully parse is discarded WHOLE, leaving
+// the previously cascaded longhands untouched — CSS 2.1 §4.2 ("user agents must
+// ignore a declaration with an illegal value") and CSS Syntax 3 ("treats it as
+// if it wasn't there at all").
+//
+// This is not a nicety. It is what makes the standard fallback idiom work:
+//
+//	background: red;
+//	background: linear-gradient(…);  /* dropped whole here → red survives */
+//
+// The engine previously reset every longhand first and then tolerated components
+// it could not classify, which turned each such fallback into a transparent
+// background. Every expectation below was measured in both Blink and Gecko.
+func TestBackgroundShorthandDropsInvalidDeclarations(t *testing.T) {
+	red := rgbaOf(255, 0, 0)
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"unclassifiable token alone", "notacolour"},
+		{"bad component before a good url", "notacolour url(x.png)"},
+		{"bad component after a good url", "url(x.png) notacolour"},
+		{"valid colour plus garbage", "red notavalue"},
+		{"unknown function", "nonsense(1,2,3)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := initialStyle()
+			applyDeclaration(&cs, Declaration{Property: "background", Value: "red"})
+			applyDeclaration(&cs, Declaration{Property: "background", Value: tc.value})
+			if cs.BackgroundColor != red {
+				t.Errorf("colour = %+v, want the earlier declaration's red %+v", cs.BackgroundColor, red)
+			}
+			// The dropped declaration must not have applied its own good parts
+			// either: the whole declaration dies, not just the bad component.
+			if cs.BackgroundImage != "" {
+				t.Errorf("image = %q, want none (the declaration should have been dropped whole)", cs.BackgroundImage)
+			}
+		})
+	}
+}
+
+// TestBackgroundShorthandStillAppliesValidValues is the other half of the rule
+// above: dropping invalid declarations must not make the shorthand timid about
+// valid ones, which still reset every sub-property they omit.
+func TestBackgroundShorthandStillAppliesValidValues(t *testing.T) {
+	t.Run("a valid colour replaces an earlier one", func(t *testing.T) {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "background", Value: "red"})
+		applyDeclaration(&cs, Declaration{Property: "background", Value: "blue"})
+		if want := rgbaOf(0, 0, 255); cs.BackgroundColor != want {
+			t.Errorf("colour = %+v, want %+v", cs.BackgroundColor, want)
+		}
+	})
+	t.Run("none clears an earlier image", func(t *testing.T) {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "background", Value: "url(x.png)"})
+		applyDeclaration(&cs, Declaration{Property: "background", Value: "none"})
+		if cs.BackgroundImage != "" {
+			t.Errorf("image = %q, want cleared", cs.BackgroundImage)
+		}
+	})
+	t.Run("position and size still parse", func(t *testing.T) {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "background", Value: "red center/50%"})
+		if want := rgbaOf(255, 0, 0); cs.BackgroundColor != want {
+			t.Errorf("colour = %+v, want %+v", cs.BackgroundColor, want)
+		}
+	})
+}
+
 func TestBackgroundLonghandsInitials(t *testing.T) {
 	cs := initialStyle()
 	if cs.BackgroundRepeat != "repeat" || cs.BackgroundOrigin != "padding-box" ||

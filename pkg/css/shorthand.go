@@ -489,37 +489,89 @@ func applyGridShorthand(cs *ComputedStyle, val string) {
 }
 
 // applyBackground expands the `background` shorthand into its longhands. It is a
-// single-layer parser (no comma-separated layers): it resets every background
-// longhand to its initial (per the shorthand's reset semantics) and then classifies
-// each space-separated component — color, url() image, repeat keyword, attachment
-// keyword, origin/clip box keyword, or a position[/size] group. A component it cannot
-// classify is ignored (so a gradient or unsupported token degrades without dropping
-// the whole declaration). `background: none` / an all-unrecognized value still resets
-// the longhands, matching the shorthand resetting the image to none.
+// single-layer parser (no comma-separated layers): it classifies each
+// space-separated component — color, url()/gradient image, repeat keyword,
+// attachment keyword, origin/clip box keyword, or a position[/size] group — and,
+// only once EVERY component has been classified, resets the longhands to their
+// initial values and writes the result.
 //
-// background-origin and background-clip share box keywords: the first box keyword sets
-// origin (and clip, which defaults to it), a second sets clip — matching CSS.
+// The parse-then-commit order is load-bearing, not a style choice. CSS 2.1 §4.2
+// says a user agent "must ignore a declaration with an illegal value", and CSS
+// Syntax 3 says an invalid declaration is treated "as if it wasn't there at
+// all" — it never enters the cascade, so it cannot reset anything:
+//
+//	div { background: red }
+//	div { background: notacolour }   /* dropped whole; the div stays RED */
+//
+// Resetting first and tolerating unclassifiable components (which this function
+// used to do) makes that div TRANSPARENT, and breaks the single most common
+// error-handling idiom in real stylesheets:
+//
+//	background: red;
+//	background: linear-gradient(…);  /* older UA drops it whole → red survives */
+//
+// That fallback only works because an unsupported declaration is discarded
+// entirely rather than partially applied. Verified against both Blink and Gecko:
+// `background: notacolour url(x.png)` leaves the earlier declaration standing and
+// applies NEITHER the url nor a colour reset, and the CSSOM shows the invalid
+// rule as literally empty.
+//
+// background-origin and background-clip share box keywords: the first box keyword
+// sets origin (and clip, which defaults to it), a second sets clip — matching CSS.
 func applyBackground(cs *ComputedStyle, value string) {
-	// Reset longhands to initial (the shorthand sets every sub-property — including the
-	// color: `background: url(x)` with no color resets background-color to transparent).
-	cs.BackgroundColor = color.RGBA{}
-	cs.BackgroundImage = ""
-	cs.BackgroundGradient = nil
-	cs.BackgroundRepeat = "repeat"
-	cs.BackgroundPosition = initialBackgroundPosition()
-	cs.BackgroundSize = BackgroundSize{}
-	cs.BackgroundOrigin = "padding-box"
-	cs.BackgroundClip = "border-box"
-	cs.BackgroundAttach = "scroll"
+	parsed, ok := parseBackgroundShorthand(value)
+	if !ok {
+		return // invalid declaration: leave every longhand as the cascade left it
+	}
+	cs.BackgroundColor = parsed.color
+	cs.BackgroundImage = parsed.image
+	cs.BackgroundGradient = parsed.gradient
+	cs.BackgroundRepeat = parsed.repeat
+	cs.BackgroundPosition = parsed.position
+	cs.BackgroundSize = parsed.size
+	cs.BackgroundOrigin = parsed.origin
+	cs.BackgroundClip = parsed.clip
+	cs.BackgroundAttach = parsed.attach
+}
 
-	// A "<position> / <size>" group is separated by a top-level slash. Split it off the
-	// whole value first (the slash may be its own component or attached to a keyword),
-	// then parse the size part and feed the position part through the component scan.
+// backgroundShorthand is one fully-parsed `background` value. Every field starts
+// at the sub-property's initial value, which is what the shorthand assigns to any
+// component the author omitted.
+type backgroundShorthand struct {
+	color    color.RGBA
+	image    string
+	gradient *Gradient
+	repeat   string
+	position BackgroundPos
+	size     BackgroundSize
+	origin   string
+	clip     string
+	attach   string
+}
+
+// parseBackgroundShorthand parses a complete `background` value, reporting
+// ok=false if ANY component fails to classify — at which point the caller must
+// leave every longhand untouched.
+func parseBackgroundShorthand(value string) (backgroundShorthand, bool) {
+	out := backgroundShorthand{
+		repeat:   "repeat",
+		position: initialBackgroundPosition(),
+		origin:   "padding-box",
+		clip:     "border-box",
+		attach:   "scroll",
+	}
+
+	// A "<position> / <size>" group is separated by a top-level slash. Split it off
+	// the whole value first (the slash may be its own component or attached to a
+	// keyword), then parse the size part and feed the position part through the
+	// component scan.
 	posPart, sizePart := splitBackgroundSlash(value)
 	if sizePart != "" {
-		if s, ok := parseBackgroundSize(sizePart); ok {
-			cs.BackgroundSize = s
+		s, ok := parseBackgroundSize(sizePart)
+		if !ok {
+			return out, false
 		}
+		out.size = s
 	}
 
 	boxSeen := 0
@@ -528,35 +580,40 @@ func applyBackground(cs *ComputedStyle, value string) {
 		lc := strings.ToLower(comp)
 		switch lc {
 		case "none":
-			cs.BackgroundImage, cs.BackgroundGradient = "", nil
+			out.image, out.gradient = "", nil
 		case "repeat", "repeat-x", "repeat-y", "no-repeat":
-			cs.BackgroundRepeat = lc
+			out.repeat = lc
 		case "scroll", "fixed", "local":
-			cs.BackgroundAttach = lc
+			out.attach = lc
 		case "border-box", "padding-box", "content-box":
 			if boxSeen == 0 {
-				cs.BackgroundOrigin = lc
-				cs.BackgroundClip = lc
+				out.origin = lc
+				out.clip = lc
 			} else {
-				cs.BackgroundClip = lc
+				out.clip = lc
 			}
 			boxSeen++
 		default:
 			if ref, grad, ok := parseBackgroundImage(comp); ok && (ref != "" || grad != nil) {
-				cs.BackgroundImage, cs.BackgroundGradient = ref, grad
+				out.image, out.gradient = ref, grad
 			} else if c, ok := parseColor(newTokenizer(comp)); ok {
-				cs.BackgroundColor = c
+				out.color = c
 			} else {
-				// Likely a position keyword/length; defer to the position parser.
+				// Not a colour or an image: it can only be part of the position,
+				// which is validated as a group below. A component that is not
+				// even that invalidates the whole declaration.
 				posParts = append(posParts, comp)
 			}
 		}
 	}
 	if len(posParts) > 0 {
-		if p, ok := parseBackgroundPosition(strings.Join(posParts, " ")); ok {
-			cs.BackgroundPosition = p
+		p, ok := parseBackgroundPosition(strings.Join(posParts, " "))
+		if !ok {
+			return out, false // the leftover components are not a valid <position>
 		}
+		out.position = p
 	}
+	return out, true
 }
 
 // splitBackgroundSlash splits a `background` value at the top-level slash that
