@@ -378,6 +378,22 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   pass their ctx to open; `MarkdownOptions.MaxBytes` rune-safe text-output cap (search-index
   extraction). Capability gate for hosts = `FormatFromMIME(mt).ValidInput()`.
 
+- **Cancellable HTML render, end to end.** Ctx-taking twins for the HTML entry points that had
+  none — `OpenHTMLBytesContext`/`OpenHTMLFileContext`/`OpenURLContext` (`OpenURLContext` also
+  bounds the HTTP fetch of the page itself, which `OpenURL` ran under `context.Background()`).
+  The no-ctx originals are unchanged and delegate with `context.Background()`, so every existing
+  caller is source- and byte-compatible. Rasterization now actually honors its context:
+  `reflowRenderer.renderPage` took `_ context.Context` and dropped it, so `RasterizePage`
+  advertised a cancellation it never performed — it now checks before the allocation/paint and
+  again after paint. Layout gained the two checks that bound the real worst case: `inline`'s new
+  `ShapeContext` (checked between runs and every 1024 runes — shaping runs BEFORE line breaking,
+  so it was the longest uninterruptible stretch) and a per-line check in the CSS engine's
+  `layoutInline` (a single huge paragraph is one block child, which the pre-existing
+  between-children check never revisits). Measured on a ~3s pathological layout, cancellation
+  latency went from ~2.6s to ~2ms; the normal path is unchanged (benchstat over 12 runs: raster
+  -1.3%, shape -2.0%, open flat). Cancellation degrades in the engine and hardens to an error at
+  the open boundary, so a truncated document is never returned silently.
+
 **DOCX reader fidelity — the public-model PR 1/3** (`pkg/docx`, toward a supported read+write
 document model consumed externally by tinycld/text):
 

@@ -152,9 +152,23 @@ func (r *reflowRenderer) pageSize(index int) (float64, float64, error) {
 	return pg.WidthPt, pg.HeightPt, nil
 }
 
-func (r *reflowRenderer) renderPage(_ context.Context, index int, opts RasterOptions) (image.Image, error) {
+func (r *reflowRenderer) renderPage(ctx context.Context, index int, opts RasterOptions) (image.Image, error) {
 	if index < 0 || index >= len(r.pages.Pages) {
 		return nil, errPageOutOfRange(index, len(r.pages.Pages))
+	}
+	// Cancellation is checked here, before the allocation and the paint walk, and
+	// again after paint (below). Those are the only two useful seams on this path:
+	// everything between them is a single PaintPage call over an already-laid-out
+	// item list, and the per-item/per-glyph interior of that walk is far too hot to
+	// carry a ctx.Err() (see pkg/layout/paint) — a check there would cost more than
+	// the work it guards. The genuinely unbounded loops on the reflow pipeline are
+	// in LAYOUT, which runs at open time and has its own check between block
+	// children (pkg/layout/css/block.go); by the time renderPage is reached the
+	// pages are fixed and the remaining work is bounded by the pixel cap enforced
+	// just below. The multi-page fan-out is cancelled per page by RasterizePages,
+	// which consults ctx before dispatching each job.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("doctaculous: render page %d: %w", index, err)
 	}
 	pg := &r.pages.Pages[index]
 
@@ -207,5 +221,13 @@ func (r *reflowRenderer) renderPage(_ context.Context, index int, opts RasterOpt
 	// 300 DPI A4 page is ~8.7M, so a full-page filter degrades to unfiltered at
 	// print resolution and the user otherwise has no way to learn why.
 	paint.PaintPageWithOptions(dev, pg, mat, paint.Options{Logf: opts.Logf})
+	// Re-check after paint: a very large page (up to the maxRasterPixels cap) can
+	// spend real time inside the painter, which takes no ctx of its own. Reporting
+	// the cancellation here means a caller that gave up mid-paint gets the context
+	// error rather than an image it no longer wants — and, unlike the layout engine,
+	// nothing downstream needs the partial raster, so erroring loses nothing.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("doctaculous: render page %d: %w", index, err)
+	}
 	return img, nil
 }
