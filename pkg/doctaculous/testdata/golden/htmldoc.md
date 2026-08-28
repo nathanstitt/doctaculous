@@ -517,3 +517,23 @@ Look for: `rgba(79,156,255,0.35)`, `#4f9cff59` and `rgb(79 156 255 / 35%)` are t
 The last two swatches are the error cases, and they use the `background-color` longhand deliberately. `transparent` is a _valid_ colour and correctly paints nothing. The malformed `rgb(nope,0,0)` is dropped per CSS whole-declaration error handling, so the earlier red declaration stays in force and the swatch renders solid red — a blank swatch there would mean the engine had wrongly accepted the bad value and painted transparent black. Through the `background` _shorthand_ the same bad value behaves differently, because that expander resets each sub-property before classifying components and tolerates a component it cannot classify; that divergence lives in the shorthand, not in the colour grammar.
 
 Alpha survives the whole pipeline because the paint stack carries a live alpha channel: parsing produces an RGBA, the painter hands it to the device unchanged, and the rasteriser composites it over whatever it lands on. In PDF output the same colours are emitted through the writer's own colour handling rather than being pre-blended, so the text above stays selectable and the fills stay vector.
+
+**21 / MISSING GLYPHS**
+
+## Characters No Font Can Draw
+
+No bundled face covers emoji or Devanagari, and none ever will — the bundle is a handful of permissively‑licensed Latin, Hebrew and Arabic substitutes. A character none of them maps now draws `.notdef`, the “tofu” box, exactly as a browser does.
+
+Nine weather emoji. Every one is unmappable, so every one is a box:
+
+🌈🌤🌥🌦🌧🌨🌩🌪🌫
+
+The box is not a placeholder pasted over the line — it is a glyph, and it shapes like one. Below, unmappable characters sit inline with text that resolves normally, and the correct text keeps its own metrics on either side:
+
+Latin, then Devanagari कखग, then Latin again.
+
+Whether the mark is drawn by the font or by us depends on the font. A face that ships its own `.notdef` gets _its_ glyph — DejaVu draws a hollow box, Noto draws a box containing the code point's hex digits. The bundled TeX Gyre substitutes ship a `.notdef` that is _blank_, so for the boxes above the geometry is synthesized. Each distinct missing character is also reported once through the layout log, which is the half that makes a font gap diagnosable rather than merely visible.
+
+Invisible characters are deliberately excluded. A no‑break space, a zero‑width joiner or a variation selector draws no ink even in a font that maps it, so giving it a box would invent a mark the author never wrote. The sentence you are reading contains a U+202F NARROW NO‑BREAK SPACE that no bundled face maps; it renders as space, and nothing is logged, because nothing is wrong.
+
+Look for: the boxes have a side bearing, so they read as separate marks rather than one bar, and they sit on the baseline with the text around them. This matters more than it looks. Before `.notdef`, an unmappable character rendered as _nothing_ — and because the surrounding text was untouched, a page with a font gap looked like a page with a _layout_ bug. It is worse when only some characters of a set are missing: the report behind this section was a board carrying only DejaVu and Liberation, where three of nine weather emoji drew and six vanished.
