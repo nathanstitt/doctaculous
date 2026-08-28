@@ -593,6 +593,48 @@ body {
   gap: 14px;
 }
 
+/* ----- letter-spacing / word-spacing ----------------------------------------- */
+
+/* A full-measure rule of text whose only variable is the tracking. Deliberately NOT
+   width-constrained: these properties change where glyphs sit, and a narrow box would
+   hide that behind a line break. */
+.trackbox {
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 7px 10px;
+  margin: 0 0 6px 0;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 15px;
+  color: #1a1a18;
+}
+
+/* The right-aligned pair that makes the TRAILING-SPACING rule visible. Both boxes are
+   the same width and both are right-aligned, so the tracked line visibly stops one
+   tracking-width short of the right edge — the browser behavior this engine matches,
+   and the one place letter-spacing's edge case is observable rather than theoretical. */
+.trackedge {
+  width: 250px;
+  text-align: right;
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 7px 10px;
+  margin: 0 0 6px 0;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 15px;
+}
+
+/* A narrow box in which tracking pushes a word onto a second line, so the interaction
+   with line breaking is shown rather than merely asserted in a unit test. */
+.trackwrap {
+  width: 165px;
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 8px 10px;
+  margin: 0 0 6px 0;
+  font-family: "TeX Gyre Heros", sans-serif;
+  font-size: 14px;
+}
+
 /* ----- lists ----------------------------------------------------------------- */
 
 /* Two columns side by side so the unordered nest and the ordered styles sit

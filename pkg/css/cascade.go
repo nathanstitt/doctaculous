@@ -65,16 +65,6 @@ type ComputedStyle struct {
 	// property costs nothing for an unfiltered box.
 	Filter string
 
-	// NOT PRESENT, deliberately, and recorded here because this struct is
-	// where a maintainer would look for it:
-	//
-	//   - letter-spacing / word-spacing: implemented for SVG only (see
-	//     pkg/svg/style.go). An SVG-internal declaration works; inheriting
-	//     one from an enclosing HTML ancestor does not, because there is no
-	//     field here to inherit from. Wiring them into reflow means facing
-	//     line-breaking and justification, which is why PR 6 scoped them to
-	//     SVG.
-	//
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
 	BackgroundImage    string
@@ -141,6 +131,36 @@ type ComputedStyle struct {
 	// are spaces), so keep-all's observable effect here is that it suppresses
 	// overflow-wrap breaking of the affected text.
 	WordBreak string
+
+	// LetterSpacing and WordSpacing are the CSS Text 3 spacing properties, both
+	// inherited, both initial "normal" (modeled as the zero Length — see
+	// SpacingLength — since `normal` and `0` are indistinguishable for a
+	// non-justified line and this engine never applies the extra latitude
+	// `normal` nominally grants a justifier).
+	//
+	// LetterSpacing is added after every typographic character unit; WordSpacing is
+	// added at every word-separator character (U+0020 / U+00A0). Both accept
+	// NEGATIVE lengths, which tighten. They are resolved to points against the
+	// run's own font size and folded into each glyph's advance at shaping time
+	// (pkg/layout/inline.Run.LetterSpacingPt/WordSpacingPt), so line breaking,
+	// intrinsic sizing, and alignment all see the adjusted widths without knowing
+	// the properties exist.
+	//
+	// These two are ALSO implemented independently in pkg/svg (pkg/svg/style.go),
+	// which applies them as a post-shaping advance adjustment on a flat glyph
+	// slice. The duplication is real but the two paths differ in a way that is not
+	// reconcilable by sharing code: SVG follows SVG 1.1's wording and adds NO
+	// trailing letter-spacing after the last glyph of a chunk, while CSS Text 3 and
+	// every browser DO add it after the last character (see Run.LetterSpacingPt).
+	//
+	// NOTE: an SVG element still does NOT inherit these from an enclosing HTML
+	// ancestor, and adding these fields did not change that. Inline <svg> is
+	// REPLACED content: box generation re-serializes the markup and pkg/svg parses
+	// it in isolation via svg.Parse(data, logf), so NO computed property crosses
+	// the boundary — not color, not font-family, not these. That is a
+	// whole-boundary gap, not a missing-field gap; see docs/SVG.md.
+	LetterSpacing Length
+	WordSpacing   Length
 
 	// List + counter properties. ListStyleType/ListStylePosition are inherited
 	// (initial "disc"/"outside"); the counter ops and Content are not inherited.
@@ -520,6 +540,12 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.OverflowWrap = parent.OverflowWrap // CSS Text 3: overflow-wrap is inherited
 	cs.WordBreak = parent.WordBreak       // CSS Text 3: word-break is inherited
+	// CSS Text 3: letter-spacing and word-spacing are inherited. The inherited value
+	// is the SPECIFIED length, so an em value re-resolves against each descendant's
+	// own font size (a 0.1em tracking set on <body> tracks a larger heading more
+	// widely, which is what an author writing em intends and what browsers do).
+	cs.LetterSpacing = parent.LetterSpacing
+	cs.WordSpacing = parent.WordSpacing
 	cs.ListStyleType = parent.ListStyleType
 	cs.ListStylePosition = parent.ListStylePosition
 	cs.BorderCollapse = parent.BorderCollapse
@@ -742,6 +768,10 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		case "normal", "break-all", "keep-all":
 			cs.WordBreak = d.Value
 		}
+	case "letter-spacing":
+		setSpacingLength(&cs.LetterSpacing, d.Value)
+	case "word-spacing":
+		setSpacingLength(&cs.WordSpacing, d.Value)
 	case "list-style-type":
 		cs.ListStyleType = strings.TrimSpace(d.Value)
 	case "list-style-position":
@@ -1176,6 +1206,37 @@ func setLength(dst *Length, val string) {
 func setMaxLength(dst *Length, val string) {
 	if val == "none" {
 		*dst = Length{Unit: UnitAuto}
+		return
+	}
+	setLength(dst, val)
+}
+
+// setSpacingLength parses a letter-spacing / word-spacing value into dst. Both
+// properties are `normal | <length>`, and `normal` is stored as the ZERO length
+// rather than a distinct keyword.
+//
+// That collapse is deliberate and worth stating, because it is the one place these
+// properties are not modeled literally. CSS Text 3 defines `normal` as "no
+// additional spacing, but the user agent MAY alter the spacing to justify text",
+// i.e. it differs from `0` only in whether a justifier is permitted extra latitude
+// to stretch between letters. This engine's justification distributes slack at
+// inter-word gaps only (inline.Place's ExtraPerSpace), never between letters, so it
+// never takes that latitude and `normal` and `0` are indistinguishable in every
+// rendering this engine can produce. Modeling `normal` as a separate keyword would
+// add a state to every consumer that no consumer could ever branch on.
+//
+// The practical consequence is that `normal` RESETS an inherited value, which is the
+// behavior authors rely on to cancel tracking inherited from an ancestor.
+//
+// Negative lengths are valid (they tighten) and are passed through unclamped here;
+// the layout side floors the resulting per-glyph advance at zero rather than
+// rejecting the value, so a large negative tracking overlaps glyphs the way a
+// browser does instead of producing negative advances the breaker cannot handle.
+// A value that is neither `normal` nor a parsable length leaves dst unchanged, so
+// the declaration is dropped and the cascaded/inherited value survives.
+func setSpacingLength(dst *Length, val string) {
+	if strings.TrimSpace(val) == "normal" {
+		*dst = Length{}
 		return
 	}
 	setLength(dst, val)

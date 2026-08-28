@@ -487,3 +487,45 @@ https://example.com/very/long/path/to/a/private/calendar/feed.ics
 `keep-all` forbids breaking the affected text, so it overrides `overflow-wrap` and the token overflows again.
 
 Every mid‑word break lands on a grapheme‑cluster boundary (UAX #29), so a combining mark is never separated from its base letter and an emoji ZWJ sequence or a flag is never split in half. `overflow-wrap:anywhere` breaks in the same places as `break-word` but additionally shrinks a box's intrinsic _min‑content_ width, which is visible in flex and grid sizing rather than in the line breaking itself.
+
+**20 / TRACKING**
+
+## The `letter-spacing` & `word-spacing` Properties
+
+Extra space added _between_ characters and _at_ word separators. Both are inherited, both accept negative lengths, and both are folded into each glyph's advance during shaping — so line breaking, intrinsic sizing and alignment all see the adjusted widths without knowing the properties exist.
+
+#### `letter-spacing` — positive tracks, negative tightens
+
+Tracking changes the texture of a line.
+
+The control: `letter-spacing:normal`.
+
+Tracking changes the texture of a line.
+
+`letter-spacing:3px` — every character gains 3px of advance.
+
+Tracking changes the texture of a line.
+
+`letter-spacing:-0.5px` — a negative value is legal and tightens. Advances are floored at zero, so an extreme negative value overlaps glyphs rather than producing the negative advances the line breaker cannot represent.
+
+#### `word-spacing` — separators only
+
+Only the gaps between words grow here.
+
+`word-spacing:10px` widens U+0020 and U+00A0 and nothing else, so the words themselves are untouched.
+
+#### Where the spacing lands at the end of a line
+
+flush right
+
+flush right
+
+Both boxes are right‑aligned. CSS Text 3 words `letter-spacing` as spacing _between_ characters, but every shipping browser adds it after _every_ character including the last — which is why the tracked line stops one tracking‑width short of the right edge. This engine matches the browsers. SVG deliberately does _not_: SVG 1.1's wording adds no trailing gap, so `pkg/svg` keeps its trailing edge flush. Two specs, not an inconsistency.
+
+#### Tracking changes where lines break
+
+tracking moves words
+
+tracking moves words
+
+The same text in the same box. The spacing is folded into each glyph's advance, so the greedy line breaker sees the wider run and pushes a word down with no change to the breaker itself. That same mechanism makes _min‑content_ and _max‑content_ account for tracking. Both properties inherit, and `normal` resets an inherited value; an `em` length inherits as _specified_ and re‑resolves against each descendant's own font size.

@@ -890,6 +890,75 @@ func TestOverflowWrapAndWordBreak(t *testing.T) {
 	}
 }
 
+func TestLetterAndWordSpacing(t *testing.T) {
+	// The initial value `normal` is modeled as the ZERO length (see setSpacingLength),
+	// so an unset property adds nothing.
+	if got := initialStyle().LetterSpacing; got != (Length{}) {
+		t.Errorf("initial letter-spacing = %+v, want the zero Length", got)
+	}
+	if got := initialStyle().WordSpacing; got != (Length{}) {
+		t.Errorf("initial word-spacing = %+v, want the zero Length", got)
+	}
+
+	// Every length form the engine's parseLength accepts, INCLUDING negative values
+	// (which tighten and are perfectly legal for both properties).
+	for _, tc := range []struct {
+		val  string
+		want Length
+	}{
+		{"20px", Length{20, UnitPx}},
+		{"2pt", Length{2, UnitPt}},
+		{"0.1em", Length{0.1, UnitEm}},
+		{"-3px", Length{-3, UnitPx}},
+		{"-0.05em", Length{-0.05, UnitEm}},
+		{"0", Length{0, UnitPx}},
+	} {
+		for _, prop := range []string{"letter-spacing", "word-spacing"} {
+			cs := initialStyle()
+			applyDeclaration(&cs, Declaration{Property: prop, Value: tc.val})
+			got := cs.LetterSpacing
+			if prop == "word-spacing" {
+				got = cs.WordSpacing
+			}
+			if got != tc.want {
+				t.Errorf("%s:%s => %+v, want %+v", prop, tc.val, got, tc.want)
+			}
+		}
+	}
+
+	// `normal` RESETS to zero, which is how an author cancels tracking inherited from
+	// an ancestor. This is the behavior the zero-length modeling exists to provide.
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "letter-spacing", Value: "20px"})
+	applyDeclaration(&cs, Declaration{Property: "letter-spacing", Value: "normal"})
+	if cs.LetterSpacing != (Length{}) {
+		t.Errorf("letter-spacing:normal after 20px => %+v, want the zero Length", cs.LetterSpacing)
+	}
+
+	// An unparsable value is DROPPED, leaving the previously cascaded value intact
+	// (rather than silently resetting it to the initial value).
+	keep := initialStyle()
+	applyDeclaration(&keep, Declaration{Property: "letter-spacing", Value: "20px"})
+	applyDeclaration(&keep, Declaration{Property: "letter-spacing", Value: "bogus"})
+	if keep.LetterSpacing != (Length{20, UnitPx}) {
+		t.Errorf("letter-spacing:bogus after 20px => %+v, want 20px preserved", keep.LetterSpacing)
+	}
+
+	// Both are inherited (CSS Text 3). The SPECIFIED length inherits, not a resolved
+	// point value, so an em tracking re-resolves against each descendant's font size —
+	// asserted end to end in pkg/layout/css.
+	parent := initialStyle()
+	applyDeclaration(&parent, Declaration{Property: "letter-spacing", Value: "0.1em"})
+	applyDeclaration(&parent, Declaration{Property: "word-spacing", Value: "4px"})
+	kid := inheritFrom(parent)
+	if kid.LetterSpacing != (Length{0.1, UnitEm}) {
+		t.Errorf("child letter-spacing = %+v, want 0.1em (inherited)", kid.LetterSpacing)
+	}
+	if kid.WordSpacing != (Length{4, UnitPx}) {
+		t.Errorf("child word-spacing = %+v, want 4px (inherited)", kid.WordSpacing)
+	}
+}
+
 func TestWhiteSpace(t *testing.T) {
 	// Initial value is normal.
 	if got := initialStyle().WhiteSpace; got != "normal" {

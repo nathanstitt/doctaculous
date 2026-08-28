@@ -220,6 +220,8 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				Color:           child.Style.Color,
 				WhiteSpace:      child.Style.WhiteSpace,
 				WordBreak:       wordBreakMode(child.Style),
+				LetterSpacingPt: spacingPt(child.Style.LetterSpacing, child.Style.FontSizePt),
+				WordSpacingPt:   spacingPt(child.Style.WordSpacing, child.Style.FontSizePt),
 				Underline:       child.Style.TextDecorationLine == "underline",
 				Strike:          child.Style.TextDecorationLine == "line-through",
 				BaselineShiftPt: baselineShiftPt(child.Style),
@@ -335,6 +337,28 @@ func baselineShiftPt(st gcss.ComputedStyle) float64 {
 	default:
 		return 0
 	}
+}
+
+// spacingPt resolves a letter-spacing / word-spacing length to points against the run's
+// OWN font size, which is what makes an em value track a large heading more widely than
+// the small text it was inherited from — the reason authors write tracking in em.
+//
+// A percentage has no defined meaning for either property in CSS Text 3 (unlike SVG,
+// where `letter-spacing: 50%` resolves against the font size), so a percentage resolves
+// to ZERO here rather than being silently reinterpreted: resolveLen's percentage branch
+// is given a zero basis, which is the honest answer for "no basis exists". The initial
+// `normal` is stored as the zero Length by the cascade (see setSpacingLength), so an
+// unset property returns 0 and leaves every advance untouched.
+//
+// The result is deliberately NOT clamped here. A negative value is legal and must reach
+// the shaper, which floors the per-glyph ADVANCE (not the spacing) at zero — clamping the
+// spacing itself would turn a legal tightening into a no-op.
+func spacingPt(l gcss.Length, fontSizePt float64) float64 {
+	v, isAuto := resolveLen(l, fontSizePt, 0)
+	if isAuto {
+		return 0
+	}
+	return v
 }
 
 // wordBreakMode reduces the two CSS mid-word-breaking properties, overflow-wrap (a.k.a.
