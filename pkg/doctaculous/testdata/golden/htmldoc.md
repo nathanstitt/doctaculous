@@ -494,7 +494,7 @@ Every mid‑word break lands on a grapheme‑cluster boundary (UAX #29), so a co
 
 ## The `letter-spacing` & `word-spacing` Properties
 
-Extra space added _between_ characters and _at_ word separators. Both are inherited, both accept negative lengths, and both are folded into each glyph's advance during shaping — so line breaking, intrinsic sizing and alignment all see the adjusted widths without knowing the properties exist.
+Extra space added _between_ characters and _at_ word separators. Both are inherited, both accept negative lengths, and both are folded into each glyph's advance during shaping — so line breaking, intrinsic sizing and alignment all see the adjusted widths without knowing the properties exist. `normal` resets an inherited value, and an `em` length inherits as _specified_, re‑resolving against each descendant's own font size.
 
 #### `letter-spacing` — positive tracks, negative tightens
 
@@ -524,10 +524,14 @@ flush right
 
 Both boxes are right‑aligned. CSS Text 3 words `letter-spacing` as spacing _between_ characters, but every shipping browser adds it after _every_ character including the last — which is why the tracked line stops one tracking‑width short of the right edge. This engine matches the browsers. SVG deliberately does _not_: SVG 1.1's wording adds no trailing gap, so `pkg/svg` keeps its trailing edge flush. Two specs, not an inconsistency.
 
-#### Tracking changes where lines break
+**21 / TRACKING, CONTINUED**
+
+## Tracking changes where lines break
+
+Spacing is folded into each glyph's advance during shaping, so everything downstream sees the adjusted widths without knowing the properties exist. Line breaking is the visible proof.
 
 tracking moves words
 
 tracking moves words
 
-The same text in the same box. The spacing is folded into each glyph's advance, so the greedy line breaker sees the wider run and pushes a word down with no change to the breaker itself. That same mechanism makes _min‑content_ and _max‑content_ account for tracking. Both properties inherit, and `normal` resets an inherited value; an `em` length inherits as _specified_ and re‑resolves against each descendant's own font size.
+The same text in the same box. The spacing is folded into each glyph's advance, so the greedy line breaker sees the wider run and pushes a word down with no change to the breaker itself — the same mechanism that makes _min‑content_ and _max‑content_ account for tracking.

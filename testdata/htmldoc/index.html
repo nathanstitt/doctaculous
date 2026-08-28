@@ -759,7 +759,9 @@ newline is kept.</p>
       separators. Both are inherited, both accept negative lengths, and both are folded
       into each glyph's advance during shaping &mdash; so line breaking, intrinsic
       sizing and alignment all see the adjusted widths without knowing the properties
-      exist.</p>
+      exist. <code>normal</code> resets an inherited value, and an <code>em</code>
+      length inherits as <em>specified</em>, re&#8209;resolving against each
+      descendant's own font size.</p>
 
     <h4><code>letter-spacing</code> &mdash; positive tracks, negative tightens</h4>
     <div class="trackbox">Tracking changes the texture of a line.</div>
@@ -789,16 +791,21 @@ newline is kept.</p>
       SVG&nbsp;1.1's wording adds no trailing gap, so <code>pkg/svg</code> keeps its
       trailing edge flush. Two specs, not an inconsistency.</p>
 
-    <h4>Tracking changes where lines break</h4>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">21 / TRACKING, CONTINUED</span>
+    <h2>Tracking changes where lines break</h2>
+    <p class="lede">Spacing is folded into each glyph's advance during shaping, so
+      everything downstream sees the adjusted widths without knowing the properties
+      exist. Line breaking is the visible proof.</p>
+
     <div class="trackwrap">tracking moves words</div>
     <div class="trackwrap" style="letter-spacing:4px">tracking moves words</div>
     <p class="caption">The same text in the same box. The spacing is folded into each
       glyph's advance, so the greedy line breaker sees the wider run and pushes a word
-      down with no change to the breaker itself. That same mechanism makes
-      <em>min&#8209;content</em> and <em>max&#8209;content</em> account for tracking.
-      Both properties inherit, and <code>normal</code> resets an inherited value; an
-      <code>em</code> length inherits as <em>specified</em> and re&#8209;resolves against
-      each descendant's own font size.</p>
+      down with no change to the breaker itself &mdash; the same mechanism that makes
+      <em>min&#8209;content</em> and <em>max&#8209;content</em> account for tracking.</p>
   </section>
 
 </body>
