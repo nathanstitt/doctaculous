@@ -59,6 +59,15 @@ type tokenizer struct {
 
 func newTokenizer(src string) *tokenizer { return &tokenizer{src: src} }
 
+// rest returns the un-consumed remainder of the input, without tokenizing it.
+// It is the escape hatch for grammars defined over a whole value rather than
+// over a token stream — the colour grammar (pkg/css/color.go) is the one such
+// case: CSS Color 4 syntax like `rgb(79 156 255 / 35%)` is far cleaner to parse
+// from raw text than by re-assembling numbers, solidi and percentages out of
+// tokens, and re-tokenizing it would only be a lossy round-trip. Callers must be
+// positioned where the ENTIRE remainder is the production they want to parse.
+func (t *tokenizer) rest() string { return t.src[t.pos:] }
+
 func (t *tokenizer) next() Token {
 	for {
 		if t.pos >= len(t.src) {
