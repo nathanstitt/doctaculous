@@ -222,8 +222,14 @@ type BackgroundImageContent struct {
 	// stays vector all the way to the backend. SceneW/SceneH are the scene's own
 	// authored viewport size, which the painter needs in order to scale it into the
 	// computed tile rectangle.
-	Scene                              layout.VectorScene
-	SceneW, SceneH                     float64
+	Scene          layout.VectorScene
+	SceneW, SceneH float64
+
+	// Gradient is set INSTEAD of Img and Scene when background-image is a CSS
+	// <gradient>. Its geometry is already resolved into TILE space, so it
+	// travels to the painter needing nothing further from the cascade.
+	Gradient *layout.BackgroundGradient
+
 	IntrinsicW, IntrinsicH             float64
 	OriginX, OriginY, OriginW, OriginH float64
 	ClipX, ClipY, ClipW, ClipH         float64
@@ -510,12 +516,14 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	}
 	// Background image paints after the background color and before the border (CSS
 	// Backgrounds 3 paint order).
-	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil) {
+	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil || bg.Gradient != nil) {
 		// A rounded box clips its background IMAGE to the rounded border box. Unlike
 		// the background COLOR — a single fill this engine can round directly — a
 		// background image is an arbitrary number of tiles drawn by DrawImage, which
 		// has no shape parameter, so the only way to round it is a clip bracket around
-		// the whole tiling run.
+		// the whole tiling run. A gradient takes the same path: it paints as a
+		// background image, so it rounds by the same bracket rather than needing the
+		// shader to know about corners.
 		if !f.Radii.Zero() {
 			dst = append(dst, layout.Item{
 				Kind: layout.ClipPushKind,
@@ -525,8 +533,9 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 		dst = append(dst, layout.Item{
 			Kind: layout.BackgroundImageKind,
 			BgImage: layout.BackgroundImageItem{
-				Img:   bg.Img,
-				Scene: bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
+				Img:      bg.Img,
+				Gradient: bg.Gradient,
+				Scene:    bg.Scene, SceneW: bg.SceneW, SceneH: bg.SceneH,
 				IntrinsicW: bg.IntrinsicW, IntrinsicH: bg.IntrinsicH,
 				OriginX: bg.OriginX, OriginY: bg.OriginY, OriginW: bg.OriginW, OriginH: bg.OriginH,
 				ClipX: bg.ClipX, ClipY: bg.ClipY, ClipW: bg.ClipW, ClipH: bg.ClipH,

@@ -20,11 +20,102 @@ type imageDest struct {
 	x, y, w, h float64
 }
 
+// Options configures one PaintPage call. The zero value is exactly the
+// historical behavior, so a caller that does not care about diagnostics keeps
+// using PaintPage and pays nothing for the option it did not set.
+type Options struct {
+	// Logf, if set, receives one debug line per DISTINCT fidelity degradation
+	// hit while painting this page — currently the two CSS `filter` caps
+	// (maxCSSFilterPixels and maxFilterNestingDepth), each emitted at most once
+	// per PaintPageWithOptions call so a page full of filtered boxes cannot turn
+	// into a page full of log lines. nil means silent, which is what plain
+	// PaintPage passes.
+	//
+	// It matches the signature every other degradation logger in the engine uses
+	// (pkg/svg/draw.Renderer.Logf, pkg/render/raster.Options.Logf,
+	// pkg/render/pdfwrite.Options.Logf), so a caller threads ONE func through
+	// the whole pipeline rather than adapting between logger types.
+	Logf func(string, ...any)
+}
+
 // PaintPage draws every item of page onto dev. mat maps page space (points,
 // Y-down, origin at the page's top-left) into device space (pixels); for a simple
 // rasterization it is a uniform scale of dpi/72.
+//
+// Degradations are painted but not reported; use PaintPageWithOptions to receive
+// them.
 func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
-	paintItems(dev, page.Items, mat, 0)
+	PaintPageWithOptions(dev, page, mat, Options{})
+}
+
+// PaintPageWithOptions is PaintPage with per-call options — currently just a
+// diagnostics logger.
+//
+// It is a SEPARATE entry point rather than an extra parameter on PaintPage
+// because PaintPage is the painter's public seam and is called from three
+// packages plus the tests; widening its signature would churn every caller for
+// a knob almost none of them set. The engine already spells this the same way
+// elsewhere (layoutfont.NewOSFontProvider / NewOSFontProviderWithLogf), and the
+// Options struct — rather than a bare logf argument — is what lets a future knob
+// land without a third entry point.
+func PaintPageWithOptions(dev render.Device, page *layout.Page, mat render.Matrix, opts Options) {
+	// warnFlags is allocated per call, never stored, so concurrent PaintPage
+	// calls (pdfwrite renders its bands on a worker pool) cannot race on it or
+	// suppress each other's first notice. With no logger there is nothing to
+	// suppress, so it stays a nil pointer and the whole mechanism costs one
+	// pointer-nil check per degradation — nothing at all on the correct path.
+	var warned *warnFlags
+	if opts.Logf != nil {
+		warned = &warnFlags{logf: opts.Logf}
+	}
+	paintItems(dev, page.Items, mat, 0, warned)
+}
+
+// warnFlags tracks, for one PaintPageWithOptions call, which one-per-page
+// degradation notices have already been emitted, and carries the logger they go
+// to.
+//
+// A nil *warnFlags is the "no logger" case and every method below tolerates it,
+// which is what keeps the logger-less path (PaintPage, and every backend that
+// leaves Options.Logf nil) allocation-free: no flags struct is created and no
+// closure is captured.
+//
+// This mirrors pkg/svg/draw's identically-named type for the same reason it
+// exists there — a page with a hundred over-cap filtered boxes must produce one
+// line per distinct cause, not a hundred.
+type warnFlags struct {
+	logf func(string, ...any)
+
+	// filterRegionCap/filterNestingCap track the two ways a CSS filter degrades
+	// to painting its bracket unfiltered with a cause worth naming: a surface
+	// past maxCSSFilterPixels (or one that is degenerate/off-device) and a
+	// bracket nested past maxFilterNestingDepth. They are deliberately separate
+	// flags: the two have entirely different causes, and reporting a nesting
+	// overflow as "region exceeded N pixels" sends a reader looking at a region
+	// that was perfectly fine.
+	filterRegionCap  bool
+	filterNestingCap bool
+}
+
+// logFilterRegionCapOnce emits the surface-unavailable notice the first time it
+// is needed for this page. reason names WHY the surface could not be built, so
+// an over-cap page-sized filter is not confused with a degenerate box.
+func (w *warnFlags) logFilterRegionCapOnce(reason string) {
+	if w == nil || w.filterRegionCap || w.logf == nil {
+		return
+	}
+	w.filterRegionCap = true
+	w.logf("paint: CSS filter surface unavailable (%s); the element was painted unfiltered", reason)
+}
+
+// logFilterNestingCapOnce emits the filter-nesting-too-deep notice the first
+// time it is needed for this page.
+func (w *warnFlags) logFilterNestingCapOnce() {
+	if w == nil || w.filterNestingCap || w.logf == nil {
+		return
+	}
+	w.filterNestingCap = true
+	w.logf("paint: CSS filter nesting exceeded %d levels; the element was painted unfiltered", maxFilterNestingDepth)
 }
 
 // paintItems draws one contiguous run of items. It is separate from PaintPage
@@ -32,7 +123,9 @@ func PaintPage(dev render.Device, page *layout.Page, mat render.Matrix) {
 // surface (see paintFilterBracket) and needs to re-enter with that sub-run and a
 // shifted matrix — the flat item list has no other way to express a nested
 // paint.
-func paintItems(dev render.Device, items []layout.Item, mat render.Matrix, depth int) {
+//
+// warned may be nil (no logger); see warnFlags.
+func paintItems(dev render.Device, items []layout.Item, mat render.Matrix, depth int, warned *warnFlags) {
 	for i := 0; i < len(items); i++ {
 		it := &items[i]
 		if it.Kind == layout.FilterPushKind {
@@ -41,7 +134,7 @@ func paintItems(dev render.Device, items []layout.Item, mat render.Matrix, depth
 			// hand-built or corrupted stream could carry one) takes the rest of
 			// the list and closes at its end, so the content still paints.
 			end := matchingFilterPop(items, i)
-			paintFilterBracket(dev, it, items[i+1:end], mat, depth)
+			paintFilterBracket(dev, it, items[i+1:end], mat, depth, warned)
 			i = end
 			continue
 		}
@@ -134,28 +227,40 @@ func paintItem(dev render.Device, it *layout.Item, mat render.Matrix) {
 //     vector representation, so a PDF stays vector-native and paints the content
 //     unfiltered — logged by pkg/render/pdfwrite);
 //   - the region is degenerate, fully off-device, or exceeds
-//     maxCSSFilterPixels;
-//   - nesting exceeds maxFilterNestingDepth;
+//     maxCSSFilterPixels — logged here through warned;
+//   - nesting exceeds maxFilterNestingDepth — logged here through warned;
 //   - the chain is empty (a bracket carrying no functions).
+//
+// Only the two CAPPED cases log. An empty chain is `filter: none` reaching the
+// painter and is not a degradation at all, and the no-offscreen case is a
+// property of the OUTPUT FORMAT rather than of this page, which is why
+// pkg/render/pdfwrite reports it once per document from the item stream instead
+// of once per bracket from here.
 //
 // Every one of those paths still paints the content, correctly placed, just
 // without the effect — the "a visible approximation beats a blank" rule the SVG
 // side follows. The group (rather than a bare re-entry) is what keeps that path
 // byte-identical to the pass-through this replaced.
-func paintFilterBracket(dev render.Device, push *layout.Item, inner []layout.Item, mat render.Matrix, depth int) {
+func paintFilterBracket(dev render.Device, push *layout.Item, inner []layout.Item, mat render.Matrix, depth int, warned *warnFlags) {
 	fi := &push.Filter
 	unfiltered := func() {
 		dev.BeginGroup()
-		paintItems(dev, inner, mat, depth)
+		paintItems(dev, inner, mat, depth, warned)
 		dev.EndGroup(1, "", nil, nil)
 	}
-	if len(fi.Funcs) == 0 || depth >= maxFilterNestingDepth {
+	if len(fi.Funcs) == 0 {
+		unfiltered()
+		return
+	}
+	if depth >= maxFilterNestingDepth {
+		warned.logFilterNestingCapOnce()
 		unfiltered()
 		return
 	}
 	devW, devH := dev.Size()
-	fs, scale, ok := cssFilterSurface(fi, inner, mat, devW, devH)
-	if !ok {
+	fs, scale, reason := cssFilterSurface(fi, inner, mat, devW, devH)
+	if reason != surfaceOK {
+		warned.logFilterRegionCapOnce(reason.String())
 		unfiltered()
 		return
 	}
@@ -167,7 +272,7 @@ func paintFilterBracket(dev render.Device, push *layout.Item, inner []layout.Ite
 	// the result is placed.
 	shifted := mat.Mul(render.Translate(float64(-fs.origin.X), float64(-fs.origin.Y)))
 	src := dev.RenderOffscreen(fs.size, func(scratch render.Device) {
-		paintItems(scratch, inner, shifted, depth+1)
+		paintItems(scratch, inner, shifted, depth+1, warned)
 	})
 	if src == nil {
 		unfiltered()

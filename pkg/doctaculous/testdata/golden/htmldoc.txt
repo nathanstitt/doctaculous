@@ -445,7 +445,163 @@ Look for: the two spatial functions. blur(2px) and drop-shadow() both reach outs
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints unfiltered — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
 
-19 / BORDER RADIUS
+19 / CUSTOM PROPERTIES
+
+Custom properties and var()
+
+The palette below is declared once on :root and reached by every swatch through var(). Custom properties inherit, so a value set at the document root is visible to any descendant without being redeclared — the pattern almost every themed stylesheet is built on.
+
+var(--brand)
+
+var(--accent)
+
+var(--muted)
+
+var(--absent, #7a5cff)
+
+var(--indirect)
+
+scoped override
+
+Look for: the last two swatches. Indirect resolves --indirect: var(--brand) — a custom property whose own value is another var(), substituted recursively. Scoped override redeclares --brand on the swatch itself, so the same var(--brand) reference resolves differently there than in the first swatch: custom properties cascade and inherit exactly like any other property, and the nearest declaration wins.
+
+Substitution happens between the cascade and value parsing, so var() works in any property, shorthands included — the rule below draws its whole border from one variable. A reference that cannot be resolved is invalid at computed‑value time, which is not the same as a syntax error: rather than leaving an earlier declaration showing, the property falls back to its inherited or initial value, as though unset had been specified.
+
+border: var(--rule)
+
+20 / COLOUR
+
+Alpha-bearing colour values
+
+The engine has one CSS Color 4 colour grammar, shared by the HTML cascade and the SVG parser. Every swatch below straddles a pale field and a dark block, so an alpha channel that is honoured looks different on each side while one that is dropped looks the same on both.
+
+#4f9cff (opaque reference)
+
+rgba(79,156,255,0.35)
+
+#4f9cff59
+
+#4bf6
+
+hsl(214,100%,65%)
+
+hsla(214,100%,65%,0.35)
+
+rgb(79 156 255 / 35%)
+
+hsl(214deg 100% 65% / 35%)
+
+rebeccapurple
+
+border rgba(176,48,48,0.5)
+
+Aa
+
+color rgba(20,30,45,0.4)
+
+transparent (valid, paints nothing)
+
+rgb(nope,0,0) (dropped → red stands)
+
+Look for: rgba(79,156,255,0.35), #4f9cff59 and rgb(79 156 255 / 35%) are the SAME colour at the same alpha spelled three ways — 0.35 and 35 % and the hex byte 59 all resolve to an alpha of 89 — so those three swatches must be pixel-identical. The two hsl swatches sit one step away at (77,154,255) rather than (79,156,255): that is the honest result of converting HSL to RGB and rounding, not a parsing error. #4bf6 is deliberately a different colour (#44bbff at alpha 102) to show the four-digit form expanding each nibble. Every alpha-bearing swatch must read pale over the light field and muted-blue over the dark block; a swatch that looks the same on both halves has lost its alpha, and a swatch that is not there at all means the value failed to parse and the declaration was dropped.
+
+The last two swatches are the error cases, and they use the background-color longhand deliberately. transparent is a valid colour and correctly paints nothing. The malformed rgb(nope,0,0) is dropped per CSS whole-declaration error handling, so the earlier red declaration stays in force and the swatch renders solid red — a blank swatch there would mean the engine had wrongly accepted the bad value and painted transparent black. Through the background shorthand the same bad value behaves differently, because that expander resets each sub-property before classifying components and tolerates a component it cannot classify; that divergence lives in the shorthand, not in the colour grammar.
+
+Alpha survives the whole pipeline because the paint stack carries a live alpha channel: parsing produces an RGBA, the painter hands it to the device unchanged, and the rasteriser composites it over whatever it lands on. In PDF output the same colours are emitted through the writer's own colour handling rather than being pre-blended, so the text above stays selectable and the fills stay vector.
+
+21 / MISSING GLYPHS
+
+Characters No Font Can Draw
+
+No bundled face covers emoji or Devanagari, and none ever will — the bundle is a handful of permissively‑licensed Latin, Hebrew and Arabic substitutes. A character none of them maps now draws .notdef, the “tofu” box, exactly as a browser does.
+
+Nine weather emoji. Every one is unmappable, so every one is a box:
+
+🌈🌤🌥🌦🌧🌨🌩🌪🌫
+
+The box is not a placeholder pasted over the line — it is a glyph, and it shapes like one. Below, unmappable characters sit inline with text that resolves normally, and the correct text keeps its own metrics on either side:
+
+Latin, then Devanagari कखग, then Latin again.
+
+Whether the mark is drawn by the font or by us depends on the font. A face that ships its own .notdef gets its glyph — DejaVu draws a hollow box, Noto draws a box containing the code point's hex digits. The bundled TeX Gyre substitutes ship a .notdef that is blank, so for the boxes above the geometry is synthesized. Each distinct missing character is also reported once through the layout log, which is the half that makes a font gap diagnosable rather than merely visible.
+
+Invisible characters are deliberately excluded. A no‑break space, a zero‑width joiner or a variation selector draws no ink even in a font that maps it, so giving it a box would invent a mark the author never wrote. The sentence you are reading contains a U+202F NARROW NO‑BREAK SPACE that no bundled face maps; it renders as space, and nothing is logged, because nothing is wrong.
+
+Look for: the boxes have a side bearing, so they read as separate marks rather than one bar, and they sit on the baseline with the text around them. This matters more than it looks. Before .notdef, an unmappable character rendered as nothing — and because the surrounding text was untouched, a page with a font gap looked like a page with a layout bug. It is worse when only some characters of a set are missing: the report behind this section was a board carrying only DejaVu and Liberation, where three of nine weather emoji drew and six vanished.
+
+22 / GRADIENTS
+
+CSS linear-gradient() and radial-gradient()
+
+A gradient is a generated background image, not a colour: it is painted by the same shading engine SVG paint servers use, evaluated per device pixel rather than baked into a bitmap. Every tile below is 116×58 — deliberately not square, because a to <corner> gradient's line is only 45° on a square.
+
+Direction
+
+(none) → to bottom
+
+to right
+
+to left
+
+to top
+
+45deg
+
+0.75turn
+
+to bottom right
+
+to top right
+
+Look for: the two corner swatches. Their bands are not at 45°. CSS angles the gradient line so the perpendicular through each end lands exactly on a corner, which on a 2:1 box makes the line noticeably shallower — and puts the two other corners at precisely the midpoint colour. 0deg points up and angles run clockwise, so 0.75turn (270°) matches to left.
+
+Colour stops
+
+four colours, no positions
+
+25% … 75%
+
+two stops at 50% (hard break)
+
+four hard bands
+
+→ transparent
+
+Look for: stops with no position are spread evenly between the ones that have them, so the four-colour swatch changes at 33% and 67% without being told to. Two stops sharing a position give a hard edge with no blend at all — the mechanism behind the four-band swatch. The last swatch fades to transparent and stays red the whole way: interpolation runs in premultiplied alpha, which is what keeps a grey band from appearing through the middle of it.
+
+Radial
+
+ellipse (default)
+
+circle
+
+closest-side
+
+circle farthest-side
+
+circle at 20% 30%
+
+Look for: the default ending shape is an ellipse sized to the farthest corner, so it stretches with the box; adding circle makes both radii equal and the rings become round. The sizing keyword picks which box feature the shape must reach — closest-side lands the end colour on the nearest edges, so the corners sit beyond the ramp and are solid.
+
+23 / GRADIENTS, CONTINUED
+
+Repeating gradients, and the background-* properties
+
+A gradient is a generated image, so it answers to the same sizing, tiling and positioning properties a bitmap does. These swatches are the proof: the same declarations that place a url() background place a gradient one.
+
+repeating, 16px period
+
+repeating at 45deg
+
+repeating radial
+
+background-size: 40px
+
+60% size, centered, no-repeat
+
+Look for: a repeating gradient takes its stop range as the period, so the ramp tiles rather than stretching once. The last two swatches show a gradient really is a background image — background-size resizes its box, and the result tiles or is placed by background-position exactly as a bitmap would.
+
+24 / BORDER RADIUS
 
 Rounded Corners
 

@@ -1,7 +1,6 @@
 package css
 
 import (
-	"image/color"
 	"testing"
 )
 
@@ -33,34 +32,4 @@ func TestParseLength(t *testing.T) {
 	}
 }
 
-func TestParseColor(t *testing.T) {
-	cases := []struct {
-		in   string
-		want color.RGBA
-		ok   bool
-	}{
-		{"#000000", color.RGBA{0, 0, 0, 255}, true},
-		{"#fff", color.RGBA{255, 255, 255, 255}, true},
-		{"#ff0000", color.RGBA{255, 0, 0, 255}, true},
-		{"red", color.RGBA{255, 0, 0, 255}, true},
-		{"white", color.RGBA{255, 255, 255, 255}, true},
-		{"transparent", color.RGBA{0, 0, 0, 0}, true},
-		{"rgb(0,128,255)", color.RGBA{0, 128, 255, 255}, true},
-		{"notacolor", color.RGBA{}, false},
-		{"RED", color.RGBA{255, 0, 0, 255}, true},              // named colors are case-insensitive
-		{"RGB(0,128,255)", color.RGBA{0, 128, 255, 255}, true}, // rgb() is case-insensitive
-		{"#f00", color.RGBA{255, 0, 0, 255}, true},             // 3-digit hex, red channel
-		{"rgb(a,b,c)", color.RGBA{}, false},                    // malformed rgb rejects
-		{"rgb(-1,300,0)", color.RGBA{0, 255, 0, 255}, true},    // components clamp to [0,255]
-		{"rgb(0,128", color.RGBA{}, false},                     // truncated rgb rejects, no panic
-	}
-	for _, c := range cases {
-		got, ok := parseColor(newTokenizer(c.in))
-		if ok != c.ok {
-			t.Fatalf("parseColor(%q) ok = %v, want %v", c.in, ok, c.ok)
-		}
-		if ok && got != c.want {
-			t.Fatalf("parseColor(%q) = %v, want %v", c.in, got, c.want)
-		}
-	}
-}
+// The colour grammar's own tests live in color_test.go.
