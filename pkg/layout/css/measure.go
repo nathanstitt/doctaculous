@@ -97,6 +97,16 @@ func (e *Engine) measureInline(ctx context.Context, b *cssbox.Box, wantMax bool)
 	if wantMax {
 		return inline.VisibleWidth(glyphs)
 	}
+	// min-content breaks at width 0, so every available opportunity is taken and the
+	// result is the widest indivisible unit. Which units are indivisible is exactly what
+	// overflow-wrap/word-break change — and only for `anywhere` and `break-all`.
+	//
+	// CSS Text 3 §5.5 is explicit that `overflow-wrap: break-word` does NOT affect
+	// intrinsic sizing while `anywhere` does; that asymmetry is the entire practical
+	// difference between the two values. Honoring it means stripping the mode from the
+	// measured copy when it must not count, so the measurement sees the same
+	// opportunities the zero-width break would have had WITHOUT the property.
+	glyphs = stripNonMinContentBreaks(glyphs)
 	widest := 0.0
 	rest := glyphs
 	for len(rest) > 0 {
@@ -113,6 +123,38 @@ func (e *Engine) measureInline(ctx context.Context, b *cssbox.Box, wantMax bool)
 		}
 	}
 	return widest
+}
+
+// stripNonMinContentBreaks returns glyphs with any mid-word break mode that must not
+// influence intrinsic sizing cleared to WordBreakNormal. Today that is exactly
+// `overflow-wrap: break-word`, which breaks lines but leaves min-content at the widest
+// word (CSS Text 3 §5.5); `anywhere` and `break-all` pass through and do shrink it.
+//
+// It returns the input slice unchanged — no allocation, no copy — when nothing needs
+// clearing, which is every box that does not use these properties. That keeps the
+// measurement path byte-identical for the overwhelmingly common case; only a box that
+// actually sets break-word pays for the copy. The copy is required because the glyph
+// slice is the shared shaping result, and mutating it in place would leak a
+// measurement-only change into the real line breaking that follows.
+func stripNonMinContentBreaks(glyphs []inline.Glyph) []inline.Glyph {
+	needs := false
+	for i := range glyphs {
+		if m := glyphs[i].WordBreak; m != inline.WordBreakNormal && !m.AffectsMinContent() {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return glyphs
+	}
+	out := make([]inline.Glyph, len(glyphs))
+	copy(out, glyphs)
+	for i := range out {
+		if m := out[i].WordBreak; !m.AffectsMinContent() {
+			out[i].WordBreak = inline.WordBreakNormal
+		}
+	}
+	return out
 }
 
 // specifiedFixedWidth returns the box's content-box width when it has a fixed

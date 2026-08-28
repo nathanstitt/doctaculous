@@ -451,3 +451,39 @@ grayscale(1) brightness(1.5) contrast(1.4)
 Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach _outside_ the tile's border box — CSS, unlike SVG, does not clip a filter to a region — while the eight colour adjustments recolour each pixel in place. The last swatch chains three functions, which apply left to right: grey first, then brighten that result, then raise its contrast.
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
+
+**19 / MID-WORD BREAKING**
+
+## The `overflow-wrap` & `word-break` Properties
+
+Where a line may break _inside_ a word. Normal wrapping only breaks at spaces, so a single long token — a URL, a hash, a compound noun — runs straight past the edge of its box. These two properties add opportunities between characters, and they differ in when they take them.
+
+#### The problem — one unbreakable token
+
+https://example.com/very/long/path/to/a/private/calendar/feed.ics
+
+Default `overflow-wrap:normal`: the token has no space in it, so there is nowhere to break and it overflows the box on a single line.
+
+#### `overflow-wrap: break-word` — break only as a last resort
+
+https://example.com/very/long/path/to/a/private/calendar/feed.ics
+
+The same token now breaks between characters and stays inside the box. The legacy alias `word-wrap:break-word` is accepted for the same effect.
+
+#### Last resort vs. eager — the distinction that matters
+
+wrap this sesquipedalian
+
+`break-word` moves a word that _fits on a line of its own_ down whole, breaking it only when it cannot fit anywhere.
+
+wrap this sesquipedalian
+
+`break-all` is eager: every character boundary is an ordinary opportunity, so the word is chopped at the line edge regardless.
+
+#### `word-break: keep-all` — suppress mid‑word breaking
+
+https://example.com/very/long/path/to/a/private/calendar/feed.ics
+
+`keep-all` forbids breaking the affected text, so it overrides `overflow-wrap` and the token overflows again.
+
+Every mid‑word break lands on a grapheme‑cluster boundary (UAX #29), so a combining mark is never separated from its base letter and an emoji ZWJ sequence or a flag is never split in half. `overflow-wrap:anywhere` breaks in the same places as `break-word` but additionally shrinks a box's intrinsic _min‑content_ width, which is visible in flex and grid sizing rather than in the line breaking itself.

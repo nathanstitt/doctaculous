@@ -567,6 +567,32 @@ body {
   font-size: 13px;
 }
 
+/* ----- overflow-wrap / word-break -------------------------------------------- */
+
+/* A deliberately narrow box: every demo below puts the SAME overlong token in one of
+   these, so the only variable between them is the breaking property. It is NOT clipped
+   (overflow stays visible), so the default case visibly runs past the right edge —
+   which is the behaviour the properties exist to fix. */
+.wrapbox {
+  width: 190px;
+  background: #f0e6c4;
+  border: 1px solid #c9c2b0;
+  padding: 8px 10px;
+  margin: 0 0 6px 0;
+  font-family: "Inconsolata", monospace;
+  font-size: 12px;
+  color: #1a1a18;
+}
+/* Two boxes side by side so a property and its control can be compared directly. The
+   tracks are sized to the demo box's BORDER box (190px content + 10px padding + 1px
+   border per side) so both columns are identical and the only difference the reader
+   sees between them is where the text breaks. */
+.wrapcols {
+  display: grid;
+  grid-template-columns: 212px 212px;
+  gap: 14px;
+}
+
 /* ----- lists ----------------------------------------------------------------- */
 
 /* Two columns side by side so the unordered nest and the ordered styles sit

@@ -137,6 +137,19 @@ bullet's design rationale is in its PR:
   `position: running()`/`content: element()`, named-page multi-width reflow.
 - **`white-space`** (`pkg/css` + `pkg/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line + tab
   stops.
+- **`overflow-wrap` / `word-break` — mid-word line breaking** (`pkg/css/cascade.go`,
+  `pkg/layout/inline/wordbreak.go` + `grapheme.go`): `overflow-wrap: normal | break-word |
+  anywhere` (plus the legacy `word-wrap` alias, which sets the same property) and `word-break:
+  normal | break-all | keep-all`, both inherited. `break-word`/`anywhere` break inside a word only
+  as a LAST RESORT — a word that fits on a line of its own is moved down whole — while
+  `break-all` is eager and chops at the line edge regardless; `keep-all` suppresses mid-word
+  breaking. `anywhere` and `break-all` additionally shrink intrinsic **min-content** width (CSS
+  Text 3 §5.5) while `break-word` deliberately does not, which is the only difference between
+  `break-word` and `anywhere`. Every break lands on a **grapheme-cluster boundary** — full UAX #29
+  extended clusters (GB3–GB13, including emoji ZWJ sequences and regional-indicator flag pairs),
+  using the UCD tables already vendored with `benoitkugler/textlayout`, so no combining mark, jamo,
+  or emoji is ever split. `white-space: nowrap` outranks all of it. Untouched callers (DOCX, SVG
+  text, any page not setting these) keep the whitespace-only breaking path byte-identical.
 - **List markers + CSS counters** (`pkg/css/counter_format.go`, `pkg/layout/css/counters.go`,
   `pkg/font/bullet.go`): `list-style-*`, `counter-reset`/`-increment`/`-set`, `content: counter()`;
   synthetic bullet outlines.

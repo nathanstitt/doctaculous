@@ -703,5 +703,53 @@ newline is kept.</p>
       picture of itself.</p>
   </section>
 
+  <!-- ===================== 19 · OVERFLOW-WRAP / WORD-BREAK ===================== -->
+  <section class="section break">
+    <span class="kicker">19 / MID-WORD BREAKING</span>
+    <h2>The <code>overflow-wrap</code> &amp; <code>word-break</code> Properties</h2>
+    <p class="lede">Where a line may break <em>inside</em> a word. Normal wrapping only
+      breaks at spaces, so a single long token &mdash; a URL, a hash, a compound noun
+      &mdash; runs straight past the edge of its box. These two properties add
+      opportunities between characters, and they differ in when they take them.</p>
+
+    <h4>The problem &mdash; one unbreakable token</h4>
+    <div class="wrapbox">https://example.com/very/long/path/to/a/private/calendar/feed.ics</div>
+    <p class="caption">Default <code>overflow-wrap:normal</code>: the token has no space
+      in it, so there is nowhere to break and it overflows the box on a single line.</p>
+
+    <h4><code>overflow-wrap: break-word</code> &mdash; break only as a last resort</h4>
+    <div class="wrapbox" style="overflow-wrap:break-word">https://example.com/very/long/path/to/a/private/calendar/feed.ics</div>
+    <p class="caption">The same token now breaks between characters and stays inside the
+      box. The legacy alias <code>word-wrap:break-word</code> is accepted for the same
+      effect.</p>
+
+    <h4>Last resort vs. eager &mdash; the distinction that matters</h4>
+    <div class="wrapcols">
+      <div>
+        <div class="wrapbox" style="overflow-wrap:break-word">wrap this sesquipedalian</div>
+        <p class="caption"><code>break-word</code> moves a word that <em>fits on a line of
+          its own</em> down whole, breaking it only when it cannot fit anywhere.</p>
+      </div>
+      <div>
+        <div class="wrapbox" style="word-break:break-all">wrap this sesquipedalian</div>
+        <p class="caption"><code>break-all</code> is eager: every character boundary is an
+          ordinary opportunity, so the word is chopped at the line edge regardless.</p>
+      </div>
+    </div>
+
+    <h4><code>word-break: keep-all</code> &mdash; suppress mid&#8209;word breaking</h4>
+    <div class="wrapbox" style="word-break:keep-all;overflow-wrap:break-word">https://example.com/very/long/path/to/a/private/calendar/feed.ics</div>
+    <p class="caption"><code>keep-all</code> forbids breaking the affected text, so it
+      overrides <code>overflow-wrap</code> and the token overflows again.</p>
+
+    <p class="caption">Every mid&#8209;word break lands on a grapheme&#8209;cluster
+      boundary (UAX&nbsp;#29), so a combining mark is never separated from its base
+      letter and an emoji ZWJ sequence or a flag is never split in half.
+      <code>overflow-wrap:anywhere</code> breaks in the same places as
+      <code>break-word</code> but additionally shrinks a box's intrinsic
+      <em>min&#8209;content</em> width, which is visible in flex and grid sizing rather
+      than in the line breaking itself.</p>
+  </section>
+
 </body>
 </html>

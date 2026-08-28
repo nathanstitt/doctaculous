@@ -60,6 +60,71 @@ func TestMeasureMinIsLongestWord(t *testing.T) {
 	}
 }
 
+// cellWithTextBreak is cellWithText with the two mid-word-breaking properties set on
+// both the cell and its text child (they are inherited, and the text box carries the
+// style the run is built from).
+func cellWithTextBreak(s, overflowWrap, wordBreak string) *cssbox.Box {
+	c := cellWithText(s)
+	c.Style.OverflowWrap, c.Style.WordBreak = overflowWrap, wordBreak
+	for _, ch := range c.Children {
+		ch.Style.OverflowWrap, ch.Style.WordBreak = overflowWrap, wordBreak
+	}
+	return c
+}
+
+// TestMinContentDistinguishesBreakWordFromAnywhere is the single observable difference
+// between `overflow-wrap: break-word` and `overflow-wrap: anywhere` (CSS Text 3 §5.5):
+// both break lines identically, but only `anywhere` shrinks intrinsic min-content — so a
+// flex item or table cell sized from its content stays word-wide under break-word and
+// collapses toward one character under anywhere.
+//
+// Getting this wrong is invisible in ordinary block layout and only shows up as a
+// mis-sized track, which is why it is asserted directly rather than through a golden.
+func TestMinContentDistinguishesBreakWordFromAnywhere(t *testing.T) {
+	const text = "hi enormouslylongword"
+	e := New(nil, nil, nil)
+
+	plain := e.measureMinContent(context.Background(), cellWithTextBreak(text, "normal", "normal"))
+	breakWord := e.measureMinContent(context.Background(), cellWithTextBreak(text, "break-word", "normal"))
+	anywhere := e.measureMinContent(context.Background(), cellWithTextBreak(text, "anywhere", "normal"))
+	breakAll := e.measureMinContent(context.Background(), cellWithTextBreak(text, "normal", "break-all"))
+
+	if breakWord != plain {
+		t.Errorf("break-word min-content = %v, want %v (unchanged) — break-word must NOT "+
+			"affect intrinsic sizing", breakWord, plain)
+	}
+	if anywhere >= plain {
+		t.Errorf("anywhere min-content = %v, want < %v — anywhere MUST shrink min-content",
+			anywhere, plain)
+	}
+	if breakAll >= plain {
+		t.Errorf("break-all min-content = %v, want < %v — break-all MUST shrink min-content",
+			breakAll, plain)
+	}
+	// Under anywhere/break-all every cluster is its own unit, so min-content collapses to
+	// the widest single character — far below the longest word.
+	if anywhere <= 0 {
+		t.Errorf("anywhere min-content = %v, want > 0", anywhere)
+	}
+}
+
+// TestMaxContentUnaffectedByMidWordBreaking: max-content is the unwrapped width, so no
+// breaking property may change it.
+func TestMaxContentUnaffectedByMidWordBreaking(t *testing.T) {
+	const text = "hi enormouslylongword"
+	e := New(nil, nil, nil)
+	plain := e.measureMaxContent(context.Background(), cellWithTextBreak(text, "normal", "normal"))
+	for _, tc := range []struct{ ow, wb string }{
+		{"break-word", "normal"}, {"anywhere", "normal"}, {"normal", "break-all"}, {"normal", "keep-all"},
+	} {
+		got := e.measureMaxContent(context.Background(), cellWithTextBreak(text, tc.ow, tc.wb))
+		if got != plain {
+			t.Errorf("overflow-wrap:%s word-break:%s max-content = %v, want %v (unchanged)",
+				tc.ow, tc.wb, got, plain)
+		}
+	}
+}
+
 // TestMeasureContentCacheHit proves the per-box memo is consulted (not recomputed each
 // call): after measuring a box, mutating its content and re-measuring on the SAME engine
 // returns the CACHED (pre-mutation) width, while a FRESH engine sees the new width. The
