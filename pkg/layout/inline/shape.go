@@ -66,6 +66,44 @@ type Run struct {
 	// zero value (WordBreakNormal) is the CSS initial state and the historical behavior,
 	// so a caller that never sets it (e.g. the DOCX engine) is unaffected.
 	WordBreak WordBreakMode
+	// LetterSpacingPt is CSS letter-spacing in points, already resolved against this
+	// run's font size. It is added to the advance of EVERY glyph the run produces,
+	// including the last one, and may be negative (tightening). Zero — the default —
+	// leaves advances untouched, so a caller that never sets it (e.g. the DOCX engine)
+	// is byte-identical.
+	//
+	// Unlike WordBreak this is NOT carried opaquely to the breaker: it is folded into
+	// Glyph.Advance here, at shaping time. Everything downstream — the greedy breaker,
+	// VisibleWidth, min/max-content measurement, alignment — reads only Advance, so
+	// folding it in is what makes the property compose with line breaking and
+	// intrinsic sizing without any of them learning about it.
+	//
+	// TRAILING SPACING, the part that is easy to get wrong: the spacing is added after
+	// the last character too, not only BETWEEN characters. CSS Text 3 §8.1 phrases
+	// letter-spacing as spacing "between" characters, but the CSS Text 4 editors' draft
+	// and every shipping browser add it after every typographic character unit,
+	// including the final one on a line — which is why a right-aligned tracked line in
+	// a browser sits one tracking-width short of the right edge. This engine matches
+	// the browsers, deliberately, because alignment is the observable consequence and
+	// matching Firefox/Chrome/Safari is the browser-faithful choice.
+	//
+	// This is exactly where the CSS path DIVERGES from pkg/svg, which implements the
+	// same property against SVG 1.1's literal wording and adds NO trailing gap (see
+	// pkg/svg/draw's applyTextSpacing, whose rule the resvg corpus pins with
+	// letter-spacing/filter-bbox.svg). The two are different specs, not an
+	// inconsistency to be unified.
+	LetterSpacingPt float64
+	// WordSpacingPt is CSS word-spacing in points, already resolved against this run's
+	// font size. It is added to the advance of each word-separator character — U+0020
+	// and U+00A0 per CSS Text 3 §8.2 — and nowhere else. It may be negative. Zero (the
+	// default) leaves advances untouched.
+	//
+	// Note the interaction with justification: a justified line distributes its slack at
+	// inter-word gaps (inline.Place's ExtraPerSpace), and word-spacing has ALREADY been
+	// folded into each space's advance before that slack is computed. The two therefore
+	// compose in the spec-correct order — word-spacing widens the spaces, then
+	// justification stretches whatever gap remains — with no extra work in Place.
+	WordSpacingPt float64
 }
 
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
@@ -220,6 +258,31 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 		}
 		_, preserveNL, wrap := flagsFor(r.WhiteSpace)
 		noWrap := !wrap
+		// spacedAdvance folds this run's letter-spacing and word-spacing into a glyph's
+		// natural advance. It is applied at EVERY site below that sets g.Advance, so no
+		// glyph-producing path can silently miss the adjustment.
+		//
+		// The floor at zero is the guard the breaker needs. A negative letter-spacing is
+		// legal CSS and tightens text, but nothing downstream is prepared for a NEGATIVE
+		// advance: the greedy breaker accumulates advances monotonically and treats the
+		// running total as non-decreasing, and VisibleWidth's trailing-space subtraction
+		// assumes the same. Letting an advance go negative would let a line's width shrink
+		// as glyphs are appended, so an overflowing line could un-overflow and the breaker
+		// would pick a break position that does not exist. Clamping each glyph's own
+		// advance at zero keeps the accumulation monotonic while still letting a large
+		// negative tracking collapse glyphs onto each other — which is visually what a
+		// browser shows for `letter-spacing:-1em`, since the glyph OUTLINES still paint at
+		// their (now coincident) pen positions and simply overlap.
+		spacedAdvance := func(adv float64, isWordSep bool) float64 {
+			adv += r.LetterSpacingPt
+			if isWordSep {
+				adv += r.WordSpacingPt
+			}
+			if adv < 0 {
+				return 0
+			}
+			return adv
+		}
 		// spaceEm is the face's ' ' advance in EM units, kept unscaled so it can serve
 		// both the tab-stop math below and the advance given to an unmapped invisible
 		// character — deriving the latter by dividing the scaled value back down would
@@ -271,7 +334,22 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 						g.Face = shapeFace
 						g.GID = sg.gid
 						g.Outline = shapeFace.Outline(sg.gid)
-						g.Advance = sg.advance * r.SizePt
+						// A complex-shaped cluster is one typographic character unit, so it
+						// takes one letter-spacing increment. Word-spacing does not apply:
+						// this path only runs for complex scripts, whose segments never
+						// contain U+0020 (a space ends the segment — see needsComplexShaping).
+						//
+						// KNOWN DIVERGENCE, recorded rather than hidden: CSS Text 3 §8.1 says
+						// letter-spacing must NOT be applied within a cursive script's joined
+						// runs, because inserting space between joined letters breaks the
+						// connection. pkg/svg records the same rule (see the resvg corpus's
+						// letter-spacing/on-Arabic note). Honoring it needs per-cluster join
+						// information harfbuzz does not surface through shapeComplex's flat
+						// result, so tracked Arabic is spaced here where a browser would leave
+						// it alone. Tracking is vanishingly rare on cursive text, and the
+						// alternative — silently dropping the property for those scripts —
+						// would be a different wrong answer.
+						g.Advance = spacedAdvance(sg.advance*r.SizePt, false)
 						g.Runes = sg.runes
 						out = append(out, g)
 						lineCol += g.Advance
@@ -293,17 +371,25 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				lineCol = 0
 			case rn == '\t' && preserveNL:
 				// A preserved tab advances to the next tab stop from the current column.
+				// lineCol carries every advance already emitted on this line INCLUDING the
+				// spacing folded into it, so the tab stop is measured from the true pen
+				// position rather than an unspaced one — tracked preformatted text still
+				// lands on its tab stops.
 				adv := tabStop
 				if tabStop > 0 {
 					if a := tabStop - mathMod(lineCol, tabStop); a > 0 {
 						adv = a
 					}
 				}
+				// A tab is a break opportunity and measures as whitespace, but it is NOT one
+				// of the word-separator characters CSS Text 3 §8.2 enumerates (U+0020,
+				// U+00A0), so word-spacing does not apply to it. Letter-spacing does, as to
+				// any other character unit.
 				g := base
-				g.Advance = adv
+				g.Advance = spacedAdvance(adv, false)
 				g.Space = true
 				out = append(out, g)
-				lineCol += adv
+				lineCol += g.Advance
 			default:
 				// Ordinary rune (and, in collapsing modes, a stray '\n'/'\t' that box-gen
 				// already reduced to a space — shape it as a space).
@@ -314,6 +400,11 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				// nothing but DETERMINES ordering, so it must survive shaping as a
 				// zero-width glyph — the reorder reads the line's runes, and dropping the
 				// control here would silently discard the author's directional intent.
+				//
+				// It stays ZERO-width under tracking: letter-spacing applies to typographic
+				// character units, and a bidi control is not one. Spacing it would make an
+				// invisible ordering mark widen the line, so "abc" and "abc" with an
+				// embedded LRM would track to different widths.
 				if isBidiControlRune(rn) {
 					g := base
 					g.Runes = []rune{rn}
@@ -381,8 +472,14 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				g := base
 				g.Face = glyphFace
 				g.Outline = outline
-				g.Advance = advEm * r.SizePt
 				g.Space = rn == ' '
+				// word-spacing applies to WORD-SEPARATOR characters, which CSS Text 3 §8.2
+				// defines as U+0020 and U+00A0 — the same pair pkg/svg/draw's isWordSpace
+				// uses. Note the deliberate mismatch with g.Space just above: U+00A0 takes
+				// word-spacing but is NOT a Space for breaking purposes (a no-break space
+				// must not become a break opportunity), so the two conditions differ and
+				// must not be folded together.
+				g.Advance = spacedAdvance(advEm*r.SizePt, isWordSeparator(rn))
 				// Carry font identity ONLY for a real font glyph. When GID lookup fails the
 				// outline came from a synthesized marker (e.g. a bullet the face lacks) —
 				// its GID would be .notdef, so a text-emitting backend must not re-fetch by
@@ -490,6 +587,19 @@ func warnMissingGlyph(logf func(string, ...any), seen map[rune]bool, rn rune, fa
 	}
 	seen[rn] = true
 	logf("layout: no glyph for U+%04X in family %q or any fallback; drawing .notdef", rn, family)
+}
+
+// isWordSeparator reports whether rn is one of the word-separator characters CSS
+// Text 3 §8.2 says word-spacing applies to: U+0020 SPACE and U+00A0 NO-BREAK SPACE.
+// It is spelled as a named helper rather than an inline comparison because the
+// U+00A0 literal is indistinguishable from an ordinary space in a source listing —
+// the same reason pkg/svg/draw factors out its isWordSpace.
+//
+// Note this is deliberately NOT the same predicate as Glyph.Space. U+00A0 takes
+// word-spacing but must never become a break opportunity, and a preserved tab is a
+// break opportunity but is not a word separator, so the two sets cross.
+func isWordSeparator(rn rune) bool {
+	return rn == ' ' || rn == ' '
 }
 
 // tabSize is the CSS tab-size used for tab-stop advance in preserving white-space

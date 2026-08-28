@@ -1069,5 +1069,62 @@ newline is kept.</p>
       than rasterising the page or dropping the decoration.</p>
   </section>
 
+  <!-- ===================== 20 · LETTER-SPACING / WORD-SPACING ===================== -->
+  <section class="section break">
+    <span class="kicker">27 / TRACKING</span>
+    <h2>The <code>letter-spacing</code> &amp; <code>word-spacing</code> Properties</h2>
+    <p class="lede">Extra space added <em>between</em> characters and <em>at</em> word
+      separators. Both are inherited, both accept negative lengths, and both are folded
+      into each glyph's advance during shaping &mdash; so line breaking, intrinsic
+      sizing and alignment all see the adjusted widths without knowing the properties
+      exist. <code>normal</code> resets an inherited value, and an <code>em</code>
+      length inherits as <em>specified</em>, re&#8209;resolving against each
+      descendant's own font size.</p>
+
+    <h4><code>letter-spacing</code> &mdash; positive tracks, negative tightens</h4>
+    <div class="trackbox">Tracking changes the texture of a line.</div>
+    <p class="caption">The control: <code>letter-spacing:normal</code>.</p>
+    <div class="trackbox" style="letter-spacing:3px">Tracking changes the texture of a line.</div>
+    <p class="caption"><code>letter-spacing:3px</code> &mdash; every character gains 3px
+      of advance.</p>
+    <div class="trackbox" style="letter-spacing:-0.5px">Tracking changes the texture of a line.</div>
+    <p class="caption"><code>letter-spacing:-0.5px</code> &mdash; a negative value is
+      legal and tightens. Advances are floored at zero, so an extreme negative value
+      overlaps glyphs rather than producing the negative advances the line breaker
+      cannot represent.</p>
+
+    <h4><code>word-spacing</code> &mdash; separators only</h4>
+    <div class="trackbox" style="word-spacing:10px">Only the gaps between words grow here.</div>
+    <p class="caption"><code>word-spacing:10px</code> widens U+0020 and U+00A0 and
+      nothing else, so the words themselves are untouched.</p>
+
+    <h4>Where the spacing lands at the end of a line</h4>
+    <div class="trackedge">flush right</div>
+    <div class="trackedge" style="letter-spacing:6px">flush right</div>
+    <p class="caption">Both boxes are right&#8209;aligned. CSS&nbsp;Text&nbsp;3 words
+      <code>letter-spacing</code> as spacing <em>between</em> characters, but every
+      shipping browser adds it after <em>every</em> character including the last &mdash;
+      which is why the tracked line stops one tracking&#8209;width short of the right
+      edge. This engine matches the browsers. SVG deliberately does <em>not</em>:
+      SVG&nbsp;1.1's wording adds no trailing gap, so <code>pkg/svg</code> keeps its
+      trailing edge flush. Two specs, not an inconsistency.</p>
+
+  </section>
+
+  <section class="section break">
+    <span class="kicker">28 / TRACKING, CONTINUED</span>
+    <h2>Tracking changes where lines break</h2>
+    <p class="lede">Spacing is folded into each glyph's advance during shaping, so
+      everything downstream sees the adjusted widths without knowing the properties
+      exist. Line breaking is the visible proof.</p>
+
+    <div class="trackwrap">tracking moves words</div>
+    <div class="trackwrap" style="letter-spacing:4px">tracking moves words</div>
+    <p class="caption">The same text in the same box. The spacing is folded into each
+      glyph's advance, so the greedy line breaker sees the wider run and pushes a word
+      down with no change to the breaker itself &mdash; the same mechanism that makes
+      <em>min&#8209;content</em> and <em>max&#8209;content</em> account for tracking.</p>
+  </section>
+
 </body>
 </html>

@@ -733,3 +733,49 @@ Look for: the four arguments separating cleanly. _offset_ moves the shape; _blur
 The `inset` keyword is a genuinely different rendering, not a sign flip. An outer shadow fills the region _outside_ the border box — so a tile with a transparent background shows a ring, never a filled blob — while an inset shadow fills the part of the _padding_ box its own shape does not cover, and can never escape the box however far it is offset. That is why an inset spread runs the other way: growing the shape shrinks the lit interior, which _thickens_ the band. The last two swatches show a comma‑separated list, where the first shadow in the list paints on top of the ones after it, and where an outer and an inset shadow coexist because they sit in different slots of the box's paint order — outer behind the background, inset over the background but under the border.
 
 A shadow with no blur is a plain vector fill, so the common patterns — a hard offset, a spread ring, an `inset` colour spine — stay fully vector in PDF output. A _blurred_ shadow needs an offscreen raster surface, which a PDF writer does not have and PDF has no operator for; there it degrades to the same shadow with a hard edge, at the same place and size, rather than rasterising the page or dropping the decoration.
+
+**27 / TRACKING**
+
+## The `letter-spacing` & `word-spacing` Properties
+
+Extra space added _between_ characters and _at_ word separators. Both are inherited, both accept negative lengths, and both are folded into each glyph's advance during shaping — so line breaking, intrinsic sizing and alignment all see the adjusted widths without knowing the properties exist. `normal` resets an inherited value, and an `em` length inherits as _specified_, re‑resolving against each descendant's own font size.
+
+#### `letter-spacing` — positive tracks, negative tightens
+
+Tracking changes the texture of a line.
+
+The control: `letter-spacing:normal`.
+
+Tracking changes the texture of a line.
+
+`letter-spacing:3px` — every character gains 3px of advance.
+
+Tracking changes the texture of a line.
+
+`letter-spacing:-0.5px` — a negative value is legal and tightens. Advances are floored at zero, so an extreme negative value overlaps glyphs rather than producing the negative advances the line breaker cannot represent.
+
+#### `word-spacing` — separators only
+
+Only the gaps between words grow here.
+
+`word-spacing:10px` widens U+0020 and U+00A0 and nothing else, so the words themselves are untouched.
+
+#### Where the spacing lands at the end of a line
+
+flush right
+
+flush right
+
+Both boxes are right‑aligned. CSS Text 3 words `letter-spacing` as spacing _between_ characters, but every shipping browser adds it after _every_ character including the last — which is why the tracked line stops one tracking‑width short of the right edge. This engine matches the browsers. SVG deliberately does _not_: SVG 1.1's wording adds no trailing gap, so `pkg/svg` keeps its trailing edge flush. Two specs, not an inconsistency.
+
+**28 / TRACKING, CONTINUED**
+
+## Tracking changes where lines break
+
+Spacing is folded into each glyph's advance during shaping, so everything downstream sees the adjusted widths without knowing the properties exist. Line breaking is the visible proof.
+
+tracking moves words
+
+tracking moves words
+
+The same text in the same box. The spacing is folded into each glyph's advance, so the greedy line breaker sees the wider run and pushes a word down with no change to the breaker itself — the same mechanism that makes _min‑content_ and _max‑content_ account for tracking.

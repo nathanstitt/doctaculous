@@ -44,6 +44,18 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
 
   value retained on `svg.Document`; `resolveSize` consumes it into `rootM` and discards it.
 
-- **`letter-spacing`/`word-spacing` are SVG-only** — implemented in `pkg/svg/style.go`, absent from
-  `ComputedStyle`, so an SVG-internal declaration works but inheriting one from an enclosing HTML
-  ancestor does not. Wiring them into reflow means facing line-breaking and justification.
+- **NO computed CSS property inherits across the HTML→SVG boundary** — not `letter-spacing`, not
+  `color`, not `font-family`. Inline `<svg>` is REPLACED content: box generation re-serializes the
+  markup and `pkg/svg` re-parses it through `svg.Parse(data, logf)`, whose entire input is the
+  markup and a logger. There is no seam for a `ComputedStyle` to cross.
+
+  This was previously recorded as a consequence of `letter-spacing`/`word-spacing` being absent from
+  `ComputedStyle`. That framing was wrong. Those fields now exist and are fully implemented for CSS
+  reflow, and adding them did **not** change this behavior — verified by measurement:
+  `<div style="letter-spacing:20px"><svg><text>III</text></svg></div>` renders ink spanning
+  x=[2..26], identical to no declaration at all, while an SVG-internal `letter-spacing="20"`
+  correctly spans x=[2..106].
+
+  Closing it means giving `svg.Parse` (or the inline-SVG cache) an inherited-style parameter and
+  seeding the SVG root's `Style` from it — a whole-boundary change worth doing once for the entire
+  inherited set, not one property at a time.

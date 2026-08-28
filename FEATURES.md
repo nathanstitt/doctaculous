@@ -163,6 +163,27 @@ bullet's design rationale is in its PR:
   using the UCD tables already vendored with `benoitkugler/textlayout`, so no combining mark, jamo,
   or emoji is ever split. `white-space: nowrap` outranks all of it. Untouched callers (DOCX, SVG
   text, any page not setting these) keep the whitespace-only breaking path byte-identical.
+- **`letter-spacing` / `word-spacing` on the CSS text path** (`pkg/css/cascade.go`,
+  `pkg/layout/inline/shape.go`, `pkg/layout/css/inline.go`): `letter-spacing: normal | <length>` and
+  `word-spacing: normal | <length>`, both inherited, both accepting NEGATIVE lengths (which tighten)
+  in `px`/`pt`/`em`. `letter-spacing` is added after **every** typographic character unit including
+  the last one on a line — matching Chrome/Firefox/Safari rather than CSS Text 3's literal "between"
+  wording, so a right-aligned tracked line correctly stops one tracking-width short of the edge.
+  `word-spacing` is added only at word separators (U+0020 and U+00A0, per CSS Text 3 §8.2); U+00A0
+  takes the spacing without becoming a break opportunity. `normal` is modeled as the zero length —
+  the spec's only distinction is latitude this engine's justifier never takes — so it correctly
+  RESETS an inherited value. Both are resolved against the run's own font size and folded into
+  `Glyph.Advance` at shaping time, so **line breaking, min/max-content sizing, tab stops, and
+  justification all compose with no change to any of them**: a justified line still lands flush
+  because word-spacing widens the gaps before the slack is computed. Per-glyph advances are floored
+  at zero so a large negative tracking overlaps glyphs (as browsers do) rather than producing
+  negative advances the greedy breaker cannot represent. Bidi control marks stay zero-width.
+  Untouched callers (DOCX, PDF, any page not setting these) are byte-identical.
+  Two limits recorded rather than implied: tracking is applied to cursive scripts, where CSS Text 3
+  says it should be suppressed for joined runs (harfbuzz join data is not surfaced through this
+  engine's complex-shaping result); and these properties still do **not** inherit into an inline
+  `<svg>` — nothing does, because inline SVG is replaced content re-parsed in isolation (see
+  `docs/SVG.md`).
 - **List markers + CSS counters** (`pkg/css/counter_format.go`, `pkg/layout/css/counters.go`,
   `pkg/font/bullet.go`): `list-style-*`, `counter-reset`/`-increment`/`-set`, `content: counter()`;
   synthetic bullet outlines.
