@@ -736,3 +736,91 @@ a.seen:visited { color: #6a9a3a; }
 /* Composition: the list applies LEFT TO RIGHT, each function consuming the
    previous one's output. */
 .f-chain     .fxtile { filter: grayscale(1) brightness(1.5) contrast(1.4); }
+
+/* ---------------------------------------------------------------------------
+   CSS gradients (linear-gradient / radial-gradient as a background image)
+
+   Each swatch is one gradient declaration on an otherwise identical tile, so the
+   grid reads as a comparison of the GRAMMAR rather than of the tiles. The tiles
+   are deliberately NON-SQUARE (wider than tall): a `to <corner>` gradient's line
+   is only 45 degrees on a square, so a square swatch would hide the one piece of
+   this geometry most likely to be got wrong.
+   --------------------------------------------------------------------------- */
+.gxgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 4px;
+}
+
+.gx {
+  width: 116px;
+  font-family: "Inconsolata", monospace;
+  font-size: 9px;
+  line-height: 11px;
+  color: #3a4a5a;
+}
+
+/* 116x58 — a 2:1 box, so the corner gradients below are visibly not 45 degrees. */
+.gx .gxtile {
+  height: 58px;
+  border: 1px solid #8a8272;
+  margin-bottom: 5px;
+}
+
+/* Direction: the default (`to bottom`), the four sides, an angle, and the two
+   corner forms whose line angle depends on the box's aspect ratio. */
+.g-default  .gxtile { background: linear-gradient(#2f6fb0, #d9a521); }
+.g-right    .gxtile { background: linear-gradient(to right, #2f6fb0, #d9a521); }
+.g-left     .gxtile { background: linear-gradient(to left, #2f6fb0, #d9a521); }
+.g-top      .gxtile { background: linear-gradient(to top, #2f6fb0, #d9a521); }
+.g-45deg    .gxtile { background: linear-gradient(45deg, #2f6fb0, #d9a521); }
+.g-turn     .gxtile { background: linear-gradient(0.75turn, #2f6fb0, #d9a521); }
+.g-corner   .gxtile { background: linear-gradient(to bottom right, #2f6fb0, #d9a521); }
+.g-corner2  .gxtile { background: linear-gradient(to top right, #2f6fb0, #d9a521); }
+
+/* Colour stops: several colours, explicit positions, two stops sharing a
+   position (a hard break), and a fade to `transparent` — which is the case that
+   proves the interpolation is PREMULTIPLIED, since a straight-alpha ramp shows a
+   grey band through the middle of it. */
+.g-multi    .gxtile { background: linear-gradient(to right, #b03030, #d9a521, #3a7d5a, #2f6fb0); }
+.g-stops    .gxtile { background: linear-gradient(to right, #2f6fb0 25%, #d9a521 75%); }
+.g-hard     .gxtile { background: linear-gradient(to right, #2f6fb0 50%, #b03030 50%); }
+.g-bands    .gxtile {
+  background: linear-gradient(to right,
+    #b03030 0 25%, #d9a521 25% 50%, #3a7d5a 50% 75%, #2f6fb0 75% 100%);
+}
+.g-alpha    .gxtile { background: linear-gradient(to right, #b03030, transparent); }
+
+/* Radial: the ending shape's two keyword axes (circle/ellipse) crossed with the
+   sizing rules, plus an off-centre `at <position>`. */
+.g-radial   .gxtile { background: radial-gradient(#d9a521, #2f6fb0); }
+.g-circle   .gxtile { background: radial-gradient(circle, #d9a521, #2f6fb0); }
+.g-cside    .gxtile { background: radial-gradient(closest-side, #d9a521, #2f6fb0); }
+.g-fside    .gxtile { background: radial-gradient(circle farthest-side, #d9a521, #2f6fb0); }
+.g-at       .gxtile { background: radial-gradient(circle at 20% 30%, #d9a521, #2f6fb0); }
+
+/* Repeating: the ramp's own stop range becomes the repeat PERIOD, so these tile
+   the pattern rather than stretching it across the box. */
+.g-replin   .gxtile {
+  background: repeating-linear-gradient(to right, #2f6fb0 0 8px, #d9a521 8px 16px);
+}
+.g-repang   .gxtile {
+  background: repeating-linear-gradient(45deg, #3a7d5a 0 6px, #efe9d8 6px 12px);
+}
+.g-reprad   .gxtile {
+  background: repeating-radial-gradient(circle, #b03030 0 7px, #efe9d8 7px 14px);
+}
+
+/* A gradient is a background IMAGE, so background-size / -position / -repeat all
+   apply to it exactly as they do to a bitmap. */
+.g-sized    .gxtile {
+  background: linear-gradient(to right, #2f6fb0, #d9a521);
+  background-size: 40px 100%;
+}
+.g-norepeat .gxtile {
+  background: linear-gradient(to right, #2f6fb0, #d9a521);
+  background-size: 60% 60%;
+  background-repeat: no-repeat;
+  background-position: center;
+}

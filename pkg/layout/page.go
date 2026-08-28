@@ -308,8 +308,25 @@ type BackgroundImageItem struct {
 	// SceneW, SceneH are Scene's own authored viewport size in points, which the
 	// painter needs to scale the scene into the tile rect. Meaningful only when
 	// Scene is set.
-	SceneW, SceneH         float64
-	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector source's intrinsic size), > 0
+	SceneW, SceneH float64
+
+	// Gradient is set INSTEAD of Img and Scene when the background image is a CSS
+	// <gradient>. Exactly one of the three sources is ever set.
+	//
+	// A gradient has NO INTRINSIC SIZE (CSS Images 3: it is a generated image
+	// with no natural dimensions), so unlike a bitmap or an SVG it cannot supply
+	// IntrinsicW/IntrinsicH from its content. The layout engine therefore sets
+	// them to the ORIGIN BOX's size, which is exactly what `background-size:
+	// auto` must resolve to for a sizeless image — that one substitution makes
+	// every other background property (size, position, repeat, origin, clip)
+	// work on a gradient through the unchanged geometry path, rather than needing
+	// a parallel set of rules.
+	//
+	// The gradient's own coordinates live in TILE space, so a `background-size`
+	// that shrinks the tile correctly shrinks the gradient with it.
+	Gradient *BackgroundGradient
+
+	IntrinsicW, IntrinsicH float64 // decoded pixel size (or the vector/generated source's intrinsic size), > 0
 
 	// Origin box: where the image is sized and positioned (background-origin box).
 	OriginX, OriginY, OriginW, OriginH float64

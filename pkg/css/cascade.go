@@ -77,7 +77,21 @@ type ComputedStyle struct {
 	//
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
-	BackgroundImage    string
+	BackgroundImage string
+	// BackgroundGradient is set INSTEAD of BackgroundImage when background-image
+	// is a <gradient> function rather than a url(). The two are mutually
+	// exclusive: whichever form the declaration produced clears the other, so a
+	// later `background-image: url(x)` correctly replaces an earlier gradient
+	// and vice versa. nil means "no gradient", the initial state.
+	//
+	// It holds a PARSED *Gradient rather than raw declaration text (the way
+	// Filter keeps its value raw) because a gradient's grammar needs no length
+	// resolution at parse time — only its stop POSITIONS and radii do, and those
+	// stay as Lengths inside the struct until layout resolves them against the
+	// gradient box. Parsing here means a malformed gradient is dropped by the
+	// cascade like any other bad declaration, rather than failing later where the
+	// original text is no longer available to report.
+	BackgroundGradient *Gradient
 	BackgroundRepeat   string         // "repeat" (initial) | "repeat-x" | "repeat-y" | "no-repeat"
 	BackgroundPosition BackgroundPos  // initial 0% 0% (top-left)
 	BackgroundSize     BackgroundSize // initial auto
@@ -609,8 +623,13 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.BackgroundColor = c
 		}
 	case "background-image":
-		if ref, ok := parseBackgroundImage(d.Value); ok {
-			cs.BackgroundImage = ref
+		// Both fields are assigned together so the two <image> forms stay
+		// mutually exclusive: a gradient replacing an earlier url() must clear
+		// the url(), and vice versa. ok=false leaves BOTH untouched, which is
+		// what makes an unimplemented <image> keep the prior value rather than
+		// silently resetting the property to none.
+		if ref, grad, ok := parseBackgroundImage(d.Value); ok {
+			cs.BackgroundImage, cs.BackgroundGradient = ref, grad
 		}
 	case "filter":
 		// Kept RAW (see ComputedStyle.Filter): the grammar is parsed by

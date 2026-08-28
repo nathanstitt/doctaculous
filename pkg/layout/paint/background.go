@@ -19,7 +19,7 @@ const maxBackgroundTiles = 100000
 // every tile to the clip box (background-clip). It mirrors paintImage's matrix recipe
 // (unit square → tile rect, Y-flipped for DrawImage's bottom-up convention).
 func paintBackgroundImage(dev render.Device, it *layout.BackgroundImageItem, mat render.Matrix) {
-	if it.Img == nil && it.Scene == nil {
+	if it.Img == nil && it.Scene == nil && it.Gradient == nil {
 		return
 	}
 	if it.IntrinsicW <= 0 || it.IntrinsicH <= 0 {
@@ -66,8 +66,14 @@ func paintBackgroundImage(dev render.Device, it *layout.BackgroundImageItem, mat
 // (tx,ty) at size tw x th. A RASTER source goes through DrawImage with the usual
 // unit-square → tile-rect matrix (Y-flipped for DrawImage's bottom-up convention);
 // a VECTOR source is handed a ctm that maps its authored viewport onto the tile
-// rect, so the backend receives path operators rather than pixels.
+// rect, so the backend receives path operators rather than pixels; a GRADIENT
+// source is evaluated per device pixel through the shading seam (see
+// paintGradientTile), which likewise keeps it resolution-independent.
 func paintBackgroundTile(dev render.Device, it *layout.BackgroundImageItem, tx, ty, tw, th float64, mat render.Matrix) {
+	if it.Gradient != nil {
+		paintGradientTile(dev, it.Gradient, tx, ty, tw, th, mat)
+		return
+	}
 	if it.Scene != nil {
 		if it.SceneW <= 0 || it.SceneH <= 0 {
 			return

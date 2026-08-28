@@ -451,3 +451,71 @@ grayscale(1) brightness(1.5) contrast(1.4)
 Look for: the two spatial functions. `blur(2px)` and `drop-shadow()` both reach _outside_ the tile's border box — CSS, unlike SVG, does not clip a filter to a region — while the eight colour adjustments recolour each pixel in place. The last swatch chains three functions, which apply left to right: grey first, then brighten that result, then raise its contrast.
 
 The chain runs over the box's flattened pixels in an offscreen surface, which is why a filtered box also establishes a block formatting context and a stacking context: its whole rendering has to compose as one isolated group before the effect can apply. In PDF output the same content paints _unfiltered_ — a PDF writer has no offscreen raster surface and PDF has no filter operator, so the content stays vector and correctly placed rather than being rasterised into a picture of itself.
+
+**19 / GRADIENTS**
+
+## CSS `linear-gradient()` and `radial-gradient()`
+
+A gradient is a generated _background image_, not a colour: it is painted by the same shading engine SVG paint servers use, evaluated per device pixel rather than baked into a bitmap. Every tile below is 116×58 — deliberately not square, because a `to <corner>` gradient's line is only 45° on a square.
+
+### Direction
+
+(none) → to bottom
+
+to right
+
+to left
+
+to top
+
+45deg
+
+0.75turn
+
+to bottom right
+
+to top right
+
+Look for: the two corner swatches. Their bands are _not_ at 45°. CSS angles the gradient line so the perpendicular through each end lands exactly on a corner, which on a 2:1 box makes the line noticeably shallower — and puts the two _other_ corners at precisely the midpoint colour. `0deg` points up and angles run clockwise, so `0.75turn` (270°) matches `to left`.
+
+### Colour stops
+
+four colours, no positions
+
+25% … 75%
+
+two stops at 50% (hard break)
+
+four hard bands
+
+→ transparent
+
+Look for: stops with no position are spread _evenly_ between the ones that have them, so the four-colour swatch changes at 33% and 67% without being told to. Two stops sharing a position give a hard edge with no blend at all — the mechanism behind the four-band swatch. The last swatch fades to `transparent` and stays _red_ the whole way: interpolation runs in premultiplied alpha, which is what keeps a grey band from appearing through the middle of it.
+
+### Radial
+
+ellipse (default)
+
+circle
+
+closest-side
+
+circle farthest-side
+
+circle at 20% 30%
+
+Look for: the default ending shape is an _ellipse_ sized to the farthest corner, so it stretches with the box; adding `circle` makes both radii equal and the rings become round. The sizing keyword picks which box feature the shape must reach — `closest-side` lands the end colour on the nearest edges, so the corners sit beyond the ramp and are solid.
+
+### Repeating, and the background-\* properties
+
+repeating, 16px period
+
+repeating at 45deg
+
+repeating radial
+
+background-size: 40px
+
+60% size, centered, no-repeat
+
+Look for: a repeating gradient takes its _stop range_ as the period, so the ramp tiles rather than stretching once. The last two swatches show a gradient really is a background image — `background-size` resizes its box, and the result tiles or is placed by `background-position` exactly as a bitmap would.
