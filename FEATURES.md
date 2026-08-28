@@ -311,6 +311,17 @@ bullet's design rationale is in its PR:
   it never sees a shadow item and has no `box-shadow` analogue to map one onto.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
   `:link`/`:visited` + general pseudo-class parsing.
+- **Inline emphasis UA defaults** (`pkg/html/ua.go`): `strong`/`b` bold, `em`/`i`/`cite`/`var`/`dfn`
+  italic, `u`/`ins` underlined — each resolving to the same computed style as its CSS equivalent,
+  and nesting without flattening. Previously these tags were structurally present (and survived
+  conversion to Markdown) but visually identical to plain text in every rasterized format. The sheet
+  spells the weight `bold`, not the spec's `bolder`: the cascade's `font-weight` is the binary
+  bold/normal the four-style bundled families can express and rejects the relative keywords, so
+  `bolder` would be dropped as invalid and the emphasis would stay invisible (a test pins this).
+  `<small>`/`<big>` are omitted rather than given a hardcoded px size, and `<mark>` is omitted
+  because **backgrounds do not paint on non-replaced inline boxes** — an inline `<span>` with an
+  explicit `background-color` paints nothing, while the same span at `display:inline-block` paints;
+  a `mark` rule would cascade and do nothing. Showcase §30.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
   `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… mapped to
   CSS below author rules (HN renders with its bgcolor).

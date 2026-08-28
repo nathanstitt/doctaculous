@@ -787,6 +787,22 @@ The generic keyword still terminates the list the way CSS says it should — thi
 
 Bold and italic survive the substitution.
 
-The fallback is style‑aware: the bundled bold and italic faces are selected, rather than every run collapsing to one regular face. (The weight and slant are set with CSS rather than <strong> and <em> because the UA stylesheet carries no rule for those tags yet — a separate gap, tracked in the remediation plan.)
+The fallback is style‑aware: the bundled bold and italic faces are selected, rather than every run collapsing to one regular face. The weight and slant here come from <strong> and <em> via the UA stylesheet — see §30.
 
 A related failure sat one layer down. The OS font matcher never reports a miss — asked for a family it does not have, it confidently returns some other installed font. A request for DejaVu Sans came back as Lucida Grande, and Roboto, IBM Plex Mono and a deliberately nonexistent name all returned the identical Arial Unicode bytes. Each resolved face is now checked against the family its own name table declares, so a wrong answer becomes an honest miss and falls through to the bundled face above.
+
+30 / INLINE EMPHASIS DEFAULTS
+
+Semantic emphasis tags carry their own weight and slant
+
+These tags need no author CSS: the user‑agent stylesheet gives them a weight or a slant, the way a browser does. Without those rules the markup still parsed and still converted to Markdown correctly — it was only invisible in every rasterized format.
+
+strong and b are bold. em, i, cite, var and dfn are italic. u and ins are underlined.
+
+Each tag resolves to exactly the same computed style as its CSS equivalent (font-weight:bold, font-style:italic, text-decoration:underline) — the UA rules are the only difference between this line and unstyled text.
+
+A bold line where strong is nested inside.
+
+Nesting does not flatten: <strong> inside already‑bold text stays bold. The HTML spec spells these defaults bolder and smaller, but this engine's font-weight is the binary bold/normal its four‑style bundled families can express and its font-size takes a length, so neither relative keyword parses — they would be dropped as invalid and the emphasis would stay invisible. The sheet uses bold, the honest spelling of what the renderer can do, and a test pins that choice.
+
+<small> and <big> are deliberately absent rather than given a hardcoded pixel size, which would be wrong at every font‑size but the default. <mark> is absent too: its default is a background, and backgrounds do not paint on non‑replaced inline boxes here — an inline <span> with an explicit background-color paints nothing, while the same span at display:inline-block paints. A <mark> rule would cascade and then do nothing, which reads as support; it belongs with the inline‑background work instead.

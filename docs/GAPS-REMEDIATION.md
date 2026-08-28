@@ -16,7 +16,8 @@ the fix follows the measurement, not the report.
 | 5 | `-webkit-line-clamp` unimplemented | **Real, larger** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
 | 6 | `color-mix()` unimplemented | **Real** | — |
 | 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
-| 8 | *(found while fixing #1)* | **Real** | `<strong>`/`<b>`/`<em>`/`<i>` render with no bold or italic — the UA stylesheet has no rule for them. |
+| 8 | *(found while fixing #1)* | **Real — FIXED** | `<strong>`/`<b>`/`<em>`/`<i>` rendered with no bold or italic — the UA stylesheet had no rule for them. |
+| 9 | *(found while fixing #8)* | **Real** | Backgrounds do not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` paints nothing. |
 
 ### How these were measured
 
@@ -433,12 +434,50 @@ relative weight keywords, so `bolder` is dropped as an invalid value and the emp
 stays invisible. Adding `bolder` support is a reasonable follow-up; spelling the rule
 `bold` is the honest description of what the renderer can express today.
 
-**Why its own branch.** This was drafted and verified during the #1 work (the md-specimen
-golden confirms *emphasis* and **strong** then render correctly), but reverted: a UA
-stylesheet change moves goldens across HTML, EPUB, PPTX, Markdown-text and the whole
-showcase — 10 golden files and dozens of pages. That blast radius does not belong in a
-font-resolution branch. Sequence it on its own, regenerate every affected golden, and
-eyeball them.
+**Why its own branch.** This was drafted and verified during the #1 work, but reverted:
+a UA stylesheet change moves goldens across HTML, EPUB, PPTX, RTF, DOCX, Markdown-text
+and the whole showcase. That blast radius does not belong in a font-resolution branch.
+
+**STATUS: DONE** — `fix/ua-emphasis-defaults`, stacked on branch 1. Shipped
+`strong, b { font-weight: bold }`, `em, i, cite, var, dfn { font-style: italic }`, and
+`u, ins { text-decoration: underline }`, with showcase §30. Verified per format by
+eyeballing the regenerated goldens (Markdown, RTF, EPUB, DOCX, PPTX all render emphasis
+correctly) and by confirming each differing region begins at the emphasis line rather
+than shifting the whole page. `<small>`/`<big>` and `<mark>` were deliberately left out
+— see below and #9.
+
+## 9. Backgrounds do not paint on inline boxes (found while fixing #8)
+
+Found while deciding whether the UA sheet should give `<mark>` its default yellow
+background. It should — but the rule would do nothing.
+
+**Confirmed by measurement.** Counting *yellow* pixels specifically (a non-white-pixel
+count cannot tell a yellow fill from no fill, which is exactly the trap the source
+report warned about):
+
+```
+<mark>Hello</mark>                                      yellow=0
+<span style="background-color:#ffff00">Hello</span>     yellow=0
+<span style="background:#ffff00">Hello</span>           yellow=0
+<span style="display:inline-block;background:#ffff00">  yellow=2530   <- paints
+```
+
+So the property parses and cascades correctly; the **paint** step never emits a
+background for a non-replaced inline box. Only `inline-block` (which generates a box
+with its own padding-box rect) paints.
+
+This is why `<mark>` is absent from the UA sheet: adding it would parse, cascade, and
+then silently do nothing, which reads as support. Same reasoning applies to any author
+CSS that puts a background on a `<span>` — a common highlight idiom.
+
+**Fix:** paint background (and border) for inline boxes across each of their line-box
+fragments, not just for block-level and inline-block boxes. An inline box spanning a
+line break produces multiple fragments, so the background paints once per fragment —
+that fragmentation is the reason this is a real piece of work rather than a one-liner.
+`<mark>`'s UA rule lands with it.
+
+**Priority:** above #6 (`color-mix`), below the clipping work. A background on a `<span>`
+is common in real documents, and today it is silently dropped.
 
 ## Sequencing
 
@@ -452,7 +491,8 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | 4 | `feat/svg-host-cascade` | #2 | Medium; touches three signatures + a cache key. |
 | 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |
 | 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |
-| — | `fix/ua-emphasis-defaults` | #8 | Found during branch 1. One-rule fix, but regenerates goldens across every format; slot it anywhere, alone. |
+| 2 | `fix/ua-emphasis-defaults` | #8 | **DONE** — stacked on branch 1. Regenerated goldens across every format. |
+| — | `feat/inline-box-backgrounds` | #9 | Found during #8. Needs per-line-fragment painting; `<mark>`'s UA rule lands with it. |
 
 Docs task alongside: #4c (verify line pitch, document in `docs/CSS-LAYOUT.md`), and a
 FEATURES.md entry per landed item — including the honest limits (#2 does not cross

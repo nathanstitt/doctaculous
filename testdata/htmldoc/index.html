@@ -1146,13 +1146,11 @@ newline is kept.</p>
       fallback above did not simply replace normal resolution.</p>
 
     <div class="absentbox" style="font-family:'Totally Absent Face XYZ'">
-      <span style="font-weight:bold">Bold</span> and
-      <span style="font-style:italic">italic</span> survive the substitution.</div>
+      <strong>Bold</strong> and <em>italic</em> survive the substitution.</div>
     <p class="caption">The fallback is style&#8209;aware: the bundled bold and italic
-      faces are selected, rather than every run collapsing to one regular face. (The
-      weight and slant are set with CSS rather than <code>&lt;strong&gt;</code> and
-      <code>&lt;em&gt;</code> because the UA stylesheet carries no rule for those tags
-      yet &mdash; a separate gap, tracked in the remediation plan.)</p>
+      faces are selected, rather than every run collapsing to one regular face. The
+      weight and slant here come from <code>&lt;strong&gt;</code> and
+      <code>&lt;em&gt;</code> via the UA stylesheet &mdash; see &sect;30.</p>
 
     <p class="caption">A related failure sat one layer down. The OS font matcher never
       reports a miss &mdash; asked for a family it does not have, it confidently returns
@@ -1162,6 +1160,45 @@ newline is kept.</p>
       bytes. Each resolved face is now checked against the family its own
       <code>name</code> table declares, so a wrong answer becomes an honest miss and
       falls through to the bundled face above.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">30 / INLINE EMPHASIS DEFAULTS</span>
+    <h2>Semantic emphasis tags carry their own weight and slant</h2>
+    <p class="lede">These tags need no author CSS: the user&#8209;agent stylesheet gives
+      them a weight or a slant, the way a browser does. Without those rules the markup
+      still parsed and still converted to Markdown correctly &mdash; it was only
+      <em>invisible</em> in every rasterized format.</p>
+
+    <div class="absentbox">
+      <strong>strong</strong> and <b>b</b> are bold.
+      <em>em</em>, <i>i</i>, <cite>cite</cite>, <var>var</var> and <dfn>dfn</dfn>
+      are italic. <u>u</u> and <ins>ins</ins> are underlined.</div>
+    <p class="caption">Each tag resolves to exactly the same computed style as its CSS
+      equivalent (<code>font-weight:bold</code>, <code>font-style:italic</code>,
+      <code>text-decoration:underline</code>) &mdash; the UA rules are the only
+      difference between this line and unstyled text.</p>
+
+    <div class="absentbox" style="font-weight:bold">
+      A bold line where <strong>strong</strong> is nested inside.</div>
+    <p class="caption">Nesting does not flatten: <code>&lt;strong&gt;</code> inside
+      already&#8209;bold text stays bold. The HTML spec spells these defaults
+      <code>bolder</code> and <code>smaller</code>, but this engine's
+      <code>font-weight</code> is the binary bold/normal its four&#8209;style bundled
+      families can express and its <code>font-size</code> takes a length, so neither
+      relative keyword parses &mdash; they would be dropped as invalid and the emphasis
+      would stay invisible. The sheet uses <code>bold</code>, the honest spelling of
+      what the renderer can do, and a test pins that choice.</p>
+
+    <p class="caption"><code>&lt;small&gt;</code> and <code>&lt;big&gt;</code> are
+      deliberately absent rather than given a hardcoded pixel size, which would be wrong
+      at every font&#8209;size but the default. <code>&lt;mark&gt;</code> is absent too:
+      its default is a <em>background</em>, and backgrounds do not paint on non&#8209;replaced
+      inline boxes here &mdash; an inline <code>&lt;span&gt;</code> with an explicit
+      <code>background-color</code> paints nothing, while the same span at
+      <code>display:inline-block</code> paints. A <code>&lt;mark&gt;</code> rule would
+      cascade and then do nothing, which reads as support; it belongs with the
+      inline&#8209;background work instead.</p>
   </section>
 
 </body>
