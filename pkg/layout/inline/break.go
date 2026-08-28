@@ -58,17 +58,23 @@ func Break(glyphs []Glyph, maxWidthPt, firstWidthPt float64) []Line {
 		if vw() <= avail {
 			continue
 		}
-		// The line now overflows. Break at the last space before the overflow; if
-		// there is none, the single long word stays and overflows.
-		brk := lastSpaceBefore(cur, len(cur)-1)
-		if brk < 0 {
-			// No break opportunity yet (one long word in progress). Keep filling; it
-			// will be emitted when a space finally appears or at paragraph end.
+		// The line now overflows. Choose where to break it.
+		keepN, dropBreaker, ok := chooseBreak(cur, len(cur)-1, avail)
+		if !ok {
+			// No break opportunity yet (one long word in progress, mid-word breaking
+			// not enabled). Keep filling; it will be emitted when a space finally
+			// appears or at paragraph end.
 			continue
 		}
-		// Keep [0:brk] on this line; carry the rest (minus the breaking space).
-		keep := cur[:brk]
-		rest := cur[brk+1:]
+		// Keep [0:keepN] on this line and carry the rest. A space break CONSUMES the
+		// breaking space (dropBreaker); a mid-word break consumes nothing, since both
+		// sides of it are visible characters.
+		restFrom := keepN
+		if dropBreaker {
+			restFrom = keepN + 1
+		}
+		keep := cur[:keepN]
+		rest := cur[restFrom:]
 		lines = append(lines, MakeLine(append([]Glyph(nil), keep...)))
 		cur = append([]Glyph(nil), rest...)
 		recount()
@@ -148,18 +154,67 @@ func BreakNextWrap(glyphs []Glyph, widthPt float64, wrap bool) (line, rest []Gly
 		if total-trail <= widthPt {
 			continue
 		}
-		// cur now overflows. Break at the last space before the overflow.
-		brk := lastSpaceBefore(glyphs[:i+1], i)
-		if brk < 0 {
+		// cur now overflows. Choose where to break it.
+		keepN, dropBreaker, ok := chooseBreak(glyphs[:i+1], i, widthPt)
+		if !ok {
 			// One long word in progress with no break opportunity yet: keep filling
 			// until a space appears or the run ends.
 			continue
 		}
-		// Keep [0:brk] on this line; the breaking space at brk is consumed.
-		return glyphs[:brk], glyphs[brk+1:]
+		// Keep [0:keepN] on this line. A space break consumes the breaking space; a
+		// mid-word break consumes nothing (both sides stay visible).
+		if dropBreaker {
+			return glyphs[:keepN], glyphs[keepN+1:]
+		}
+		return glyphs[:keepN], glyphs[keepN:]
 	}
 	// The whole remaining run fits (or is one overlong word): it is the line.
 	return glyphs, nil
+}
+
+// chooseBreak decides where to break a line that has just overflowed. glyphs is the
+// line-so-far ending at idx (the glyph that pushed it over) and availPt is the line's
+// available width. It returns keepN — the number of leading glyphs that stay on the line
+// — dropBreaker (true when glyphs[keepN] is a breaking SPACE that the break consumes),
+// and ok=false when no opportunity exists and the caller should keep filling.
+//
+// The precedence is what CSS Text 3 specifies and is the part worth reading carefully:
+//
+//  1. `word-break: break-all` is an ORDINARY opportunity, so it competes with spaces on
+//     position alone: whichever is later wins, because greedy first-fit takes the last
+//     opportunity that still fits. This is what makes break-all chop a word that would
+//     have fitted on the following line.
+//  2. Otherwise a space wins outright — normal breaking is always preferred.
+//  3. Only when there is NO space to break at does `overflow-wrap: break-word`/`anywhere`
+//     apply, and even then only if the overflowing word could not fit on a line of its
+//     own. That second condition is the "last resort" clause: a word narrower than the
+//     line box is left whole and pushed down by the space break that precedes it, so it
+//     is precisely the case where step 2 already handled things — which is why the check
+//     is against the word's width, not the line's.
+func chooseBreak(glyphs []Glyph, idx int, availPt float64) (keepN int, dropBreaker bool, ok bool) {
+	space := lastSpaceBefore(glyphs, idx)
+	// An eager (break-all) opportunity ranks equally with a space, so take whichever
+	// sits later in the line. Scanning only when some glyph opts in keeps the common
+	// all-normal case to the original single lastSpaceBefore scan.
+	if eager := lastClusterBreakBefore(glyphs, idx); eager > space {
+		return eager, false, true
+	}
+	if space >= 0 {
+		return space, true, true
+	}
+	// No space anywhere on the line: one long word occupies it. Last-resort breaking
+	// applies only if the word genuinely cannot fit on a line by itself — otherwise the
+	// right answer is to keep filling and let the caller move the whole word down.
+	//
+	// Here the word starts at glyph 0 (there is no space before idx), so "the word so
+	// far" is the whole line and it has already exceeded availPt by construction. That
+	// means the word is wider than the line box, the last-resort condition is met, and
+	// the break is taken at the last cluster boundary that still fits.
+	brk := firstClusterBreakFitting(glyphs, idx)
+	if brk < 0 {
+		return 0, false, false
+	}
+	return brk, false, true
 }
 
 // lastSpaceBefore returns the index of the last break-opportunity space at or before

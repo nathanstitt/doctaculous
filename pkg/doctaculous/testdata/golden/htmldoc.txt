@@ -654,3 +654,39 @@ Look for: the inner curve. A rounded border is not the outer path stroked — th
 The overlap correction (CSS Backgrounds 3 §5.1) is what makes an over‑large radius degrade gracefully rather than producing self‑crossing arcs: each side compares its length against the sum of the two radii meeting along it, and the smallest of those ratios scales all eight radius components at once. That single shared factor is why border-radius: 999px on the pill above resolves to exactly half the box's height on every corner.
 
 Backgrounds and borders both follow the rounded outline, and a background image is clipped to it. In PDF output the corners stay genuinely curved: the writer emits the same cubic curve path natively, so a rounded box remains vector rather than being flattened to a picture. A rounded border is filled as one ring in a single colour, so a dashed or multi‑coloured rounded border paints solid — the engine logs that substitution rather than making it silently.
+
+25 / MID-WORD BREAKING
+
+The overflow-wrap & word-break Properties
+
+Where a line may break inside a word. Normal wrapping only breaks at spaces, so a single long token — a URL, a hash, a compound noun — runs straight past the edge of its box. These two properties add opportunities between characters, and they differ in when they take them.
+
+The problem — one unbreakable token
+
+https://example.com/very/long/path/to/a/private/calendar/feed.ics
+
+Default overflow-wrap:normal: the token has no space in it, so there is nowhere to break and it overflows the box on a single line.
+
+overflow-wrap: break-word — break only as a last resort
+
+https://example.com/very/long/path/to/a/private/calendar/feed.ics
+
+The same token now breaks between characters and stays inside the box. The legacy alias word-wrap:break-word is accepted for the same effect.
+
+Last resort vs. eager — the distinction that matters
+
+wrap this sesquipedalian
+
+break-word moves a word that fits on a line of its own down whole, breaking it only when it cannot fit anywhere.
+
+wrap this sesquipedalian
+
+break-all is eager: every character boundary is an ordinary opportunity, so the word is chopped at the line edge regardless.
+
+word-break: keep-all — suppress mid‑word breaking
+
+https://example.com/very/long/path/to/a/private/calendar/feed.ics
+
+keep-all forbids breaking the affected text, so it overrides overflow-wrap and the token overflows again.
+
+Every mid‑word break lands on a grapheme‑cluster boundary (UAX #29), so a combining mark is never separated from its base letter and an emoji ZWJ sequence or a flag is never split in half. overflow-wrap:anywhere breaks in the same places as break-word but additionally shrinks a box's intrinsic min‑content width, which is visible in flex and grid sizing rather than in the line breaking itself.

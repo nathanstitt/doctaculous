@@ -836,6 +836,60 @@ func TestBreakProperties(t *testing.T) {
 	}
 }
 
+func TestOverflowWrapAndWordBreak(t *testing.T) {
+	// Initial values.
+	if got := initialStyle().OverflowWrap; got != "normal" {
+		t.Errorf("initial overflow-wrap = %q, want normal", got)
+	}
+	if got := initialStyle().WordBreak; got != "normal" {
+		t.Errorf("initial word-break = %q, want normal", got)
+	}
+	for _, v := range []string{"normal", "break-word", "anywhere"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "overflow-wrap", Value: v})
+		if cs.OverflowWrap != v {
+			t.Errorf("overflow-wrap:%s => %q", v, cs.OverflowWrap)
+		}
+	}
+	for _, v := range []string{"normal", "break-all", "keep-all"} {
+		cs := initialStyle()
+		applyDeclaration(&cs, Declaration{Property: "word-break", Value: v})
+		if cs.WordBreak != v {
+			t.Errorf("word-break:%s => %q", v, cs.WordBreak)
+		}
+	}
+	// The legacy `word-wrap` alias sets the SAME field — a great deal of real-world CSS
+	// still uses it, and treating it as unknown would silently drop the author's intent.
+	cs := initialStyle()
+	applyDeclaration(&cs, Declaration{Property: "word-wrap", Value: "break-word"})
+	if cs.OverflowWrap != "break-word" {
+		t.Errorf("word-wrap:break-word => OverflowWrap %q, want break-word", cs.OverflowWrap)
+	}
+	// Because both spellings share a field, the later declaration wins (cascade order).
+	applyDeclaration(&cs, Declaration{Property: "overflow-wrap", Value: "normal"})
+	if cs.OverflowWrap != "normal" {
+		t.Errorf("overflow-wrap:normal after word-wrap:break-word => %q, want normal", cs.OverflowWrap)
+	}
+	// Unknown values are ignored, keeping the prior value.
+	bad := initialStyle()
+	applyDeclaration(&bad, Declaration{Property: "overflow-wrap", Value: "bogus"})
+	applyDeclaration(&bad, Declaration{Property: "word-break", Value: "bogus"})
+	if bad.OverflowWrap != "normal" || bad.WordBreak != "normal" {
+		t.Errorf("bogus values => %q/%q, want normal/normal", bad.OverflowWrap, bad.WordBreak)
+	}
+	// Both are inherited (CSS Text 3).
+	parent := initialStyle()
+	applyDeclaration(&parent, Declaration{Property: "overflow-wrap", Value: "anywhere"})
+	applyDeclaration(&parent, Declaration{Property: "word-break", Value: "break-all"})
+	kid := inheritFrom(parent)
+	if kid.OverflowWrap != "anywhere" {
+		t.Errorf("child overflow-wrap = %q, want anywhere (inherited)", kid.OverflowWrap)
+	}
+	if kid.WordBreak != "break-all" {
+		t.Errorf("child word-break = %q, want break-all (inherited)", kid.WordBreak)
+	}
+}
+
 func TestWhiteSpace(t *testing.T) {
 	// Initial value is normal.
 	if got := initialStyle().WhiteSpace; got != "normal" {

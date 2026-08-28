@@ -238,6 +238,7 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				SizePt:          child.Style.FontSizePt,
 				Color:           child.Style.Color,
 				WhiteSpace:      child.Style.WhiteSpace,
+				WordBreak:       wordBreakMode(child.Style),
 				Underline:       child.Style.TextDecorationLine == "underline",
 				Strike:          child.Style.TextDecorationLine == "line-through",
 				BaselineShiftPt: baselineShiftPt(child.Style),
@@ -353,6 +354,38 @@ func baselineShiftPt(st gcss.ComputedStyle) float64 {
 	default:
 		return 0
 	}
+}
+
+// wordBreakMode reduces the two CSS mid-word-breaking properties, overflow-wrap (a.k.a.
+// word-wrap) and word-break, into the single policy the inline breaker implements.
+//
+// They are independent properties that can be set together, so the reduction has to pick
+// a winner. The precedence below is what CSS Text 3 implies and what browsers do:
+//
+//   - `word-break: break-all` is strictly stronger than any overflow-wrap value. It makes
+//     every cluster boundary an ordinary opportunity, which already subsumes
+//     overflow-wrap's last-resort break — a word break-all would have chopped early is
+//     never reached by the last-resort path.
+//   - `word-break: keep-all` is strictly weaker in the opposite direction: it forbids
+//     breaking the affected text, so it SUPPRESSES overflow-wrap. (Per spec keep-all
+//     governs the implicit CJK opportunities; since this engine generates none, the
+//     suppression is its only observable effect here — see ComputedStyle.WordBreak.)
+//   - Otherwise overflow-wrap decides, with `anywhere` distinguished from `break-word`
+//     only by its effect on intrinsic sizing.
+func wordBreakMode(st gcss.ComputedStyle) inline.WordBreakMode {
+	switch st.WordBreak {
+	case "break-all":
+		return inline.WordBreakAll
+	case "keep-all":
+		return inline.WordBreakKeepAll
+	}
+	switch st.OverflowWrap {
+	case "break-word":
+		return inline.WordBreakWord
+	case "anywhere":
+		return inline.WordBreakAnywhere
+	}
+	return inline.WordBreakNormal
 }
 
 // inlineBlockCBWidth returns the containing-block width to lay a width:auto inline-block

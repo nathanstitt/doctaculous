@@ -59,6 +59,13 @@ type Run struct {
 	// it does not affect line-box metrics here. Zero (the default) leaves the run on the
 	// baseline, so a caller (e.g. the DOCX engine) that never sets it is unaffected.
 	BaselineShiftPt float64
+	// WordBreak is the run's mid-word break policy: CSS overflow-wrap (a.k.a. word-wrap)
+	// combined with word-break, reduced to the distinct behaviors the breaker implements
+	// (see wordbreak.go). It is carried onto every glyph the run produces, so a
+	// break-word span inside an otherwise-normal paragraph breaks only its own text. The
+	// zero value (WordBreakNormal) is the CSS initial state and the historical behavior,
+	// so a caller that never sets it (e.g. the DOCX engine) is unaffected.
+	WordBreak WordBreakMode
 }
 
 // AtomicItem is an inline-level box that participates in a line as one unbreakable
@@ -97,6 +104,12 @@ type Glyph struct {
 	// opportunity, so a nowrap inline span stays on one line even inside a wrapping
 	// block.
 	NoWrap bool
+	// WordBreak carries the run's mid-word break policy (the reduced combination of CSS
+	// overflow-wrap and word-break — see wordbreak.go). The breaker consults it to decide
+	// whether a cluster boundary inside this glyph's word is a break opportunity. The zero
+	// value (WordBreakNormal) is whitespace-only breaking, the historical behavior, so a
+	// caller that never sets Run.WordBreak (e.g. DOCX) is unaffected.
+	WordBreak WordBreakMode
 	// Underline carries the run's text-decoration: underline onto the glyph, for the
 	// engine's line emitter to paint as an underline rule. The shaper does not act on
 	// it. Zero (false) for callers that don't set Run.Underline (e.g. DOCX).
@@ -217,7 +230,7 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 		}
 		spaceAdv := spaceEm * r.SizePt
 		tabStop := tabSize * spaceAdv // width of one tab-stop interval, points
-		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
+		base := Glyph{Color: col, SizePt: r.SizePt, AscentPt: asc * r.SizePt, DescentPt: desc * r.SizePt, LineGapPt: gap * r.SizePt, NoWrap: noWrap, WordBreak: r.WordBreak, Underline: r.Underline, Strike: r.Strike, BaselineShiftPt: r.BaselineShiftPt, Face: face}
 		// Complex-script segments (Arabic and friends) are shaped as whole runs through
 		// harfbuzz rather than rune-at-a-time, since a letter's form depends on its
 		// neighbours. runes carries the run's text once so segments can be sliced from

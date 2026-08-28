@@ -140,6 +140,29 @@ type ComputedStyle struct {
 	// behaviors by WhiteSpaceFlags (collapse spaces, preserve newlines, wrap).
 	WhiteSpace string
 
+	// OverflowWrap is the CSS overflow-wrap property: "normal" (initial) |
+	// "break-word" | "anywhere". Inherited. The legacy alias `word-wrap` — still
+	// extremely common in real stylesheets, and the name IE shipped the feature under —
+	// sets the same field. It permits breaking WITHIN a word as a LAST RESORT: only when
+	// the word would overflow the line box even on a line of its own.
+	//
+	// "break-word" and "anywhere" differ in exactly one respect: "anywhere" also affects
+	// intrinsic (min-content) sizing, so a box sized from its content can shrink to a
+	// single grapheme cluster, while "break-word" leaves min-content at the widest word.
+	// See WordBreakMode in pkg/layout/inline.
+	OverflowWrap string
+
+	// WordBreak is the CSS word-break property: "normal" (initial) | "break-all" |
+	// "keep-all". Inherited. Unlike overflow-wrap it is EAGER: "break-all" makes every
+	// grapheme-cluster boundary an ordinary break opportunity, so a word is chopped at
+	// the line edge even when it would have fitted on the following line by itself.
+	//
+	// "keep-all" forbids the implicit between-ideograph opportunities CJK text would
+	// otherwise get. This engine generates no such opportunities (its only implicit ones
+	// are spaces), so keep-all's observable effect here is that it suppresses
+	// overflow-wrap breaking of the affected text.
+	WordBreak string
+
 	// List + counter properties. ListStyleType/ListStylePosition are inherited
 	// (initial "disc"/"outside"); the counter ops and Content are not inherited.
 	ListStyleType     string        // "disc" | "circle" | "square" | "decimal" | "lower-roman" | ... | "none"
@@ -764,6 +787,8 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.TextDecorationLine = parent.TextDecorationLine
 	cs.TextTransform = parent.TextTransform
 	cs.WhiteSpace = parent.WhiteSpace
+	cs.OverflowWrap = parent.OverflowWrap // CSS Text 3: overflow-wrap is inherited
+	cs.WordBreak = parent.WordBreak       // CSS Text 3: word-break is inherited
 	cs.ListStyleType = parent.ListStyleType
 	cs.ListStylePosition = parent.ListStylePosition
 	cs.BorderCollapse = parent.BorderCollapse
@@ -804,6 +829,8 @@ func initialStyle() ComputedStyle {
 		TextDecorationLine: "none",
 		TextTransform:      "none",
 		WhiteSpace:         "normal",
+		OverflowWrap:       "normal",
+		WordBreak:          "normal",
 		ListStyleType:      "disc",
 		ListStylePosition:  "outside",
 		BackgroundRepeat:   "repeat",
@@ -980,6 +1007,21 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "normal", "nowrap", "pre", "pre-wrap", "pre-line":
 			cs.WhiteSpace = d.Value
+		}
+	case "overflow-wrap", "word-wrap":
+		// `word-wrap` is the legacy alias overflow-wrap was standardized from; CSS Text 3
+		// requires user agents to treat it as a shorthand for the same property, and it is
+		// still what a lot of real stylesheets say. Both spellings land in the same field,
+		// so later declarations of either name override earlier ones — which is the
+		// cascade behavior an author gets in a browser.
+		switch d.Value {
+		case "normal", "break-word", "anywhere":
+			cs.OverflowWrap = d.Value
+		}
+	case "word-break":
+		switch d.Value {
+		case "normal", "break-all", "keep-all":
+			cs.WordBreak = d.Value
 		}
 	case "list-style-type":
 		cs.ListStyleType = strings.TrimSpace(d.Value)
