@@ -14,7 +14,7 @@ one does not reproduce at all.
 
 | # | Reported | Verified | Correction |
 | --- | --- | --- | --- |
-| 2b | SVG presentation attributes do not inherit | **Real** | Worse than reported: `fill` on the root does not inherit either, so it is not stroke-specific. |
+| 2b | SVG presentation attributes do not inherit | **Real — FIXED** | Worse than reported: `fill` on the root does not inherit either, so it is not stroke-specific. |
 | 7 | `line-height` is ignored | **Real — FIXED** | Only the **unitless** form (`1.2`) is ignored. `line-height: 40px` works. |
 | 8 | `margin` ignored on flex children | **Real — FIXED** | Margins work fine on **blocks** — the report's "plain block" contrast case is CSS margin collapsing, not a bug. Only flex children drop them. `transform` is separately unimplemented. |
 | 9 | `z-index` does not order positioned siblings | **Does NOT reproduce** | Both orderings paint red on top. Already fixed, or mis-measured. |
@@ -345,6 +345,15 @@ child that declares nothing; a child override still winning; a non-inherited pro
 (`opacity`, `transform`) NOT double-applying — that last one is the regression risk and
 needs its own assertion.
 
+**STATUS: DONE.** Showcase §40.
+
+`rootStyle`'s own doc comment had already identified this as "a genuine, pre-existing
+gap" and predicted that fixing it would move goldens, recommending it be done as "a
+separate, self-contained change so its golden movement can be reviewed on its own".
+It moved **zero** goldens — the whole resvg conformance corpus passes unchanged, which
+is the strongest available evidence the inherited/non-inherited split is right, since
+those fixtures exercise inheritance directly.
+
 ---
 
 ## 14. `writing-mode` is ignored
@@ -401,7 +410,7 @@ Ordered by (silent × common) first, since a silent failure costs the most.
 | 1 | `fix/unitless-line-height` | 7 | **DONE** — showcase §37. |
 | 2 | `fix/flex-child-margins` | 8 | **DONE** — showcase §38. `transform` split out, still pending. |
 | 3 | `feat/background-layer-list` | 13 | **DONE** — maximal (all layers painted). Showcase §39. |
-| 4 | `fix/svg-presentation-inheritance` | 2b | Silent; icons lose their strokes. Related to #132, already familiar. |
+| 4 | `fix/svg-presentation-inheritance` | 2b | **DONE** — showcase §40, zero golden movement. |
 | 5 | `fix/abs-position-in-flex` | 10, 10b, 11, 12 | One cluster, one branch — they touch the same code. |
 | 6 | `feat/css-transform` | (from 8) | Its own property; currently silent. |
 | — | (docs only) | 14 | **Deferred by decision.** Recorded in SCOPE.md; no implementation planned. |

@@ -1658,5 +1658,54 @@ newline is kept.</p>
       genuinely per&#8209;layer is a separate slice, and FEATURES.md says so.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">40 / SVG INHERITANCE</span>
+    <h2>Presentation attributes reach the children</h2>
+    <p class="lede">A paint property set on the root <code>&lt;svg&gt;</code> did not
+      reach its children. The root's attributes were resolved and then <em>discarded</em>
+      &mdash; only the font and text properties were copied back &mdash; so a path
+      relying on an inherited <code>stroke</code> painted nothing at all.</p>
+
+    <div style="display:flex; gap:24px; align-items:center;">
+      <svg width="90" height="90" stroke="#9b3d2e" stroke-width="7" fill="none"
+           stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="45" cy="45" r="18"/>
+        <path d="M45 8 v10 M45 72 v10 M8 45 h10 M72 45 h10"/>
+        <path d="M19 19 l7 7 M64 64 l7 7 M71 19 l-7 7 M26 64 l-7 7"/>
+      </svg>
+      <svg width="90" height="90" fill="#4a7c59">
+        <circle cx="30" cy="52" r="20"/>
+        <circle cx="52" cy="42" r="26"/>
+        <rect x="24" y="52" width="46" height="18"/>
+      </svg>
+      <svg width="90" height="90" stroke="#3a4a5a" stroke-width="6" fill="#f2d98c">
+        <rect x="16" y="30" width="58" height="44" rx="4"/>
+        <path d="M16 30 L45 8 L74 30" fill="none"/>
+      </svg>
+    </div>
+    <p class="caption">Not one <code>stroke</code> or <code>fill</code> on any child
+      &mdash; every colour, width, cap and join comes from the root and inherits down.
+      This is exactly how the icons that surfaced the bug were authored: the first
+      icon's rays, the third one's outline. Before this, each would have shown only its
+      filled parts, which reads as &ldquo;the icon is not rendering&rdquo; rather than
+      &ldquo;the strokes are gone&rdquo;.</p>
+
+    <h4>The construction, and why it is inverted</h4>
+    <p class="caption">The old code listed the properties that inherit, and anything
+      missing from that list was silently dropped &mdash; which is how the entire paint
+      vocabulary came to be absent. It now starts from the root's fully resolved style
+      and clears only the properties CSS marks <em>non</em>&#8209;inherited, so a
+      property added later defaults to the spec's answer rather than to
+      &ldquo;dropped&rdquo;.</p>
+    <p class="caption">The non&#8209;inherited set matters as much: <code>opacity</code>,
+      <code>clip-path</code>, <code>mask</code> and <code>filter</code> must <em>not</em>
+      reach the children, or the root's value would apply twice &mdash; once to its own
+      group and again to each child. A 50% root over a black child would composite to
+      75% rather than 50%, which a test pins.</p>
+    <p class="caption">The whole resvg conformance corpus passes unchanged, which is the
+      strongest evidence available that the inherited/non&#8209;inherited split is
+      right: those fixtures exercise inheritance directly.</p>
+  </section>
+
 </body>
 </html>

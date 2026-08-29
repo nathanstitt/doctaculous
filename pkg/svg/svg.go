@@ -318,24 +318,26 @@ func ParseWithHost(data []byte, host *HostContext, logf func(string, ...any)) (*
 	return doc, nil
 }
 
-// rootStyle returns the style the root <svg>'s CHILDREN inherit: the
-// defaults, plus the root element's own FONT and TEXT properties.
+// rootStyle returns the style the root <svg>'s CHILDREN inherit: the root element's
+// own resolved presentation properties, minus the ones CSS does not inherit.
 //
-// The narrowness is deliberate. buildGroup walks the root's children with a
-// parent style, and historically that was defaultStyle() — the root's own
-// presentation attributes were never resolved at all, so `<svg fill="red">`
-// does not tint its children today. That is a genuine, pre-existing gap, but
-// widening it here would change the rendering of every existing document that
-// sets a paint property on its root, moving goldens for a reason unrelated to
-// text. The font properties have no such history: they did not exist before
-// this change, so making them inherit from the root is purely additive and
-// cannot alter any previously-rendered pixel.
+// This used to copy back only the font and text properties, leaving `fill`, `stroke`,
+// and the rest of the paint vocabulary resolved-then-discarded. The consequence was
+// reported from the field: an icon authored as `<svg stroke="#f5a623"><path d="…"/>`
+// — stroke on the root, detail paths inheriting it — painted its filled body and NONE
+// of its stroked detail, so a weather icon reduced to a small dot and read as "the
+// icon is not rendering". `fill` on the root failed the same way, so it was never
+// stroke-specific.
 //
-// It is also not optional for text to work at all: the resvg corpus routinely
-// writes `<svg font-family="Noto Sans" font-size="48">` and expects every
-// <text> below to pick it up, which is the ordinary CSS inheritance a browser
-// performs. Fixing the general case is left as a separate, self-contained
-// change so its golden movement can be reviewed on its own.
+// The construction is deliberately INVERTED from the old one. Rather than listing the
+// properties that inherit (where anything forgotten is silently dropped, which is how
+// paint came to be missing), it starts from the root's fully-resolved style and clears
+// only the properties CSS marks non-inherited. A property added to Style later then
+// defaults to the spec's answer — inherited — rather than to "dropped".
+//
+// The non-inherited set matters as much as the inherited one: opacity, clip-path,
+// mask, filter, and the mask/overflow enums must NOT reach the children, or the root's
+// value would be applied twice — once to the root's own group and again to each child.
 func rootStyle(root *element, ctx *cascadeCtx) Style {
 	base := defaultStyle()
 	// An embedded SVG inherits from its parent box, so the host's computed values seed
@@ -355,15 +357,27 @@ func rootStyle(root *element, ctx *cascadeCtx) Style {
 		}
 	}
 	full := base.apply(root, ctx)
-	s := base
-	s.fontFamily = full.fontFamily
-	s.fontSizePt = full.fontSizePt
-	s.fontBold = full.fontBold
-	s.fontItalic = full.fontItalic
-	s.fontWeight = full.fontWeight
-	s.textAnchor = full.textAnchor
-	s.direction = full.direction
-	s.color = full.color
+	return inheritableFrom(full)
+}
+
+// inheritableFrom returns s with every NON-inherited property reset to its initial
+// value, giving the style a child should inherit.
+//
+// Each field below is non-inherited per SVG 1.1 / CSS Masking / CSS Filter Effects.
+// Leaving any of them in place would double-apply the root's value: the root's own
+// group already carries them, so a child inheriting them would composite the same
+// opacity, clip, mask, or filter a second time.
+func inheritableFrom(s Style) Style {
+	d := defaultStyle()
+	s.opacity = d.opacity
+	s.clipPathRef = d.clipPathRef
+	s.maskRef = d.maskRef
+	s.filterRef = d.filterRef
+	s.maskType = d.maskType
+	s.overflow = d.overflow
+	// display is not inherited either: `display="none"` on the root hides the whole
+	// document, which the caller handles, and must not hide each child independently.
+	s.display = d.display
 	return s
 }
 

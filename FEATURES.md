@@ -333,6 +333,15 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **SVG presentation attributes inherit from the root** (`pkg/svg/svg.go` `rootStyle`): `fill`,
+  `stroke`, `stroke-width`, caps/joins/dashes and the rest of the inherited vocabulary set on the
+  root `<svg>` reach its children, as CSS inheritance requires. Previously only the font and text
+  properties were carried across — the root's paint properties were resolved and then discarded —
+  so an icon authored as `<svg stroke="…">` with detail paths inheriting it painted its filled
+  parts and none of its strokes. The set is built by INVERSION: start from the root's resolved
+  style and clear only what CSS marks non-inherited (`opacity`, `clip-path`, `mask`, `filter`,
+  `mask-type`, `overflow`, `display`), so a property added later defaults to inheriting rather than
+  to being dropped. Showcase §40.
 - **Comma-separated `background` / `background-image` layer lists** (`pkg/css/shorthand.go`,
   `pkg/layout/css/background.go`): multiple layers paint, first layer on top, with the
   background-color behind them — so `background: <gradient>, <color>`, the ordinary way to give a

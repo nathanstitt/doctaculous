@@ -1071,3 +1071,19 @@ Three layers: a fully transparent one, a gradient, and a base colour. Everything
 The layers travel from the cascade through the box tree to paint as a _list_, emitted last‑first so the first layer ends up on top. `background-image` takes the same list.
 
 One subtlety worth recording, because getting it wrong is silent: the per‑layer records carry only the _image_. An early version also captured `background-size` and friends when the image list was parsed, which discarded any of those declared _after_ it — so `background-image` then `background-size` lost the size, while the reverse order worked. Those properties are single‑valued here and are read at layout time instead, so declaration order stops mattering. Making them genuinely per‑layer is a separate slice, and FEATURES.md says so.
+
+**40 / SVG INHERITANCE**
+
+## Presentation attributes reach the children
+
+A paint property set on the root `<svg>` did not reach its children. The root's attributes were resolved and then _discarded_ — only the font and text properties were copied back — so a path relying on an inherited `stroke` painted nothing at all.
+
+Not one `stroke` or `fill` on any child — every colour, width, cap and join comes from the root and inherits down. This is exactly how the icons that surfaced the bug were authored: the first icon's rays, the third one's outline. Before this, each would have shown only its filled parts, which reads as “the icon is not rendering” rather than “the strokes are gone”.
+
+#### The construction, and why it is inverted
+
+The old code listed the properties that inherit, and anything missing from that list was silently dropped — which is how the entire paint vocabulary came to be absent. It now starts from the root's fully resolved style and clears only the properties CSS marks _non_‑inherited, so a property added later defaults to the spec's answer rather than to “dropped”.
+
+The non‑inherited set matters as much: `opacity`, `clip-path`, `mask` and `filter` must _not_ reach the children, or the root's value would apply twice — once to its own group and again to each child. A 50% root over a black child would composite to 75% rather than 50%, which a test pins.
+
+The whole resvg conformance corpus passes unchanged, which is the strongest evidence available that the inherited/non‑inherited split is right: those fixtures exercise inheritance directly.
