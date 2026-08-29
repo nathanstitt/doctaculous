@@ -333,6 +333,16 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **`transform`** (`pkg/css/transform.go`, `pkg/layout/css/fragment.go`): the 2D functions —
+  `translate`/`translateX`/`translateY` (lengths and percentages of the box's own size),
+  `scale`/`scaleX`/`scaleY`, `rotate`, `skew`/`skewX`/`skewY`, and `matrix()` — composed left to
+  right. It is a PAINT-time effect and changes no layout (CSS Transforms 1 §3): the box keeps the
+  space it occupied, and the matrix brackets its already-flattened items. A transformed element
+  establishes a stacking context and a BFC, as the spec requires — which is also what lets the
+  bracket wrap its background and content together rather than splitting them across Appendix E's
+  phases. Not modeled: the 3D functions (`translate3d`, `rotateX`, `perspective`, `matrix3d`),
+  refused rather than flattened since the engine has no 3D pipeline; and `transform-origin`, which
+  is always the box centre. Showcase §42.
 - **Absolute positioning in flex containers, and flex-derived heights** (`pkg/layout/css/flex.go`,
   `block.go`): an abs/fixed child of a flex container is out of flow and honours its offsets (CSS
   Flexbox §4.1) rather than being laid out as a flex item pinned to the edge; `top`+`bottom` with
