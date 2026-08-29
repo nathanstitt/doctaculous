@@ -1226,3 +1226,16 @@ a.seen:visited { color: #6a9a3a; }
   font-size: 15px;
   width: 300px;
 }
+
+/* §38: margins on flex children. The container is outlined so the margin's effect on
+   the item's position inside it is visible rather than described. */
+.fmrow {
+  display: flex;
+  border: 1px solid #c9c2b0;
+  background: #f7f2e4;
+  width: 320px;
+  margin: 0 0 8px 0;
+}
+.fmcol { display: flex; flex-direction: column; }
+.fmitem { width: 54px; height: 26px; background: #9b3d2e; }
+.fmitem.alt { background: #3a4a5a; }

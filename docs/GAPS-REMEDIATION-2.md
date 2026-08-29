@@ -16,7 +16,7 @@ one does not reproduce at all.
 | --- | --- | --- | --- |
 | 2b | SVG presentation attributes do not inherit | **Real** | Worse than reported: `fill` on the root does not inherit either, so it is not stroke-specific. |
 | 7 | `line-height` is ignored | **Real — FIXED** | Only the **unitless** form (`1.2`) is ignored. `line-height: 40px` works. |
-| 8 | `margin` ignored on flex children | **Real, narrower** | Margins work fine on **blocks** — the report's "plain block" contrast case is CSS margin collapsing, not a bug. Only flex children drop them. `transform` is separately unimplemented. |
+| 8 | `margin` ignored on flex children | **Real — FIXED** | Margins work fine on **blocks** — the report's "plain block" contrast case is CSS margin collapsing, not a bug. Only flex children drop them. `transform` is separately unimplemented. |
 | 9 | `z-index` does not order positioned siblings | **Does NOT reproduce** | Both orderings paint red on top. Already fixed, or mis-measured. |
 | 10 | `top` + `bottom` does not size a box | **Real** | — |
 | 10b | Abs-positioned flex child ignores `left` | **Real** | — |
@@ -158,6 +158,10 @@ should be recorded in FEATURES.md as absent rather than silently doing nothing.
 Margin honoured on a flex child in both axes and both directions; `auto` margins
 absorbing free space; `gap` still working (it does today — do not regress it); a block
 control proving collapsing behaviour is unchanged.
+
+**STATUS: DONE.** Showcase §38. `margin: auto` landed in the same pass rather than as a
+follow-up — the plumbing was the same once margins reached free-space distribution.
+`transform` remains split out and unimplemented.
 
 ---
 
@@ -385,7 +389,7 @@ Ordered by (silent × common) first, since a silent failure costs the most.
 | Order | Branch | Items | Why here |
 | --- | --- | --- | --- |
 | 1 | `fix/unitless-line-height` | 7 | **DONE** — showcase §37. |
-| 2 | `fix/flex-child-margins` | 8 | Silent, common idiom, contained to `flex.go`. |
+| 2 | `fix/flex-child-margins` | 8 | **DONE** — showcase §38. `transform` split out, still pending. |
 | 3 | `feat/background-layer-list` | 13 | Silent and total; the fallback-colour idiom is ubiquitous. |
 | 4 | `fix/svg-presentation-inheritance` | 2b | Silent; icons lose their strokes. Related to #132, already familiar. |
 | 5 | `fix/abs-position-in-flex` | 10, 10b, 11, 12 | One cluster, one branch — they touch the same code. |

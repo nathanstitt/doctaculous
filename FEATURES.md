@@ -333,6 +333,13 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **Margins on flex children** (`pkg/layout/css/flex.go`): honoured on both axes, including
+  `margin: auto` absorbing free space (CSS Flexbox §8.1). Flex layout was previously margin-blind —
+  an item's size and position came from its border box — so a margin on a flex child did nothing
+  while the identical rule on a block child worked. Margins are counted where they must be: line
+  packing uses the OUTER size, free-space distribution and `justify-content` position the margin
+  box, the line grows to hold a cross margin, and `stretch` fills the line less the item's cross
+  margins. Showcase §38.
 - **`line-height`, all forms** (`pkg/css/value.go` `UnitNumber`, `pkg/layout/css/inline.go`): the
   **unitless multiplier** (`line-height: 1.5`) — the commonest spelling — plus `em`, `%`, lengths,
   and `normal`. The unitless form was previously rejected as an invalid length and the declaration

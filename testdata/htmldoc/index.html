@@ -1574,5 +1574,51 @@ newline is kept.</p>
       in every length rather than a fix to one property.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">38 / FLEX MARGINS</span>
+    <h2>Margins on flex children</h2>
+    <p class="lede">Flex layout was margin&#8209;blind: an item's size and position came
+      from its border box, so <code>margin-top</code> on a child of a flex column did
+      nothing at all &mdash; while the identical rule on a block child worked. That reads
+      as &ldquo;the rule did not apply&rdquo;, which is the most expensive kind of
+      failure to diagnose, because the stylesheet is plainly correct.</p>
+
+    <div class="fmrow"><div class="fmitem"></div></div>
+    <p class="caption">No margin &mdash; the item sits at the container's start edge.</p>
+
+    <div class="fmrow"><div class="fmitem" style="margin-left:80px"></div></div>
+    <p class="caption"><code>margin-left: 80px</code> on the main axis.</p>
+
+    <div class="fmrow"><div class="fmitem" style="margin-left:auto"></div></div>
+    <p class="caption"><code>margin-left: auto</code> absorbs the free space and pushes
+      the item to the end &mdash; the idiomatic way to do it
+      (CSS&nbsp;Flexbox&nbsp;&sect;8.1). Auto margins take the space <em>before</em>
+      <code>justify-content</code> sees any, which is the spec's own resolution order.</p>
+
+    <div class="fmrow"><div class="fmitem" style="margin-left:auto;margin-right:auto"></div></div>
+    <p class="caption">Two auto margins centre it.</p>
+
+    <div class="fmrow" style="justify-content:flex-end"><div class="fmitem" style="margin-right:60px"></div></div>
+    <p class="caption"><code>justify-content: flex-end</code> with a trailing margin: the
+      item's <em>margin box</em> is what lands against the end edge, so the margin has to
+      be counted while free space is distributed &mdash; not applied as an offset
+      afterwards.</p>
+
+    <div class="fmrow fmcol" style="height:110px">
+      <div class="fmitem" style="margin-top:20px"></div>
+      <div class="fmitem alt" style="margin-top:20px;margin-left:40px"></div>
+    </div>
+    <p class="caption">A column: <code>margin-top</code> is the main axis and
+      <code>margin-left</code> the cross one. Both apply, and the line grows to hold the
+      item's margin box rather than letting a cross margin overflow it.</p>
+
+    <h4>The block control</h4>
+    <p class="caption">The same <code>margin-top</code> on a <em>block</em> child was
+      always correct, and still is &mdash; a test pins the two to the same position. This
+      distinction matters: the original report contrasted a flex column against a plain
+      block whose bare <code>margin-top</code> measured zero, but that is CSS margin
+      <em>collapsing</em> through the body, not a bug. Only the flex case was wrong.</p>
+  </section>
+
 </body>
 </html>

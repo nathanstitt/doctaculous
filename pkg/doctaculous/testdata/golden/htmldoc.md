@@ -1031,3 +1031,25 @@ Getting that backwards is invisible until a nested font‑size change appears, w
 #### What did not change
 
 `line-height: normal` and an absent declaration both keep the font‑metric height, so a document that never states the property renders exactly as before. And a unitless number is still _not_ a length: `width: 5` remains invalid, because accepting it there would be a hole in every length rather than a fix to one property.
+
+**38 / FLEX MARGINS**
+
+## Margins on flex children
+
+Flex layout was margin‑blind: an item's size and position came from its border box, so `margin-top` on a child of a flex column did nothing at all — while the identical rule on a block child worked. That reads as “the rule did not apply”, which is the most expensive kind of failure to diagnose, because the stylesheet is plainly correct.
+
+No margin — the item sits at the container's start edge.
+
+`margin-left: 80px` on the main axis.
+
+`margin-left: auto` absorbs the free space and pushes the item to the end — the idiomatic way to do it (CSS Flexbox §8.1). Auto margins take the space _before_ `justify-content` sees any, which is the spec's own resolution order.
+
+Two auto margins centre it.
+
+`justify-content: flex-end` with a trailing margin: the item's _margin box_ is what lands against the end edge, so the margin has to be counted while free space is distributed — not applied as an offset afterwards.
+
+A column: `margin-top` is the main axis and `margin-left` the cross one. Both apply, and the line grows to hold the item's margin box rather than letting a cross margin overflow it.
+
+#### The block control
+
+The same `margin-top` on a _block_ child was always correct, and still is — a test pins the two to the same position. This distinction matters: the original report contrasted a flex column against a plain block whose bare `margin-top` measured zero, but that is CSS margin _collapsing_ through the body, not a bug. Only the flex case was wrong.
