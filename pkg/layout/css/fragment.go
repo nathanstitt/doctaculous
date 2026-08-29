@@ -753,6 +753,22 @@ func appendDecoRules(dst []layout.Item, ln *LineFragment, sel func(*GlyphFragmen
 	return dst
 }
 
+// glyphHasColorInk reports whether a glyph paints through a colour-font path rather
+// than an outline.
+func glyphHasColorInk(g *GlyphFragment) bool {
+	if g.Face == nil {
+		return false
+	}
+	if g.Face.HasColorBitmaps() {
+		return true
+	}
+	if g.Face.HasColorGlyphs() {
+		layers, ok := g.Face.ColorLayers(g.GID)
+		return ok && len(layers) > 0
+	}
+	return false
+}
+
 // appendInlineBoxDecorations emits the background and border of every inline box that
 // has a fragment on line ln — one rect per box PER LINE, which is what makes a <span>
 // spanning a line break paint correctly without any explicit fragmentation bookkeeping.
@@ -878,7 +894,13 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 		dst = appendInlineBoxDecorations(dst, ln)
 		for gi := range ln.Glyphs {
 			g := &ln.Glyphs[gi]
-			if g.Outline == nil {
+			// A nil outline is usually whitespace or an inline-box edge — nothing to
+			// paint. A COLOUR glyph is the exception: its ink lives in COLR layers or a
+			// bitmap strike, resolved at paint time from Face+GID, so skipping on
+			// "no outline" would drop every emoji after layout had already reserved its
+			// advance (the following text sat correctly, with a gap where the glyph
+			// should have been).
+			if g.Outline == nil && !glyphHasColorInk(g) {
 				continue
 			}
 			// vertical-align: super/sub shifts the glyph off the line baseline (up = a

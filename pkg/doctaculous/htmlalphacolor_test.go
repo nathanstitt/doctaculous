@@ -42,6 +42,7 @@ func alphaProbeInk(img *image.RGBA) color.RGBA { return img.RGBAAt(60, 30) }
 //
 // Half-alpha black is the cleanest single check: 0*0.5 + 128*0.5 = 64.
 func TestHTMLAlphaColorComposites(t *testing.T) {
+	t.Parallel()
 	// Guard the sample point first: if it ever drifts off the swatch, every
 	// expectation below would silently be measuring the backdrop instead.
 	if got, want := alphaProbeInk(rasterHTML(t, alphaProbeHTML("#4f9cff"))), (color.RGBA{0x4f, 0x9c, 0xff, 0xff}); got != want {
@@ -105,6 +106,7 @@ func TestHTMLAlphaColorComposites(t *testing.T) {
 // would paint transparent black, which over most backdrops is indistinguishable
 // from "nothing happened" by eye but is a different pixel from the correct one.
 func TestHTMLMalformedColorDropsDeclaration(t *testing.T) {
+	t.Parallel()
 	// The earlier declaration is opaque red; the later, malformed one must not
 	// disturb it.
 	probe := func(bad string) string {

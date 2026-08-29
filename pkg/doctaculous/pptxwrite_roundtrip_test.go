@@ -27,6 +27,7 @@ func pptxOf(t *testing.T, doc *Document) []byte {
 // become slide titles, quote/code semantics flatten) — so the pin is
 // content + structure fragments, per construct.
 func TestPPTXWriteRoundTrip(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		html  string
@@ -98,6 +99,7 @@ func TestPPTXWriteRoundTrip(t *testing.T) {
 // TestPPTXWriteImage pins that an embedded image survives into the deck as a
 // media part and back out through the reader.
 func TestPPTXWriteImage(t *testing.T) {
+	t.Parallel()
 	html := `<html><body><h1>Pics</h1><p><img src="` + parityImageURI(t) + `" alt="blue square"></p></body></html>`
 	src, err := OpenHTMLBytes([]byte(html), WithBundledFonts())
 	if err != nil {
@@ -117,6 +119,7 @@ func TestPPTXWriteImage(t *testing.T) {
 // TestPPTXWriteSlideCount pins the slide-splitting rule at the package level:
 // three h1/h2 headings produce three slides.
 func TestPPTXWriteSlideCount(t *testing.T) {
+	t.Parallel()
 	html := `<html><body><h1>A</h1><p>1</p><h2>B</h2><p>2</p><h1>C</h1><p>3</p></body></html>`
 	src, err := OpenHTMLBytes([]byte(html), WithBundledFonts())
 	if err != nil {
@@ -134,6 +137,7 @@ func TestPPTXWriteSlideCount(t *testing.T) {
 // TestPPTXOutputGolden renders a reopened writer-produced deck — the visual
 // smoke check that a generated .pptx lays out and rasterizes sanely.
 func TestPPTXOutputGolden(t *testing.T) {
+	t.Parallel()
 	const src = `<html><body>
 <h1>PPTX Output</h1>
 <p>A paragraph with <strong>bold</strong> and <em>italic</em>.</p>

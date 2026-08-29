@@ -118,6 +118,18 @@ func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, 
 // author's chosen family lacks the character, and quietly substituting a downloaded
 // @font-face or a system font there would be a surprising second guess at intent.
 func (c *FaceCache) ResolveScriptFallback(r rune, style pkgfont.Style) (*pkgfont.Face, bool) {
+	// Emoji come FIRST and take a different route: the bundle has no emoji face (a
+	// colour emoji font is megabytes, far past what the toolkit embeds), so they
+	// resolve through the injected system provider instead. Without this, an emoji in
+	// ordinary text falls through to the Latin substitutes, which have no glyph for it
+	// — the reason "Hi 😀" rendered as "Hi " with nothing after it.
+	if isEmojiRune(r) {
+		if face, ok := c.resolveEmojiFallback(style); ok {
+			return face, true
+		}
+		// No emoji font on this host: fall through, and the caller degrades to the
+		// missing-glyph path rather than painting a wrong character.
+	}
 	script, ok := fallbackScriptOf(r)
 	if !ok {
 		return nil, false
@@ -132,6 +144,74 @@ func (c *FaceCache) ResolveScriptFallback(r rune, style pkgfont.Style) (*pkgfont
 	face, ok := pkgfont.LoadScriptFallback(r, style)
 	c.faces[key] = cacheEntry{face: face, ok: ok}
 	return face, ok
+}
+
+// emojiFallbackFamilies are the installed families tried, in order, for an emoji with
+// no glyph in the run's own face. The list spans the three platforms' system emoji
+// fonts plus the common Linux package names; the first that resolves AND actually has
+// a glyph for the rune wins.
+//
+// It is a fixed list rather than a scan because the OS font matcher answers by name,
+// and "the emoji font" is not something a font's metadata declares.
+var emojiFallbackFamilies = []string{
+	"Apple Color Emoji", // macOS, iOS
+	"Segoe UI Emoji",    // Windows
+	"Noto Color Emoji",  // Linux, Android, ChromeOS
+	"Twemoji Mozilla",   // Firefox's bundled emoji font
+	"EmojiOne Color",
+	"Symbola", // monochrome, but covers the range
+}
+
+// resolveEmojiFallback finds an installed emoji face, cached under one synthetic key
+// so the (expensive) provider lookup happens once per style per document.
+func (c *FaceCache) resolveEmojiFallback(style pkgfont.Style) (*pkgfont.Face, bool) {
+	key := faceKey{family: "\x00fallback:emoji", style: style}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, found := c.faces[key]; found {
+		return e.face, e.ok
+	}
+	var face *pkgfont.Face
+	ok := false
+	for _, fam := range emojiFallbackFamilies {
+		if f, hit := c.resolveProvider(fam, style); hit {
+			face, ok = f, true
+			break
+		}
+	}
+	if ok {
+		c.logf("font: emoji fallback resolved to an installed colour font")
+	}
+	c.faces[key] = cacheEntry{face: face, ok: ok}
+	return face, ok
+}
+
+// isEmojiRune reports whether r is in a range an emoji font is expected to cover.
+//
+// It is deliberately a RANGE test rather than a per-font cmap probe: the caller reaches
+// here only after the run's own face already failed to map the rune, so the question is
+// "which fallback should try this", and the emoji blocks answer it without loading a
+// font. The ranges are the Unicode emoji blocks plus the older dingbat/symbol blocks
+// that emoji fonts also cover.
+func isEmojiRune(r rune) bool {
+	switch {
+	case r >= 0x1F300 && r <= 0x1FAFF: // Misc Symbols and Pictographs .. Symbols Extended-A
+		return true
+	case r >= 0x1F000 && r <= 0x1F2FF: // Mahjong, Dominoes, Playing Cards, Enclosed
+		return true
+	case r >= 0x2600 && r <= 0x27BF: // Misc Symbols, Dingbats
+		return true
+	case r >= 0x2B00 && r <= 0x2BFF: // Misc Symbols and Arrows
+		return true
+	case r >= 0xFE00 && r <= 0xFE0F: // Variation Selectors (VS16 requests emoji style)
+		return true
+	case r >= 0x1F900 && r <= 0x1F9FF: // Supplemental Symbols and Pictographs
+		return true
+	case r == 0x203C || r == 0x2049 || r == 0x20E3 || r == 0x2122 || r == 0x2139:
+		return true
+	}
+	return false
 }
 
 // fallbackScriptOf names the script r belongs to for fallback-cache purposes, or

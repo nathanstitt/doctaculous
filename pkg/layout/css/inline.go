@@ -217,7 +217,10 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			// continuous across the spaces in "<span>Hello world</span>" rather than
 			// painting as two rects with a hole between them. Blank marks the latter so
 			// the paint loop keeps skipping it — only the decoration pass reads it.
-			case g.Outline != nil || g.InlineBox.Paints() || g.Edge != inline.EdgeNone:
+			// A COLOUR glyph has no outline — its ink lives in COLR layers or a bitmap
+			// strike, both resolved at paint time from Face+GID — so an outline test
+			// alone drops emoji entirely.
+			case g.Outline != nil || hasColorInk(g) || g.InlineBox.Paints() || g.Edge != inline.EdgeNone:
 				emitted = append(emitted, GlyphFragment{
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
 					Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
@@ -974,4 +977,21 @@ func (e *Engine) ellipsisGlyphFor(b *cssbox.Box, line []inline.Glyph) (inline.Gl
 		return inline.Glyph{}, false
 	}
 	return inline.ShapeEllipsis(e.faces, family, style, size, col)
+}
+
+// hasColorInk reports whether a glyph paints through a colour-font path (COLR layers or
+// a bitmap strike) rather than through an outline. Such a glyph must survive the emit
+// even though Outline is nil, or an emoji is dropped between shaping and paint.
+func hasColorInk(g *inline.Glyph) bool {
+	if g.Face == nil || g.Break || g.Atomic != nil {
+		return false
+	}
+	if g.Face.HasColorBitmaps() {
+		return true
+	}
+	if g.Face.HasColorGlyphs() {
+		layers, ok := g.Face.ColorLayers(g.GID)
+		return ok && len(layers) > 0
+	}
+	return false
 }

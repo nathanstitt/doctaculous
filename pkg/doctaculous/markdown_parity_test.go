@@ -43,6 +43,7 @@ func markdownOfHTML(t *testing.T, src string) string {
 // same Markdown for a DOCX and an equivalent HTML document: a heading followed by a
 // table. This is the core "one walker serves both" guarantee.
 func TestDOCXHTMLParityHeadingTable(t *testing.T) {
+	t.Parallel()
 	d := &docx.Document{
 		Section: letterSection,
 		Body: []docx.Block{

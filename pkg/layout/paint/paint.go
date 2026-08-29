@@ -7,6 +7,7 @@ package paint
 import (
 	"image/color"
 
+	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
@@ -318,6 +319,16 @@ func paintGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) {
 	m := render.Scale(g.SizePt, -g.SizePt).
 		Mul(render.Translate(g.XPt, g.YPt)).
 		Mul(mat)
+	// A colour glyph (COLR/CPAL) paints as a stack of coloured outlines rather than one
+	// filled path. Expanding it HERE rather than in the item stream means every backend
+	// — raster, PDF, anything reading layout.Item — gets colour emoji without changing
+	// its own glyph handling, and a face with no colour tables costs one nil check.
+	if paintColorGlyph(dev, g, m) {
+		return
+	}
+	if paintColorBitmapGlyph(dev, g, mat) {
+		return
+	}
 	if g.Face != nil {
 		dev.DrawGlyph(render.GlyphRef{
 			Face:      g.Face,
@@ -334,6 +345,132 @@ func paintGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) {
 	dev.FillGlyph(transformPath(g.Outline, m), render.FillColor{
 		R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A,
 	}, "")
+}
+
+// paintColorGlyph paints a COLR/CPAL colour glyph as its layer stack, returning false
+// when the glyph has no colour data (the caller then paints it normally).
+//
+// Each layer is an ordinary outline filled with its own colour, bottom layer first. A
+// layer marked Foreground takes the run's text colour, which is how a colour font marks
+// the parts meant to follow the document rather than the palette.
+//
+// The layer transform is applied in FONT UNITS, inside the em scale, because that is
+// the space COLR expresses it in: the outline and the offset share one coordinate
+// system, so composing them before the em scale keeps them aligned at any size.
+func paintColorGlyph(dev render.Device, g *layout.GlyphItem, m render.Matrix) bool {
+	if g.Face == nil || !g.Face.HasColorGlyphs() {
+		return false
+	}
+	layers, ok := g.Face.ColorLayers(g.GID)
+	if !ok || len(layers) == 0 {
+		return false
+	}
+	upem := g.Face.UnitsPerEm()
+	if upem <= 0 {
+		return false
+	}
+	painted := false
+	for _, l := range layers {
+		outline := g.Face.Outline(l.GID)
+		if outline == nil || outline.Empty() {
+			continue // an empty layer is legal; it contributes no ink
+		}
+		col := l.Color
+		if l.Foreground {
+			col = g.Color
+		}
+		if col.A == 0 && l.Gradient == nil {
+			continue
+		}
+		lm := m
+		if !l.IsIdentity() {
+			// The layer's affine is in FONT units; the outline is in em units, so the
+			// translation is scaled down by upem while the linear part carries over
+			// unchanged (it is dimensionless).
+			xx, yx, xy, yy, dx, dy := l.Transform()
+			lm = render.Matrix{
+				A: xx, B: yx,
+				C: xy, D: yy,
+				E: dx / upem, F: dy / upem,
+			}.Mul(m)
+		}
+		path := transformPath(outline, lm)
+		if l.Gradient != nil {
+			// A gradient layer is the outline used as a CLIP with the shading filling
+			// it, which is how the render layer expresses a non-flat fill. The shader
+			// works in em units, matching the transformed path.
+			fillGradientLayer(dev, path, l.Gradient, lm, upem)
+			painted = true
+			continue
+		}
+		dev.FillGlyph(path, render.FillColor{
+			R: col.R, G: col.G, B: col.B, A: col.A,
+		}, "")
+		painted = true
+	}
+	return painted
+}
+
+// fillGradientLayer paints one COLR v1 gradient layer: clip to the layer's outline,
+// then fill that region with the gradient. The gradient geometry arrives in font
+// units, so it is mapped through the same matrix as the outline.
+func fillGradientLayer(dev render.Device, path *render.Path, g *font.ColorGradient, lm render.Matrix, upem float64) {
+	sh := newColorGradientShader(g, upem)
+	if sh == nil {
+		return
+	}
+	dev.Save()
+	dev.PushClip(path, render.NonZero)
+	dev.FillShading(sh, lm, "")
+	dev.Restore()
+}
+
+// paintColorBitmapGlyph paints a colour glyph stored as a bitmap strike (sbix or
+// CBDT), returning false when the face has none.
+//
+// Unlike the COLR path this draws an IMAGE, so it takes the page matrix directly
+// rather than the glyph's em-scaled one: the image is placed by its own box in page
+// space, sized by (em size / strike ppem).
+func paintColorBitmapGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) bool {
+	if g.Face == nil || !g.Face.HasColorBitmaps() {
+		return false
+	}
+	bm, ok := g.Face.ColorBitmapFor(g.GID, g.SizePt)
+	if !ok || bm.Img == nil || bm.PPEM <= 0 {
+		return false
+	}
+	b := bm.Img.Bounds()
+	if b.Dx() <= 0 || b.Dy() <= 0 {
+		return false
+	}
+	// The strike is designed for bm.PPEM pixels per em, so one strike pixel is
+	// (SizePt / PPEM) points. The origin offset is in the same pixel space.
+	scale := g.SizePt / bm.PPEM
+	w := float64(b.Dx()) * scale
+	h := float64(b.Dy()) * scale
+	// Y is measured DOWN in page space; BearingY is the height of the image's TOP
+	// above the baseline in strike pixels, so the top edge sits that far above the pen
+	// once scaled.
+	//
+	// A strike that declares no bearing (Apple Color Emoji reports 0) is designed to
+	// sit on the baseline the way the font's own metrics describe, i.e. with its
+	// descent below it — so the face's descent supplies the missing placement. Using
+	// zero literally would drop the glyph by a full image height, which reads as emoji
+	// hanging below the line.
+	bearing := bm.BearingY
+	if !bm.HasBearing {
+		bearing = float64(b.Dy())
+		if _, desc, _ := g.Face.Metrics(); desc > 0 {
+			bearing -= desc * bm.PPEM
+		}
+	}
+	x := g.XPt + bm.OriginX*scale
+	y := g.YPt - bearing*scale
+	// DrawImage maps the image's unit square through the ctm, so the size goes into
+	// the matrix rather than into separate arguments.
+	ctm := render.Scale(w, h).Mul(render.Translate(x, y)).Mul(mat)
+	dev.DrawImage(bm.Img, ctm, 1, "")
+	return true
 }
 
 // paintRule fills an axis-aligned rectangle (underline/background) in page space,

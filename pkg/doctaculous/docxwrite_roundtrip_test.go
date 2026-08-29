@@ -36,6 +36,7 @@ func markdownOf(t *testing.T, doc *Document) string {
 // (a lost heading level, a doubled list marker, a dropped link) shows up as a
 // diff.
 func TestDOCXWriteRoundTripParity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		html string
@@ -93,6 +94,7 @@ func TestDOCXWriteRoundTripParity(t *testing.T) {
 // TestMarkdownToDOCXAndBack closes the loop from the Markdown frontend: a GFM
 // specimen → .docx → Markdown must preserve every construct's content.
 func TestMarkdownToDOCXAndBack(t *testing.T) {
+	t.Parallel()
 	md := "# Doc Title\n\nBody with **bold** and _italic_ and a [link](https://x.test/p).\n\n" +
 		"- one\n- two\n\n1. first\n2. second\n\n> quoted\n\n```\ncode here\n```\n"
 	src, err := OpenMarkdownBytes([]byte(md), WithBundledFonts())
@@ -124,6 +126,7 @@ func TestMarkdownToDOCXAndBack(t *testing.T) {
 // TestPDFToDOCX proves the extraction path: a PDF's recovered structure writes
 // to .docx and the text survives a reopen.
 func TestPDFToDOCX(t *testing.T) {
+	t.Parallel()
 	pdfDoc, err := OpenBytes(matrixPDF(t))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
@@ -141,6 +144,7 @@ func TestPDFToDOCX(t *testing.T) {
 // TestDOCXOutputGolden renders a reopened writer-produced document — the visual
 // smoke check that a generated .docx lays out and rasterizes sanely.
 func TestDOCXOutputGolden(t *testing.T) {
+	t.Parallel()
 	const src = `<html><body>
 <h1>DOCX Output</h1>
 <p>A paragraph with <strong>bold</strong>, <em>italic</em>, and <a href="https://x.test">a link</a>.</p>

@@ -89,6 +89,7 @@ func pptxSpecimen() []byte {
 // TestPPTXGolden renders slide 1 end to end — the PPTX visual entry. Run with
 // -update, then eyeball.
 func TestPPTXGolden(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenPPTXBytes(pptxSpecimen(), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenPPTXBytes: %v", err)
@@ -133,6 +134,7 @@ func TestPPTXGolden(t *testing.T) {
 // TestPPTXDetectionAndConvert pins the unified-conversion wiring and the
 // reading-order contract for structure writers.
 func TestPPTXDetectionAndConvert(t *testing.T) {
+	t.Parallel()
 	deck := pptxSpecimen()
 	doc, err := OpenBytes(deck)
 	if err != nil {

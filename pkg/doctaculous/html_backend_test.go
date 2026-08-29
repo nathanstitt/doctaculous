@@ -46,6 +46,7 @@ func countColor(img *image.RGBA, c color.RGBA) int {
 // image: parse → box generation → layout → paint. It asserts the single-tall-page
 // model (one page) and a non-empty image.
 func TestOpenHTMLBytesSmoke(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(sampleHTML))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -71,6 +72,7 @@ func TestOpenHTMLBytesSmoke(t *testing.T) {
 // TestOpenHTMLBytesPaintsContent proves the pipeline actually rasterizes glyphs:
 // the default background is white, so any non-white pixel means text was drawn.
 func TestOpenHTMLBytesPaintsContent(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(sampleHTML), WithViewportWidth(400))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -93,6 +95,7 @@ func TestOpenHTMLBytesPaintsContent(t *testing.T) {
 // page width: a wider viewport yields a wider image for the same content and DPI.
 // The assertion is on width ordering (robust) rather than exact pixel counts.
 func TestOpenHTMLBytesViewportWidth(t *testing.T) {
+	t.Parallel()
 	const dpi = 96
 	narrow, err := OpenHTMLBytes([]byte(sampleHTML), WithViewportWidth(400))
 	if err != nil {
@@ -119,6 +122,7 @@ func TestOpenHTMLBytesViewportWidth(t *testing.T) {
 // TestOpenHTMLBytesBackground confirms the RasterOptions.Background fill reaches the
 // page: a corner pixel (outside any drawn content) is the requested color.
 func TestOpenHTMLBytesBackground(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(sampleHTML), WithViewportWidth(400))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -141,6 +145,7 @@ func TestOpenHTMLBytesBackground(t *testing.T) {
 // <link rel=stylesheet> resolves relative to the file's directory and its
 // background color is applied to the page, proving the loader is wired up.
 func TestOpenHTMLFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	const themeBG = "#0080ff" // matches color.RGBA{0,128,255,255}
 	if err := os.WriteFile(filepath.Join(dir, "theme.css"),
@@ -187,6 +192,7 @@ func TestOpenHTMLFile(t *testing.T) {
 // TestOpenHTMLMissingFile reports a wrapped error (not a panic) for a path that
 // does not exist.
 func TestOpenHTMLMissingFile(t *testing.T) {
+	t.Parallel()
 	if _, err := OpenHTML(filepath.Join(t.TempDir(), "does-not-exist.html")); err == nil {
 		t.Fatal("expected an error opening a missing HTML file")
 	}
@@ -196,6 +202,7 @@ func TestOpenHTMLMissingFile(t *testing.T) {
 // neither error nor panic (x/net/html is lenient and Build recovers), yielding a
 // one-page Document that rasterizes (possibly blank).
 func TestOpenHTMLBytesDegrades(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		data []byte

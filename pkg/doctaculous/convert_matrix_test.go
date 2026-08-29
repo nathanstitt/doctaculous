@@ -71,6 +71,7 @@ func matrixPDF(t *testing.T) []byte {
 // must convert successfully with spot-checked output, and pairs it rejects
 // must fail from Convert with the same sentinel error.
 func TestConvertMatrix(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	inputs := map[Format][]byte{
 		FormatPDF:      matrixPDF(t),
@@ -287,6 +288,7 @@ func TestConvertMatrix(t *testing.T) {
 // TestConvertAutoDetectsFrom verifies Convert detects the input format from
 // content when From is unset.
 func TestConvertAutoDetectsFrom(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var out bytes.Buffer
 	err := Convert(ctx, bytes.NewReader(matrixPDF(t)), &out,
@@ -307,6 +309,7 @@ func TestConvertAutoDetectsFrom(t *testing.T) {
 
 // TestConvertSelectsImagePage verifies Convert-to-image honors Image.Page.
 func TestConvertSelectsImagePage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// A document tall enough to paginate onto two US-Letter pages.
 	html := `<html><body><div style="height: 1800px">first</div><p>second page</p></body></html>`
@@ -339,6 +342,7 @@ func TestConvertSelectsImagePage(t *testing.T) {
 // TestConvertFile verifies output-format inference from the extension and file
 // creation.
 func TestConvertFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	inPath := filepath.Join(dir, "in.html")
@@ -381,6 +385,7 @@ func TestConvertFile(t *testing.T) {
 // TestDocumentWriteSameFormat verifies the generic Write rejects the
 // document's own format while the format-specific writers stay unrestricted.
 func TestDocumentWriteSameFormat(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	doc, err := OpenHTMLBytes([]byte(matrixHTML))
 	if err != nil {

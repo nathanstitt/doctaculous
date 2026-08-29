@@ -24,6 +24,7 @@ func roundTripPDF(t *testing.T, html string) []byte {
 }
 
 func TestPDFToMarkdownRoundTrip(t *testing.T) {
+	t.Parallel()
 	html := `<!DOCTYPE html><html><head><style>body{margin:0}
 		h1{font-size:32px}</style></head><body>
 		<h1>Quarterly Report</h1>
@@ -47,6 +48,7 @@ func TestPDFToMarkdownRoundTrip(t *testing.T) {
 }
 
 func TestPDFToHTMLRoundTrip(t *testing.T) {
+	t.Parallel()
 	html := `<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body>
 		<h1>Title Here</h1>
 		<p>Some body content in a paragraph.</p>
@@ -69,6 +71,7 @@ func TestPDFToHTMLRoundTrip(t *testing.T) {
 }
 
 func TestPDFTableRoundTrip(t *testing.T) {
+	t.Parallel()
 	// A ruled HTML table → PDF → extracted back to a GFM pipe table. This exercises the
 	// lattice table detector end to end (the borders become the ruling grid the detector
 	// finds). The headline feature: a table survives the round trip as a table.
@@ -96,6 +99,7 @@ func TestPDFTableRoundTrip(t *testing.T) {
 }
 
 func TestPDFDocumentSatisfiesWriteMarkdown(t *testing.T) {
+	t.Parallel()
 	// An opened PDF must now support WriteMarkdown/WriteText/WriteHTML (it satisfies
 	// reflowTree via lazy extraction), where previously it errored.
 	pdf := roundTripPDF(t, `<html><body><p>hello world</p></body></html>`)

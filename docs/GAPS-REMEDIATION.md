@@ -15,7 +15,7 @@ the fix follows the measurement, not the report.
 | 4 | `max-height` / `overflow:clip` do not clip | **Real — FIXED** | Two independent causes, not one. |
 | 5 | `-webkit-line-clamp` unimplemented | **Real — FIXED** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
 | 6 | `color-mix()` unimplemented | **Real — FIXED** | — |
-| 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
+| 7 | *(added by user)* colour emoji | **Real — FIXED** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
 | 8 | *(found while fixing #1)* | **Real — FIXED** | `<strong>`/`<b>`/`<em>`/`<i>` rendered with no bold or italic — the UA stylesheet had no rule for them. |
 | 9 | *(found while fixing #8)* | **Real — FIXED** | Backgrounds did not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` painted nothing. |
 
@@ -482,6 +482,49 @@ on tofu — the same trap the report calls out); per-table unit tests in `pkg/fo
 `.ttc` face-selection test; a "no colour face available" degradation test asserting the
 monochrome fallback *and* its log.
 
+**STATUS: DONE** — `feat/color-fonts`, stacked on branch 7. All four planned stages
+landed: COLR v0/v1 layers, bitmap strikes, COLR v1 gradients, and the emoji fallback
+chain. Showcase §36.
+
+### Test fixtures
+
+Two subsets of Noto Color Emoji (SIL OFL 1.1) ship as fixtures — COLR v1 at 230 KB and
+CBDT at 29 KB, from 4.8 MB and 10.2 MB upstream. Producing them needed a small
+sfnt subsetter (`testdata/gen/fonts/tools/`) because no `fonttools` is available and a
+15 MB fixture pair against a 1.6 MB fixture directory was not defensible.
+
+Twemoji was fetched first for COLR **v0** coverage and then dropped: its artwork is
+CC-BY-4.0, and `docs/DEPENDENCIES.md` permits MIT/BSD/Apache only. That leaves a real
+gap — **COLR v0 has no real-font coverage**, since the Noto fixture is v1-only. A small
+synthetic v0 font built in test code would close it honestly; v0's structure is simple
+enough (a flat base-glyph → layer-range table) that a hand-built one is not
+self-confirming the way a hand-built v1 paint graph would be.
+
+### Four bugs worth recording
+
+1. **Signed 24-bit offsets.** COLR v1 paint offsets are Offset24 and real fonts use
+   NEGATIVE ones — a shared paint sits earlier in the table. Reading them unsigned
+   turned -5 into 16,777,211 and walked off the end.
+2. **Wrong paint-format constants.** A draft had 12 as `PaintColrGlyph`; the real
+   records show it carries a u24 child-paint offset, i.e. a transform. Verified against
+   actual bytes rather than a re-reading.
+3. **A corrupt fixture masquerading as a parser bug.** After fixing 1 and 2 one glyph
+   still failed. Running the parser against the UNMODIFIED upstream font showed it
+   resolving perfectly, which isolated the fault to the fixture extractor (it had
+   swapped PaintTransform's two u24 fields). Testing against ground truth is what
+   separated these; without it the next hour would have gone into "fixing" correct code.
+4. **Bitmap bearing semantics.** `sbix`'s originOffsetY measures the image's BOTTOM from
+   the baseline while CBDT's bearingY measures its TOP. Treating them alike put CBDT
+   glyphs an em above the line — off-page, so they vanished while the tests still
+   reported ink from surrounding text.
+
+### A design change the data forced
+
+The layer model began as translation-only, then translation+mirror. Real emoji use
+genuine rotation and scale (a party popper's streamers), and refusing those discarded
+whole glyphs — so `ColorLayer` carries a full 2x3 affine. The lesson is the same one as
+the fixture bug: the shape of the data decides the model, not the other way round.
+
 ---
 
 ## 8. `<strong>`/`<b>`/`<em>`/`<i>` are not bold or italic (found while fixing #1)
@@ -591,7 +634,7 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | 5 | `feat/css-color-mix` | #6 | **DONE** — stacked on branch 4. |
 | 6 | `feat/svg-host-cascade` | #2 | **DONE** — stacked on branch 5. |
 | 7 | `feat/text-overflow-and-line-clamp` | #5 | **DONE** — stacked on branch 6. |
-| 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |
+| 8 | `feat/color-fonts` | #7 | **DONE** — stacked on branch 7. All four stages. |
 | 2 | `fix/ua-emphasis-defaults` | #8 | **DONE** — stacked on branch 1. Regenerated goldens across every format. |
 | 4 | `feat/inline-box-backgrounds` | #9 | **DONE** — stacked on branch 3. `<mark>`'s UA rule landed with it. |
 

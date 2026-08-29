@@ -12,6 +12,7 @@ import (
 // survives. The fixture includes a heading (bold face) and body text so multiple
 // embedded fonts are exercised.
 func TestPDFWriteTextRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	md := "# Fixture Heading\n\nHello doctaculous world.\n"
 

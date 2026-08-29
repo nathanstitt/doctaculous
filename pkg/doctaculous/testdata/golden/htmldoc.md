@@ -969,3 +969,37 @@ A clamp larger than the content is inert — no height change and no ellipsis, b
 Truncation happens in _glyph_ units, where the advances are already resolved, so the fit is exact rather than a re‑measure of a guessed substring. Trailing whitespace is dropped before the ellipsis — “foo …” reads as a gap — and the ellipsis inherits the styling of the glyph it follows, so a line ending in a larger or differently coloured span gets a matching one.
 
 Two edge cases worth stating. An ellipsis needs something to hide the truncation behind, so it applies only where the box actually clips; in an `overflow: visible` box the text still overflows visibly, as browsers do. And when even the ellipsis alone will not fit, CSS Overflow 3 still requires it to render — so a box a few pixels wide shows part of an ellipsis rather than nothing, which would erase the only sign that text was cut.
+
+**36 / COLOUR FONTS**
+
+## Emoji, in colour
+
+Colour glyphs painted nothing at all. A colour font's base glyph is _empty_ — its ink lives in separate tables the engine did not read — so an emoji rendered as a blank space, and naming an emoji family rendered the whole run as nothing.
+
+#### Layered outlines — `COLR`/`CPAL`
+
+😀🎉❤👍🌟
+
+😀🎉❤👍🌟
+
+Each glyph is a stack of ordinary outlines with palette colours, so it is _vector_ and scales like text. The grinning face carries a radial gradient and the party popper a linear one, with its streamers placed by genuine rotation matrices — an earlier draft modelled only offsets and mirrors, which forced it to refuse that glyph entirely.
+
+#### Bitmap strikes — `CBDT`/`CBLC` and `sbix`
+
+😀🎉❤👍🌟
+
+😀🎉❤👍🌟
+
+Other fonts — Apple Color Emoji among them, which has no `COLR` table at all — ship a rendered PNG per glyph per size. The strike nearest the used size is chosen, preferring a larger one so the image is downscaled rather than enlarged. These do _not_ scale like outlines, and saying so is more honest than implying they do.
+
+#### In ordinary prose
+
+An emoji with no font named resolves through the script‑fallback chain. The bundled substitutes have no emoji face — a colour emoji font is megabytes, well past what the toolkit embeds — so emoji route to an _installed_ one instead: Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji and friends, in that order. On a host with none, the run degrades to the missing‑glyph path rather than painting a wrong character.
+
+That path is deliberately _not_ exercised on this page. The goldens render hermetically, with no system fonts, so an emoji here would show a missing‑glyph box — which is the honest result for a host with no emoji font, and a poor demonstration of a feature that works. The two rows above name a font explicitly, and it ships as a fixture, so they render identically everywhere.
+
+#### What is deliberately absent
+
+A colour glyph the engine cannot express — a sweep (conic) gradient, or a composite paint needing per‑layer group compositing — is refused as a whole and falls back to the glyph's own monochrome outline. Painting it in a plausible flat colour would be harder to notice than painting it in none, which is the failure this whole area was reported for.
+
+A colour glyph keeps the _font's_ colours rather than the CSS `color`. A font can opt a layer into the text colour through the palette's foreground sentinel; that is the font's choice to make, not the document's.

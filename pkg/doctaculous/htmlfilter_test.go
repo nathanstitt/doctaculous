@@ -45,6 +45,7 @@ func filterProbeHTML(decl string) string {
 // CSS error handling makes an invalid declaration ignored ENTIRELY, so a list with
 // one bad entry must not apply the entries that did parse — hence the mixed cases.
 func TestHTMLFilterNoneIsPixelIdentical(t *testing.T) {
+	t.Parallel()
 	base := rasterHTML(t, filterProbeHTML(""))
 	for _, decl := range []string{
 		"filter:none",
@@ -80,6 +81,7 @@ func filterProbeInk(img *image.RGBA) color.RGBA { return img.RGBAAt(75, 34) }
 // It replaces the pass-through pin the plumbing stage carried, whose purpose was
 // exactly to fail once the chain landed.
 func TestHTMLFilterAppliesTheChainEndToEnd(t *testing.T) {
+	t.Parallel()
 	base := filterProbeInk(rasterHTML(t, filterProbeHTML("")))
 	if want := (color.RGBA{0x33, 0x66, 0x99, 0xff}); base != want {
 		t.Fatalf("unfiltered probe sampled %v at (75,34), want the div's own %v — "+
@@ -111,6 +113,7 @@ func TestHTMLFilterAppliesTheChainEndToEnd(t *testing.T) {
 // as a SPREAD rather than a recolouring. It must soften the div's own border edge
 // and reach outside the border box, since CSS does not clip a filter to the box.
 func TestHTMLFilterBlurIsSpatial(t *testing.T) {
+	t.Parallel()
 	plain := rasterHTML(t, filterProbeHTML(""))
 	blurred := rasterHTML(t, filterProbeHTML("filter:blur(4px)"))
 	if bytes.Equal(plain.Pix, blurred.Pix) {
@@ -128,6 +131,7 @@ func TestHTMLFilterBlurIsSpatial(t *testing.T) {
 // function that cannot be resolved without the cascade, which is why the colour is
 // resolved at layout time and carried on the item.
 func TestHTMLFilterDropShadowUsesCurrentColor(t *testing.T) {
+	t.Parallel()
 	img := rasterHTML(t, filterProbeHTML("color:#f00;filter:drop-shadow(20px 20px)"))
 	// The shadow is the div's silhouette shifted 20px down-right, so a point
 	// just past the div's bottom edge but within the shifted silhouette is pure
@@ -162,6 +166,7 @@ func closeRGBA(got, want color.RGBA, tol int) bool {
 // The unit tests in pkg/layout/paint prove the notice is emitted; only this one
 // proves RasterOptions.Logf is actually threaded through to the painter.
 func TestHTMLFilterOverCapReachesTheCallersLogf(t *testing.T) {
+	t.Parallel()
 	// A full-page filtered box. At 300 DPI this page rasterizes to far more than
 	// the 4M-pixel cap, so the bracket degrades to unfiltered.
 	src := `<html><body style="margin:0;background:#fff">` +

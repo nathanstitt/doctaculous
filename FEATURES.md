@@ -333,6 +333,21 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **Colour fonts / emoji** (`pkg/font/colr.go`, `colrv1.go`, `bitmap.go`,
+  `pkg/layout/paint/colrgradient.go`): colour glyphs paint in colour, through both families of
+  table. **`COLR`/`CPAL`** (v0 and v1) decode to layered outlines — vector, so they scale like text
+  — including per-layer **full affine transforms** (translation, mirror, rotation, scale) and
+  **linear/radial gradients** with pad/repeat/reflect spreads. **`sbix`** (Apple) and
+  **`CBDT`/`CBLC`** (Google) decode PNG strikes, choosing the strike nearest the used size and
+  preferring a larger one so the image is downscaled rather than enlarged; these do NOT scale like
+  outlines. A `.ttc` collection resolves its first face's tables. Emoji in ordinary prose reach an
+  **installed** colour font through the script-fallback chain (Apple Color Emoji, Segoe UI Emoji,
+  Noto Color Emoji…), because a colour emoji font is far too large to bundle; on a host with none,
+  the run degrades to the missing-glyph path. A colour glyph keeps the FONT's palette rather than
+  the CSS `color`, unless the font opts a layer into the foreground via the palette sentinel.
+  Showcase §36. Not modeled: **sweep (conic) gradients** and **composite paints**, which are refused
+  as a whole so the glyph falls back to its monochrome outline rather than a plausible wrong colour;
+  CPAL light/dark palette variants (the first palette is used); and non-PNG strike payloads.
 - **`text-overflow: ellipsis` and `-webkit-line-clamp`** (`pkg/layout/inline/ellipsis.go`,
   `pkg/layout/css/inline.go`): single-line ellipsis truncation and N-line clamping, the two ways CSS
   truncates text. Truncation runs in GLYPH units — whole glyphs are dropped until the ellipsis fits,

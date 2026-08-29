@@ -13,6 +13,7 @@ import (
 )
 
 func TestOpenSVGBytes(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
 	  <rect x="10" y="10" width="80" height="30" fill="#0000ff"/>
 	</svg>`)
@@ -62,6 +63,7 @@ func TestOpenSVGBytes(t *testing.T) {
 // TestSVGPDFRoundTrip proves vectors survive into PDF output: SVG -> PDF ->
 // raster matches SVG -> raster within the golden tolerance.
 func TestSVGPDFRoundTrip(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">
 	  <circle cx="60" cy="60" r="40" fill="teal" stroke="black" stroke-width="4"/>
 	  <path d="M 20 100 Q 60 20 100 100" fill="none" stroke="red" stroke-width="3"/>
@@ -102,6 +104,7 @@ func TestSVGPDFRoundTrip(t *testing.T) {
 // the structural assertion); either way the reopened PDF's raster shows the
 // gradient ramp: reddish on the left, blueish on the right.
 func TestSVGGradientPDFRoundTrip(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
 	  <defs>
 	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
@@ -173,6 +176,7 @@ const multiStopGradientSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="120
 // (within the project's standard golden tolerance) is the only real proof the
 // emitted /Function and /Coords are correct rather than merely present.
 func TestSVGOpaqueGradientVisualEquivalence(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenSVGBytes([]byte(multiStopGradientSVG))
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +211,7 @@ func TestSVGOpaqueGradientVisualEquivalence(t *testing.T) {
 // ramp: sampling just before and just after the break in the round-tripped
 // PDF render must show the two solid colors, not an interpolated blend.
 func TestHardBreakStillRendersAsBreak(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="20">
 	  <defs>
 	    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
@@ -258,6 +263,7 @@ func TestHardBreakStillRendersAsBreak(t *testing.T) {
 // written as plain text, so both names are searchable directly in the raw
 // PDF bytes.
 func TestSVGOpaqueGradientEmitsNativeShading(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenSVGBytes([]byte(multiStopGradientSVG))
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +293,7 @@ func TestSVGOpaqueGradientEmitsNativeShading(t *testing.T) {
 // correct, not merely present (same technique as
 // TestSVGOpaqueGradientVisualEquivalence).
 func TestSVGTransparentGradientEmitsShadingUnderSoftMask(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
 	  <rect width="100" height="50" fill="white"/>
 	  <defs>
@@ -350,6 +357,7 @@ func TestSVGTransparentGradientEmitsShadingUnderSoftMask(t *testing.T) {
 // emitting a /Shading dict that would render the reflected/repeated ramp as a
 // flat pad instead.
 func TestSVGGradientReflectSpreadStillRasterizes(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
 	  <defs>
 	    <linearGradient id="g1" x1="0.25" y1="0" x2="0.75" y2="0" spreadMethod="reflect">
@@ -417,6 +425,7 @@ func gzipSVGWithFiller(fillerLen int) []byte {
 // truncated (a truncated stream looks, to svg.Parse, like ordinary malformed
 // real-world SVG and returns a partial tree with a nil error).
 func TestOpenSVGBytesOversizedSVGZ(t *testing.T) {
+	t.Parallel()
 	data := gzipSVGWithFiller(svgzMaxSize + 1024)
 	if _, err := OpenSVGBytes(data); err == nil {
 		t.Fatal("oversized svgz accepted without error")
@@ -427,6 +436,7 @@ func TestOpenSVGBytesOversizedSVGZ(t *testing.T) {
 // payload decompressing to just under svgzMaxSize still opens successfully.
 // This is the assertion that would catch an off-by-one at the boundary.
 func TestOpenSVGBytesSVGZUnderCap(t *testing.T) {
+	t.Parallel()
 	data := gzipSVGWithFiller(svgzMaxSize - 1024)
 	doc, err := OpenSVGBytes(data)
 	if err != nil {
@@ -441,6 +451,7 @@ func TestOpenSVGBytesSVGZUnderCap(t *testing.T) {
 // magic bytes are present but the stream is not valid gzip) returns a clean
 // error instead of panicking or hanging.
 func TestOpenSVGBytesCorruptGzip(t *testing.T) {
+	t.Parallel()
 	data := []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff}
 	if _, err := OpenSVGBytes(data); err == nil {
 		t.Fatal("corrupt gzip accepted without error")
@@ -449,6 +460,7 @@ func TestOpenSVGBytesCorruptGzip(t *testing.T) {
 
 // TestOpenSVGFileMissing proves a missing path returns a clean wrapped error.
 func TestOpenSVGFileMissing(t *testing.T) {
+	t.Parallel()
 	if _, err := OpenSVGFile("/nonexistent/path/does-not-exist.svg"); err == nil {
 		t.Fatal("missing file accepted without error")
 	}
@@ -459,6 +471,7 @@ func TestOpenSVGFileMissing(t *testing.T) {
 // is skipped with one logged line), and that omitting WithLogf entirely
 // (the nil-logf path) still opens the same document without panicking.
 func TestOpenSVGBytesLogf(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
 	  <image href="nope.png" x="10" y="10" width="10" height="10"/>
 	  <rect x="10" y="10" width="80" height="30" fill="#0000ff"/>
@@ -481,6 +494,7 @@ func TestOpenSVGBytesLogf(t *testing.T) {
 }
 
 func TestSVGDetectAndFormat(t *testing.T) {
+	t.Parallel()
 	plain := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	prolog := []byte("\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
 		"<!-- generator -->\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"x\">\n" +
@@ -573,6 +587,7 @@ func TestSVGDetectAndFormat(t *testing.T) {
 // reflow pipeline) returns a clean error from RasterizePage instead of
 // panicking inside image.NewRGBA ("Rectangle has huge or negative dimensions").
 func TestRasterizeSVGNonFinitePageSizeErrorsCleanly(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1e300" height="1e300"/>`)
 	doc, err := OpenSVGBytes(src)
 	if err != nil {
@@ -588,6 +603,7 @@ func TestRasterizeSVGNonFinitePageSizeErrorsCleanly(t *testing.T) {
 // px at 72 DPI) is rejected by the pixel-count cap quickly, rather than
 // hanging the process trying to allocate it.
 func TestRasterizeSVGHugeFinitePageSizeErrorsFast(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1e6" height="1e6"/>`)
 	doc, err := OpenSVGBytes(src)
 	if err != nil {
@@ -611,6 +627,7 @@ func TestRasterizeSVGHugeFinitePageSizeErrorsFast(t *testing.T) {
 // TestRasterizeSVGNormalPageSizeUnaffected proves the new size guard does not
 // over-trigger: an ordinary small SVG still rasterizes successfully.
 func TestRasterizeSVGNormalPageSizeUnaffected(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
 	  <rect width="200" height="100" fill="#00ff00"/>
 	</svg>`)
@@ -639,6 +656,7 @@ func TestRasterizeSVGNormalPageSizeUnaffected(t *testing.T) {
 // support (fillAlpha/strokeAlpha in its gstate) already honors /ca and /CA,
 // so this test also proves the reader half of the loop, not just the writer.
 func TestSVGFillOpacityRoundTripsThroughPDF(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
 	  <rect width="100" height="100" fill="white"/>
 	  <rect width="100" height="100" fill="red" fill-opacity="0.5"/>
@@ -720,6 +738,7 @@ func hexColor(c color.RGBA) string {
 // point INSIDE the overlap distinguishes "composited once, correctly" from
 // "double-darkened by per-primitive alpha."
 func TestSVGGroupOpacityRoundTripsThroughPDFNoSeam(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
 	  <rect width="100" height="100" fill="white"/>
 	  <g opacity="0.5">
@@ -802,6 +821,7 @@ func TestSVGGroupOpacityRoundTripsThroughPDFNoSeam(t *testing.T) {
 // combination trips the bug, so this test exercises exactly that
 // combination and nothing less.
 func TestClipPathAndMaskBothApplyThroughPDF(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
 	  <mask id="m1"><rect x="0" y="0" width="100" height="100" fill="white"/></mask>
 	  <clipPath id="c1"><rect x="0" y="0" width="60" height="100"/></clipPath>
@@ -872,6 +892,7 @@ func TestClipPathAndMaskBothApplyThroughPDF(t *testing.T) {
 // so at most one BuildLuminanceMask call (and therefore at most one
 // sentinel) is ever produced per buildMask invocation.
 func TestNestedMaskOnMaskThroughPDF(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
 	  <mask id="inner"><rect x="40" y="40" width="120" height="120" fill="white"/></mask>
 	  <mask id="outer" mask="url(#inner)" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
@@ -933,6 +954,7 @@ func TestNestedMaskOnMaskThroughPDF(t *testing.T) {
 // opaque case is what this proves — no "/GSn gs" operator and no /ExtGState
 // resource may appear.
 func TestSVGOpaquePDFByteIdenticalAfterExtGState(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
 	  <rect x="0" y="0" width="120" height="80" fill="#0000ff"/>
 	  <rect x="10" y="10" width="40" height="30" fill="#00ff00" stroke="#000000" stroke-width="2"/>
@@ -961,6 +983,7 @@ func TestSVGOpaquePDFByteIdenticalAfterExtGState(t *testing.T) {
 // TestSVGManySameAlphaShapesDedupeExtGState proves a document with many shapes
 // at the same alpha emits ONE /ExtGState resource, not one per shape.
 func TestSVGManySameAlphaShapesDedupeExtGState(t *testing.T) {
+	t.Parallel()
 	var rects strings.Builder
 	for i := 0; i < 50; i++ {
 		fmt.Fprintf(&rects, `<rect x="%d" y="0" width="2" height="10" fill="red" fill-opacity="0.5"/>`, i*2)
@@ -1014,6 +1037,7 @@ func TestSVGManySameAlphaShapesDedupeExtGState(t *testing.T) {
 // to strip element opacity separately — a per-kind regression would otherwise
 // only surface in one of them.
 func TestFilteredElementSurvivesPDFRoundTrip(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		body   string
@@ -1096,6 +1120,7 @@ func TestFilteredElementSurvivesPDFRoundTrip(t *testing.T) {
 // and re-applies to the result. Dropping it on the fallback path would render
 // the element fully opaque in PDF while the raster backend renders it faded.
 func TestFilteredElementWithOpacitySurvivesPDFRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ name, body string }{
 		{"shape", `<rect x="10" y="10" width="80" height="80" fill="red" opacity="0.5" filter="url(#f)"/>`},
 		{"group", `<g opacity="0.5" filter="url(#f)"><rect x="10" y="10" width="80" height="80" fill="red"/></g>`},

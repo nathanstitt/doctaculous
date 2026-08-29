@@ -580,6 +580,13 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
 						if o, a, gOK := fb.Glyph(rn); gOK {
 							outline, advEm, ok, glyphFace = o, a, true, fb
+						} else if gid, adv, cOK := colorGlyphIn(fb, rn); cOK {
+							// A COLOUR glyph has no outline of its own: its ink is in
+							// COLR layers or a bitmap strike, both resolved at paint
+							// time from the face + gid. Requiring an outline here is
+							// what made an emoji vanish even once its font was found.
+							outline, advEm, ok, glyphFace = nil, adv, true, fb
+							_ = gid
 						}
 					}
 				}
@@ -796,4 +803,26 @@ func mathMod(a, m float64) float64 {
 		a += m
 	}
 	return a
+}
+
+// colorGlyphIn reports whether face has a COLOUR glyph for r — COLR layers or a bitmap
+// strike — returning its id and advance. It exists because such a glyph has no outline
+// of its own, so the ordinary Glyph() probe reports "no glyph" for a character the font
+// can very much draw.
+func colorGlyphIn(face *pkgfont.Face, r rune) (uint16, float64, bool) {
+	if face == nil || (!face.HasColorGlyphs() && !face.HasColorBitmaps()) {
+		return 0, 0, false
+	}
+	gid, ok := face.GID(r)
+	if !ok {
+		return 0, 0, false
+	}
+	if layers, lok := face.ColorLayers(gid); !lok || len(layers) == 0 {
+		// No layers: only a bitmap face can still draw it. A size-independent probe is
+		// enough here — the strike is chosen at paint time.
+		if !face.HasColorBitmaps() {
+			return 0, 0, false
+		}
+	}
+	return gid, face.GlyphAdvance(gid), true
 }

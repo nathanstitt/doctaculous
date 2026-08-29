@@ -12,6 +12,7 @@ import (
 // not just that box. This is the behavior that made e.g. Hacker News (a beige body
 // background) render with white margins/empty area before the fix.
 func TestCanvasBackgroundPropagation(t *testing.T) {
+	t.Parallel()
 	// HN-style beige body background; the page is taller than the content (a single
 	// tall page at a fixed viewport), so there is empty area below the content that
 	// must still be beige.
@@ -53,6 +54,7 @@ func TestCanvasBackgroundPropagation(t *testing.T) {
 // root/body background still renders on the default white canvas (no propagation,
 // byte-for-byte the prior behavior).
 func TestNoBackgroundStaysWhite(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(`<!DOCTYPE html><html><body><p>x</p></body></html>`),
 		WithViewportWidth(120))
 	if err != nil {

@@ -120,6 +120,7 @@ func solidSwatchLoader() resource.MapLoader {
 // failure means either the engine regressed on the equivalence under test or the
 // reference is not actually equivalent to the test.
 func TestWPTReftests(t *testing.T) {
+	t.Parallel()
 	for _, rt := range wptReftests {
 		t.Run(rt.name, func(t *testing.T) {
 			testImg := renderReftestPage(t, rt.name+".html", rt.viewportPx, rt.loader)

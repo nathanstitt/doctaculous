@@ -27,6 +27,7 @@ const shortBlockHTML = `<html><body>` +
 // rasterizes without error and paints real (non-blank) content. The layout width
 // is set from LetterWidthPt so the constant is exercised here.
 func TestWithPageSizeMultiPage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(multiBlockHTML), WithPageSize(LetterWidthPt, 300))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -57,6 +58,7 @@ func TestWithPageSizeMultiPage(t *testing.T) {
 // TestWithPageSizeSinglePageWhenShort checks that content shorter than the page
 // height stays on a single page even with WithPageSize active.
 func TestWithPageSizeSinglePageWhenShort(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(shortBlockHTML), WithPageSize(LetterWidthPt, LetterHeightPt))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -70,6 +72,7 @@ func TestWithPageSizeSinglePageWhenShort(t *testing.T) {
 // without WithPageSize the document is one tall page regardless of content height —
 // the 800pt of stacked blocks is NOT sliced.
 func TestDefaultIsSingleTallPage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(multiBlockHTML))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -82,6 +85,7 @@ func TestDefaultIsSingleTallPage(t *testing.T) {
 // TestLetterConstants documents the exported US-Letter page-size constants (and
 // keeps the unused linter satisfied for both).
 func TestLetterConstants(t *testing.T) {
+	t.Parallel()
 	if LetterWidthPt != 816 {
 		t.Fatalf("LetterWidthPt = %v, want 816", LetterWidthPt)
 	}

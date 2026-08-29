@@ -1206,3 +1206,12 @@ a.seen:visited { color: #6a9a3a; }
 .truncclip { white-space: nowrap; overflow: hidden; text-overflow: clip; }
 .trunc2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .trunc3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+
+/* §36: colour fonts. The two emoji faces ship as test fixtures (subsets of Noto Color
+   Emoji, SIL OFL 1.1) so the showcase renders identically everywhere rather than
+   depending on what the host has installed. */
+@font-face { font-family: "SpecimenEmojiVector"; src: url("../fonts/NotoColorEmoji-COLRv1.ttf") format("truetype"); }
+@font-face { font-family: "SpecimenEmojiBitmap"; src: url("../fonts/NotoColorEmoji-CBDT.ttf") format("truetype"); }
+.emoji-vec { font-family: "SpecimenEmojiVector"; }
+.emoji-bmp { font-family: "SpecimenEmojiBitmap"; }
+.emoji-row { margin: 0 0 4px 0; }

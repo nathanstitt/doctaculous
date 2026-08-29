@@ -22,6 +22,7 @@ const atPageDocHTML = `<html><head><style>
 // document's @page size: A4 pages (794 x 1123 @96), multiple of them for 1500pt of
 // content, each non-blank.
 func TestWithDefaultPagedUsesAtPage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(atPageDocHTML), WithDefaultPaged())
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -56,6 +57,7 @@ func TestWithDefaultPagedUsesAtPage(t *testing.T) {
 // rule but opened WITHOUT WithDefaultPaged / WithPageSize is still a single tall page
 // (the @page rule is inert until pagination is requested).
 func TestAtPageInertWithoutOptIn(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(atPageDocHTML))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
@@ -82,6 +84,7 @@ const tallNoAtPageHTML = `<html><body>` +
 // TestWithDefaultPagedNoAtPageFallsBackToLetter proves WithDefaultPaged on a document
 // with NO @page rule falls back to US-Letter pages.
 func TestWithDefaultPagedNoAtPageFallsBackToLetter(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(tallNoAtPageHTML), WithDefaultPaged())
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)

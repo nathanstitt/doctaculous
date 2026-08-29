@@ -8,6 +8,7 @@ import (
 )
 
 func TestOpenBytesAndCount(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(gen.MultiPagePDF(3))
 	if err != nil {
 		t.Fatal(err)
@@ -18,6 +19,7 @@ func TestOpenBytesAndCount(t *testing.T) {
 }
 
 func TestRasterizePage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(gen.VectorPDF())
 	if err != nil {
 		t.Fatal(err)
@@ -32,6 +34,7 @@ func TestRasterizePage(t *testing.T) {
 }
 
 func TestRasterizePageOutOfRange(t *testing.T) {
+	t.Parallel()
 	doc, _ := OpenBytes(gen.TextPDF())
 	if _, err := doc.RasterizePage(context.Background(), 99, RasterOptions{}); err == nil {
 		t.Fatal("expected error for out-of-range page")
@@ -39,6 +42,7 @@ func TestRasterizePageOutOfRange(t *testing.T) {
 }
 
 func TestRasterizePagesConcurrent(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(gen.MultiPagePDF(8))
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +66,7 @@ func TestRasterizePagesConcurrent(t *testing.T) {
 }
 
 func TestRasterizePagesSubset(t *testing.T) {
+	t.Parallel()
 	doc, _ := OpenBytes(gen.MultiPagePDF(5))
 	idx := []int{4, 0, 2}
 	results := doc.RasterizePages(context.Background(), idx, RasterOptions{DPI: 72})
@@ -76,6 +81,7 @@ func TestRasterizePagesSubset(t *testing.T) {
 }
 
 func TestRasterizePagesCancellation(t *testing.T) {
+	t.Parallel()
 	doc, _ := OpenBytes(gen.MultiPagePDF(8))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before starting
@@ -89,6 +95,7 @@ func TestRasterizePagesCancellation(t *testing.T) {
 }
 
 func TestRasterizePagesEmpty(t *testing.T) {
+	t.Parallel()
 	doc, _ := OpenBytes(gen.TextPDF())
 	results := doc.RasterizePages(context.Background(), nil, RasterOptions{})
 	if len(results) != 0 {

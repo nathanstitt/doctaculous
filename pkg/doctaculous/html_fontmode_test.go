@@ -9,6 +9,7 @@ import (
 // the default system mode. Both must lay out without error; the assertion is that the
 // option compiles and the pipeline runs (hermetic bundled path + system default path).
 func TestOpenHTMLBundledFonts(t *testing.T) {
+	t.Parallel()
 	src := []byte(`<html><body style="font-family:Helvetica"><p>Hello fonts</p></body></html>`)
 
 	docB, err := OpenHTMLBytes(src, WithBundledFonts())

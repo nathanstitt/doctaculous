@@ -57,6 +57,7 @@ var mdTextGoldens = []struct {
 // TestMarkdownTextGolden mirrors TestHTMLGolden for the Markdown/plain-text
 // frontends. Run with -update to regenerate, then eyeball the PNGs in review.
 func TestMarkdownTextGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
