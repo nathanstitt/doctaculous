@@ -28,7 +28,17 @@ type Engine struct {
 	svgs *svgCache
 	// inlineSVGs memoizes parses of inline <svg> markup (no ref, no loader).
 	inlineSVGs *inlineSVGCache
-	logf       func(string, ...any)
+	// authorSheets are the document's AUTHOR stylesheets, retained so they can cascade
+	// into an inline <svg> (see Engine.svgHostContext). An inline <svg> is part of the
+	// host document's tree, so a rule like `.icon { fill: blue }` applies to its
+	// children — but the SVG is re-parsed from serialized markup by pkg/svg, which
+	// never sees the host's sheets unless they are handed to it explicitly.
+	//
+	// Only AUTHOR sheets are carried: the UA sheet styles HTML elements and has no
+	// SVG rules, and passing it would make every inline <svg> parse consult ~40
+	// irrelevant rules per element.
+	authorSheets []gcss.Stylesheet
+	logf         func(string, ...any)
 	// measures memoizes per-box min/max-content widths within ONE layout. measureContent
 	// is a pure function of the box subtree and the (fixed) face cache, but table auto
 	// layout, grid track sizing, and flex base sizing each measure every cell/item for
@@ -82,6 +92,11 @@ type minMaxContent struct {
 // logf. A nil faces builds a fresh cache; a nil loader means images cannot be fetched
 // (every <img> degrades to a placeholder); a nil logf is a no-op — so callers need
 // supply only what they have.
+// SetAuthorSheets supplies the document's author stylesheets so they cascade into
+// inline <svg> content. Optional: an engine without them lays out identically except
+// that inline SVG children are styled by their own markup alone.
+func (e *Engine) SetAuthorSheets(sheets []gcss.Stylesheet) { e.authorSheets = sheets }
+
 func New(faces *layoutfont.FaceCache, loader resource.ResourceLoader, logf func(string, ...any)) *Engine {
 	if faces == nil {
 		faces = layoutfont.NewFaceCache()

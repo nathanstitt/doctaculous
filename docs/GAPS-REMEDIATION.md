@@ -10,7 +10,7 @@ the fix follows the measurement, not the report.
 | # | Reported | Verified | Correction to the report |
 | --- | --- | --- | --- |
 | 1 | `font-family` must end in a generic | **Real** | Not about the generic. Any family that fails to resolve deletes its text; the generic is merely the only *guaranteed* resolution. |
-| 2 | CSS does not style inline `<svg>` children | **Real, narrower** | Inline `style=` on a child **does** work, and so does `<style>` inside the `<svg>`. Only the *HTML document* stylesheet is lost. |
+| 2 | CSS does not style inline `<svg>` children | **Real — FIXED** | Inline `style=` on a child **does** work, and so does `<style>` inside the `<svg>`. Only the *HTML document* stylesheet is lost. |
 | 3 | `sysfont` registry lacks most families | **Real, worse** | `sysfont` *does* walk the font dirs, but identifies files by **filename** against a registry, and `Match` **never returns nil** — so the miss path in `osfont.go` is dead code. |
 | 4 | `max-height` / `overflow:clip` do not clip | **Real — FIXED** | Two independent causes, not one. |
 | 5 | `-webkit-line-clamp` unimplemented | **Real, larger** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
@@ -146,10 +146,28 @@ than re-cascading in the HTML tree:
    also key on the host sheets/root style, or two identical SVGs under different CSS
    would collide. This is a correctness requirement, not an optimisation.
 
-Selector matching across the boundary (`body .k`) stays out of scope: `cssNode.Parent()`
-(`pkg/svg/cssnode.go:42-47`) terminates at the SVG root. Selectors that match *within*
-the SVG subtree (`.k`, `rect`, `#id`) will work — that covers the reported use case.
-Note this honestly in FEATURES.md rather than implying full cross-boundary cascade.
+**STATUS: DONE** — `feat/svg-host-cascade`, stacked on branch 5. Showcase §34.
+
+Cross-boundary selectors were planned as out of scope, on the grounds that
+`cssNode.Parent()` terminates at the SVG root. They are IN scope and shipped. Leaving
+them out would have been worse than not doing the feature: `.icon` would work while
+`#sidebar .icon` silently did nothing — precisely the confusing partial support the
+source report complained about. `cssNode` is an adapter over the `css.Node` INTERFACE,
+so continuing the chain past the root only needed a `HostParent css.Node` field, which
+`html.Element` already satisfies.
+
+Two correctness details worth recording:
+
+- **The cache key needed the host PARENT, not just the sheets.** Two sibling `<svg>`
+  elements with byte-identical markup under the same stylesheet differ only in where
+  they sit in the host tree — exactly what `#a .k` keys on. Caught by measurement: the
+  first svg painted red and the second painted red too, when it should have been green.
+- **`<img src="*.svg">` must NOT be reached.** A referenced SVG is a separate document
+  and CSS does not cascade into it. A fix that overreaches is as wrong as one that
+  under-reaches, so that direction is pinned by its own test.
+
+`currentColor` was also broken and is fixed here — it is the same root cause (no host
+style crossed the boundary), and the report did not mention it.
 
 ### Tests
 
@@ -548,7 +566,7 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | 1 | `fix/font-terminal-fallback` | #1 + #3 | Same failure in the field; #3 makes #1's fallback reachable. Highest value: blank pages become text. |
 | 3 | `fix/overflow-clip-and-max-height` | #4a, #4b | **DONE** — stacked on branch 2. |
 | 5 | `feat/css-color-mix` | #6 | **DONE** — stacked on branch 4. |
-| 4 | `feat/svg-host-cascade` | #2 | Medium; touches three signatures + a cache key. |
+| 6 | `feat/svg-host-cascade` | #2 | **DONE** — stacked on branch 5. |
 | 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |
 | 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |
 | 2 | `fix/ua-emphasis-defaults` | #8 | **DONE** — stacked on branch 1. Regenerated goldens across every format. |

@@ -26,6 +26,12 @@ type Document struct {
 	// LinkRefs are the hrefs of <link rel=stylesheet>, unresolved. Box generation
 	// resolves them through a resource.ResourceLoader.
 	LinkRefs []string
+	// AuthorSheets are every author-origin stylesheet the document resolved to,
+	// in document order — StyleSheets plus the fetched LinkRefs. It is filled in by
+	// box generation (which is where <link> hrefs are actually loaded), and exists so
+	// the layout engine can cascade the page's CSS into inline <svg> content, which
+	// pkg/svg re-parses from serialized markup and would otherwise never see.
+	AuthorSheets []css.Stylesheet
 }
 
 // Parse parses HTML bytes into an owned DOM Document. It is total on the kinds of

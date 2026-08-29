@@ -333,6 +333,18 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **Host CSS cascades into inline `<svg>`** (`pkg/svg` `HostContext`/`ParseWithHost`,
+  `pkg/layout/css/replaced.go`): a page author sheet styles inline SVG children, so
+  `.icon { fill: blue }` works the way CSS says it should. Class, element, id, grouped, and
+  **descendant selectors rooted outside the `<svg>`** all match — the ancestor chain continues past
+  the SVG root into the host tree, so `#sidebar .icon` matches rather than silently doing nothing.
+  `currentColor` resolves against the `color` the `<svg>` box inherits, and the host's font-size and
+  font-family seed the SVG root. Precedence follows CSS: presentation attributes (zero specificity)
+  < host sheets < the SVG's own `<style>` (the more specific context wins a tie) < inline `style=`.
+  The inline-SVG parse cache is keyed by markup **plus the host context**, so two byte-identical
+  subtrees under different rules, colors, or ancestors do not collide. An `<img src="*.svg">` is
+  deliberately NOT reached — a referenced SVG is a separate document that CSS does not cascade
+  into, and a test pins that direction too. Showcase §34.
 - **`color-mix()`** (`pkg/css/colormix.go`, `pkg/css/colorspace.go`): CSS Color 5 §3, in every
   interpolation space — `srgb`, `srgb-linear`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `xyz`,
   `xyz-d50`, `xyz-d65` — plus all four hue-interpolation modes (`shorter`/`longer`/`increasing`/

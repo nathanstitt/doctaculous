@@ -2,7 +2,9 @@ package svg
 
 import (
 	"fmt"
+	"image/color"
 
+	"github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -198,11 +200,65 @@ type IntrinsicSize struct {
 // the document.
 func (d *Document) Intrinsic() IntrinsicSize { return d.intrinsic }
 
+// HostContext carries the styling an SVG inherits from a HOST document it is
+// embedded in — the stylesheets that should cascade into it, and the computed values
+// it inherits from its parent box.
+//
+// It exists because an inline <svg> in HTML is not a standalone document: CSS says an
+// author rule like `.icon { fill: blue }` in the page's <style> applies to SVG
+// children, and `fill="currentColor"` resolves against the color the <svg> element
+// inherits. Neither is knowable from the SVG markup alone, and this engine re-parses
+// an inline <svg> from serialized markup (pkg/html hands the subtree back as a
+// string), so the host's contribution has to be passed in explicitly.
+//
+// The zero value is the standalone-document case and changes nothing.
+type HostContext struct {
+	// Sheets are the host document's author stylesheets, in document order. They
+	// cascade BELOW the SVG's own <style> elements, so an internal rule still wins a
+	// specificity tie — the SVG is the more specific context.
+	Sheets []css.Stylesheet
+
+	// Color is the computed `color` the <svg> element inherits from its parent box,
+	// backing `currentColor`. Zero alpha means "not supplied", leaving the SVG
+	// default (black).
+	Color color.RGBA
+
+	// FontSizePt is the computed font-size the <svg> inherits, in points, so relative
+	// units and text inside the SVG scale with the host. Zero means "not supplied".
+	FontSizePt float64
+
+	// FontFamily is the computed font-family the <svg> inherits. Empty means "not
+	// supplied".
+	FontFamily string
+
+	// Parent is the host document's node for the <svg> element's PARENT, continuing
+	// the ancestor chain past the SVG root so a descendant selector written against
+	// the page (`#sidebar .icon`) matches inside the SVG. Nil leaves the chain
+	// terminating at the root, where only selectors confined to the SVG subtree match.
+	Parent css.Node
+}
+
+// empty reports whether the context carries nothing, so the standalone path can skip
+// every host-related branch.
+func (h *HostContext) empty() bool {
+	return h == nil || (len(h.Sheets) == 0 && h.Color.A == 0 && h.FontSizePt == 0 && h.FontFamily == "" && h.Parent == nil)
+}
+
 // Parse parses an SVG document into a read-only Document. logf (nil ok)
 // receives one debug line per skipped-or-degraded feature encountered while
 // building the scene; each unsupported element name is logged at most once
 // regardless of how many times it appears.
+//
+// It is the standalone-document form of ParseWithHost, which see for an SVG embedded
+// in a host document whose CSS should cascade into it.
 func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
+	return ParseWithHost(data, nil, logf)
+}
+
+// ParseWithHost is Parse for an SVG embedded in a host document: host (nil ok)
+// supplies the stylesheets that cascade into the SVG and the values it inherits from
+// its parent box. A nil or empty host is byte-identical to Parse.
+func ParseWithHost(data []byte, host *HostContext, logf func(string, ...any)) (*Document, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -247,7 +303,7 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	}
 	b.idx = buildIndex(root, b.warnOnceMsg)
 	b.servers = newPaintServerResolver(b.idx, logf)
-	ctx := &cascadeCtx{idx: b.idx, logf: logf}
+	ctx := &cascadeCtx{idx: b.idx, logf: logf, host: host}
 	doc.root = b.buildGroup(root, rootStyle(root, ctx), ctx)
 	// The root <svg> element's own opacity attribute (e.g. <svg
 	// opacity="0.5">) applies to it just like any other element's, even
@@ -281,8 +337,25 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 // performs. Fixing the general case is left as a separate, self-contained
 // change so its golden movement can be reviewed on its own.
 func rootStyle(root *element, ctx *cascadeCtx) Style {
-	full := defaultStyle().apply(root, ctx)
-	s := defaultStyle()
+	base := defaultStyle()
+	// An embedded SVG inherits from its parent box, so the host's computed values seed
+	// the root BEFORE the root element's own attributes are resolved — the root can
+	// then override them, and anything it does not set inherits down the tree. This is
+	// what makes fill="currentColor" resolve to the host's `color` rather than the SVG
+	// default black, and what lets text inside the SVG follow the host's font.
+	if h := ctx.hostContext(); h != nil {
+		if h.Color.A != 0 {
+			base.color = h.Color
+		}
+		if h.FontSizePt > 0 {
+			base.fontSizePt = h.FontSizePt
+		}
+		if h.FontFamily != "" {
+			base.fontFamily = h.FontFamily
+		}
+	}
+	full := base.apply(root, ctx)
+	s := base
 	s.fontFamily = full.fontFamily
 	s.fontSizePt = full.fontSizePt
 	s.fontBold = full.fontBold
@@ -290,6 +363,7 @@ func rootStyle(root *element, ctx *cascadeCtx) Style {
 	s.fontWeight = full.fontWeight
 	s.textAnchor = full.textAnchor
 	s.direction = full.direction
+	s.color = full.color
 	return s
 }
 

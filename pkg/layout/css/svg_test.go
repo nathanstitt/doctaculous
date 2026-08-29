@@ -205,11 +205,11 @@ func TestFitSceneToLeavesAMatchingBoxUnwrapped(t *testing.T) {
 // once more per intrinsic-width measurement.
 func TestInlineSVGCacheParsesEachMarkupOnce(t *testing.T) {
 	c := newInlineSVGCache()
-	first := c.get(testSVG, nil)
+	first := c.get(testSVG, nil, nil)
 	if !first.ok {
 		t.Fatal("inline markup did not parse")
 	}
-	if second := c.get(testSVG, nil); second.doc != first.doc {
+	if second := c.get(testSVG, nil, nil); second.doc != first.doc {
 		t.Error("the same markup was parsed twice; the memo is not working")
 	}
 }
@@ -221,7 +221,7 @@ func TestInlineSVGCacheParsesEachMarkupOnce(t *testing.T) {
 func TestInlineSVGCacheDegradesOnMalformedMarkup(t *testing.T) {
 	c := newInlineSVGCache()
 	for _, bad := range []string{"", "<svg", "\x00\x01", "<notsvg/>", `<svg><rect`} {
-		got := c.get(bad, nil)
+		got := c.get(bad, nil, nil)
 		if got.ok {
 			t.Errorf("malformed inline markup %q reported a successful parse", bad)
 		}
@@ -248,7 +248,7 @@ func TestParseSVGBytesNeverPanics(t *testing.T) {
 					t.Errorf("parseSVGBytes panicked on %q: %v", bad, r)
 				}
 			}()
-			parseSVGBytes(bad, "t", nil) //nolint:errcheck // the point is that it returns at all
+			parseSVGBytes(bad, "t", nil, nil) //nolint:errcheck // the point is that it returns at all
 		}()
 	}
 }

@@ -1372,5 +1372,57 @@ newline is kept.</p>
       the same reason: quantizing between levels turns Chrome's 191 into 192.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">34 / INLINE SVG &amp; THE HOST CASCADE</span>
+    <h2>The page's CSS reaches inside inline <code>&lt;svg&gt;</code></h2>
+    <p class="lede">An inline <code>&lt;svg&gt;</code> is part of the host document, so a
+      rule in the page's stylesheet styles its children. It previously did not: the
+      subtree was re-serialized to markup and re-parsed as a <em>standalone</em>
+      document, so the page's CSS never reached it and every shape fell back to SVG's
+      default black fill.</p>
+
+    <div class="chart">
+      <svg width="380" height="120" viewBox="0 0 380 120">
+        <path class="area" d="M20 100 L80 62 L140 74 L200 34 L260 50 L320 22 L320 100 Z"/>
+        <path class="curve" d="M20 100 L80 62 L140 74 L200 34 L260 50 L320 22"/>
+        <path class="axis" d="M20 10 L20 100 L360 100"/>
+        <circle class="dot" cx="80" cy="62" r="4"/>
+        <circle class="dot" cx="200" cy="34" r="4"/>
+        <circle class="dot" cx="320" cy="22" r="4"/>
+      </svg>
+    </div>
+    <p class="caption">Not one <code>fill</code> or <code>stroke</code> attribute in that
+      markup &mdash; every colour comes from <code>.chart .curve</code>,
+      <code>.chart .area</code> and friends in the page stylesheet. That includes
+      <em>descendant</em> selectors rooted outside the <code>&lt;svg&gt;</code>: the
+      ancestor chain now continues past the SVG root into the host tree, so
+      <code>.chart&nbsp;.curve</code> matches. Without that, <code>.curve</code> alone
+      would work while <code>.chart&nbsp;.curve</code> silently did nothing &mdash;
+      partial support that reads as a styling bug.</p>
+
+    <h4>Same markup, different context</h4>
+    <div style="display:flex; gap:16px;">
+      <div id="tinted"><svg width="90" height="46"><rect class="swatch" x="0" y="0" width="90" height="46"/></svg></div>
+      <div id="plain"><svg width="90" height="46"><rect class="swatch" x="0" y="0" width="90" height="46"/></svg></div>
+      <div style="color:#4a7c59"><svg width="90" height="46"><rect fill="currentColor" x="0" y="0" width="90" height="46"/></svg></div>
+    </div>
+    <p class="caption">The first two are <em>byte&#8209;identical</em> SVG markup; only
+      their containing <code>#id</code> differs. The parsed-SVG cache is keyed by markup,
+      so the host context had to join that key &mdash; otherwise the second would reuse
+      the first's parse and silently paint the wrong colour. The third takes its fill
+      from <code>currentColor</code>, which resolves against the <code>color</code> the
+      <code>&lt;svg&gt;</code> box inherits from its parent.</p>
+
+    <h4>What still wins</h4>
+    <p class="caption">Host sheets cascade <em>below</em> the SVG's own
+      <code>&lt;style&gt;</code>, so an internal rule takes a specificity tie &mdash; the
+      SVG is the more specific context for its own content. A presentation attribute has
+      zero specificity and loses to any host rule; an inline <code>style=</code> still
+      beats everything. And an <code>&lt;img src="…svg"&gt;</code> is deliberately
+      untouched: a referenced SVG is a separate document, and CSS does not cascade into
+      it. Both directions are pinned by tests, because a fix that overreaches is as wrong
+      as one that under&#8209;reaches.</p>
+  </section>
+
 </body>
 </html>

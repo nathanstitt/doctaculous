@@ -1181,3 +1181,13 @@ a.seen:visited { color: #6a9a3a; }
 /* Outer and inset in one list: they occupy different slots in the paint order,
    so both are visible at once. */
 .bs-both    .bstile { box-shadow: 6px 6px 5px #7a6a2a, inset 0 0 6px #b03030; }
+
+/* §34: inline-SVG host cascade. These rules live in the PAGE stylesheet and style
+   elements inside inline <svg> — the whole point of the section is that they reach
+   across the boundary at all. */
+.chart .axis { stroke: #6b7a96; stroke-width: 2; fill: none; }
+.chart .curve { stroke: #9b3d2e; stroke-width: 3; fill: none; }
+.chart .area { fill: #f2d98c; }
+.chart .dot { fill: #3a4a5a; }
+#tinted .swatch { fill: #9b3d2e; }
+#plain .swatch { fill: #3a4a5a; }

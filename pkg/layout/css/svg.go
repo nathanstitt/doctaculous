@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -121,7 +122,10 @@ func (c *svgCache) parse(ctx context.Context, ref string) (p parsedSVG, transien
 	if normalizeContentType(contentType) != svgContentType {
 		return parsedSVG{}, false // not SVG: the raster path owns this ref
 	}
-	doc, err := parseSVGBytes(data, ref, c.logf)
+	// No host context: an <img src="*.svg"> is a SEPARATE document, and CSS does not
+	// cascade the referencing page's rules into it. Only an INLINE <svg> is part of
+	// the host document's tree and inherits from it.
+	doc, err := parseSVGBytes(data, ref, nil, c.logf)
 	if err != nil {
 		return parsedSVG{wasSVG: true}, false
 	}
@@ -134,33 +138,75 @@ func (c *svgCache) parse(ctx context.Context, ref string) (p parsedSVG, transien
 // Memoizing still matters — replacedUsedSize and replacedFragment each resolve the
 // same box, and intrinsic-width measurement can resolve it several more times, so
 // without a cache one inline <svg> is parsed repeatedly per layout.
+//
+// The key is the markup PLUS the host styling that cascades into it. Keying on markup
+// alone would be a correctness bug once host CSS reaches the SVG: two identical
+// <svg> subtrees under different rules (or in boxes with different `color`, which
+// currentColor reads) would collide and the second would silently paint with the
+// first's styling.
 type inlineSVGCache struct {
 	mu       sync.Mutex
-	byMarkup map[string]parsedSVG
+	byMarkup map[inlineSVGKey]parsedSVG
+}
+
+// inlineSVGKey identifies one parse: the markup, plus a digest of the host context
+// that styles it. The host part is a digest rather than the context itself because
+// stylesheets are not comparable and would not work as a map key.
+type inlineSVGKey struct {
+	markup string
+	host   string
 }
 
 // newInlineSVGCache returns an empty inline-markup cache.
 func newInlineSVGCache() *inlineSVGCache {
-	return &inlineSVGCache{byMarkup: make(map[string]parsedSVG)}
+	return &inlineSVGCache{byMarkup: make(map[inlineSVGKey]parsedSVG)}
 }
 
 // get returns the parsed document for inline SVG markup, parsing on first use and
 // caching the result (including a failed parse, so malformed inline markup is not
 // re-parsed on every reference). ok is false for a failed parse; the caller
 // reserves the box and paints nothing.
-func (c *inlineSVGCache) get(markup string, logf func(string, ...any)) parsedSVG {
+func (c *inlineSVGCache) get(markup string, host *svg.HostContext, logf func(string, ...any)) parsedSVG {
 	if markup == "" {
 		return parsedSVG{wasSVG: true}
 	}
+	key := inlineSVGKey{markup: markup, host: hostDigest(host)}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if e, found := c.byMarkup[markup]; found {
+	if e, found := c.byMarkup[key]; found {
 		return e
 	}
-	doc, err := parseSVGBytes([]byte(markup), "", logf)
+	doc, err := parseSVGBytes([]byte(markup), "", host, logf)
 	e := parsedSVG{doc: doc, ok: err == nil && doc != nil, wasSVG: true}
-	c.byMarkup[markup] = e
+	c.byMarkup[key] = e
 	return e
+}
+
+// hostDigest reduces a host context to a comparable string for the cache key. Every
+// input that can change the parse must appear here, or two identical <svg> subtrees
+// styled differently would collide and the second would silently paint with the
+// first's styling.
+//
+// The sheets and the host PARENT are identified by pointer. For sheets that is cheap
+// and sufficient: the engine builds each document's stylesheet slice once and hands
+// the same backing array to every SVG in it. For the parent it is REQUIRED, not an
+// optimization — two sibling <svg> elements with byte-identical markup under the same
+// sheets differ only in where they sit in the host tree, which is exactly what a
+// descendant selector like `#a .k` keys on. Without the parent in the digest, the
+// second sibling reuses the first's parse.
+func hostDigest(h *svg.HostContext) string {
+	if h == nil {
+		return ""
+	}
+	var sb strings.Builder
+	if len(h.Sheets) > 0 {
+		fmt.Fprintf(&sb, "s%p/%d;", &h.Sheets[0], len(h.Sheets))
+	}
+	if h.Parent != nil {
+		fmt.Fprintf(&sb, "p%p;", h.Parent)
+	}
+	fmt.Fprintf(&sb, "c%08x;f%.4f;%s", uint32(h.Color.R)<<24|uint32(h.Color.G)<<16|uint32(h.Color.B)<<8|uint32(h.Color.A), h.FontSizePt, h.FontFamily)
+	return sb.String()
 }
 
 // maxSVGBytes caps the size of an SVG referenced from a document. An <img src>
@@ -176,7 +222,7 @@ const maxSVGBytes = 32 << 20
 // recovers and returns a partial scene), but a recover here keeps a future parser
 // bug from taking the whole layout down, since this runs on untrusted input.
 // ref names the source in diagnostics; pass "" for inline markup.
-func parseSVGBytes(data []byte, ref string, logf func(string, ...any)) (doc *svg.Document, err error) {
+func parseSVGBytes(data []byte, ref string, host *svg.HostContext, logf func(string, ...any)) (doc *svg.Document, err error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -194,7 +240,7 @@ func parseSVGBytes(data []byte, ref string, logf func(string, ...any)) (doc *svg
 			doc, err = nil, errSVGParse
 		}
 	}()
-	doc, err = svg.Parse(data, logf)
+	doc, err = svg.ParseWithHost(data, host, logf)
 	if err != nil {
 		logf("css layout: parse %s failed: %v", where, err)
 		return nil, err

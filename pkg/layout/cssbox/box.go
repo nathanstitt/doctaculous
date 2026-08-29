@@ -158,6 +158,12 @@ type ReplacedContent struct {
 	Attrs   map[string]string // src, width, height, alt, ...
 	Control ControlKind       // form-control kind; CtrlNone for <img>
 	Text    string            // control's display text; empty for <img>
+	// HostParent is the source element's PARENT as a css.Node, retained only for an
+	// inline <svg> so the host document's descendant selectors (`#sidebar .icon`) can
+	// continue matching past the SVG root. The box tree otherwise keeps no DOM
+	// reference; this is a read-only handle used at layout time and never mutated.
+	// Nil for every other replaced box.
+	HostParent css.Node
 }
 
 // InlineSVGAttr is the Attrs key under which box generation stores the

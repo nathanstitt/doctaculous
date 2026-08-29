@@ -103,6 +103,11 @@ func BuildWithFontsPagesRunningMedia(ctx context.Context, doc *html.Document, lo
 
 	var sheets []gcss.OriginSheet
 	sheets, faces, pages.Pages = assembleSheets(ctx, doc, loader, logf)
+	// Retain the author sheets on the parsed document so the layout engine can cascade
+	// them into inline <svg> content (see Engine.SetAuthorSheets). They are collected
+	// here because assembleSheets is where <style> elements and <link> hrefs are
+	// resolved into stylesheets; recovering them later would mean re-fetching.
+	doc.AuthorSheets = authorSheetsOf(sheets)
 	resolver := gcss.NewResolver(sheets, logf)
 	resolver.SetMedia(media)
 
@@ -231,6 +236,13 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running 
 	if attrs, ok := isReplaced(e); ok {
 		b.Kind = cssbox.BoxReplaced
 		b.Replaced = &cssbox.ReplacedContent{Tag: e.Tag(), Attrs: attrs}
+		// An inline <svg> keeps a handle on its host parent so the page's descendant
+		// selectors keep matching past the SVG root (see ReplacedContent.HostParent).
+		// Only inline SVG needs it; an <img src="*.svg"> is a separate document that
+		// the page's CSS correctly does not reach into.
+		if _, isInlineSVG := attrs[cssbox.InlineSVGAttr]; isInlineSVG {
+			b.Replaced.HostParent = e.Parent()
+		}
 		return b // replaced elements are leaves
 	}
 
@@ -489,4 +501,18 @@ func classifyDisplay(b *cssbox.Box, display string) {
 		// unknown display value -> block normal flow.
 		b.Kind, b.Display, b.Formatting = cssbox.BoxBlock, cssbox.DisplayBlock, cssbox.BlockFC
 	}
+}
+
+// authorSheetsOf extracts the author-origin stylesheets from an assembled origin list,
+// in document order. The UA sheet is excluded: it styles HTML elements and carries no
+// SVG rules, so passing it to an inline <svg> parse would cost a match attempt per
+// element for nothing.
+func authorSheetsOf(sheets []gcss.OriginSheet) []gcss.Stylesheet {
+	var out []gcss.Stylesheet
+	for _, os := range sheets {
+		if os.Origin == gcss.OriginAuthor {
+			out = append(out, os.Sheet)
+		}
+	}
+	return out
 }

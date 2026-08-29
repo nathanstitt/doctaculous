@@ -904,3 +904,19 @@ A 24% wash over white
 Every expected value was captured from Chrome rather than derived here, and the tests pin them byte‑for‑byte. A transposed conversion matrix or a swapped white point yields colours that look entirely plausible and are quietly wrong — and a test written from the same arithmetic as the implementation would happily agree with the bug.
 
 Mixing with transparent is the one deliberate divergence. Premultiplication weights a zero‑alpha colour's channels by zero, so the opaque colour's channels must survive untouched and only its alpha scales — making color-mix(in srgb, X N%, transparent) exactly rgba(X, N/100). Chrome reports up to 2/255 off from rounding through an intermediate space; the engine keeps the exact value. Nested mixes stay in float for the same reason: quantizing between levels turns Chrome's 191 into 192.
+
+34 / INLINE SVG & THE HOST CASCADE
+
+The page's CSS reaches inside inline <svg>
+
+An inline <svg> is part of the host document, so a rule in the page's stylesheet styles its children. It previously did not: the subtree was re-serialized to markup and re-parsed as a standalone document, so the page's CSS never reached it and every shape fell back to SVG's default black fill.
+
+Not one fill or stroke attribute in that markup — every colour comes from .chart .curve, .chart .area and friends in the page stylesheet. That includes descendant selectors rooted outside the <svg>: the ancestor chain now continues past the SVG root into the host tree, so .chart .curve matches. Without that, .curve alone would work while .chart .curve silently did nothing — partial support that reads as a styling bug.
+
+Same markup, different context
+
+The first two are byte‑identical SVG markup; only their containing #id differs. The parsed-SVG cache is keyed by markup, so the host context had to join that key — otherwise the second would reuse the first's parse and silently paint the wrong colour. The third takes its fill from currentColor, which resolves against the color the <svg> box inherits from its parent.
+
+What still wins
+
+Host sheets cascade below the SVG's own <style>, so an internal rule takes a specificity tie — the SVG is the more specific context for its own content. A presentation attribute has zero specificity and loses to any host rule; an inline style= still beats everything. And an <img src="…svg"> is deliberately untouched: a referenced SVG is a separate document, and CSS does not cascade into it. Both directions are pinned by tests, because a fix that overreaches is as wrong as one that under‑reaches.
