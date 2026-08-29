@@ -35,8 +35,13 @@ type Fragment struct {
 	Image      *ImageContent           // decoded replaced-element image (set for a replaced box), painted in the content box
 	Vector     *VectorContent          // parsed replaced-element SVG scene (set for an SVG replaced box), painted in the content box
 	Control    *ControlContent         // form-control widget (set for a control replaced box), painted in the content box
-	BgImage    *BackgroundImageContent // decoded CSS background image (set when the box has a decodable background-image), painted behind content
-	DebugTag   string                  // optional label for test lookup; not used in paint
+	BgImage    *BackgroundImageContent // decoded CSS background image (layer 0; see BgImages)
+	// BgImages holds EVERY background layer in paint order (last CSS layer first, so
+	// the first one ends up on top). BgImage aliases the topmost for consumers that
+	// only understand a single background; both are set together and neither is
+	// authoritative alone — the paint pass walks BgImages.
+	BgImages []*BackgroundImageContent
+	DebugTag string // optional label for test lookup; not used in paint
 
 	// Radii is the box's border-radius resolved against THIS fragment's border box
 	// and already overlap-corrected (CSS Backgrounds 3 §5.1). It is resolved at
@@ -583,7 +588,16 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	}
 	// Background image paints after the background color and before the border (CSS
 	// Backgrounds 3 paint order).
-	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil || bg.Gradient != nil) {
+	// Every layer, in the order resolveBackgroundImages produced (last CSS layer
+	// first), so the first layer ends up painted on top.
+	bgLayers := f.BgImages
+	if len(bgLayers) == 0 && f.BgImage != nil {
+		bgLayers = []*BackgroundImageContent{f.BgImage}
+	}
+	for _, bg := range bgLayers {
+		if bg == nil || (bg.Img == nil && bg.Scene == nil && bg.Gradient == nil) {
+			continue
+		}
 		// A rounded box clips its background IMAGE to the rounded border box. Unlike
 		// the background COLOR — a single fill this engine can round directly — a
 		// background image is an arbitrary number of tiles drawn by DrawImage, which

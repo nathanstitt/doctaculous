@@ -75,6 +75,18 @@ type ComputedStyle struct {
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
 	BackgroundImage string
+	// BackgroundLayers is the full comma-separated layer list, FIRST LAYER ON TOP
+	// (CSS Backgrounds §3.10). The single-value BackgroundImage/BackgroundGradient
+	// fields above mirror layer 0, so a consumer that only understands one background
+	// keeps working; the paint pass walks this to draw them all.
+	//
+	// Only the IMAGE varies per layer here. background-size/-repeat/-position and the
+	// rest are single-valued in this engine, and layout applies the computed longhand
+	// to every layer — so a layer record left zero means "use the element's value",
+	// not "use the initial value". Making those per-layer too is a separate slice.
+	//
+	// Nil means no list was given, and the single-value fields are the whole story.
+	BackgroundLayers []BackgroundLayer
 	// BackgroundGradient is set INSTEAD of BackgroundImage when background-image
 	// is a <gradient> function rather than a url(). The two are mutually
 	// exclusive: whichever form the declaration produced clears the other, so a
@@ -982,8 +994,21 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		// the url(), and vice versa. ok=false leaves BOTH untouched, which is
 		// what makes an unimplemented <image> keep the prior value rather than
 		// silently resetting the property to none.
-		if ref, grad, ok := parseBackgroundImage(d.Value); ok {
-			cs.BackgroundImage, cs.BackgroundGradient = ref, grad
+		// background-image takes the same comma-separated layer list as the shorthand.
+		//
+		// It sets ONLY the image of each layer. background-size, -repeat, -position and
+		// friends are separate longhands that may be declared either side of this one,
+		// so the layer records leave them zero and the LAYOUT side reads the final
+		// computed longhand values instead. Capturing them here would freeze whatever
+		// they happened to be at this point in the declaration block, which broke
+		// background-size when it was declared after background-image.
+		if layers, ok := parseBackgroundImageList(d.Value); ok {
+			cs.BackgroundLayers = layers
+			if len(layers) > 0 {
+				cs.BackgroundImage, cs.BackgroundGradient = layers[0].Image, layers[0].Gradient
+			} else {
+				cs.BackgroundImage, cs.BackgroundGradient = "", nil
+			}
 		}
 	case "filter":
 		// Kept RAW (see ComputedStyle.Filter): the grammar is parsed by

@@ -431,7 +431,12 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	// Fragment.Shadows). nil for an unshadowed box leaves its item stream
 	// byte-identical.
 	frag.Shadows = e.boxShadows(b)
-	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
+	frag.BgImages = e.resolveBackgroundImages(ctx, b, borderX, borderY, borderW, borderH, ed)
+	if n := len(frag.BgImages); n > 0 {
+		// BgImage aliases the TOPMOST layer (the last emitted), for consumers that
+		// only understand one background.
+		frag.BgImage = frag.BgImages[n-1]
+	}
 	if len(in.collapsedBorders) > 0 {
 		// The collapsed grid strips were built from the interior's cell fragments —
 		// page-space X but the local content-top-0 Y frame (like in.children). Shift
@@ -1584,7 +1589,13 @@ func shiftFragmentExtras(f *Fragment, dx, dy float64) {
 		f.ClipRect.x += dx
 		f.ClipRect.y += dy
 	}
-	if f.BgImage != nil {
+	for _, bg := range f.BgImages {
+		bg.OriginX += dx
+		bg.OriginY += dy
+		bg.ClipX += dx
+		bg.ClipY += dy
+	}
+	if f.BgImage != nil && len(f.BgImages) == 0 {
 		f.BgImage.OriginX += dx
 		f.BgImage.OriginY += dy
 		f.BgImage.ClipX += dx

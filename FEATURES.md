@@ -333,6 +333,15 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **Comma-separated `background` / `background-image` layer lists** (`pkg/css/shorthand.go`,
+  `pkg/layout/css/background.go`): multiple layers paint, first layer on top, with the
+  background-color behind them — so `background: <gradient>, <color>`, the ordinary way to give a
+  gradient a fallback, works. It previously made the whole declaration unparseable, so the element
+  painted NOTHING and it read as "gradients are unsupported". A colour is accepted in the final
+  layer only (CSS Backgrounds §3.10) and one earlier invalidates the declaration, as does any
+  unparseable layer. Known limit: `background-size`/`-repeat`/`-position`/`-origin`/`-clip` are
+  single-valued and apply to every layer — genuinely per-layer values are a separate slice.
+  Showcase §39.
 - **Margins on flex children** (`pkg/layout/css/flex.go`): honoured on both axes, including
   `margin: auto` absorbing free space (CSS Flexbox §8.1). Flex layout was previously margin-blind —
   an item's size and position came from its border box — so a margin on a flex child did nothing

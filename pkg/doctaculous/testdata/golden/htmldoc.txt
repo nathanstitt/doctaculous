@@ -1044,3 +1044,21 @@ A column: margin-top is the main axis and margin-left the cross one. Both apply,
 The block control
 
 The same margin-top on a block child was always correct, and still is — a test pins the two to the same position. This distinction matters: the original report contrasted a flex column against a plain block whose bare margin-top measured zero, but that is CSS margin collapsing through the body, not a bug. Only the flex case was wrong.
+
+39 / BACKGROUND LAYERS
+
+Comma-separated background lists
+
+Layering backgrounds on one element — the normal way to put a gradient over a base colour — made the whole declaration paint nothing. Only a single value was accepted, and adding the fallback colour that every browser wants was exactly what broke it. The failure was silent and total, so it read as “gradients are unsupported” rather than “the list was rejected”.
+
+A gradient over a fallback colour. The colour is legal in the last layer only (CSS Backgrounds §3.10); one earlier is a parse error, not something to quietly ignore.
+
+Two gradients. The first layer paints on top, and it fades to transparent on the right so the green beneath shows through — which is the proof that both layers paint, rather than the first one winning.
+
+Three layers: a fully transparent one, a gradient, and a base colour. Everything composites in order.
+
+What this needed
+
+The layers travel from the cascade through the box tree to paint as a list, emitted last‑first so the first layer ends up on top. background-image takes the same list.
+
+One subtlety worth recording, because getting it wrong is silent: the per‑layer records carry only the image. An early version also captured background-size and friends when the image list was parsed, which discarded any of those declared after it — so background-image then background-size lost the size, while the reverse order worked. Those properties are single‑valued here and are read at layout time instead, so declaration order stops mattering. Making them genuinely per‑layer is a separate slice, and FEATURES.md says so.

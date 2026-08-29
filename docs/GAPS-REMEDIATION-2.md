@@ -23,7 +23,7 @@ one does not reproduce at all.
 | 11 | Flex-derived height breaks `justify-content` | **Real** | — |
 | 12 | Abs-positioned box never shrink-wraps | **Real, narrower** | `width` IS honoured (measured 76px for `width:76px`). Shrink-to-fit is the missing part. The report's "width ignored" row is wrong. |
 | 12b | Flex child does not shrink-wrap | **Does NOT reproduce** | Measured 117px for a 117px string, identical to `inline-block`. |
-| 13 | Comma-separated `background` list dropped | **Real** | — |
+| 13 | Comma-separated `background` list dropped | **Real — FIXED** | — |
 | 14 | `writing-mode` ignored | **Real** | — |
 
 ### How these were measured
@@ -277,6 +277,16 @@ Parse `background` as a **layer list**: split on top-level commas, parse each la
 and take the colour from the **final** layer only (CSS Backgrounds §3.10 — a colour is
 only allowed in the last layer). Then either:
 
+**STATUS: DONE**, maximal. Showcase §39.
+
+One trap found while doing it, worth recording because it was silent: an early version
+captured `background-size` and the other longhands into each layer record when the
+image list was PARSED. Those are separate declarations that may appear either side of
+`background-image`, so a size declared afterwards was discarded — `background-image`
+then `background-size` lost the size, while the reverse order worked. Caught by two
+existing SVG-background tests. The per-layer records now carry only the image, and the
+layout side reads the final computed longhands, so declaration order stops mattering.
+
 **DECIDED: the maximal version.** Paint all layers, first on top, with
 `background-image` taking the same list. Layering is the point of the property, and
 doing half of it silently is the failure mode being fixed. This means `BgImage` becomes
@@ -390,7 +400,7 @@ Ordered by (silent × common) first, since a silent failure costs the most.
 | --- | --- | --- | --- |
 | 1 | `fix/unitless-line-height` | 7 | **DONE** — showcase §37. |
 | 2 | `fix/flex-child-margins` | 8 | **DONE** — showcase §38. `transform` split out, still pending. |
-| 3 | `feat/background-layer-list` | 13 | Silent and total; the fallback-colour idiom is ubiquitous. |
+| 3 | `feat/background-layer-list` | 13 | **DONE** — maximal (all layers painted). Showcase §39. |
 | 4 | `fix/svg-presentation-inheritance` | 2b | Silent; icons lose their strokes. Related to #132, already familiar. |
 | 5 | `fix/abs-position-in-flex` | 10, 10b, 11, 12 | One cluster, one branch — they touch the same code. |
 | 6 | `feat/css-transform` | (from 8) | Its own property; currently silent. |
