@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
@@ -80,6 +81,13 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	// the first line and shifts it left; the arithmetic handles it without clamping.
 	indent := textIndentPt(b, contentW)
 	firstLine := true
+	// Truncation state. clampAt is the line count -webkit-line-clamp allows (0 = no
+	// clamp); wantEllipsis is text-overflow:ellipsis on a box that actually clips —
+	// an overflowing line in an overflow:visible box still overflows visibly, because
+	// there is nothing to hide the truncation behind.
+	clampAt := b.Style.LineClamp
+	wantEllipsis := b.Style.TextOverflow == "ellipsis" && clips(b)
+	lineNo := 0
 	for len(rest) > 0 {
 		// Cancellation: checked PER LINE, not per glyph. This loop is the second
 		// unbounded walk in the engine (layoutBlockChildren is the first): a single
@@ -131,6 +139,42 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 
 		var lineGlyphs []inline.Glyph
 		lineGlyphs, rest = inline.BreakNextWrap(rest, avail-lineIndent, wrap)
+		lineNo++
+
+		// Truncation. Two properties, one operation: drop trailing glyphs until an
+		// ellipsis fits, then append it.
+		//
+		//   - line-clamp ends the box at line N and marks THAT line, so the ellipsis
+		//     signals the text that was cut. It fires only when text actually remains
+		//     (`len(rest) > 0`), matching browsers: a clamp larger than the line count
+		//     leaves the last line untouched.
+		//   - text-overflow marks any line too wide for the box, which in the
+		//     white-space:nowrap case it is written for is the only line.
+		//
+		// The line is measured against its own available width — narrowed by a first-line
+		// indent or an intruding float — so truncation lands where the clip will.
+		lineWidth := avail - lineIndent
+		atClamp := clampAt > 0 && lineNo >= clampAt && len(rest) > 0
+		overflows := wantEllipsis && inline.VisibleWidth(lineGlyphs) > lineWidth
+		if atClamp || overflows {
+			if ell, ok := e.ellipsisGlyphFor(b, lineGlyphs); ok {
+				// At a clamp boundary the line usually FITS — the ellipsis marks the
+				// text cut after it, not an overflow of this line — so it has to be
+				// appended rather than merely made room for.
+				var cut []inline.Glyph
+				if atClamp {
+					cut, _ = inline.AppendEllipsis(lineGlyphs, lineWidth, ell)
+				} else {
+					cut, _ = inline.TruncateWithEllipsis(lineGlyphs, lineWidth, ell)
+				}
+				lineGlyphs = cut
+			}
+		}
+		if atClamp {
+			// Stop after this line: the clamped box is N lines tall, which is a LAYOUT
+			// effect (a browser reports the shorter height), not just a paint clip.
+			rest = nil
+		}
 		// Breaking happened in logical order; MakeVisualLine reorders this line's
 		// glyphs into visual order (UAX#9 L2) so the emitter below, which walks the
 		// slice left-to-right at increasing x, paints them correctly. For an LTR
@@ -903,4 +947,31 @@ func edgeRun(b *cssbox.Box, style *inline.InlineBoxStyle, edge inline.InlineEdge
 		InlineBox:     style,
 		InlineBoxEdge: edge,
 	}
+}
+
+// ellipsisGlyphFor shapes the ellipsis for a line, styled like the run it will
+// terminate: the last glyph's family/size/colour, so the ellipsis matches the text it
+// truncates rather than the block's own defaults.
+//
+// ok=false when the face has no U+2026 (or no face resolves), in which case the caller
+// leaves the line untruncated — a hard cut is honest, a substituted box glyph is not.
+func (e *Engine) ellipsisGlyphFor(b *cssbox.Box, line []inline.Glyph) (inline.Glyph, bool) {
+	family, size := b.Style.FontFamily, b.Style.FontSizePt
+	style := pkgfont.Style{Bold: b.Style.Bold, Italic: b.Style.Italic}
+	col := inline.Color{R: b.Style.Color.R, G: b.Style.Color.G, B: b.Style.Color.B, A: b.Style.Color.A}
+	if col.A == 0 {
+		col.A = 0xff
+	}
+	// Prefer the LAST inked glyph's metrics: a line ending in a larger or differently
+	// styled span should get an ellipsis sized to match it.
+	for i := len(line) - 1; i >= 0; i-- {
+		if g := &line[i]; g.Outline != nil && g.SizePt > 0 {
+			size, col = g.SizePt, g.Color
+			break
+		}
+	}
+	if size <= 0 {
+		return inline.Glyph{}, false
+	}
+	return inline.ShapeEllipsis(e.faces, family, style, size, col)
 }

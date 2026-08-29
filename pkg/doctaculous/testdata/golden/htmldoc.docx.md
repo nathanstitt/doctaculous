@@ -927,3 +927,43 @@ The first two are _byte‑identical_ SVG markup; only their containing `#id` dif
 #### What still wins
 
 Host sheets cascade _below_ the SVG's own `<style>`, so an internal rule takes a specificity tie — the SVG is the more specific context for its own content. A presentation attribute has zero specificity and loses to any host rule; an inline `style=` still beats everything. And an `<img src="…svg">` is deliberately untouched: a referenced SVG is a separate document, and CSS does not cascade into it. Both directions are pinned by tests, because a fix that overreaches is as wrong as one that under‑reaches.
+
+**35 / TRUNCATION**
+
+## `text-overflow` and `-webkit-line-clamp`
+
+Neither existed. A single line clipped mid‑glyph with no ellipsis, and there was no way at all to truncate to N lines — so the only route was to cut the string in application code, before it ever reached the engine, guessing at how much would fit.
+
+#### Single line
+
+A headline long enough that it cannot fit on one line of this card
+
+`text-overflow: ellipsis` — whole glyphs are dropped until the ellipsis fits, so the cut never lands mid‑character and the line never spills past the clip edge.
+
+A headline long enough that it cannot fit on one line of this card
+
+`text-overflow: clip`, the initial value — the hard cut, mid‑glyph, for contrast.
+
+Short enough
+
+Text that fits is untouched: no ellipsis appears just because the property is set.
+
+#### Multiple lines
+
+Clamping to a fixed number of lines is what a card layout actually needs, and it is the case that had no CSS answer here at all: the box stops after the second line and the ellipsis marks what was cut.
+
+`-webkit-line-clamp: 2`. The box is genuinely _two lines tall_ — the clamp changes layout, not just paint, so the height a browser would report is the height this engine lays out.
+
+Clamping to a fixed number of lines is what a card layout actually needs, and it is the case that had no CSS answer here at all: the box stops after the second line and the ellipsis marks what was cut.
+
+The same text at `-webkit-line-clamp: 3`.
+
+Two short lines.
+
+A clamp larger than the content is inert — no height change and no ellipsis, because nothing was cut. An ellipsis that appears when nothing was truncated is a lie about the text.
+
+#### How the cut is chosen
+
+Truncation happens in _glyph_ units, where the advances are already resolved, so the fit is exact rather than a re‑measure of a guessed substring. Trailing whitespace is dropped before the ellipsis — “foo …” reads as a gap — and the ellipsis inherits the styling of the glyph it follows, so a line ending in a larger or differently coloured span gets a matching one.
+
+Two edge cases worth stating. An ellipsis needs something to hide the truncation behind, so it applies only where the box actually clips; in an `overflow: visible` box the text still overflows visibly, as browsers do. And when even the ellipsis alone will not fit, CSS Overflow 3 still requires it to render — so a box a few pixels wide shows part of an ellipsis rather than nothing, which would erase the only sign that text was cut.

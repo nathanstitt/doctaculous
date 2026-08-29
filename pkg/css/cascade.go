@@ -251,6 +251,25 @@ type ComputedStyle struct {
 	// dropping the clip entirely would be the worse error.
 	Overflow string
 
+	// TextOverflow is CSS Overflow 3 text-overflow: "clip" (the initial) | "ellipsis".
+	// Not inherited. It only takes effect on a line the box actually CLIPS — an
+	// overflowing line in an overflow:visible box still overflows visibly, matching
+	// browsers, because there is nothing to hide the truncation behind.
+	TextOverflow string
+
+	// LineClamp is the -webkit-line-clamp / line-clamp line count: 0 means none (the
+	// initial). Not inherited. A clamped box stops after N line boxes, shrinks its
+	// height to them, and marks line N with an ellipsis — so it is a LAYOUT effect,
+	// not only a paint one (a 2-line clamp on 5 lines of text makes the box 2 lines
+	// tall, which is what browsers report as its height).
+	LineClamp int
+
+	// BoxOrient is the legacy -webkit-box-orient. It is stored so the
+	// display:-webkit-box + -webkit-box-orient:vertical + -webkit-line-clamp idiom
+	// parses as a unit, but layout implements only the vertical orientation that
+	// idiom always uses. Not inherited.
+	BoxOrient string
+
 	// BreakBefore / BreakAfter are the CSS fragmentation break hints (break-before /
 	// break-after, plus the legacy page-break-before / page-break-after aliases). Read
 	// only by the pagination pass (never by layout); a forced value ("page"/"always"/
@@ -1163,6 +1182,29 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		if v, ok := parseOverflowShorthand(d.Value); ok {
 			cs.Overflow = v
 		}
+	case "text-overflow":
+		// Only the two keywords this engine can express. CSS Overflow 4 also allows a
+		// custom <string> and a two-value form (start/end); both are rejected here
+		// rather than approximated, so the declaration drops and the initial stands.
+		switch d.Value {
+		case "clip", "ellipsis":
+			cs.TextOverflow = d.Value
+		}
+	case "-webkit-line-clamp", "line-clamp":
+		// "none" is the initial (no clamp); a positive integer clamps to that many
+		// lines. Zero and negatives are invalid, so the declaration drops.
+		if d.Value == "none" {
+			cs.LineClamp = 0
+			break
+		}
+		if n, err := strconv.Atoi(strings.TrimSpace(d.Value)); err == nil && n > 0 {
+			cs.LineClamp = n
+		}
+	case "-webkit-box-orient":
+		// Accepted so the -webkit-box clamp idiom parses as a whole, but the engine
+		// only implements the vertical orientation the idiom always uses; a horizontal
+		// value is stored and ignored by layout rather than silently changing it.
+		cs.BoxOrient = d.Value
 	case "overflow-x", "overflow-y":
 		// Modeled as the same single clip flag as the shorthand: this engine has no
 		// per-axis clipping, and a box clipping on one axis still needs a clip rect

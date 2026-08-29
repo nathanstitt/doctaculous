@@ -333,6 +333,18 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **`text-overflow: ellipsis` and `-webkit-line-clamp`** (`pkg/layout/inline/ellipsis.go`,
+  `pkg/layout/css/inline.go`): single-line ellipsis truncation and N-line clamping, the two ways CSS
+  truncates text. Truncation runs in GLYPH units — whole glyphs are dropped until the ellipsis fits,
+  so a cut never lands mid-character and the line never spills past the clip edge. Trailing
+  whitespace is dropped before the ellipsis, and the ellipsis inherits the styling of the glyph it
+  follows. `-webkit-line-clamp` (and the unprefixed `line-clamp`) is a LAYOUT effect: the box stops
+  after N line boxes and its height shrinks to them, matching the height a browser reports, and the
+  final line is marked only when text actually remains. `text-overflow` applies only where the box
+  clips — an `overflow: visible` box still overflows visibly, as browsers do — and when even the
+  ellipsis alone does not fit it is still rendered (CSS Overflow 3 §5). `text-overflow: clip` (the
+  initial) and an over-large clamp are both inert. Showcase §35. Not modeled: `text-overflow`'s
+  custom `<string>` and two-value forms, and per-axis clamping.
 - **Host CSS cascades into inline `<svg>`** (`pkg/svg` `HostContext`/`ParseWithHost`,
   `pkg/layout/css/replaced.go`): a page author sheet styles inline SVG children, so
   `.icon { fill: blue }` works the way CSS says it should. Class, element, id, grouped, and

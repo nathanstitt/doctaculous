@@ -13,7 +13,7 @@ the fix follows the measurement, not the report.
 | 2 | CSS does not style inline `<svg>` children | **Real — FIXED** | Inline `style=` on a child **does** work, and so does `<style>` inside the `<svg>`. Only the *HTML document* stylesheet is lost. |
 | 3 | `sysfont` registry lacks most families | **Real, worse** | `sysfont` *does* walk the font dirs, but identifies files by **filename** against a registry, and `Match` **never returns nil** — so the miss path in `osfont.go` is dead code. |
 | 4 | `max-height` / `overflow:clip` do not clip | **Real — FIXED** | Two independent causes, not one. |
-| 5 | `-webkit-line-clamp` unimplemented | **Real, larger** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
+| 5 | `-webkit-line-clamp` unimplemented | **Real — FIXED** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
 | 6 | `color-mix()` unimplemented | **Real — FIXED** | — |
 | 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
 | 8 | *(found while fixing #1)* | **Real — FIXED** | `<strong>`/`<b>`/`<em>`/`<i>` rendered with no bold or italic — the UA stylesheet had no rule for them. |
@@ -353,6 +353,29 @@ Unit on the line breaker (glyph-level: the ellipsis replaces exactly enough glyp
 goldens for 1-line ellipsis, N-line clamp, clamp with a trailing float, and the
 too-narrow-for-ellipsis edge case.
 
+**STATUS: DONE** — `feat/text-overflow-and-line-clamp`, stacked on branch 6.
+Showcase §35.
+
+Confirmed the report's correction: `text-overflow: ellipsis` did NOT already work.
+Both properties were absent from the cascade entirely, so this was two features, and
+the single-line one had to land first because the clamp reuses its machinery.
+
+Two implementation notes worth keeping:
+
+- **The clamp needs its own append, not the truncate.** At a clamp boundary the final
+  line usually FITS — the ellipsis marks text cut *after* it, not an overflow *of* it —
+  so `TruncateWithEllipsis` returns it untouched and no ellipsis appears. That is why
+  `AppendEllipsis` exists as a separate entry point. Caught by measurement: the clamp
+  height was right while the ellipsis was silently missing.
+- **Trailing whitespace had to be stripped BEFORE the fit loop, not after.**
+  `VisibleWidth` excludes trailing spaces but a raw advance sum does not, so measuring
+  a candidate cut with spaces still attached compares two different quantities and lets
+  the loop stop while spaces remain. A unit test caught a space surviving before the
+  ellipsis.
+
+The clamp is a layout effect, not a paint clip: `clamp:2` lays the box out at exactly
+twice `clamp:1`'s height, which a test pins.
+
 ---
 
 ## 6. `color-mix()` unimplemented
@@ -567,7 +590,7 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | 3 | `fix/overflow-clip-and-max-height` | #4a, #4b | **DONE** — stacked on branch 2. |
 | 5 | `feat/css-color-mix` | #6 | **DONE** — stacked on branch 4. |
 | 6 | `feat/svg-host-cascade` | #2 | **DONE** — stacked on branch 5. |
-| 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |
+| 7 | `feat/text-overflow-and-line-clamp` | #5 | **DONE** — stacked on branch 6. |
 | 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |
 | 2 | `fix/ua-emphasis-defaults` | #8 | **DONE** — stacked on branch 1. Regenerated goldens across every format. |
 | 4 | `feat/inline-box-backgrounds` | #9 | **DONE** — stacked on branch 3. `<mark>`'s UA rule landed with it. |

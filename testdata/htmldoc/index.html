@@ -1424,5 +1424,60 @@ newline is kept.</p>
       as one that under&#8209;reaches.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">35 / TRUNCATION</span>
+    <h2><code>text-overflow</code> and <code>-webkit-line-clamp</code></h2>
+    <p class="lede">Neither existed. A single line clipped mid&#8209;glyph with no
+      ellipsis, and there was no way at all to truncate to N lines &mdash; so the only
+      route was to cut the string in application code, before it ever reached the
+      engine, guessing at how much would fit.</p>
+
+    <h4>Single line</h4>
+    <div class="truncbox trunc1">A headline long enough that it cannot fit on one line of this card</div>
+    <p class="caption"><code>text-overflow:&nbsp;ellipsis</code> &mdash; whole glyphs are
+      dropped until the ellipsis fits, so the cut never lands mid&#8209;character and the
+      line never spills past the clip edge.</p>
+
+    <div class="truncbox truncclip">A headline long enough that it cannot fit on one line of this card</div>
+    <p class="caption"><code>text-overflow:&nbsp;clip</code>, the initial value &mdash; the
+      hard cut, mid&#8209;glyph, for contrast.</p>
+
+    <div class="truncbox trunc1">Short enough</div>
+    <p class="caption">Text that fits is untouched: no ellipsis appears just because the
+      property is set.</p>
+
+    <h4>Multiple lines</h4>
+    <div class="truncbox trunc2">Clamping to a fixed number of lines is what a card
+      layout actually needs, and it is the case that had no CSS answer here at all:
+      the box stops after the second line and the ellipsis marks what was cut.</div>
+    <p class="caption"><code>-webkit-line-clamp:&nbsp;2</code>. The box is genuinely
+      <em>two lines tall</em> &mdash; the clamp changes layout, not just paint, so the
+      height a browser would report is the height this engine lays out.</p>
+
+    <div class="truncbox trunc3">Clamping to a fixed number of lines is what a card
+      layout actually needs, and it is the case that had no CSS answer here at all:
+      the box stops after the second line and the ellipsis marks what was cut.</div>
+    <p class="caption">The same text at <code>-webkit-line-clamp:&nbsp;3</code>.</p>
+
+    <div class="truncbox trunc3">Two short lines.</div>
+    <p class="caption">A clamp larger than the content is inert &mdash; no height change
+      and no ellipsis, because nothing was cut. An ellipsis that appears when nothing
+      was truncated is a lie about the text.</p>
+
+    <h4>How the cut is chosen</h4>
+    <p class="caption">Truncation happens in <em>glyph</em> units, where the advances are
+      already resolved, so the fit is exact rather than a re&#8209;measure of a guessed
+      substring. Trailing whitespace is dropped before the ellipsis &mdash; &ldquo;foo
+      &hellip;&rdquo; reads as a gap &mdash; and the ellipsis inherits the styling of the
+      glyph it follows, so a line ending in a larger or differently coloured span gets a
+      matching one.</p>
+    <p class="caption">Two edge cases worth stating. An ellipsis needs something to hide
+      the truncation behind, so it applies only where the box actually clips; in an
+      <code>overflow:&nbsp;visible</code> box the text still overflows visibly, as
+      browsers do. And when even the ellipsis alone will not fit, CSS&nbsp;Overflow&nbsp;3
+      still requires it to render &mdash; so a box a few pixels wide shows part of an
+      ellipsis rather than nothing, which would erase the only sign that text was cut.</p>
+  </section>
+
 </body>
 </html>

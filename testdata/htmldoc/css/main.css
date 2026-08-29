@@ -1191,3 +1191,18 @@ a.seen:visited { color: #6a9a3a; }
 .chart .dot { fill: #3a4a5a; }
 #tinted .swatch { fill: #9b3d2e; }
 #plain .swatch { fill: #3a4a5a; }
+
+/* §35: truncation. Card-like boxes with a fixed measure, so the ellipsis and clamp
+   have something to truncate against. */
+.truncbox {
+  width: 200px;
+  border: 1px solid #c9c2b0;
+  background: #f7f2e4;
+  padding: 6px 8px;
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+.trunc1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.truncclip { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.trunc2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.trunc3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
