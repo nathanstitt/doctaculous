@@ -333,6 +333,13 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **Absolute positioning in flex containers, and flex-derived heights** (`pkg/layout/css/flex.go`,
+  `block.go`): an abs/fixed child of a flex container is out of flow and honours its offsets (CSS
+  Flexbox §4.1) rather than being laid out as a flex item pinned to the edge; `top`+`bottom` with
+  `height: auto` sizes the box to the space between them (CSS 10.6.4), matching what `left`+`right`
+  already did; and an element whose height comes from flex layout (`align-items: stretch` or its own
+  `flex: 1`) resolves `justify-content` for its own children, because the cross size is now definite
+  BEFORE its interior lays out rather than written onto the fragment afterwards. Showcase §41.
 - **SVG presentation attributes inherit from the root** (`pkg/svg/svg.go` `rootStyle`): `fill`,
   `stroke`, `stroke-width`, caps/joins/dashes and the rest of the inherited vocabulary set on the
   root `<svg>` reach its children, as CSS inheritance requires. Previously only the font and text

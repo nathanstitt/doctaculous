@@ -18,10 +18,10 @@ one does not reproduce at all.
 | 7 | `line-height` is ignored | **Real — FIXED** | Only the **unitless** form (`1.2`) is ignored. `line-height: 40px` works. |
 | 8 | `margin` ignored on flex children | **Real — FIXED** | Margins work fine on **blocks** — the report's "plain block" contrast case is CSS margin collapsing, not a bug. Only flex children drop them. `transform` is separately unimplemented. |
 | 9 | `z-index` does not order positioned siblings | **Does NOT reproduce** | Both orderings paint red on top. Already fixed, or mis-measured. |
-| 10 | `top` + `bottom` does not size a box | **Real** | — |
-| 10b | Abs-positioned flex child ignores `left` | **Real** | — |
-| 11 | Flex-derived height breaks `justify-content` | **Real** | — |
-| 12 | Abs-positioned box never shrink-wraps | **Real, narrower** | `width` IS honoured (measured 76px for `width:76px`). Shrink-to-fit is the missing part. The report's "width ignored" row is wrong. |
+| 10 | `top` + `bottom` does not size a box | **Real — FIXED** | — |
+| 10b | Abs-positioned flex child ignores `left` | **Real — FIXED** | — |
+| 11 | Flex-derived height breaks `justify-content` | **Real — FIXED** | — |
+| 12 | Abs-positioned box never shrink-wraps | **Does NOT reproduce** | Re-measured on this branch: an abs box around a 72px string comes out 72px, identical to `inline-block`, and `width:76px` is honoured exactly. Both of the report's claims are wrong, and my own first reading of it was too. |
 | 12b | Flex child does not shrink-wrap | **Does NOT reproduce** | Measured 117px for a 117px string, identical to `inline-block`. |
 | 13 | Comma-separated `background` list dropped | **Real — FIXED** | — |
 | 14 | `writing-mode` ignored | **Real** | — |
@@ -242,6 +242,16 @@ shrink-wrap. Measured 117px for a 117px string, identical to `inline-block`. Eit
 was fixed already or the original probe measured something else — no work needed, and
 the plan should say so rather than "fixing" a non-bug.
 
+**STATUS: DONE** for 10, 10b and 11. Showcase §41, zero golden movement.
+
+**12 needed no work.** Re-measured on this branch, an absolutely positioned box around
+a 72px string comes out 72px — identical to `display: inline-block` — and an explicit
+`width: 76px` is honoured exactly. `absWidthShrinksToFit`/`absShrinkToFitWidth` already
+implement CSS 10.3.7. The report's "width ignored" row is wrong, and so was my own
+first reading of it: I recorded shrink-to-fit as the real gap, when in fact neither
+half reproduces. The measured spans in the report were probably the enclosing card's
+edge rather than the box's.
+
 ### Tests for the cluster
 
 Each of the four gets its own assertion, plus the controls that already pass
@@ -411,7 +421,7 @@ Ordered by (silent × common) first, since a silent failure costs the most.
 | 2 | `fix/flex-child-margins` | 8 | **DONE** — showcase §38. `transform` split out, still pending. |
 | 3 | `feat/background-layer-list` | 13 | **DONE** — maximal (all layers painted). Showcase §39. |
 | 4 | `fix/svg-presentation-inheritance` | 2b | **DONE** — showcase §40, zero golden movement. |
-| 5 | `fix/abs-position-in-flex` | 10, 10b, 11, 12 | One cluster, one branch — they touch the same code. |
+| 5 | `fix/abs-position-in-flex` | 10, 10b, 11 | **DONE** — showcase §41. 12 needed no work. |
 | 6 | `feat/css-transform` | (from 8) | Its own property; currently silent. |
 | — | (docs only) | 14 | **Deferred by decision.** Recorded in SCOPE.md; no implementation planned. |
 

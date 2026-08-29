@@ -1078,3 +1078,25 @@ The old code listed the properties that inherit, and anything missing from that 
 The non‑inherited set matters as much: opacity, clip-path, mask and filter must not reach the children, or the root's value would apply twice — once to its own group and again to each child. A 50% root over a black child would composite to 75% rather than 50%, which a test pins.
 
 The whole resvg conformance corpus passes unchanged, which is the strongest evidence available that the inherited/non‑inherited split is right: those fixtures exercise inheritance directly.
+
+41 / ABSOLUTE POSITIONING & FLEX
+
+Boxes that would not size or place
+
+Three related failures, all silent: a box given both top and bottom collapsed to nothing, an absolutely positioned child of a flex container ignored its offsets, and an element whose height came from flex layout laid its own children out as if it had no height at all.
+
+top + bottom sizes a box
+
+Rust: top + bottom, spanning the container. Slate: an explicit height, for contrast. Green: both pairs at once. The rust bar used to paint nothing — it collapsed to its content height, which for an empty box is zero. The horizontal equivalent (left + right) always worked, which is what made the asymmetry surprising.
+
+An absolutely positioned child of a flex container
+
+Per CSS Flexbox §4.1 such a child is not a flex item: it is out of flow and positioned against the container's padding box. It was being laid out as an item instead, pinned to the container's edge with left discarded — so this bar sat at x = 0 no matter what offset it was given.
+
+A flex-derived height aligns its own children
+
+Left: height from flex: 1. Right: an explicit height. Both centre their child. The cross size was being written onto the fragment after its interior had already been laid out, so anything inside that needs a definite height — justify-content, a percentage height — had already resolved against auto and packed to the top.
+
+One reported gap that did not reproduce
+
+The same report said an absolutely positioned box never shrink‑wraps and that width is ignored on one. Measured here, neither holds: an position: absolute box around a 72px string comes out 72px — identical to display: inline-block — and an explicit width: 76px is honoured exactly. Recorded as not‑reproducing rather than “fixed”, since nothing was changed.

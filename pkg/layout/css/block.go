@@ -653,7 +653,7 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 	case cssbox.TableFC:
 		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
 	case cssbox.FlexFC:
-		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC)
+		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	case cssbox.GridFC:
 		in = e.layoutGrid(ctx, b, contentW, contentX, childBand, childFC)
 	default:
@@ -1048,7 +1048,20 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		// auto-height box is positioned against a provisional zero content height — a
 		// documented deferral.)
 		translateFragment(frag, border.x-frag.X, border.y-frag.Y)
-		if isHeightAuto(d.box) && isAuto2(d.box.Style.Top, d.box.Style.FontSizePt) && !isAuto2(d.box.Style.Bottom, d.box.Style.FontSizePt) {
+		// height:auto with BOTH top and bottom specified: the used height is the space
+		// between them (CSS 10.6.4), not the content height. absRect already resolved
+		// it; the fragment keeps its own content-derived H otherwise, so this is the one
+		// case where the resolved height must be written back.
+		//
+		// Without it the box collapsed to its content height — zero for an empty one —
+		// so `top: 0; bottom: 20px`, the ordinary way to span a container vertically,
+		// painted nothing at all. The horizontal equivalent (left+right) already worked,
+		// which is what made the asymmetry surprising.
+		fsBox := d.box.Style.FontSizePt
+		if isHeightAuto(d.box) && !isAuto2(d.box.Style.Top, fsBox) && !isAuto2(d.box.Style.Bottom, fsBox) {
+			setFragmentHeight(frag, border.h)
+		}
+		if isHeightAuto(d.box) && isAuto2(d.box.Style.Top, fsBox) && !isAuto2(d.box.Style.Bottom, fsBox) {
 			e.logf("css layout: abs-pos bottom-only auto-height box positioned against a provisional height (approximate)")
 		}
 		fs := d.box.Style.FontSizePt
@@ -1655,5 +1668,25 @@ func debugTag(b *cssbox.Box) string {
 		return "inline"
 	default:
 		return "block"
+	}
+}
+
+// setFragmentHeight overrides a fragment's border-box height, growing or shrinking the
+// box itself without moving its origin or its children.
+//
+// Only the abs-positioned top+bottom case uses it: everywhere else a fragment's height
+// is content-derived and authoritative. The children are deliberately NOT rescaled —
+// CSS says the box's height comes from the offsets while its contents lay out normally
+// and may overflow, which is exactly what a taller-than-content box should do.
+func setFragmentHeight(f *Fragment, h float64) {
+	if f == nil || h < 0 {
+		return
+	}
+	f.H = h
+	if f.Clips {
+		f.ClipRect.h = h - (f.ClipRect.y - f.Y) - (f.Y + h - (f.ClipRect.y + f.ClipRect.h))
+		if f.ClipRect.h < 0 {
+			f.ClipRect.h = 0
+		}
 	}
 }

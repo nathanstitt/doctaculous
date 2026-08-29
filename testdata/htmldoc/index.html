@@ -1707,5 +1707,63 @@ newline is kept.</p>
       right: those fixtures exercise inheritance directly.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">41 / ABSOLUTE POSITIONING &amp; FLEX</span>
+    <h2>Boxes that would not size or place</h2>
+    <p class="lede">Three related failures, all silent: a box given both
+      <code>top</code> and <code>bottom</code> collapsed to nothing, an absolutely
+      positioned child of a flex container ignored its offsets, and an element whose
+      height came from flex layout laid its own children out as if it had no height at
+      all.</p>
+
+    <h4><code>top</code> + <code>bottom</code> sizes a box</h4>
+    <div style="position:relative;width:320px;height:90px;background:#f7f2e4;border:1px solid #c9c2b0">
+      <div style="position:absolute;left:8px;width:60px;top:8px;bottom:8px;background:#9b3d2e"></div>
+      <div style="position:absolute;left:80px;width:60px;top:8px;height:30px;background:#3a4a5a"></div>
+      <div style="position:absolute;top:8px;bottom:8px;left:152px;right:8px;background:#4a7c59"></div>
+    </div>
+    <p class="caption">Rust: <code>top</code>&nbsp;+&nbsp;<code>bottom</code>, spanning
+      the container. Slate: an explicit <code>height</code>, for contrast. Green: both
+      pairs at once. The rust bar used to paint <em>nothing</em> &mdash; it collapsed to
+      its content height, which for an empty box is zero. The horizontal equivalent
+      (<code>left</code>&nbsp;+&nbsp;<code>right</code>) always worked, which is what
+      made the asymmetry surprising.</p>
+
+    <h4>An absolutely positioned child of a flex container</h4>
+    <div style="position:relative;display:flex;width:320px;height:60px;background:#f7f2e4;border:1px solid #c9c2b0">
+      <div style="position:absolute;left:220px;top:12px;width:70px;height:32px;background:#9b3d2e"></div>
+    </div>
+    <p class="caption">Per CSS&nbsp;Flexbox&nbsp;&sect;4.1 such a child is <em>not</em> a
+      flex item: it is out of flow and positioned against the container's padding box.
+      It was being laid out as an item instead, pinned to the container's edge with
+      <code>left</code> discarded &mdash; so this bar sat at x&nbsp;=&nbsp;0 no matter
+      what offset it was given.</p>
+
+    <h4>A flex-derived height aligns its own children</h4>
+    <div style="display:flex;align-items:stretch;height:96px;width:320px;gap:8px">
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;background:#f7f2e4;border:1px solid #c9c2b0">
+        <div style="height:20px;background:#9b3d2e"></div>
+      </div>
+      <div style="height:96px;display:flex;flex-direction:column;justify-content:center;background:#f7f2e4;border:1px solid #c9c2b0;width:150px">
+        <div style="height:20px;background:#3a4a5a"></div>
+      </div>
+    </div>
+    <p class="caption">Left: height from <code>flex:&nbsp;1</code>. Right: an explicit
+      <code>height</code>. Both centre their child. The cross size was being written
+      onto the fragment <em>after</em> its interior had already been laid out, so
+      anything inside that needs a definite height &mdash;
+      <code>justify-content</code>, a percentage height &mdash; had already resolved
+      against auto and packed to the top.</p>
+
+    <h4>One reported gap that did not reproduce</h4>
+    <p class="caption">The same report said an absolutely positioned box never
+      shrink&#8209;wraps and that <code>width</code> is ignored on one. Measured here,
+      neither holds: an <code>position:&nbsp;absolute</code> box around a 72px string
+      comes out 72px &mdash; identical to <code>display:&nbsp;inline-block</code> &mdash;
+      and an explicit <code>width:&nbsp;76px</code> is honoured exactly. Recorded as
+      not&#8209;reproducing rather than &ldquo;fixed&rdquo;, since nothing was
+      changed.</p>
+  </section>
+
 </body>
 </html>

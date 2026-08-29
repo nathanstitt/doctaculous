@@ -278,7 +278,7 @@ func (a flexAxis) rect(originMain, originCross, mainPos, crossPos, mainSize, cro
 // interior (positioned item fragments + the content height). Signature matches
 // layoutTable. bandOriginY/fc are reserved for future float interactions (a flex
 // container establishes a BFC; floats inside items are self-contained).
-func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
+func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) interior {
 	_ = bandOriginY
 	_ = fc
 	ax := axisFor(b.Style.FlexDirection, effectiveDirection(b))
@@ -288,7 +288,28 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	// cancel.
 	ax.reverseCrossLines = ax.reverseCross != (b.Style.FlexWrap == "wrap-reverse")
 
+	// An absolutely- or fixed-positioned child of a flex container is NOT a flex item
+	// (CSS Flexbox §4.1): it is out of flow and positioned against the container's
+	// padding box, exactly as in a block container. Laying it out as an item instead
+	// pinned it to the container's edge and discarded its `left`/`top` — measured, a
+	// `left: 300px` child landed at x=0 under `display:flex` and at x=300 under a plain
+	// block. Defer them to the same pass a block container uses.
 	items := flexItemBoxes(b)
+	if posCtx != nil {
+		var inflow []*cssbox.Box
+		for _, it := range items {
+			if it.Position == cssbox.PosAbsolute || it.Position == cssbox.PosFixed {
+				cb := posCB
+				if it.Position == cssbox.PosFixed {
+					cb = posCBOwner{isPage: true}
+				}
+				posCtx.deferred = append(posCtx.deferred, deferredAbs{box: it, cb: cb})
+				continue
+			}
+			inflow = append(inflow, it)
+		}
+		items = inflow
+	}
 	if len(items) == 0 {
 		return interior{contentHeight: 0}
 	}
@@ -580,6 +601,7 @@ func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxi
 	if ax.vertical {
 		// column: relayout at width = lineCross, height pinned to usedMain.
 		pos := &positionedContext{}
+		defer withDefiniteHeight(it, usedMain)()
 		res := e.layoutBlock(ctx, it, lineCross, 0, 0, 0,
 			&floatContext{cbLeft: 0, cbRight: lineCross}, pos, posCBOwner{isPage: true})
 		frag := res.frag
@@ -592,6 +614,12 @@ func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxi
 	}
 	// row: width = usedMain (the main size); pin height to lineCross.
 	pos := &positionedContext{}
+	// The stretched height must be DEFINITE before the interior lays out, not pinned
+	// onto the fragment afterwards. A flex item whose height comes from stretch (or
+	// from its own flex:1) laid its children out as if it were auto-height, so
+	// justify-content had nothing to resolve against and packed them at the top —
+	// measured: children at y=0 where an explicit height centred them at y=90.
+	defer withDefiniteHeight(it, lineCross)()
 	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
 		&floatContext{cbLeft: 0, cbRight: usedMain}, pos, posCBOwner{isPage: true})
 	frag := res.frag
@@ -1063,4 +1091,25 @@ func flexMargins(it *cssbox.Box, ax flexAxis, innerMain float64) (mainStart, mai
 		return top, bottom, left, right, autoTop, autoBottom
 	}
 	return left, right, top, bottom, autoLeft, autoRight
+}
+
+// withDefiniteHeight temporarily gives a box a definite height for the duration of one
+// layout, returning a function that restores the original.
+//
+// A flex item's cross size is resolved by the flex algorithm, but its INTERIOR is laid
+// out by a nested formatting context that reads the box's own style. Writing the height
+// onto the fragment after that layout is too late: anything inside that needs a
+// definite height — justify-content, align-items, a percentage height — has already
+// resolved against auto.
+//
+// Mutating the box is safe here because layout is single-threaded and the value is
+// restored before the caller returns; the box tree is read-only across the CONCURRENT
+// render fan-out, which happens strictly after layout completes.
+func withDefiniteHeight(b *cssbox.Box, h float64) func() {
+	if b == nil || h < 0 {
+		return func() {}
+	}
+	prev := b.Style.Height
+	b.Style.Height = gcss.Length{Value: h, Unit: gcss.UnitPx}
+	return func() { b.Style.Height = prev }
 }
