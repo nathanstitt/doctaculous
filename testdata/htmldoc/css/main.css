@@ -1239,3 +1239,22 @@ a.seen:visited { color: #6a9a3a; }
 .fmcol { display: flex; flex-direction: column; }
 .fmitem { width: 54px; height: 26px; background: #9b3d2e; }
 .fmitem.alt { background: #3a4a5a; }
+
+/* §42: transforms. Each tile is identical apart from its transform, and the dashed
+   outline marks the space the box still occupies in layout. */
+.tfcell {
+  position: relative;
+  width: 96px; height: 64px;
+  border: 1px dashed #c9c2b0;
+  margin: 0 10px 30px 0;
+  display: inline-block;
+  vertical-align: top;
+}
+.tfbox {
+  width: 96px; height: 64px;
+  background: #9b3d2e;
+  color: #f7f2e4;
+  font-size: 12px;
+  text-align: center;
+  line-height: 64px;
+}

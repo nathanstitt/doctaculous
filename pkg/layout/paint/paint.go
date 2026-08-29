@@ -129,6 +129,16 @@ func (w *warnFlags) logFilterNestingCapOnce() {
 func paintItems(dev render.Device, items []layout.Item, mat render.Matrix, depth int, warned *warnFlags) {
 	for i := 0; i < len(items); i++ {
 		it := &items[i]
+		if it.Kind == layout.TransformPushKind {
+			// A CSS transform composes into the page matrix for the bracketed run:
+			// everything inside paints through it, and the matrix is restored after.
+			// An unmatched push takes the rest of the list, matching the filter
+			// bracket's own tolerance for a corrupted stream.
+			end := matchingTransformPop(items, i)
+			paintItems(dev, items[i+1:end], it.Transform.Mul(mat), depth, warned)
+			i = end
+			continue
+		}
 		if it.Kind == layout.FilterPushKind {
 			// The bracketed run is [i+1, end); end indexes the matching pop.
 			// An UNMATCHED push (impossible from the emission side, but a
@@ -141,6 +151,24 @@ func paintItems(dev render.Device, items []layout.Item, mat render.Matrix, depth
 		}
 		paintItem(dev, it, mat)
 	}
+}
+
+// matchingTransformPop returns the index of the TransformPopKind matching the push at
+// i, or len(items) when the stream is unbalanced.
+func matchingTransformPop(items []layout.Item, i int) int {
+	depth := 0
+	for j := i; j < len(items); j++ {
+		switch items[j].Kind {
+		case layout.TransformPushKind:
+			depth++
+		case layout.TransformPopKind:
+			depth--
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return len(items)
 }
 
 // maxFilterNestingDepth bounds how many CSS filters may be applied at once (a
@@ -205,6 +233,8 @@ func paintItem(dev render.Device, it *layout.Item, mat render.Matrix) {
 		clipRoundedRect(dev, mat, it.Rule.XPt, it.Rule.YPt, it.Rule.WPt, it.Rule.HPt, it.Rule.Radii)
 	case layout.ClipPopKind:
 		dev.Restore()
+	case layout.TransformPushKind, layout.TransformPopKind:
+		// Handled by the caller, which owns the matrix stack (see paintItems).
 	case layout.VectorKind:
 		paintVector(dev, &it.Vector, mat)
 	case layout.ShadowKind:

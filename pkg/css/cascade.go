@@ -149,6 +149,11 @@ type ComputedStyle struct {
 	// time by the inline formatting context. small-caps is approximated upstream as
 	// uppercase (true small-caps needs synthesized small capitals — deferred).
 	TextTransform string
+	// Transform is the resolved CSS `transform` matrix, or the identity when the
+	// property is absent or "none". Not inherited. It is a PAINT-time effect: it does
+	// not change layout, and the box keeps the space it occupied untransformed
+	// (CSS Transforms 1 §3).
+	Transform Transform
 
 	// WhiteSpace is the CSS white-space property: "normal" | "nowrap" | "pre" |
 	// "pre-wrap" | "pre-line". Inherited; initial "normal". Decomposed into three
@@ -905,6 +910,7 @@ func initialStyle() ComputedStyle {
 		TextAlign:          "start",
 		TextDecorationLine: "none",
 		TextTransform:      "none",
+		Transform:          identityTransform(),
 		WhiteSpace:         "normal",
 		OverflowWrap:       "normal",
 		WordBreak:          "normal",
@@ -1125,6 +1131,14 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "uppercase", "lowercase", "capitalize", "none":
 			cs.TextTransform = d.Value
+		}
+	case "transform":
+		// "none" and any unimplemented function (notably the 3D ones) leave the
+		// previous value, per CSS error handling.
+		if t, ok := parseTransform(d.Value, cs.FontSizePt); ok {
+			cs.Transform = t
+		} else if strings.EqualFold(strings.TrimSpace(d.Value), "none") {
+			cs.Transform = identityTransform()
 		}
 	case "white-space":
 		switch d.Value {

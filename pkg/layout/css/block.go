@@ -1259,6 +1259,13 @@ func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
 		return true
 	}
+	// A transformed box establishes a containing block for its descendants (CSS
+	// Transforms 1 §3), and painting it as ONE atom is what lets the transform bracket
+	// wrap its background and its content together — Appendix E otherwise emits those
+	// in separate phases, so the matrix would move the background and leave the text.
+	if transformed(b) {
+		return true
+	}
 	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
 		return true // a table and a table cell each establish a BFC
 	}
@@ -1293,7 +1300,31 @@ func establishesNewBFC(b *cssbox.Box) bool {
 // filtered box with a positioned child is an everyday pattern (badges, overlays,
 // dropdowns), so this is not an exotic case.
 func establishesStackingContext(b *cssbox.Box) bool {
-	return b.Position != cssbox.PosStatic || filtered(b)
+	// A TRANSFORMED element establishes one too (CSS Transforms 1 §3). That is not a
+	// detail: the transform is painted as a matrix bracket around the box's items, and
+	// only a stacking context emits its background, its children, and its content as
+	// one contiguous run. A plain block splits them across Appendix E's decoration and
+	// content phases, so a bracket around it would transform its background without its
+	// text.
+	return b.Position != cssbox.PosStatic || filtered(b) || transformed(b)
+}
+
+// transformed reports whether b carries a non-identity CSS transform.
+//
+// The ZERO-VALUE guard is essential, not defensive. An anonymous box carries a
+// zero-value ComputedStyle rather than the CSS initial one (see isAnonymous), so its
+// Transform is all zeros — which is not the identity matrix, and would make every
+// anonymous box a stacking context and a BFC. That silently reordered painting and
+// broke a WPT reftest before the guard was added.
+func transformed(b *cssbox.Box) bool {
+	if b == nil {
+		return false
+	}
+	t := b.Style.Transform
+	if t == (gcss.Transform{}) {
+		return false // zero-value style (anonymous box): no transform, not a matrix of zeros
+	}
+	return !t.IsIdentity()
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous

@@ -1109,3 +1109,35 @@ Left: height from `flex: 1`. Right: an explicit `height`. Both centre their chil
 #### One reported gap that did not reproduce
 
 The same report said an absolutely positioned box never shrink‑wraps and that `width` is ignored on one. Measured here, neither holds: an `position: absolute` box around a 72px string comes out 72px — identical to `display: inline-block` — and an explicit `width: 76px` is honoured exactly. Recorded as not‑reproducing rather than “fixed”, since nothing was changed.
+
+**42 / TRANSFORMS**
+
+## `transform`
+
+The property did nothing at all — it was not in the cascade, so every declaration was silently dropped. It was reported alongside a flex‑margin bug, but it is not flex‑specific: `translateX` on a plain block did nothing either.
+
+none
+
+translateX
+
+scale(.7)
+
+rotate
+
+skewX
+
+chained
+
+The dashed outline is the space each box still occupies: a transform is a _paint‑time_ effect and does not change layout (CSS Transforms 1 §3), so the boxes stay on their grid while their ink moves. The default origin is the box's centre, which is why `scale(.7)` shrinks inward rather than toward a corner, and why the percentage in the last tile resolves against the box's own width.
+
+#### How it is implemented, and the trap in it
+
+Because it changes no layout, the transform is a matrix _bracket_ around the box's already‑flattened items — the same shape the `filter` bracket uses. That only works if the box's background and its content are emitted as one contiguous run, and for a plain block they are not: Appendix E paints child decorations and in‑flow content in separate phases, so a bracket would have moved the background and left the text behind.
+
+The resolution is the spec's own: a transformed element establishes a _stacking context_ and a containing block for its descendants, and such a box already paints as a single atom. Marking it so was the fix — not a workaround for the bracket.
+
+The trap: an _anonymous_ box carries a zero‑value style, and a zero matrix is not the identity matrix. Without a guard, every anonymous box became a stacking context and a BFC, which reordered painting and broke a WPT reftest. It is the second time that same zero‑value distinction has bitten in this codebase, so it is called out at the predicate itself.
+
+#### What is refused
+
+The 3D functions — `translate3d`, `rotateX`, `perspective`, `matrix3d` — are rejected rather than flattened. This engine has no 3D pipeline, and dropping the Z terms would paint something confidently wrong; a refused declaration drops and the previous value stands, which is at least visible. `transform-origin` is not yet settable — the centre is used unconditionally.

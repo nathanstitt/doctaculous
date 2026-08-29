@@ -392,6 +392,19 @@ type GlyphFragment struct {
 // list — each page flattens its own subtree through this method — so a filtered box
 // straddling a page break emits its own balanced pair on each page.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
+	// A CSS transform brackets the box's WHOLE painted subtree, outside the filter
+	// bracket: `transform` positions what `filter` produced. It is a paint-time
+	// effect, so the box's layout — and the space it reserved — is already final.
+	if m, ok := f.transformMatrix(); ok {
+		dst = append(dst, layout.Item{Kind: layout.TransformPushKind, Transform: m})
+		dst = f.appendItemsTransformed(dst)
+		return append(dst, layout.Item{Kind: layout.TransformPopKind})
+	}
+	return f.appendItemsTransformed(dst)
+}
+
+// appendItemsTransformed is AppendItems minus the transform bracket.
+func (f *Fragment) appendItemsTransformed(dst []layout.Item) []layout.Item {
 	if len(f.Filter) == 0 {
 		return f.appendItemsUnfiltered(dst)
 	}
@@ -499,6 +512,27 @@ func (f *Fragment) appendFloatLayer(dst []layout.Item) []layout.Item {
 		}
 	}
 	return dst
+}
+
+// transformMatrix returns the fragment's CSS transform as a page-space matrix, and
+// whether it does anything.
+//
+// The matrix is built about the box's TRANSFORM ORIGIN, which defaults to its centre
+// (CSS Transforms 1 §6): translate to the origin, apply, translate back. Percentage
+// translate terms resolve against the box's own border-box size, which is why they
+// travel unresolved on the style and are finished here.
+func (f *Fragment) transformMatrix() (render.Matrix, bool) {
+	if f.Box == nil || f.Box.Style.Transform.IsIdentity() {
+		return render.Identity, false
+	}
+	t := f.Box.Style.Transform
+	ox, oy := f.X+f.W/2, f.Y+f.H/2
+	m := render.Matrix{
+		A: t.A, B: t.B,
+		C: t.C, D: t.D,
+		E: t.E + t.PctX*f.W, F: t.F + t.PctY*f.H,
+	}
+	return render.Translate(-ox, -oy).Mul(m).Mul(render.Translate(ox, oy)), true
 }
 
 // appendDecorations recurses the in-flow subtree emitting only backgrounds and

@@ -1765,5 +1765,55 @@ newline is kept.</p>
       changed.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">42 / TRANSFORMS</span>
+    <h2><code>transform</code></h2>
+    <p class="lede">The property did nothing at all &mdash; it was not in the cascade, so
+      every declaration was silently dropped. It was reported alongside a flex&#8209;margin
+      bug, but it is not flex&#8209;specific: <code>translateX</code> on a plain block did
+      nothing either.</p>
+
+    <div>
+      <div class="tfcell"><div class="tfbox">none</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:translateX(24px)">translateX</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:scale(0.7)">scale(.7)</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:rotate(-8deg)">rotate</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:skewX(-12deg)">skewX</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:translateX(20%) rotate(6deg)">chained</div></div>
+    </div>
+    <p class="caption">The dashed outline is the space each box still occupies:
+      a transform is a <em>paint&#8209;time</em> effect and does not change layout
+      (CSS&nbsp;Transforms&nbsp;1&nbsp;&sect;3), so the boxes stay on their grid while
+      their ink moves. The default origin is the box's centre, which is why
+      <code>scale(.7)</code> shrinks inward rather than toward a corner, and why the
+      percentage in the last tile resolves against the box's own width.</p>
+
+    <h4>How it is implemented, and the trap in it</h4>
+    <p class="caption">Because it changes no layout, the transform is a matrix
+      <em>bracket</em> around the box's already&#8209;flattened items &mdash; the same
+      shape the <code>filter</code> bracket uses. That only works if the box's
+      background and its content are emitted as one contiguous run, and for a plain
+      block they are not: Appendix&nbsp;E paints child decorations and in&#8209;flow
+      content in separate phases, so a bracket would have moved the background and left
+      the text behind.</p>
+    <p class="caption">The resolution is the spec's own: a transformed element
+      establishes a <em>stacking context</em> and a containing block for its
+      descendants, and such a box already paints as a single atom. Marking it so was the
+      fix &mdash; not a workaround for the bracket.</p>
+    <p class="caption">The trap: an <em>anonymous</em> box carries a zero&#8209;value
+      style, and a zero matrix is not the identity matrix. Without a guard, every
+      anonymous box became a stacking context and a BFC, which reordered painting and
+      broke a WPT reftest. It is the second time that same zero&#8209;value distinction
+      has bitten in this codebase, so it is called out at the predicate itself.</p>
+
+    <h4>What is refused</h4>
+    <p class="caption">The 3D functions &mdash; <code>translate3d</code>,
+      <code>rotateX</code>, <code>perspective</code>, <code>matrix3d</code> &mdash; are
+      rejected rather than flattened. This engine has no 3D pipeline, and dropping the Z
+      terms would paint something confidently wrong; a refused declaration drops and the
+      previous value stands, which is at least visible. <code>transform-origin</code> is
+      not yet settable &mdash; the centre is used unconditionally.</p>
+  </section>
+
 </body>
 </html>
