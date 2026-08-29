@@ -14,7 +14,7 @@ the fix follows the measurement, not the report.
 | 3 | `sysfont` registry lacks most families | **Real, worse** | `sysfont` *does* walk the font dirs, but identifies files by **filename** against a registry, and `Match` **never returns nil** — so the miss path in `osfont.go` is dead code. |
 | 4 | `max-height` / `overflow:clip` do not clip | **Real — FIXED** | Two independent causes, not one. |
 | 5 | `-webkit-line-clamp` unimplemented | **Real, larger** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
-| 6 | `color-mix()` unimplemented | **Real** | — |
+| 6 | `color-mix()` unimplemented | **Real — FIXED** | — |
 | 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
 | 8 | *(found while fixing #1)* | **Real — FIXED** | `<strong>`/`<b>`/`<em>`/`<i>` rendered with no bold or italic — the UA stylesheet had no rule for them. |
 | 9 | *(found while fixing #8)* | **Real — FIXED** | Backgrounds did not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` painted nothing. |
@@ -360,6 +360,32 @@ Table-driven unit tests in `pkg/css` covering each space, percentage normalisati
 missing/over-100% percentages, `transparent`, nesting inside `var()`, and an invalid
 space (asserting both the drop and the log). One showcase entry.
 
+**STATUS: DONE** — `feat/css-color-mix`, stacked on branch 4. Every space and all four
+hue modes shipped, plus showcase §33.
+
+Method note worth keeping. Expected values were **captured from Chrome** by rendering
+each mix to a 1x1 canvas and reading the pixel back, rather than derived from the spec
+by hand. That direction is the point: a transposed conversion matrix or a swapped white
+point produces colours that look entirely plausible, and a test written from the same
+arithmetic as the implementation agrees with the bug. 19 of 20 cases came out
+byte-identical to Chrome on the first run; the 20th exposed a real question rather than
+a rounding nitpick.
+
+Two deliberate divergences from Chrome, both toward exactness:
+
+- **Mixing with `transparent`.** Premultiplication weights a zero-alpha colour's
+  channels by zero, so the opaque colour's channels must survive untouched and only its
+  alpha scales. Chrome reports (75,142,217) for a 24% `#4a90d9`; the exact answer is
+  (74,144,217), verified by hand. This confirms the source report's claim that
+  `color-mix(in srgb, X N%, transparent)` maps exactly to `rgba(X, N/100)` — the report
+  was right and Chrome is the one that rounds.
+- **Nested mixes stay in float.** Quantizing between levels turns Chrome's (191,128,191)
+  into (192,128,192), because the inner 127.5 rounds up before the outer average sees
+  it. `parseColorMixFloat` keeps the intermediate unquantized.
+
+Chrome also corrected two of my own assumptions: `red 150%` is INVALID rather than
+clamped to 100%, and so is `red 0%, blue 0%`.
+
 ---
 
 ## 7. Colour emoji fonts (added during review)
@@ -521,7 +547,7 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | --- | --- | --- | --- |
 | 1 | `fix/font-terminal-fallback` | #1 + #3 | Same failure in the field; #3 makes #1's fallback reachable. Highest value: blank pages become text. |
 | 3 | `fix/overflow-clip-and-max-height` | #4a, #4b | **DONE** — stacked on branch 2. |
-| 3 | `feat/css-color-mix` | #6 | Self-contained, cheap. |
+| 5 | `feat/css-color-mix` | #6 | **DONE** — stacked on branch 4. |
 | 4 | `feat/svg-host-cascade` | #2 | Medium; touches three signatures + a cache key. |
 | 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |
 | 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |

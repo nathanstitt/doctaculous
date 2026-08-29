@@ -333,6 +333,20 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **`color-mix()`** (`pkg/css/colormix.go`, `pkg/css/colorspace.go`): CSS Color 5 §3, in every
+  interpolation space — `srgb`, `srgb-linear`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `xyz`,
+  `xyz-d50`, `xyz-d65` — plus all four hue-interpolation modes (`shorter`/`longer`/`increasing`/
+  `decreasing hue`) for the polar spaces. Percentages may precede or follow either colour; omitted
+  ones fill the remainder; two that sum under 100% normalize the weights **and** scale the result's
+  alpha. Interpolation is premultiplied per CSS Color 4 §12.3, so a semi-transparent input
+  contributes proportionally less hue. Evaluated inside the single shared colour grammar, so it
+  works in every property that takes a colour, and nests. Expected values are pinned to **Chrome**
+  (captured by canvas readback), not derived from the same arithmetic as the implementation. Two
+  deliberate divergences, both toward exactness: mixing with `transparent` leaves the opaque
+  colour's channels untouched (Chrome rounds up to 2/255 through an intermediate space), making
+  `color-mix(in srgb, X N%, transparent)` exactly `rgba(X, N/100)`; and nested mixes stay
+  unquantized between levels. An unknown space or a malformed component drops the declaration per
+  CSS error handling. Showcase §33. Gamut mapping is not modeled — out-of-gamut results clamp.
 - **Inline-box backgrounds and borders** (`pkg/layout/inline` `InlineBoxStyle`,
   `pkg/layout/css/fragment.go` `appendInlineBoxDecorations`): `background-color`, a uniform solid
   `border`, and horizontal `padding` on a non-replaced inline box (`<span>`, `<em>`, `<a>`…). Line

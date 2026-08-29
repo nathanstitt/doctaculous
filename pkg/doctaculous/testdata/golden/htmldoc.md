@@ -865,3 +865,51 @@ Identity is a _pointer_, not a colour. Two adjacent spans with the same backgrou
 Padding is part of _layout_, not just paint. It rides on a zero‑ink edge glyph at each boundary, so the line breaker, intrinsic sizing, and alignment all reserve the space by reading advances — none of them needs to know inline boxes exist. Painting a padded rect without that would draw a background wider than the layout ever agreed to.
 
 Still absent, deliberately: background _images_, vertical padding and margins (which per CSS 10.6.1 overflow the line box instead of growing it), and per‑edge or rounded inline borders. Each needs layout work this slice does not do, so each is omitted rather than half‑applied.
+
+**33 / COLOR-MIX()**
+
+## Mixing colours in a named interpolation space
+
+Every swatch below is `color-mix(in <space>, red, blue)` — the same two colours, mixed 50/50, eleven times. The space is not a formality: it decides the answer.
+
+`srgb` 128,0,128
+
+`srgb-linear` 188,0,188
+
+`hsl` 255,0,255
+
+`hwb` 255,0,255
+
+`lab` 193,0,136
+
+`oklab` 140,83,162
+
+`lch` 245,0,134
+
+`oklch` 186,0,194
+
+`xyz` 188,0,188
+
+#### Hue interpolation
+
+`shorter hue` — via magenta
+
+`longer hue` — the long way, via green
+
+`increasing hue`
+
+`decreasing hue`
+
+#### Weights and alpha
+
+`red 30%` — the remainder goes to blue
+
+Both `20%` — weights normalize _and_ the alpha drops to 0.4
+
+Premultiplied — the half‑transparent red gives up hue, so this is not 128,0,128
+
+A 24% wash over white
+
+Every expected value was _captured from Chrome_ rather than derived here, and the tests pin them byte‑for‑byte. A transposed conversion matrix or a swapped white point yields colours that look entirely plausible and are quietly wrong — and a test written from the same arithmetic as the implementation would happily agree with the bug.
+
+Mixing with `transparent` is the one deliberate divergence. Premultiplication weights a zero‑alpha colour's channels by zero, so the opaque colour's channels must survive _untouched_ and only its alpha scales — making `color-mix(in srgb, X N%, transparent)` exactly `rgba(X, N/100)`. Chrome reports up to 2/255 off from rounding through an intermediate space; the engine keeps the exact value. Nested mixes stay in float for the same reason: quantizing between levels turns Chrome's 191 into 192.

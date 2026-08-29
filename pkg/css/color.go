@@ -76,6 +76,12 @@ func ParseColorValue(s string) (color.RGBA, bool) {
 	if strings.HasPrefix(lower, "rgb") || strings.HasPrefix(lower, "hsl") {
 		return parseFunctionalColor(lower)
 	}
+	// color-mix() is evaluated here rather than by parseFunctionalColor because its
+	// arguments are whole colours (recursively parsed) plus an interpolation space,
+	// not the numeric channel triple that function handles. See colormix.go.
+	if strings.HasPrefix(lower, "color-mix") {
+		return parseColorMix(lower)
+	}
 	c, ok := namedColors[lower]
 	return c, ok
 }
