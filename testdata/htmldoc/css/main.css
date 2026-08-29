@@ -1215,3 +1215,14 @@ a.seen:visited { color: #6a9a3a; }
 .emoji-vec { font-family: "SpecimenEmojiVector"; }
 .emoji-bmp { font-family: "SpecimenEmojiBitmap"; }
 .emoji-row { margin: 0 0 4px 0; }
+
+/* §37: line-height. Each row states its own multiplier so the leading difference is
+   visible directly rather than described. */
+.lhbox {
+  background: #f7f2e4;
+  border: 1px solid #c9c2b0;
+  padding: 6px 8px;
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  width: 300px;
+}

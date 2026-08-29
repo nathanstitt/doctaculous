@@ -14,6 +14,11 @@ const (
 	UnitPercent
 	UnitAuto    // the "auto" keyword, modeled as a length so width/margin can carry it
 	UnitContent // the flex-basis "content" keyword (only produced/read by flex-basis)
+	// UnitNumber is a UNITLESS number, which is a valid value for a few properties
+	// (line-height most importantly) and invalid for lengths like width or margin.
+	// parseLength never produces it — parseNumberOrLength does, and only the
+	// properties that accept one call that — so `width: 5` keeps being rejected.
+	UnitNumber
 )
 
 // Length is a CSS length value: a magnitude plus its unit. Percentages and the
@@ -46,6 +51,10 @@ func parseTextDecorationLine(value string) string {
 // parseLength interprets a single token as a length. A unitless 0 is a valid
 // zero length; the "auto" keyword yields UnitAuto. ok is false for tokens that
 // are not lengths (e.g. a color keyword).
+//
+// A non-zero unitless number is NOT a length and is rejected here. The properties
+// for which one is meaningful — line-height — use parseNumberOrLength instead, so
+// that stays a per-property opt-in rather than a hole in every length.
 func parseLength(tok Token) (Length, bool) {
 	switch tok.Kind {
 	case TokenDimension:
@@ -97,4 +106,22 @@ func nextNonWhitespace(tz *tokenizer) Token {
 			return t
 		}
 	}
+}
+
+// parseNumberOrLength is parseLength plus the unitless-number form, for the
+// properties whose grammar accepts a bare number.
+//
+// line-height is the case that forced it: `line-height: 1.2` is the commonest
+// spelling of the property, and parseLength rejects it (correctly — `width: 1.2` is
+// invalid). Before this the declaration was simply dropped, so every text block used
+// the font-metric height and the property appeared to do nothing at all.
+//
+// The distinction is not cosmetic: a NUMBER inherits as a number, so a child with a
+// larger font gets a proportionally larger line box, whereas an em value inherits the
+// computed length. Keeping the unit distinct downstream is what makes that possible.
+func parseNumberOrLength(tok Token) (Length, bool) {
+	if tok.Kind == TokenNumber && tok.Num != 0 {
+		return Length{tok.Num, UnitNumber}, true
+	}
+	return parseLength(tok)
 }

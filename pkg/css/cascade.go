@@ -1055,8 +1055,24 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "font-style":
 		cs.Italic = d.Value == "italic" || d.Value == "oblique"
 	case "line-height":
-		if l, ok := parseLength(newTokenizer(d.Value).next()); ok {
-			cs.LineHeight = l
+		// Accepts a unitless NUMBER (the commonest spelling, and a multiplier of the
+		// font size) as well as a length or "normal".
+		//
+		// An em or % value is COMPUTED HERE against this element's own font size, so
+		// what descendants inherit is a fixed length — CSS 2.1 §10.8.1. A number is
+		// deliberately left as a number, because it inherits as one and re-multiplies
+		// against each descendant's own font size. That difference is the whole reason
+		// the two units stay distinct: `line-height: 2` on a 10px parent gives a 40px
+		// child an 80px line box, while `line-height: 2em` gives it a 20px one.
+		if l, ok := parseNumberOrLength(newTokenizer(d.Value).next()); ok {
+			switch l.Unit {
+			case UnitEm:
+				cs.LineHeight = Length{Value: l.Value * cs.FontSizePt, Unit: UnitPt}
+			case UnitPercent:
+				cs.LineHeight = Length{Value: l.Value / 100 * cs.FontSizePt, Unit: UnitPt}
+			default:
+				cs.LineHeight = l
+			}
 		} else if d.Value == "normal" {
 			cs.LineHeight = Length{Unit: UnitAuto}
 		}

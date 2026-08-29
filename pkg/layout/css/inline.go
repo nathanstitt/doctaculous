@@ -813,8 +813,14 @@ func resolveLineHeight(lh gcss.Length, fontSizePt float64, line inline.Line) flo
 	switch lh.Unit {
 	case gcss.UnitPx, gcss.UnitPt:
 		return lh.Value
-	case gcss.UnitEm:
+	case gcss.UnitEm, gcss.UnitNumber:
+		// A unitless number multiplies the font size, exactly as em does here. They
+		// differ only in how they INHERIT (a number inherits as a number, an em as the
+		// computed length), which is resolved by the cascade before this point.
 		return lh.Value * fontSizePt
+	case gcss.UnitPercent:
+		// A percentage resolves against the element's own font size (CSS 2.1 10.8.1).
+		return lh.Value / 100 * fontSizePt
 	default: // UnitAuto / unsupported: metrics × default multiplier
 		return autoLineHeight(line)
 	}

@@ -1530,5 +1530,49 @@ newline is kept.</p>
       document's.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">37 / LINE-HEIGHT</span>
+    <h2>The unitless multiplier</h2>
+    <p class="lede">A unitless <code>line-height</code> &mdash; the commonest spelling of
+      the property &mdash; was rejected as an invalid length, so the declaration was
+      dropped and every block used the font&#8209;metric height instead. The property
+      appeared to do nothing at all, and the slack compounded down a page.</p>
+
+    <div class="lhbox" style="line-height:1">Two lines at <code>line-height: 1</code>,
+      set tight enough that the ascenders and descenders nearly touch.</div>
+    <div class="lhbox" style="line-height:1.5">Two lines at
+      <code>line-height: 1.5</code>, the usual comfortable measure for body copy.</div>
+    <div class="lhbox" style="line-height:2.5">Two lines at
+      <code>line-height: 2.5</code>, loose enough that the leading is unmistakable.</div>
+    <p class="caption">All three are the same text at the same font size. Before this
+      they rendered identically.</p>
+
+    <h4>The units agree &mdash; except when they inherit</h4>
+    <p class="caption">At one font size, <code>2</code>, <code>2em</code>,
+      <code>200%</code> and <code>30px</code> all give the same line box on 15px text.
+      They diverge on <em>inheritance</em>, and the difference is the reason the units
+      stay distinct downstream: a <em>number</em> inherits as a number and
+      re&#8209;multiplies against each descendant's own font size, while an
+      <code>em</code> or <code>%</code> is computed against the element that declares it
+      and inherits as a fixed length (CSS&nbsp;2.1&nbsp;&sect;10.8.1).</p>
+
+    <div class="lhbox" style="font-size:10px;line-height:2">
+      <span style="font-size:26px">A 26px child inheriting <code>line-height: 2</code>
+      from a 10px parent gets a 52px line box.</span></div>
+    <div class="lhbox" style="font-size:10px;line-height:2em">
+      <span style="font-size:26px">The same child inheriting <code>2em</code> gets a
+      20px one &mdash; computed against the parent, then fixed.</span></div>
+    <p class="caption">Getting that backwards is invisible until a nested
+      font&#8209;size change appears, which is exactly when it matters, so both
+      directions are pinned by tests.</p>
+
+    <h4>What did not change</h4>
+    <p class="caption"><code>line-height: normal</code> and an absent declaration both
+      keep the font&#8209;metric height, so a document that never states the property
+      renders exactly as before. And a unitless number is still <em>not</em> a length:
+      <code>width: 5</code> remains invalid, because accepting it there would be a hole
+      in every length rather than a fix to one property.</p>
+  </section>
+
 </body>
 </html>

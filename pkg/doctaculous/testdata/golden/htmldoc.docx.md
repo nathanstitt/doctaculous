@@ -1001,3 +1001,31 @@ That path is deliberately _not_ exercised on this page. The goldens render herme
 A colour glyph the engine cannot express — a sweep (conic) gradient, or a composite paint needing per‑layer group compositing — is refused as a whole and falls back to the glyph's own monochrome outline. Painting it in a plausible flat colour would be harder to notice than painting it in none, which is the failure this whole area was reported for.
 
 A colour glyph keeps the _font's_ colours rather than the CSS `color`. A font can opt a layer into the text colour through the palette's foreground sentinel; that is the font's choice to make, not the document's.
+
+**37 / LINE-HEIGHT**
+
+## The unitless multiplier
+
+A unitless `line-height` — the commonest spelling of the property — was rejected as an invalid length, so the declaration was dropped and every block used the font‑metric height instead. The property appeared to do nothing at all, and the slack compounded down a page.
+
+Two lines at `line-height: 1`, set tight enough that the ascenders and descenders nearly touch.
+
+Two lines at `line-height: 1.5`, the usual comfortable measure for body copy.
+
+Two lines at `line-height: 2.5`, loose enough that the leading is unmistakable.
+
+All three are the same text at the same font size. Before this they rendered identically.
+
+#### The units agree — except when they inherit
+
+At one font size, `2`, `2em`, `200%` and `30px` all give the same line box on 15px text. They diverge on _inheritance_, and the difference is the reason the units stay distinct downstream: a _number_ inherits as a number and re‑multiplies against each descendant's own font size, while an `em` or `%` is computed against the element that declares it and inherits as a fixed length (CSS 2.1 §10.8.1).
+
+A 26px child inheriting `line-height: 2` from a 10px parent gets a 52px line box.
+
+The same child inheriting `2em` gets a 20px one — computed against the parent, then fixed.
+
+Getting that backwards is invisible until a nested font‑size change appears, which is exactly when it matters, so both directions are pinned by tests.
+
+#### What did not change
+
+`line-height: normal` and an absent declaration both keep the font‑metric height, so a document that never states the property renders exactly as before. And a unitless number is still _not_ a length: `width: 5` remains invalid, because accepting it there would be a hole in every length rather than a fix to one property.

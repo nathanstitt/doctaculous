@@ -333,6 +333,14 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
   cascaded and painted nothing). Showcase §30.
+- **`line-height`, all forms** (`pkg/css/value.go` `UnitNumber`, `pkg/layout/css/inline.go`): the
+  **unitless multiplier** (`line-height: 1.5`) — the commonest spelling — plus `em`, `%`, lengths,
+  and `normal`. The unitless form was previously rejected as an invalid length and the declaration
+  dropped, so every block used the font-metric height and the property appeared inert. Units differ
+  where it matters: a NUMBER inherits as a number and re-multiplies against each descendant's own
+  font size, while `em`/`%` compute against the declaring element and inherit as a fixed length
+  (CSS 2.1 §10.8.1). A unitless number is still not a valid length elsewhere — `width: 5` remains
+  invalid. Showcase §37.
 - **Colour fonts / emoji** (`pkg/font/colr.go`, `colrv1.go`, `bitmap.go`,
   `pkg/layout/paint/colrgradient.go`): colour glyphs paint in colour, through both families of
   table. **`COLR`/`CPAL`** (v0 and v1) decode to layered outlines — vector, so they scale like text
