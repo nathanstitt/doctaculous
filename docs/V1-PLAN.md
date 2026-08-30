@@ -224,6 +224,15 @@ Needs a showcase section and regenerated goldens per the project rule.
 12. **CI tests one OS.** `ci.yml:14` is `ubuntu-latest` only, while `.goreleaser.yaml`
     ships darwin and windows binaries. Windows path handling is never tested. Add a
     matrix.
+13. **The race suite has almost no memory headroom.** It peaks at ~13.3 GB RSS
+    against a 16 GB runner. That was latent until the rename nudged it over, and the
+    kernel killed the job (SIGTERM, exit 143) minutes into a 30-minute budget — a
+    failure that reads as a hang. `-p 2` bought the margin back, but three levels of
+    parallelism still compound (package binaries × `t.Parallel` × per-rasterize
+    worker pools), and `-race` multiplies all of it. Worth measuring again before
+    item 12 lands: a matrix multiplies runners, not per-runner memory, and macOS and
+    Windows runners are not more generous. If it is still near the ceiling, cap the
+    per-rasterize pool in tests rather than trimming coverage.
 
 Also missing, in rough priority: `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.
 Consider SBOM and artifact signing — both increasingly expected at 1.0.
