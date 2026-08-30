@@ -61,7 +61,7 @@ func TestColorLayersCarryPaletteColors(t *testing.T) {
 	if c.A == 0 {
 		t.Fatal("first layer is fully transparent")
 	}
-	if !(c.R > 200 && c.G < 120 && c.B < 120) {
+	if c.R <= 200 || c.G >= 120 || c.B >= 120 {
 		t.Errorf("first layer colour = %v, want a saturated red", c)
 	}
 }

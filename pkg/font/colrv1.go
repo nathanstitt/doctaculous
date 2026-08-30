@@ -297,13 +297,6 @@ func (a affine) mul(in affine) affine {
 // fixed1616 converts an OpenType Fixed (16.16) to float64.
 func fixed1616(v uint32) float64 { return float64(int32(v)) / 65536.0 }
 
-func absf(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
 // colrLayers walks a PaintColrLayers record: a slice of the LayerList, painted in
 // order (first layer at the bottom).
 func (w *colrWalk) colrLayers(off uint32, depth int) bool {
