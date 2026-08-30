@@ -33,6 +33,18 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   already-flattened outline and `content.Glyph` carries no `Face`/`GID`, so PDF text would need a
   new interpreter seam. Scope it to reflow inputs.
 
+- **Glyph hoisting does not apply to PDF input.** Reflow input (HTML/DOCX/SVG) reaches the
+  Device through `DrawGlyph`, which carries `Face`+`GID`, so each outline is defined once in
+  `<defs>` and referenced with `<use>` — measured 9.2× smaller on a text page. A PDF's text
+  arrives through `FillGlyph` with an already-flattened, already-positioned outline
+  (`pkg/pdf/content/showtext.go:139-142`), so there is no identity to key a definition on and
+  every occurrence emits its own inline path. Verified on the committed `svgwrite/text.svg`
+  golden: zero `<use>` elements.
+
+  This shares a root cause with the deferred `<text>` mode above — both need `content.GlyphSource`
+  to surface `Face`/`GID` so the interpreter can populate a `GlyphRef`. Doing that once would fix
+  both, and would shrink PDF-to-SVG output on text-heavy documents by roughly the same factor.
+
 - **Native `<clipPath>` for a clip-path union.** `Device.BuildClipMask` returns
   `GroupMask = *image.Alpha`, which collapses the `[]MaskPath` union to pixels, so a group's clip
   is embedded as a rasterized `<mask>`. SVG can express the union natively and would stay
@@ -59,6 +71,19 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   self-describing upstream, so they take the sampled-`<image>` fallback and hit the same gap),
   and 2 are `blend-*` (`mix-blend-mode` is not honored by the reader). Those paths are asserted
   structurally instead. Implementing `<image>` in the reader would close 15 of the 17.
+
+  `TestHTMLDocSVGShowcase` runs the same loop over all 44 pages of the htmldoc specimen against
+  the committed raster goldens, and hits the same wall: 8 of its pages embed an `<image>` and are
+  bounded loosely (`svgShowcasePagesWithRasterContent`). Those 8 tighten to the normal budget the
+  day the reader grows `<image>`.
+
+- **A cross-backend antialiasing seam at gradient edges.** Measured on htmldoc page 39: the only
+  pixels differing between a direct raster and the SVG round-trip are the single antialiased rows
+  at each gradient swatch's top and bottom edge — 1920 of 907200 (0.21%), max channel delta 33,
+  with every interior pixel byte-identical. The raster path fills a rect directly; the SVG path
+  fills a `<rect>` carrying a gradient reference, and the two rasterizations disagree on edge
+  coverage by a fraction of a pixel. The showcase budget is 0.3% rather than 0.2% for this
+  reason alone; the per-channel tolerance is unchanged at ±4.
 
 ## Not implemented — the SVG READER (`pkg/svg`)
 

@@ -694,9 +694,15 @@ bullet's design rationale is in its PR:
   `@font-face`, and the repo has no WOFF/WOFF2 encoder — so `<text>` would render with whatever
   the viewer happened to substitute. Outlines render identically everywhere. Each unique
   (face, glyph) outline is defined once in `<defs>` and referenced with `<use>`, which measured
-  **9.2× smaller** output on a text page (1.09 MB → 118 KB) versus inlining transformed copies.
-  Each `<use>` carries an `aria-label` with the source characters it stands for, so the text stays
-  recoverable by a screen reader or a scraper. Output is not text-selectable; that cost is the trade.
+  **9.2× smaller** output on an HTML text page (1.09 MB → 118 KB) versus inlining transformed
+  copies. Each `<use>` carries an `aria-label` with the source characters it stands for, so the
+  text stays recoverable by a screen reader or a scraper. Output is not text-selectable; that cost
+  is the trade.
+  - **The hoisting applies to reflow input only** (HTML/DOCX/SVG), not to PDF. A PDF's text
+    reaches the Device through `FillGlyph` with an already-flattened, already-positioned outline
+    (`pkg/pdf/content/showtext.go`) rather than through `DrawGlyph`, so there is no glyph identity
+    to key a definition on and PDF text emits inline paths. Closing that needs the same new
+    interpreter seam the deferred `<text>` mode would — see `docs/SVG.md`.
 - One page per document, like an image: `SVGOptions.Page` selects it on the generic `Convert`
   path, and the CLI reuses the same `%d` fan-out, page-selection flags, and per-page error
   handling as image output.
@@ -705,6 +711,19 @@ bullet's design rationale is in its PR:
   `SVGOptions.Background`. Only the fallback differs, deliberately: with neither set the page
   stays **transparent**, where rasterization commits to opaque white, since a vector document
   composited over an unknown backdrop should not carry an assumed backdrop of its own.
+- **Tested three ways.** Committed **text goldens** of the emitted markup
+  (`testdata/golden/svgwrite/`, regenerate with
+  `go test ./pkg/omnidoc -run TestSVGWriteGolden -update`) catch output that renders the same but
+  says something different — a lost `fill-rule`, a switch from `<use>` back to inline paths —
+  which a pixel check cannot see; output is asserted deterministic so they cannot flake. A
+  **round-trip** sweep over `gen.Core` writes SVG, re-reads it through `pkg/svg`, rasterizes, and
+  diffs against a direct raster. The **htmldoc showcase** (`TestHTMLDocSVGShowcase`) runs all 44
+  pages of the specimen document through that same loop against the existing `htmldoc-p*.png`
+  raster goldens — no new goldens, so any raster-vs-SVG disagreement shows against a
+  known-good reference. 35 of 44 pages match within the standard budget; the 8 pages embedding
+  an `<image>` are bounded loosely (the reader cannot draw it back), and the budget is 0.3%
+  rather than 0.2% for a measured, documented reason: a gradient swatch's single antialiased
+  edge row differs between the two rasterizations, interiors byte-identical.
 - Degradations, each logged once: a blend mode with no CSS `mix-blend-mode` equivalent paints
   source-over; a `Shader` that cannot describe itself (mesh shadings, and **PDF-sourced shadings**,
   which are deliberately not self-describing upstream) is sampled and embedded as an `<image>`.
