@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
 	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 )
@@ -80,6 +81,13 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	// the first line and shifts it left; the arithmetic handles it without clamping.
 	indent := textIndentPt(b, contentW)
 	firstLine := true
+	// Truncation state. clampAt is the line count -webkit-line-clamp allows (0 = no
+	// clamp); wantEllipsis is text-overflow:ellipsis on a box that actually clips —
+	// an overflowing line in an overflow:visible box still overflows visibly, because
+	// there is nothing to hide the truncation behind.
+	clampAt := b.Style.LineClamp
+	wantEllipsis := b.Style.TextOverflow == "ellipsis" && clips(b)
+	lineNo := 0
 	for len(rest) > 0 {
 		// Cancellation: checked PER LINE, not per glyph. This loop is the second
 		// unbounded walk in the engine (layoutBlockChildren is the first): a single
@@ -131,6 +139,42 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 
 		var lineGlyphs []inline.Glyph
 		lineGlyphs, rest = inline.BreakNextWrap(rest, avail-lineIndent, wrap)
+		lineNo++
+
+		// Truncation. Two properties, one operation: drop trailing glyphs until an
+		// ellipsis fits, then append it.
+		//
+		//   - line-clamp ends the box at line N and marks THAT line, so the ellipsis
+		//     signals the text that was cut. It fires only when text actually remains
+		//     (`len(rest) > 0`), matching browsers: a clamp larger than the line count
+		//     leaves the last line untouched.
+		//   - text-overflow marks any line too wide for the box, which in the
+		//     white-space:nowrap case it is written for is the only line.
+		//
+		// The line is measured against its own available width — narrowed by a first-line
+		// indent or an intruding float — so truncation lands where the clip will.
+		lineWidth := avail - lineIndent
+		atClamp := clampAt > 0 && lineNo >= clampAt && len(rest) > 0
+		overflows := wantEllipsis && inline.VisibleWidth(lineGlyphs) > lineWidth
+		if atClamp || overflows {
+			if ell, ok := e.ellipsisGlyphFor(b, lineGlyphs); ok {
+				// At a clamp boundary the line usually FITS — the ellipsis marks the
+				// text cut after it, not an overflow of this line — so it has to be
+				// appended rather than merely made room for.
+				var cut []inline.Glyph
+				if atClamp {
+					cut, _ = inline.AppendEllipsis(lineGlyphs, lineWidth, ell)
+				} else {
+					cut, _ = inline.TruncateWithEllipsis(lineGlyphs, lineWidth, ell)
+				}
+				lineGlyphs = cut
+			}
+		}
+		if atClamp {
+			// Stop after this line: the clamped box is N lines tall, which is a LAYOUT
+			// effect (a browser reports the shorter height), not just a paint clip.
+			rest = nil
+		}
 		// Breaking happened in logical order; MakeVisualLine reorders this line's
 		// glyphs into visual order (UAX#9 L2) so the emitter below, which walks the
 		// slice left-to-right at increasing x, paints them correctly. For an LTR
@@ -168,12 +212,25 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 				if frag, ok := g.Atomic.Ref.(*Fragment); ok && frag != nil {
 					translateFragment(frag, (x+g.Atomic.MarginLeftPt)-frag.X, (baselineY-g.Atomic.BaselinePt)-frag.Y)
 				}
-			case g.Outline != nil:
+			// A glyph with ink is emitted; so is an INKLESS one (a space) that sits
+			// inside a decorated inline box, because the box's background has to stay
+			// continuous across the spaces in "<span>Hello world</span>" rather than
+			// painting as two rects with a hole between them. Blank marks the latter so
+			// the paint loop keeps skipping it — only the decoration pass reads it.
+			// A COLOUR glyph has no outline — its ink lives in COLR layers or a bitmap
+			// strike, both resolved at paint time from Face+GID — so an outline test
+			// alone drops emoji entirely.
+			case g.Outline != nil || hasColorInk(g) || g.InlineBox.Paints() || g.Edge != inline.EdgeNone:
 				emitted = append(emitted, GlyphFragment{
 					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
 					Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 					Underline:       g.Underline,
 					Strike:          g.Strike,
+					InlineBox:       g.InlineBox,
+					Edge:            g.Edge,
+					AscentPt:        g.AscentPt,
+					DescentPt:       g.DescentPt,
+					Blank:           g.Outline == nil,
 					BaselineShiftPt: g.BaselineShiftPt,
 					Face:            g.Face, GID: g.GID, Runes: g.Runes,
 				})
@@ -225,6 +282,13 @@ func (e *Engine) lineHeightGuess(b *cssbox.Box) float64 {
 // auto widths against. It recurses into inline element boxes (whose text leaves
 // already carry the correct cascaded style) and never panics on an unexpected box.
 func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW float64, runs *[]inline.Run, atomics *[]*Fragment) {
+	e.gatherInlineRunsIn(ctx, b, contentW, runs, atomics, nil)
+}
+
+// gatherInlineRunsIn is gatherInlineRuns carrying the innermost decorated inline box
+// down the recursion. box is nil at the top and for undecorated ancestors, so an
+// ordinary paragraph produces exactly the runs it always did.
+func (e *Engine) gatherInlineRunsIn(ctx context.Context, b *cssbox.Box, contentW float64, runs *[]inline.Run, atomics *[]*Fragment, box *inline.InlineBoxStyle) {
 	for _, child := range b.Children {
 		switch {
 		case child.Kind == cssbox.BoxText:
@@ -243,6 +307,7 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 				WordSpacingPt:   spacingPt(child.Style.WordSpacing, child.Style.FontSizePt),
 				Underline:       child.Style.TextDecorationLine == "underline",
 				Strike:          child.Style.TextDecorationLine == "line-through",
+				InlineBox:       box,
 				BaselineShiftPt: baselineShiftPt(child.Style),
 			})
 		case child.Kind == cssbox.BoxReplaced:
@@ -290,8 +355,27 @@ func (e *Engine) gatherInlineRuns(ctx context.Context, b *cssbox.Box, contentW f
 			*runs = append(*runs, atomicRunFor(child, frag, atomCBWidth))
 		case child.Kind == cssbox.BoxInline || child.Kind == cssbox.BoxAnonInline:
 			// Descend into the inline element box; its text leaves carry the correct
-			// cascaded font/color. Inline-box decoration is deferred (see layoutInline).
-			e.gatherInlineRuns(ctx, child, contentW, runs, atomics)
+			// cascaded font/color. The box's own background/border/padding are not on
+			// those leaves (background-color does not inherit), so its decoration is
+			// captured here and carried down as the runs' identity. A box with nothing
+			// to paint keeps the ancestor's, so an undecorated <em> inside a decorated
+			// <span> stays part of the span's rect rather than splitting it.
+			inner := box
+			if d := inlineBoxStyleFor(child); d != nil {
+				inner = d
+			}
+			// A box with its own decoration brackets its content with edge runs, which
+			// is what reserves its horizontal padding+border in the line. A box that
+			// merely inherits the ancestor's identity (an undecorated <em> inside a
+			// decorated <span>) adds no edges — it is part of the span's run, not a
+			// separate box.
+			if inner != box && inner.Reserves() {
+				*runs = append(*runs, edgeRun(child, inner, inline.EdgeLead))
+			}
+			e.gatherInlineRunsIn(ctx, child, contentW, runs, atomics, inner)
+			if inner != box && inner.Reserves() {
+				*runs = append(*runs, edgeRun(child, inner, inline.EdgeTrail))
+			}
 		default:
 			// A block-level child in an inline formatting context violates the box-gen
 			// invariant; skip it defensively rather than misplacing it.
@@ -729,8 +813,14 @@ func resolveLineHeight(lh gcss.Length, fontSizePt float64, line inline.Line) flo
 	switch lh.Unit {
 	case gcss.UnitPx, gcss.UnitPt:
 		return lh.Value
-	case gcss.UnitEm:
+	case gcss.UnitEm, gcss.UnitNumber:
+		// A unitless number multiplies the font size, exactly as em does here. They
+		// differ only in how they INHERIT (a number inherits as a number, an em as the
+		// computed length), which is resolved by the cascade before this point.
 		return lh.Value * fontSizePt
+	case gcss.UnitPercent:
+		// A percentage resolves against the element's own font size (CSS 2.1 10.8.1).
+		return lh.Value / 100 * fontSizePt
 	default: // UnitAuto / unsupported: metrics × default multiplier
 		return autoLineHeight(line)
 	}
@@ -817,4 +907,97 @@ func translateFragment(f *Fragment, dx, dy float64) {
 	// AFTER the Children/Floats recursion so an abs/fixed Positioned entry — present only
 	// here, never in Children — moves exactly once. See shiftFragmentExtras.
 	shiftFragmentExtras(f, dx, dy)
+}
+
+// inlineBoxStyleFor builds the paintable decoration of a non-replaced inline box, or
+// nil when the box paints nothing — which is the overwhelmingly common case, so an
+// ordinary paragraph allocates nothing and produces byte-identical runs.
+//
+// Only what the inline paint path honors is read. CSS also gives inline boxes vertical
+// padding and margins, which overflow the line box without growing it, and background
+// images; those are deliberately left out rather than half-applied, so the rect that
+// paints is exactly the rect this describes. See appendInlineBoxDecorations.
+func inlineBoxStyleFor(b *cssbox.Box) *inline.InlineBoxStyle {
+	st := &b.Style
+	// A border paints only when it has a width, a visible style, and a visible color —
+	// the same three-way test the block border path applies.
+	borderW := 0.0
+	if st.BorderLeftStyle != "" && st.BorderLeftStyle != "none" && st.BorderLeftStyle != "hidden" {
+		if w, _ := resolveLen(st.BorderLeftWidth, st.FontSizePt, 0); w > 0 {
+			borderW = w
+		}
+	}
+	d := &inline.InlineBoxStyle{
+		Background:    st.BackgroundColor,
+		BorderColor:   st.BorderLeftColor,
+		BorderWidthPt: borderW,
+	}
+	// Horizontal padding resolves against the containing block's WIDTH in CSS. The
+	// percentage basis is not threaded into this helper, so a PERCENTAGE inline padding
+	// resolves to 0 rather than being guessed against the wrong basis — a known limit,
+	// not a silently wrong value.
+	d.PaddingLeftPt, _ = resolveLen(st.PaddingLeft, st.FontSizePt, 0)
+	d.PaddingRightPt, _ = resolveLen(st.PaddingRight, st.FontSizePt, 0)
+	if !d.Paints() && !d.Reserves() {
+		return nil
+	}
+	return d
+}
+
+// edgeRun builds the zero-ink run carrying one side's padding+border. It takes the
+// box's font so the edge glyph carries the same metrics as its text, which is what
+// gives an empty or all-whitespace decorated span a rect with a height.
+func edgeRun(b *cssbox.Box, style *inline.InlineBoxStyle, edge inline.InlineEdge) inline.Run {
+	return inline.Run{
+		Family:        b.Style.FontFamily,
+		Bold:          b.Style.Bold,
+		Italic:        b.Style.Italic,
+		SizePt:        b.Style.FontSizePt,
+		InlineBox:     style,
+		InlineBoxEdge: edge,
+	}
+}
+
+// ellipsisGlyphFor shapes the ellipsis for a line, styled like the run it will
+// terminate: the last glyph's family/size/colour, so the ellipsis matches the text it
+// truncates rather than the block's own defaults.
+//
+// ok=false when the face has no U+2026 (or no face resolves), in which case the caller
+// leaves the line untruncated — a hard cut is honest, a substituted box glyph is not.
+func (e *Engine) ellipsisGlyphFor(b *cssbox.Box, line []inline.Glyph) (inline.Glyph, bool) {
+	family, size := b.Style.FontFamily, b.Style.FontSizePt
+	style := pkgfont.Style{Bold: b.Style.Bold, Italic: b.Style.Italic}
+	col := inline.Color{R: b.Style.Color.R, G: b.Style.Color.G, B: b.Style.Color.B, A: b.Style.Color.A}
+	if col.A == 0 {
+		col.A = 0xff
+	}
+	// Prefer the LAST inked glyph's metrics: a line ending in a larger or differently
+	// styled span should get an ellipsis sized to match it.
+	for i := len(line) - 1; i >= 0; i-- {
+		if g := &line[i]; g.Outline != nil && g.SizePt > 0 {
+			size, col = g.SizePt, g.Color
+			break
+		}
+	}
+	if size <= 0 {
+		return inline.Glyph{}, false
+	}
+	return inline.ShapeEllipsis(e.faces, family, style, size, col)
+}
+
+// hasColorInk reports whether a glyph paints through a colour-font path (COLR layers or
+// a bitmap strike) rather than through an outline. Such a glyph must survive the emit
+// even though Outline is nil, or an emoji is dropped between shaping and paint.
+func hasColorInk(g *inline.Glyph) bool {
+	if g.Face == nil || g.Break || g.Atomic != nil {
+		return false
+	}
+	if g.Face.HasColorBitmaps() {
+		return true
+	}
+	if g.Face.HasColorGlyphs() {
+		layers, ok := g.Face.ColorLayers(g.GID)
+		return ok && len(layers) > 0
+	}
+	return false
 }

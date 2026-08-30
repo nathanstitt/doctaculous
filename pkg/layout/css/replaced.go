@@ -176,12 +176,37 @@ func (e *Engine) intrinsicSize(ctx context.Context, b *cssbox.Box) (iw, ih float
 // Two sources feed this: inline <svg> markup, which box generation re-serialized
 // onto the replaced content, and an <img src> whose resource has an SVG content
 // type. Inline markup wins if somehow both are present, since it needs no fetch.
+// svgHostContext builds the styling an inline <svg> inherits from the host document:
+// the author stylesheets that cascade into it, plus the computed color and font of
+// the <svg> box itself (what currentColor and relative text sizing read).
+//
+// Returns nil when there is nothing to carry, so a document with no author sheets and
+// a default-styled <svg> takes the byte-identical standalone path.
+func (e *Engine) svgHostContext(b *cssbox.Box) *svg.HostContext {
+	h := &svg.HostContext{Sheets: e.authorSheets}
+	if b != nil {
+		h.Color = b.Style.Color
+		h.FontSizePt = b.Style.FontSizePt
+		h.FontFamily = b.Style.FontFamily
+		if b.Replaced != nil {
+			h.Parent = b.Replaced.HostParent
+		}
+	}
+	if len(h.Sheets) == 0 && h.Color.A == 0 && h.FontSizePt == 0 && h.FontFamily == "" && h.Parent == nil {
+		return nil
+	}
+	return h
+}
+
 func (e *Engine) replacedSVG(ctx context.Context, b *cssbox.Box) (doc *svg.Document, isSVG bool) {
 	if b.Replaced == nil {
 		return nil, false
 	}
 	if src, ok := b.Replaced.Attrs[cssbox.InlineSVGAttr]; ok {
-		d := e.inlineSVGs.get(src, e.logf)
+		// An INLINE <svg> is part of the host document: its author sheets cascade into
+		// the SVG, and it inherits color/font from its own box. (An <img src="*.svg">
+		// below does not — that is a separate document.)
+		d := e.inlineSVGs.get(src, e.svgHostContext(b), e.logf)
 		return d.doc, true
 	}
 	if b.Replaced.Tag != "img" {

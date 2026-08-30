@@ -66,7 +66,72 @@ type Face struct {
 
 	progData []byte      // raw program bytes for embedding (nil if not retained)
 	progKind ProgramKind // format of progData
+
+	// colr/cpal back ColorLayers: a face with colour tables paints certain glyphs as
+	// stacked coloured outlines rather than one monochrome path. Both are nil for the
+	// overwhelmingly common non-colour face, and every colour path checks colr first,
+	// so an ordinary face costs one nil check.
+	colr *colrTable
+	cpal *cpalTable
+	// sbix/cbdt back ColorBitmap: a face storing colour glyphs as PNG strikes rather
+	// than as layered outlines (Apple Color Emoji, Noto Color Emoji). Consulted only
+	// when colr is nil, since vector layers scale and bitmaps do not.
+	sbix *sbixTable
+	cbdt *cbdtTable
+	// numGlyphs is needed to index sbix's per-strike offset array.
+	numGlyphs int
 }
+
+// ColorBitmapFor returns the colour BITMAP for glyph gid at the given em size, or
+// ok=false when the face has none. sizePt selects among the font's strikes: the
+// nearest is chosen, preferring a larger one so the image is downscaled rather than
+// enlarged.
+//
+// Prefer ColorLayers: those are outlines and scale cleanly. This is the fallback for
+// fonts that ship rendered images (Apple Color Emoji has no COLR data at all), and the
+// result is an image whose fidelity is bounded by the strike it came from.
+func (f *Face) ColorBitmapFor(gid uint16, sizePt float64) (ColorBitmap, bool) {
+	if f == nil {
+		return ColorBitmap{}, false
+	}
+	if f.sbix != nil {
+		if bm, ok := f.sbix.bitmapFor(gid, f.numGlyphs, sizePt); ok {
+			return bm, true
+		}
+	}
+	if f.cbdt != nil {
+		if bm, ok := f.cbdt.bitmapFor(gid, sizePt); ok {
+			return bm, true
+		}
+	}
+	return ColorBitmap{}, false
+}
+
+// HasColorBitmaps reports whether the face carries colour bitmap strikes.
+func (f *Face) HasColorBitmaps() bool { return f != nil && (f.sbix != nil || f.cbdt != nil) }
+
+// ColorLayers returns the colour layers of glyph gid — the ordered (outline, colour)
+// pairs a colour font paints it as — or ok=false for a glyph with no colour data, or a
+// face with no usable COLR/CPAL pair.
+//
+// The caller draws each layer's GID through the normal outline path and fills it with
+// the layer's Color, bottom layer first. A layer with Foreground set takes the
+// surrounding text colour instead, which is how a colour font marks the parts meant to
+// follow the document (COLR's 0xFFFF palette sentinel).
+//
+// ok=false is the honest degradation for a paint graph this engine cannot express —
+// gradients, transforms, composites — because the caller then renders the glyph's own
+// monochrome outline rather than a flat colour that would be confidently wrong.
+func (f *Face) ColorLayers(gid uint16) ([]ColorLayer, bool) {
+	if f.colr == nil {
+		return nil, false
+	}
+	return f.colr.layersFor(gid, f.cpal)
+}
+
+// HasColorGlyphs reports whether the face carries a usable COLR/CPAL pair, so a caller
+// can skip the per-glyph colour probe entirely for an ordinary face.
+func (f *Face) HasColorGlyphs() bool { return f != nil && f.colr != nil }
 
 // LoadStandard returns a Face for a named font family, substituting a bundled
 // permissively-licensed look-alike. It resolves the standard-14 names and common

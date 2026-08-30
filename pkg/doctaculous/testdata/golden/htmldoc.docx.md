@@ -835,3 +835,307 @@ A 320×320 child in each. All three cut it at the padding box, identically to th
 `max-height` was only ever applied on the fixed‑height path, which runs when `height` is _not_ auto — so `max-height` alone never bounded anything. It now clamps the auto height too, after float enclosure and before the clip rect is built, so the box, its clip, and its parent's advance all agree. `min-height` still applies after `max-height` per CSS 10.7, so a min above the max wins.
 
 Anonymous boxes are deliberately exempt. They carry a copy of the parent's computed style so inherited text properties reach their inline content, but CSS 9.2.1.1 gives them no properties of their own — clamping them truncated boxes the author never sized. A WPT reftest caught it.
+
+**32 / INLINE BOX DECORATION**
+
+## Backgrounds and borders on inline boxes
+
+A background on a `<span>` used to paint nothing at all. The property parsed and cascaded; the paint step simply had no geometry for a non‑replaced inline box, so the most common highlight idiom on the web was dropped in silence.
+
+Highlighted words sit inside ordinary prose, and the rect follows the text rather than the line box.
+
+One spanthen another, adjacent and distinct. Samecolour stays two boxes too.
+
+A span whose text is long enough to wrap paints one rect per line, which falls out of coalescing per line box rather than any explicit bookkeeping.
+
+Padded​|​unpadded​| — the bar after the first span sits past its padding, not under it.
+
+A bordered inline and big TALL text, whose rect grows to its tallest glyph.
+
+The `<mark>` element finally works: marked text.
+
+#### Why this was not a one-liner
+
+An inline box has no single rectangle. It is flattened into glyph runs during line breaking, so the box identity is gone by paint time — and a box that wraps needs _one rect per line_. The fix carries the innermost inline box's identity onto every glyph and coalesces consecutive glyphs per line, the same shape `text-decoration` already uses for underlines.
+
+Identity is a _pointer_, not a colour. Two adjacent spans with the same background are still two boxes; a colour comparison would merge them and a plain boolean — how underline does it — could not tell them apart at all. Inkless glyphs are retained for this pass too, or the space in “two words” would split one rect into two.
+
+Padding is part of _layout_, not just paint. It rides on a zero‑ink edge glyph at each boundary, so the line breaker, intrinsic sizing, and alignment all reserve the space by reading advances — none of them needs to know inline boxes exist. Painting a padded rect without that would draw a background wider than the layout ever agreed to.
+
+Still absent, deliberately: background _images_, vertical padding and margins (which per CSS 10.6.1 overflow the line box instead of growing it), and per‑edge or rounded inline borders. Each needs layout work this slice does not do, so each is omitted rather than half‑applied.
+
+**33 / COLOR-MIX()**
+
+## Mixing colours in a named interpolation space
+
+Every swatch below is `color-mix(in <space>, red, blue)` — the same two colours, mixed 50/50, eleven times. The space is not a formality: it decides the answer.
+
+`srgb` 128,0,128
+
+`srgb-linear` 188,0,188
+
+`hsl` 255,0,255
+
+`hwb` 255,0,255
+
+`lab` 193,0,136
+
+`oklab` 140,83,162
+
+`lch` 245,0,134
+
+`oklch` 186,0,194
+
+`xyz` 188,0,188
+
+#### Hue interpolation
+
+`shorter hue` — via magenta
+
+`longer hue` — the long way, via green
+
+`increasing hue`
+
+`decreasing hue`
+
+#### Weights and alpha
+
+`red 30%` — the remainder goes to blue
+
+Both `20%` — weights normalize _and_ the alpha drops to 0.4
+
+Premultiplied — the half‑transparent red gives up hue, so this is not 128,0,128
+
+A 24% wash over white
+
+Every expected value was _captured from Chrome_ rather than derived here, and the tests pin them byte‑for‑byte. A transposed conversion matrix or a swapped white point yields colours that look entirely plausible and are quietly wrong — and a test written from the same arithmetic as the implementation would happily agree with the bug.
+
+Mixing with `transparent` is the one deliberate divergence. Premultiplication weights a zero‑alpha colour's channels by zero, so the opaque colour's channels must survive _untouched_ and only its alpha scales — making `color-mix(in srgb, X N%, transparent)` exactly `rgba(X, N/100)`. Chrome reports up to 2/255 off from rounding through an intermediate space; the engine keeps the exact value. Nested mixes stay in float for the same reason: quantizing between levels turns Chrome's 191 into 192.
+
+**34 / INLINE SVG & THE HOST CASCADE**
+
+## The page's CSS reaches inside inline `<svg>`
+
+An inline `<svg>` is part of the host document, so a rule in the page's stylesheet styles its children. It previously did not: the subtree was re-serialized to markup and re-parsed as a _standalone_ document, so the page's CSS never reached it and every shape fell back to SVG's default black fill.
+
+Not one `fill` or `stroke` attribute in that markup — every colour comes from `.chart .curve`, `.chart .area` and friends in the page stylesheet. That includes _descendant_ selectors rooted outside the `<svg>`: the ancestor chain now continues past the SVG root into the host tree, so `.chart .curve` matches. Without that, `.curve` alone would work while `.chart .curve` silently did nothing — partial support that reads as a styling bug.
+
+#### Same markup, different context
+
+The first two are _byte‑identical_ SVG markup; only their containing `#id` differs. The parsed-SVG cache is keyed by markup, so the host context had to join that key — otherwise the second would reuse the first's parse and silently paint the wrong colour. The third takes its fill from `currentColor`, which resolves against the `color` the `<svg>` box inherits from its parent.
+
+#### What still wins
+
+Host sheets cascade _below_ the SVG's own `<style>`, so an internal rule takes a specificity tie — the SVG is the more specific context for its own content. A presentation attribute has zero specificity and loses to any host rule; an inline `style=` still beats everything. And an `<img src="…svg">` is deliberately untouched: a referenced SVG is a separate document, and CSS does not cascade into it. Both directions are pinned by tests, because a fix that overreaches is as wrong as one that under‑reaches.
+
+**35 / TRUNCATION**
+
+## `text-overflow` and `-webkit-line-clamp`
+
+Neither existed. A single line clipped mid‑glyph with no ellipsis, and there was no way at all to truncate to N lines — so the only route was to cut the string in application code, before it ever reached the engine, guessing at how much would fit.
+
+#### Single line
+
+A headline long enough that it cannot fit on one line of this card
+
+`text-overflow: ellipsis` — whole glyphs are dropped until the ellipsis fits, so the cut never lands mid‑character and the line never spills past the clip edge.
+
+A headline long enough that it cannot fit on one line of this card
+
+`text-overflow: clip`, the initial value — the hard cut, mid‑glyph, for contrast.
+
+Short enough
+
+Text that fits is untouched: no ellipsis appears just because the property is set.
+
+#### Multiple lines
+
+Clamping to a fixed number of lines is what a card layout actually needs, and it is the case that had no CSS answer here at all: the box stops after the second line and the ellipsis marks what was cut.
+
+`-webkit-line-clamp: 2`. The box is genuinely _two lines tall_ — the clamp changes layout, not just paint, so the height a browser would report is the height this engine lays out.
+
+Clamping to a fixed number of lines is what a card layout actually needs, and it is the case that had no CSS answer here at all: the box stops after the second line and the ellipsis marks what was cut.
+
+The same text at `-webkit-line-clamp: 3`.
+
+Two short lines.
+
+A clamp larger than the content is inert — no height change and no ellipsis, because nothing was cut. An ellipsis that appears when nothing was truncated is a lie about the text.
+
+#### How the cut is chosen
+
+Truncation happens in _glyph_ units, where the advances are already resolved, so the fit is exact rather than a re‑measure of a guessed substring. Trailing whitespace is dropped before the ellipsis — “foo …” reads as a gap — and the ellipsis inherits the styling of the glyph it follows, so a line ending in a larger or differently coloured span gets a matching one.
+
+Two edge cases worth stating. An ellipsis needs something to hide the truncation behind, so it applies only where the box actually clips; in an `overflow: visible` box the text still overflows visibly, as browsers do. And when even the ellipsis alone will not fit, CSS Overflow 3 still requires it to render — so a box a few pixels wide shows part of an ellipsis rather than nothing, which would erase the only sign that text was cut.
+
+**36 / COLOUR FONTS**
+
+## Emoji, in colour
+
+Colour glyphs painted nothing at all. A colour font's base glyph is _empty_ — its ink lives in separate tables the engine did not read — so an emoji rendered as a blank space, and naming an emoji family rendered the whole run as nothing.
+
+#### Layered outlines — `COLR`/`CPAL`
+
+😀🎉❤👍🌟
+
+😀🎉❤👍🌟
+
+Each glyph is a stack of ordinary outlines with palette colours, so it is _vector_ and scales like text. The grinning face carries a radial gradient and the party popper a linear one, with its streamers placed by genuine rotation matrices — an earlier draft modelled only offsets and mirrors, which forced it to refuse that glyph entirely.
+
+#### Bitmap strikes — `CBDT`/`CBLC` and `sbix`
+
+😀🎉❤👍🌟
+
+😀🎉❤👍🌟
+
+Other fonts — Apple Color Emoji among them, which has no `COLR` table at all — ship a rendered PNG per glyph per size. The strike nearest the used size is chosen, preferring a larger one so the image is downscaled rather than enlarged. These do _not_ scale like outlines, and saying so is more honest than implying they do.
+
+#### In ordinary prose
+
+An emoji with no font named resolves through the script‑fallback chain. The bundled substitutes have no emoji face — a colour emoji font is megabytes, well past what the toolkit embeds — so emoji route to an _installed_ one instead: Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji and friends, in that order. On a host with none, the run degrades to the missing‑glyph path rather than painting a wrong character.
+
+That path is deliberately _not_ exercised on this page. The goldens render hermetically, with no system fonts, so an emoji here would show a missing‑glyph box — which is the honest result for a host with no emoji font, and a poor demonstration of a feature that works. The two rows above name a font explicitly, and it ships as a fixture, so they render identically everywhere.
+
+#### What is deliberately absent
+
+A colour glyph the engine cannot express — a sweep (conic) gradient, or a composite paint needing per‑layer group compositing — is refused as a whole and falls back to the glyph's own monochrome outline. Painting it in a plausible flat colour would be harder to notice than painting it in none, which is the failure this whole area was reported for.
+
+A colour glyph keeps the _font's_ colours rather than the CSS `color`. A font can opt a layer into the text colour through the palette's foreground sentinel; that is the font's choice to make, not the document's.
+
+**37 / LINE-HEIGHT**
+
+## The unitless multiplier
+
+A unitless `line-height` — the commonest spelling of the property — was rejected as an invalid length, so the declaration was dropped and every block used the font‑metric height instead. The property appeared to do nothing at all, and the slack compounded down a page.
+
+Two lines at `line-height: 1`, set tight enough that the ascenders and descenders nearly touch.
+
+Two lines at `line-height: 1.5`, the usual comfortable measure for body copy.
+
+Two lines at `line-height: 2.5`, loose enough that the leading is unmistakable.
+
+All three are the same text at the same font size. Before this they rendered identically.
+
+#### The units agree — except when they inherit
+
+At one font size, `2`, `2em`, `200%` and `30px` all give the same line box on 15px text. They diverge on _inheritance_, and the difference is the reason the units stay distinct downstream: a _number_ inherits as a number and re‑multiplies against each descendant's own font size, while an `em` or `%` is computed against the element that declares it and inherits as a fixed length (CSS 2.1 §10.8.1).
+
+A 26px child inheriting `line-height: 2` from a 10px parent gets a 52px line box.
+
+The same child inheriting `2em` gets a 20px one — computed against the parent, then fixed.
+
+Getting that backwards is invisible until a nested font‑size change appears, which is exactly when it matters, so both directions are pinned by tests.
+
+#### What did not change
+
+`line-height: normal` and an absent declaration both keep the font‑metric height, so a document that never states the property renders exactly as before. And a unitless number is still _not_ a length: `width: 5` remains invalid, because accepting it there would be a hole in every length rather than a fix to one property.
+
+**38 / FLEX MARGINS**
+
+## Margins on flex children
+
+Flex layout was margin‑blind: an item's size and position came from its border box, so `margin-top` on a child of a flex column did nothing at all — while the identical rule on a block child worked. That reads as “the rule did not apply”, which is the most expensive kind of failure to diagnose, because the stylesheet is plainly correct.
+
+No margin — the item sits at the container's start edge.
+
+`margin-left: 80px` on the main axis.
+
+`margin-left: auto` absorbs the free space and pushes the item to the end — the idiomatic way to do it (CSS Flexbox §8.1). Auto margins take the space _before_ `justify-content` sees any, which is the spec's own resolution order.
+
+Two auto margins centre it.
+
+`justify-content: flex-end` with a trailing margin: the item's _margin box_ is what lands against the end edge, so the margin has to be counted while free space is distributed — not applied as an offset afterwards.
+
+A column: `margin-top` is the main axis and `margin-left` the cross one. Both apply, and the line grows to hold the item's margin box rather than letting a cross margin overflow it.
+
+#### The block control
+
+The same `margin-top` on a _block_ child was always correct, and still is — a test pins the two to the same position. This distinction matters: the original report contrasted a flex column against a plain block whose bare `margin-top` measured zero, but that is CSS margin _collapsing_ through the body, not a bug. Only the flex case was wrong.
+
+**39 / BACKGROUND LAYERS**
+
+## Comma-separated `background` lists
+
+Layering backgrounds on one element — the normal way to put a gradient over a base colour — made the whole declaration paint _nothing_. Only a single value was accepted, and adding the fallback colour that every browser wants was exactly what broke it. The failure was silent and total, so it read as “gradients are unsupported” rather than “the list was rejected”.
+
+A gradient over a fallback colour. The colour is legal in the _last_ layer only (CSS Backgrounds §3.10); one earlier is a parse error, not something to quietly ignore.
+
+Two gradients. The _first_ layer paints on top, and it fades to transparent on the right so the green beneath shows through — which is the proof that both layers paint, rather than the first one winning.
+
+Three layers: a fully transparent one, a gradient, and a base colour. Everything composites in order.
+
+#### What this needed
+
+The layers travel from the cascade through the box tree to paint as a _list_, emitted last‑first so the first layer ends up on top. `background-image` takes the same list.
+
+One subtlety worth recording, because getting it wrong is silent: the per‑layer records carry only the _image_. An early version also captured `background-size` and friends when the image list was parsed, which discarded any of those declared _after_ it — so `background-image` then `background-size` lost the size, while the reverse order worked. Those properties are single‑valued here and are read at layout time instead, so declaration order stops mattering. Making them genuinely per‑layer is a separate slice, and FEATURES.md says so.
+
+**40 / SVG INHERITANCE**
+
+## Presentation attributes reach the children
+
+A paint property set on the root `<svg>` did not reach its children. The root's attributes were resolved and then _discarded_ — only the font and text properties were copied back — so a path relying on an inherited `stroke` painted nothing at all.
+
+Not one `stroke` or `fill` on any child — every colour, width, cap and join comes from the root and inherits down. This is exactly how the icons that surfaced the bug were authored: the first icon's rays, the third one's outline. Before this, each would have shown only its filled parts, which reads as “the icon is not rendering” rather than “the strokes are gone”.
+
+#### The construction, and why it is inverted
+
+The old code listed the properties that inherit, and anything missing from that list was silently dropped — which is how the entire paint vocabulary came to be absent. It now starts from the root's fully resolved style and clears only the properties CSS marks _non_‑inherited, so a property added later defaults to the spec's answer rather than to “dropped”.
+
+The non‑inherited set matters as much: `opacity`, `clip-path`, `mask` and `filter` must _not_ reach the children, or the root's value would apply twice — once to its own group and again to each child. A 50% root over a black child would composite to 75% rather than 50%, which a test pins.
+
+The whole resvg conformance corpus passes unchanged, which is the strongest evidence available that the inherited/non‑inherited split is right: those fixtures exercise inheritance directly.
+
+**41 / ABSOLUTE POSITIONING & FLEX**
+
+## Boxes that would not size or place
+
+Three related failures, all silent: a box given both `top` and `bottom` collapsed to nothing, an absolutely positioned child of a flex container ignored its offsets, and an element whose height came from flex layout laid its own children out as if it had no height at all.
+
+#### `top` + `bottom` sizes a box
+
+Rust: `top` + `bottom`, spanning the container. Slate: an explicit `height`, for contrast. Green: both pairs at once. The rust bar used to paint _nothing_ — it collapsed to its content height, which for an empty box is zero. The horizontal equivalent (`left` + `right`) always worked, which is what made the asymmetry surprising.
+
+#### An absolutely positioned child of a flex container
+
+Per CSS Flexbox §4.1 such a child is _not_ a flex item: it is out of flow and positioned against the container's padding box. It was being laid out as an item instead, pinned to the container's edge with `left` discarded — so this bar sat at x = 0 no matter what offset it was given.
+
+#### A flex-derived height aligns its own children
+
+Left: height from `flex: 1`. Right: an explicit `height`. Both centre their child. The cross size was being written onto the fragment _after_ its interior had already been laid out, so anything inside that needs a definite height — `justify-content`, a percentage height — had already resolved against auto and packed to the top.
+
+#### One reported gap that did not reproduce
+
+The same report said an absolutely positioned box never shrink‑wraps and that `width` is ignored on one. Measured here, neither holds: an `position: absolute` box around a 72px string comes out 72px — identical to `display: inline-block` — and an explicit `width: 76px` is honoured exactly. Recorded as not‑reproducing rather than “fixed”, since nothing was changed.
+
+**42 / TRANSFORMS**
+
+## `transform`
+
+The property did nothing at all — it was not in the cascade, so every declaration was silently dropped. It was reported alongside a flex‑margin bug, but it is not flex‑specific: `translateX` on a plain block did nothing either.
+
+none
+
+translateX
+
+scale(.7)
+
+rotate
+
+skewX
+
+chained
+
+The dashed outline is the space each box still occupies: a transform is a _paint‑time_ effect and does not change layout (CSS Transforms 1 §3), so the boxes stay on their grid while their ink moves. The default origin is the box's centre, which is why `scale(.7)` shrinks inward rather than toward a corner, and why the percentage in the last tile resolves against the box's own width.
+
+#### How it is implemented, and the trap in it
+
+Because it changes no layout, the transform is a matrix _bracket_ around the box's already‑flattened items — the same shape the `filter` bracket uses. That only works if the box's background and its content are emitted as one contiguous run, and for a plain block they are not: Appendix E paints child decorations and in‑flow content in separate phases, so a bracket would have moved the background and left the text behind.
+
+The resolution is the spec's own: a transformed element establishes a _stacking context_ and a containing block for its descendants, and such a box already paints as a single atom. Marking it so was the fix — not a workaround for the bracket.
+
+The trap: an _anonymous_ box carries a zero‑value style, and a zero matrix is not the identity matrix. Without a guard, every anonymous box became a stacking context and a BFC, which reordered painting and broke a WPT reftest. It is the second time that same zero‑value distinction has bitten in this codebase, so it is called out at the predicate itself.
+
+#### What is refused
+
+The 3D functions — `translate3d`, `rotateX`, `perspective`, `matrix3d` — are rejected rather than flattened. This engine has no 3D pipeline, and dropping the Z terms would paint something confidently wrong; a refused declaration drops and the previous value stands, which is at least visible. `transform-origin` is not yet settable — the centre is used unconditionally.

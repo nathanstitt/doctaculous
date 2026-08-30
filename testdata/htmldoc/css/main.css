@@ -1181,3 +1181,80 @@ a.seen:visited { color: #6a9a3a; }
 /* Outer and inset in one list: they occupy different slots in the paint order,
    so both are visible at once. */
 .bs-both    .bstile { box-shadow: 6px 6px 5px #7a6a2a, inset 0 0 6px #b03030; }
+
+/* §34: inline-SVG host cascade. These rules live in the PAGE stylesheet and style
+   elements inside inline <svg> — the whole point of the section is that they reach
+   across the boundary at all. */
+.chart .axis { stroke: #6b7a96; stroke-width: 2; fill: none; }
+.chart .curve { stroke: #9b3d2e; stroke-width: 3; fill: none; }
+.chart .area { fill: #f2d98c; }
+.chart .dot { fill: #3a4a5a; }
+#tinted .swatch { fill: #9b3d2e; }
+#plain .swatch { fill: #3a4a5a; }
+
+/* §35: truncation. Card-like boxes with a fixed measure, so the ellipsis and clamp
+   have something to truncate against. */
+.truncbox {
+  width: 200px;
+  border: 1px solid #c9c2b0;
+  background: #f7f2e4;
+  padding: 6px 8px;
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+.trunc1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.truncclip { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.trunc2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.trunc3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+
+/* §36: colour fonts. The two emoji faces ship as test fixtures (subsets of Noto Color
+   Emoji, SIL OFL 1.1) so the showcase renders identically everywhere rather than
+   depending on what the host has installed. */
+@font-face { font-family: "SpecimenEmojiVector"; src: url("../fonts/NotoColorEmoji-COLRv1.ttf") format("truetype"); }
+@font-face { font-family: "SpecimenEmojiBitmap"; src: url("../fonts/NotoColorEmoji-CBDT.ttf") format("truetype"); }
+.emoji-vec { font-family: "SpecimenEmojiVector"; }
+.emoji-bmp { font-family: "SpecimenEmojiBitmap"; }
+.emoji-row { margin: 0 0 4px 0; }
+
+/* §37: line-height. Each row states its own multiplier so the leading difference is
+   visible directly rather than described. */
+.lhbox {
+  background: #f7f2e4;
+  border: 1px solid #c9c2b0;
+  padding: 6px 8px;
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  width: 300px;
+}
+
+/* §38: margins on flex children. The container is outlined so the margin's effect on
+   the item's position inside it is visible rather than described. */
+.fmrow {
+  display: flex;
+  border: 1px solid #c9c2b0;
+  background: #f7f2e4;
+  width: 320px;
+  margin: 0 0 8px 0;
+}
+.fmcol { display: flex; flex-direction: column; }
+.fmitem { width: 54px; height: 26px; background: #9b3d2e; }
+.fmitem.alt { background: #3a4a5a; }
+
+/* §42: transforms. Each tile is identical apart from its transform, and the dashed
+   outline marks the space the box still occupies in layout. */
+.tfcell {
+  position: relative;
+  width: 96px; height: 64px;
+  border: 1px dashed #c9c2b0;
+  margin: 0 10px 30px 0;
+  display: inline-block;
+  vertical-align: top;
+}
+.tfbox {
+  width: 96px; height: 64px;
+  background: #9b3d2e;
+  color: #f7f2e4;
+  font-size: 12px;
+  text-align: center;
+  line-height: 64px;
+}

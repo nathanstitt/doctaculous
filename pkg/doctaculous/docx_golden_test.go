@@ -31,6 +31,7 @@ const (
 // compares it to a committed PNG. It also checks the fixture's declared page
 // count. Run with -update to regenerate the goldens and eyeball the diffs.
 func TestDOCXGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

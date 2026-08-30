@@ -18,14 +18,57 @@ import (
 // borderX/Y/W/H is the box's border box in page space; ed carries its border widths and
 // padding, from which the padding box (background-origin/clip "padding-box", the
 // initial origin) and content box are derived. The clip box defaults to the border box.
-func (e *Engine) resolveBackgroundImage(ctx context.Context, b *cssbox.Box, borderX, borderY, borderW, borderH float64, ed edges) *BackgroundImageContent {
-	ref := b.Style.BackgroundImage
-	grad := b.Style.BackgroundGradient
+// resolveBackgroundImages resolves every layer of the box's background list, in PAINT
+// order (last layer first, so the first layer ends up on top).
+//
+// A comma-separated list used to be unparseable, so `background: <gradient>, <color>`
+// — the ordinary way to give a gradient a fallback colour — dropped the whole
+// declaration and the element painted nothing. Resolving a list rather than a single
+// image is what makes the layering the property is for actually work.
+func (e *Engine) resolveBackgroundImages(ctx context.Context, b *cssbox.Box, borderX, borderY, borderW, borderH float64, ed edges) []*BackgroundImageContent {
+	layers := b.Style.BackgroundLayers
+	if len(layers) == 0 {
+		// No list: fall back to the single-value fields, which the longhand
+		// background-image/background-repeat properties still populate.
+		if bg := e.resolveBackgroundLayer(ctx, b, b.Style.BackgroundImage, b.Style.BackgroundGradient,
+			b.Style.BackgroundRepeat, b.Style.BackgroundPosition, b.Style.BackgroundSize,
+			b.Style.BackgroundOrigin, b.Style.BackgroundClip,
+			borderX, borderY, borderW, borderH, ed); bg != nil {
+			return []*BackgroundImageContent{bg}
+		}
+		return nil
+	}
+	out := make([]*BackgroundImageContent, 0, len(layers))
+	// Walk BACKWARDS: CSS paints the first layer on top, and the item stream paints in
+	// order, so the last layer must be emitted first.
+	for i := len(layers) - 1; i >= 0; i-- {
+		l := layers[i]
+		if !l.HasImage() {
+			continue
+		}
+		// The non-image properties come from the element's computed longhands, which
+		// apply to every layer (see ComputedStyle.BackgroundLayers).
+		if bg := e.resolveBackgroundLayer(ctx, b, l.Image, l.Gradient,
+			b.Style.BackgroundRepeat, b.Style.BackgroundPosition, b.Style.BackgroundSize,
+			b.Style.BackgroundOrigin, b.Style.BackgroundClip,
+			borderX, borderY, borderW, borderH, ed); bg != nil {
+			out = append(out, bg)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (e *Engine) resolveBackgroundLayer(ctx context.Context, b *cssbox.Box, ref string, grad *gcss.Gradient,
+	repeat string, position gcss.BackgroundPos, size gcss.BackgroundSize, origin, clip string,
+	borderX, borderY, borderW, borderH float64, ed edges) *BackgroundImageContent {
 	if ref == "" && grad == nil {
 		return nil
 	}
 
-	ox0, oy0, ow0, oh0 := bgBox(b.Style.BackgroundOrigin, borderX, borderY, borderW, borderH, ed)
+	ox0, oy0, ow0, oh0 := bgBox(origin, borderX, borderY, borderW, borderH, ed)
 
 	var bg *BackgroundImageContent
 	if grad != nil {
@@ -47,7 +90,7 @@ func (e *Engine) resolveBackgroundImage(ctx context.Context, b *cssbox.Box, bord
 	}
 
 	ox, oy, ow, oh := ox0, oy0, ow0, oh0
-	cx, cy, cw, ch := bgBox(b.Style.BackgroundClip, borderX, borderY, borderW, borderH, ed)
+	cx, cy, cw, ch := bgBox(clip, borderX, borderY, borderW, borderH, ed)
 	if ow <= 0 || oh <= 0 || cw <= 0 || ch <= 0 {
 		return nil
 	}
@@ -56,26 +99,26 @@ func (e *Engine) resolveBackgroundImage(ctx context.Context, b *cssbox.Box, bord
 
 	// Size.
 	fs := b.Style.FontSizePt
-	switch b.Style.BackgroundSize.Kind {
+	switch size.Kind {
 	case gcss.BgSizeCover:
 		bg.SizeKind = layout.BgSizeCover
 	case gcss.BgSizeContain:
 		bg.SizeKind = layout.BgSizeContain
 	case gcss.BgSizeExplicit:
 		bg.SizeKind = layout.BgSizeExplicit
-		bg.SizeW = bgSizeAxis(b.Style.BackgroundSize.W, fs, ow)
-		bg.SizeH = bgSizeAxis(b.Style.BackgroundSize.H, fs, oh)
+		bg.SizeW = bgSizeAxis(size.W, fs, ow)
+		bg.SizeH = bgSizeAxis(size.H, fs, oh)
 	default:
 		bg.SizeKind = layout.BgSizeAuto
 	}
 
 	// Position: a percentage stays a fraction (resolved against origin−tile at paint
 	// time); a length/em resolves to px now.
-	bg.PosXIsPct, bg.PosXFrac, bg.PosXPx = bgPosAxis(b.Style.BackgroundPosition.X, fs)
-	bg.PosYIsPct, bg.PosYFrac, bg.PosYPx = bgPosAxis(b.Style.BackgroundPosition.Y, fs)
+	bg.PosXIsPct, bg.PosXFrac, bg.PosXPx = bgPosAxis(position.X, fs)
+	bg.PosYIsPct, bg.PosYFrac, bg.PosYPx = bgPosAxis(position.Y, fs)
 
 	// Repeat.
-	bg.RepeatX, bg.RepeatY = bgRepeatAxes(b.Style.BackgroundRepeat)
+	bg.RepeatX, bg.RepeatY = bgRepeatAxes(repeat)
 	if bg.Scene != nil && (bg.RepeatX || bg.RepeatY) {
 		// Tiling a VECTOR background is deliberately not implemented: repeating an
 		// SVG interacts with the SVG's own viewBox/preserveAspectRatio mapping in a

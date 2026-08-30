@@ -28,6 +28,7 @@ func writeTempFile(t *testing.T, name string, data []byte) string {
 // TestOpenSniffs verifies the generic Open detects the format from content,
 // regardless of the file's extension.
 func TestOpenSniffs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		data []byte
@@ -60,6 +61,7 @@ func TestOpenSniffs(t *testing.T) {
 }
 
 func TestOpenErrors(t *testing.T) {
+	t.Parallel()
 	// Undetectable content -> ErrUnknownFormat.
 	garbage := writeTempFile(t, "noise.bin", []byte{0x00, 0x01, 0xFE, 0xBA})
 	if _, err := Open(garbage); !errors.Is(err, ErrUnknownFormat) {
@@ -80,6 +82,7 @@ func TestOpenErrors(t *testing.T) {
 }
 
 func TestOpenAs(t *testing.T) {
+	t.Parallel()
 	// OpenAs forces the format, skipping detection: a PDF hiding behind a
 	// nonsense extension opens when named explicitly.
 	path := writeTempFile(t, "data.blob", gen.TextPDF())
@@ -110,6 +113,7 @@ func TestOpenAs(t *testing.T) {
 // TestOpenReader verifies the stream entry point detects the format from
 // content (no filename hint exists), fully buffering the reader.
 func TestOpenReader(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenReader(context.Background(), bytes.NewReader(gen.TextPDF()))
 	if err != nil {
 		t.Fatalf("OpenReader(pdf stream): %v", err)
@@ -129,6 +133,7 @@ func TestOpenReader(t *testing.T) {
 // TestOpenReaderAs covers the MIME-driven composition the drive integration
 // uses: FormatFromMIME names the format, the stream supplies the bytes.
 func TestOpenReaderAs(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenReaderAs(context.Background(), FormatMarkdown, strings.NewReader("# Title\n\nbody\n"))
 	if err != nil {
 		t.Fatalf("OpenReaderAs(markdown): %v", err)
@@ -154,6 +159,7 @@ func TestOpenReaderAs(t *testing.T) {
 // TestOpenReaderReadError verifies a failing reader surfaces its error from
 // both stream entry points.
 func TestOpenReaderReadError(t *testing.T) {
+	t.Parallel()
 	sentinel := errors.New("stream broke")
 	if _, err := OpenReader(context.Background(), iotest.ErrReader(sentinel)); !errors.Is(err, sentinel) {
 		t.Errorf("OpenReader(ErrReader): want the read error, got %v", err)
@@ -167,6 +173,7 @@ func TestOpenReaderReadError(t *testing.T) {
 // yields an error, never a silently truncated document (the layout engine
 // degrades internally; the boundary converts that to a failure).
 func TestOpenReaderCancelled(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := OpenReaderAs(ctx, FormatHTML, strings.NewReader("<html><body><p>hi</p></body></html>")); !errors.Is(err, context.Canceled) {
@@ -184,6 +191,7 @@ func TestOpenReaderCancelled(t *testing.T) {
 // TestOpenURLRouting verifies Open on an http(s) URL fetches and renders it as
 // a web page, stamped FormatHTML.
 func TestOpenURLRouting(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("<html><body><h1>served</h1></body></html>"))
 	}))
@@ -200,6 +208,7 @@ func TestOpenURLRouting(t *testing.T) {
 
 // TestDocumentFormatStamped verifies every opener records its source format.
 func TestDocumentFormatStamped(t *testing.T) {
+	t.Parallel()
 	pdfBytes := gen.TextPDF()
 	docxBytes := gendocx.Core[0].Bytes()
 	htmlBytes := []byte("<html><body><p>x</p></body></html>")

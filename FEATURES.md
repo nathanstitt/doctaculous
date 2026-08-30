@@ -330,10 +330,125 @@ bullet's design rationale is in its PR:
   spells the weight `bold`, not the spec's `bolder`: the cascade's `font-weight` is the binary
   bold/normal the four-style bundled families can express and rejects the relative keywords, so
   `bolder` would be dropped as invalid and the emphasis would stay invisible (a test pins this).
-  `<small>`/`<big>` are omitted rather than given a hardcoded px size, and `<mark>` is omitted
-  because **backgrounds do not paint on non-replaced inline boxes** — an inline `<span>` with an
-  explicit `background-color` paints nothing, while the same span at `display:inline-block` paints;
-  a `mark` rule would cascade and do nothing. Showcase §30.
+  `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
+  yellow highlight (it landed with inline-box backgrounds below; before that the rule would have
+  cascaded and painted nothing). Showcase §30.
+- **`transform`** (`pkg/css/transform.go`, `pkg/layout/css/fragment.go`): the 2D functions —
+  `translate`/`translateX`/`translateY` (lengths and percentages of the box's own size),
+  `scale`/`scaleX`/`scaleY`, `rotate`, `skew`/`skewX`/`skewY`, and `matrix()` — composed left to
+  right. It is a PAINT-time effect and changes no layout (CSS Transforms 1 §3): the box keeps the
+  space it occupied, and the matrix brackets its already-flattened items. A transformed element
+  establishes a stacking context and a BFC, as the spec requires — which is also what lets the
+  bracket wrap its background and content together rather than splitting them across Appendix E's
+  phases. Not modeled: the 3D functions (`translate3d`, `rotateX`, `perspective`, `matrix3d`),
+  refused rather than flattened since the engine has no 3D pipeline; and `transform-origin`, which
+  is always the box centre. Showcase §42.
+- **Absolute positioning in flex containers, and flex-derived heights** (`pkg/layout/css/flex.go`,
+  `block.go`): an abs/fixed child of a flex container is out of flow and honours its offsets (CSS
+  Flexbox §4.1) rather than being laid out as a flex item pinned to the edge; `top`+`bottom` with
+  `height: auto` sizes the box to the space between them (CSS 10.6.4), matching what `left`+`right`
+  already did; and an element whose height comes from flex layout (`align-items: stretch` or its own
+  `flex: 1`) resolves `justify-content` for its own children, because the cross size is now definite
+  BEFORE its interior lays out rather than written onto the fragment afterwards. Showcase §41.
+- **SVG presentation attributes inherit from the root** (`pkg/svg/svg.go` `rootStyle`): `fill`,
+  `stroke`, `stroke-width`, caps/joins/dashes and the rest of the inherited vocabulary set on the
+  root `<svg>` reach its children, as CSS inheritance requires. Previously only the font and text
+  properties were carried across — the root's paint properties were resolved and then discarded —
+  so an icon authored as `<svg stroke="…">` with detail paths inheriting it painted its filled
+  parts and none of its strokes. The set is built by INVERSION: start from the root's resolved
+  style and clear only what CSS marks non-inherited (`opacity`, `clip-path`, `mask`, `filter`,
+  `mask-type`, `overflow`, `display`), so a property added later defaults to inheriting rather than
+  to being dropped. Showcase §40.
+- **Comma-separated `background` / `background-image` layer lists** (`pkg/css/shorthand.go`,
+  `pkg/layout/css/background.go`): multiple layers paint, first layer on top, with the
+  background-color behind them — so `background: <gradient>, <color>`, the ordinary way to give a
+  gradient a fallback, works. It previously made the whole declaration unparseable, so the element
+  painted NOTHING and it read as "gradients are unsupported". A colour is accepted in the final
+  layer only (CSS Backgrounds §3.10) and one earlier invalidates the declaration, as does any
+  unparseable layer. Known limit: `background-size`/`-repeat`/`-position`/`-origin`/`-clip` are
+  single-valued and apply to every layer — genuinely per-layer values are a separate slice.
+  Showcase §39.
+- **Margins on flex children** (`pkg/layout/css/flex.go`): honoured on both axes, including
+  `margin: auto` absorbing free space (CSS Flexbox §8.1). Flex layout was previously margin-blind —
+  an item's size and position came from its border box — so a margin on a flex child did nothing
+  while the identical rule on a block child worked. Margins are counted where they must be: line
+  packing uses the OUTER size, free-space distribution and `justify-content` position the margin
+  box, the line grows to hold a cross margin, and `stretch` fills the line less the item's cross
+  margins. Showcase §38.
+- **`line-height`, all forms** (`pkg/css/value.go` `UnitNumber`, `pkg/layout/css/inline.go`): the
+  **unitless multiplier** (`line-height: 1.5`) — the commonest spelling — plus `em`, `%`, lengths,
+  and `normal`. The unitless form was previously rejected as an invalid length and the declaration
+  dropped, so every block used the font-metric height and the property appeared inert. Units differ
+  where it matters: a NUMBER inherits as a number and re-multiplies against each descendant's own
+  font size, while `em`/`%` compute against the declaring element and inherit as a fixed length
+  (CSS 2.1 §10.8.1). A unitless number is still not a valid length elsewhere — `width: 5` remains
+  invalid. Showcase §37.
+- **Colour fonts / emoji** (`pkg/font/colr.go`, `colrv1.go`, `bitmap.go`,
+  `pkg/layout/paint/colrgradient.go`): colour glyphs paint in colour, through both families of
+  table. **`COLR`/`CPAL`** (v0 and v1) decode to layered outlines — vector, so they scale like text
+  — including per-layer **full affine transforms** (translation, mirror, rotation, scale) and
+  **linear/radial gradients** with pad/repeat/reflect spreads. **`sbix`** (Apple) and
+  **`CBDT`/`CBLC`** (Google) decode PNG strikes, choosing the strike nearest the used size and
+  preferring a larger one so the image is downscaled rather than enlarged; these do NOT scale like
+  outlines. A `.ttc` collection resolves its first face's tables. Emoji in ordinary prose reach an
+  **installed** colour font through the script-fallback chain (Apple Color Emoji, Segoe UI Emoji,
+  Noto Color Emoji…), because a colour emoji font is far too large to bundle; on a host with none,
+  the run degrades to the missing-glyph path. A colour glyph keeps the FONT's palette rather than
+  the CSS `color`, unless the font opts a layer into the foreground via the palette sentinel.
+  Showcase §36. Not modeled: **sweep (conic) gradients** and **composite paints**, which are refused
+  as a whole so the glyph falls back to its monochrome outline rather than a plausible wrong colour;
+  CPAL light/dark palette variants (the first palette is used); and non-PNG strike payloads.
+- **`text-overflow: ellipsis` and `-webkit-line-clamp`** (`pkg/layout/inline/ellipsis.go`,
+  `pkg/layout/css/inline.go`): single-line ellipsis truncation and N-line clamping, the two ways CSS
+  truncates text. Truncation runs in GLYPH units — whole glyphs are dropped until the ellipsis fits,
+  so a cut never lands mid-character and the line never spills past the clip edge. Trailing
+  whitespace is dropped before the ellipsis, and the ellipsis inherits the styling of the glyph it
+  follows. `-webkit-line-clamp` (and the unprefixed `line-clamp`) is a LAYOUT effect: the box stops
+  after N line boxes and its height shrinks to them, matching the height a browser reports, and the
+  final line is marked only when text actually remains. `text-overflow` applies only where the box
+  clips — an `overflow: visible` box still overflows visibly, as browsers do — and when even the
+  ellipsis alone does not fit it is still rendered (CSS Overflow 3 §5). `text-overflow: clip` (the
+  initial) and an over-large clamp are both inert. Showcase §35. Not modeled: `text-overflow`'s
+  custom `<string>` and two-value forms, and per-axis clamping.
+- **Host CSS cascades into inline `<svg>`** (`pkg/svg` `HostContext`/`ParseWithHost`,
+  `pkg/layout/css/replaced.go`): a page author sheet styles inline SVG children, so
+  `.icon { fill: blue }` works the way CSS says it should. Class, element, id, grouped, and
+  **descendant selectors rooted outside the `<svg>`** all match — the ancestor chain continues past
+  the SVG root into the host tree, so `#sidebar .icon` matches rather than silently doing nothing.
+  `currentColor` resolves against the `color` the `<svg>` box inherits, and the host's font-size and
+  font-family seed the SVG root. Precedence follows CSS: presentation attributes (zero specificity)
+  < host sheets < the SVG's own `<style>` (the more specific context wins a tie) < inline `style=`.
+  The inline-SVG parse cache is keyed by markup **plus the host context**, so two byte-identical
+  subtrees under different rules, colors, or ancestors do not collide. An `<img src="*.svg">` is
+  deliberately NOT reached — a referenced SVG is a separate document that CSS does not cascade
+  into, and a test pins that direction too. Showcase §34.
+- **`color-mix()`** (`pkg/css/colormix.go`, `pkg/css/colorspace.go`): CSS Color 5 §3, in every
+  interpolation space — `srgb`, `srgb-linear`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `xyz`,
+  `xyz-d50`, `xyz-d65` — plus all four hue-interpolation modes (`shorter`/`longer`/`increasing`/
+  `decreasing hue`) for the polar spaces. Percentages may precede or follow either colour; omitted
+  ones fill the remainder; two that sum under 100% normalize the weights **and** scale the result's
+  alpha. Interpolation is premultiplied per CSS Color 4 §12.3, so a semi-transparent input
+  contributes proportionally less hue. Evaluated inside the single shared colour grammar, so it
+  works in every property that takes a colour, and nests. Expected values are pinned to **Chrome**
+  (captured by canvas readback), not derived from the same arithmetic as the implementation. Two
+  deliberate divergences, both toward exactness: mixing with `transparent` leaves the opaque
+  colour's channels untouched (Chrome rounds up to 2/255 through an intermediate space), making
+  `color-mix(in srgb, X N%, transparent)` exactly `rgba(X, N/100)`; and nested mixes stay
+  unquantized between levels. An unknown space or a malformed component drops the declaration per
+  CSS error handling. Showcase §33. Gamut mapping is not modeled — out-of-gamut results clamp.
+- **Inline-box backgrounds and borders** (`pkg/layout/inline` `InlineBoxStyle`,
+  `pkg/layout/css/fragment.go` `appendInlineBoxDecorations`): `background-color`, a uniform solid
+  `border`, and horizontal `padding` on a non-replaced inline box (`<span>`, `<em>`, `<a>`…). Line
+  breaking flattens inline boxes into glyph runs, so the box's identity is carried onto every glyph
+  and consecutive glyphs are coalesced **per line box** — a span that wraps paints one rect per
+  line, the same shape `text-decoration` uses. Identity is a POINTER, not a color: two adjacent
+  spans with the same background stay two rects. Inkless glyphs are retained for this pass so a
+  background stays continuous across intra-span spaces. Padding is part of LAYOUT, riding on a
+  zero-ink edge glyph at each boundary, so the breaker/intrinsic sizing/alignment reserve it by
+  reading advances alone. The rect is the content area (tallest ascent + deepest descent among its
+  glyphs), so a span mixing font sizes is sized to its largest. Not modeled: background images,
+  vertical padding/margins (which per CSS 10.6.1 overflow the line box rather than growing it), and
+  per-edge or rounded inline borders. Showcase §32.
 - **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
   `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… mapped to
   CSS below author rules (HN renders with its bgcolor).

@@ -10,14 +10,14 @@ the fix follows the measurement, not the report.
 | # | Reported | Verified | Correction to the report |
 | --- | --- | --- | --- |
 | 1 | `font-family` must end in a generic | **Real** | Not about the generic. Any family that fails to resolve deletes its text; the generic is merely the only *guaranteed* resolution. |
-| 2 | CSS does not style inline `<svg>` children | **Real, narrower** | Inline `style=` on a child **does** work, and so does `<style>` inside the `<svg>`. Only the *HTML document* stylesheet is lost. |
+| 2 | CSS does not style inline `<svg>` children | **Real — FIXED** | Inline `style=` on a child **does** work, and so does `<style>` inside the `<svg>`. Only the *HTML document* stylesheet is lost. |
 | 3 | `sysfont` registry lacks most families | **Real, worse** | `sysfont` *does* walk the font dirs, but identifies files by **filename** against a registry, and `Match` **never returns nil** — so the miss path in `osfont.go` is dead code. |
 | 4 | `max-height` / `overflow:clip` do not clip | **Real — FIXED** | Two independent causes, not one. |
-| 5 | `-webkit-line-clamp` unimplemented | **Real, larger** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
-| 6 | `color-mix()` unimplemented | **Real** | — |
-| 7 | *(added by user)* colour emoji | **Real** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
+| 5 | `-webkit-line-clamp` unimplemented | **Real — FIXED** | `text-overflow: ellipsis` does **not** already work either — it is byte-identical to no ellipsis. |
+| 6 | `color-mix()` unimplemented | **Real — FIXED** | — |
+| 7 | *(added by user)* colour emoji | **Real — FIXED** | No `COLR/CPAL`, `sbix`, or `CBDT/CBLC` support anywhere. |
 | 8 | *(found while fixing #1)* | **Real — FIXED** | `<strong>`/`<b>`/`<em>`/`<i>` rendered with no bold or italic — the UA stylesheet had no rule for them. |
-| 9 | *(found while fixing #8)* | **Real** | Backgrounds do not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` paints nothing. |
+| 9 | *(found while fixing #8)* | **Real — FIXED** | Backgrounds did not paint on non-replaced **inline** boxes; an inline `<span>` with `background-color` painted nothing. |
 
 ### How these were measured
 
@@ -146,10 +146,28 @@ than re-cascading in the HTML tree:
    also key on the host sheets/root style, or two identical SVGs under different CSS
    would collide. This is a correctness requirement, not an optimisation.
 
-Selector matching across the boundary (`body .k`) stays out of scope: `cssNode.Parent()`
-(`pkg/svg/cssnode.go:42-47`) terminates at the SVG root. Selectors that match *within*
-the SVG subtree (`.k`, `rect`, `#id`) will work — that covers the reported use case.
-Note this honestly in FEATURES.md rather than implying full cross-boundary cascade.
+**STATUS: DONE** — `feat/svg-host-cascade`, stacked on branch 5. Showcase §34.
+
+Cross-boundary selectors were planned as out of scope, on the grounds that
+`cssNode.Parent()` terminates at the SVG root. They are IN scope and shipped. Leaving
+them out would have been worse than not doing the feature: `.icon` would work while
+`#sidebar .icon` silently did nothing — precisely the confusing partial support the
+source report complained about. `cssNode` is an adapter over the `css.Node` INTERFACE,
+so continuing the chain past the root only needed a `HostParent css.Node` field, which
+`html.Element` already satisfies.
+
+Two correctness details worth recording:
+
+- **The cache key needed the host PARENT, not just the sheets.** Two sibling `<svg>`
+  elements with byte-identical markup under the same stylesheet differ only in where
+  they sit in the host tree — exactly what `#a .k` keys on. Caught by measurement: the
+  first svg painted red and the second painted red too, when it should have been green.
+- **`<img src="*.svg">` must NOT be reached.** A referenced SVG is a separate document
+  and CSS does not cascade into it. A fix that overreaches is as wrong as one that
+  under-reaches, so that direction is pinned by its own test.
+
+`currentColor` was also broken and is fixed here — it is the same root cause (no host
+style crossed the boundary), and the report did not mention it.
 
 ### Tests
 
@@ -335,6 +353,29 @@ Unit on the line breaker (glyph-level: the ellipsis replaces exactly enough glyp
 goldens for 1-line ellipsis, N-line clamp, clamp with a trailing float, and the
 too-narrow-for-ellipsis edge case.
 
+**STATUS: DONE** — `feat/text-overflow-and-line-clamp`, stacked on branch 6.
+Showcase §35.
+
+Confirmed the report's correction: `text-overflow: ellipsis` did NOT already work.
+Both properties were absent from the cascade entirely, so this was two features, and
+the single-line one had to land first because the clamp reuses its machinery.
+
+Two implementation notes worth keeping:
+
+- **The clamp needs its own append, not the truncate.** At a clamp boundary the final
+  line usually FITS — the ellipsis marks text cut *after* it, not an overflow *of* it —
+  so `TruncateWithEllipsis` returns it untouched and no ellipsis appears. That is why
+  `AppendEllipsis` exists as a separate entry point. Caught by measurement: the clamp
+  height was right while the ellipsis was silently missing.
+- **Trailing whitespace had to be stripped BEFORE the fit loop, not after.**
+  `VisibleWidth` excludes trailing spaces but a raw advance sum does not, so measuring
+  a candidate cut with spaces still attached compares two different quantities and lets
+  the loop stop while spaces remain. A unit test caught a space surviving before the
+  ellipsis.
+
+The clamp is a layout effect, not a paint clip: `clamp:2` lays the box out at exactly
+twice `clamp:1`'s height, which a test pins.
+
 ---
 
 ## 6. `color-mix()` unimplemented
@@ -359,6 +400,32 @@ self-contained and cheap.
 Table-driven unit tests in `pkg/css` covering each space, percentage normalisation,
 missing/over-100% percentages, `transparent`, nesting inside `var()`, and an invalid
 space (asserting both the drop and the log). One showcase entry.
+
+**STATUS: DONE** — `feat/css-color-mix`, stacked on branch 4. Every space and all four
+hue modes shipped, plus showcase §33.
+
+Method note worth keeping. Expected values were **captured from Chrome** by rendering
+each mix to a 1x1 canvas and reading the pixel back, rather than derived from the spec
+by hand. That direction is the point: a transposed conversion matrix or a swapped white
+point produces colours that look entirely plausible, and a test written from the same
+arithmetic as the implementation agrees with the bug. 19 of 20 cases came out
+byte-identical to Chrome on the first run; the 20th exposed a real question rather than
+a rounding nitpick.
+
+Two deliberate divergences from Chrome, both toward exactness:
+
+- **Mixing with `transparent`.** Premultiplication weights a zero-alpha colour's
+  channels by zero, so the opaque colour's channels must survive untouched and only its
+  alpha scales. Chrome reports (75,142,217) for a 24% `#4a90d9`; the exact answer is
+  (74,144,217), verified by hand. This confirms the source report's claim that
+  `color-mix(in srgb, X N%, transparent)` maps exactly to `rgba(X, N/100)` — the report
+  was right and Chrome is the one that rounds.
+- **Nested mixes stay in float.** Quantizing between levels turns Chrome's (191,128,191)
+  into (192,128,192), because the inner 127.5 rounds up before the outer average sees
+  it. `parseColorMixFloat` keeps the intermediate unquantized.
+
+Chrome also corrected two of my own assumptions: `red 150%` is INVALID rather than
+clamped to 100%, and so is `red 0%, blue 0%`.
 
 ---
 
@@ -414,6 +481,49 @@ Golden rasters asserting **non-greyscale** pixels (a greyscale-only assertion wo
 on tofu — the same trap the report calls out); per-table unit tests in `pkg/font`; a
 `.ttc` face-selection test; a "no colour face available" degradation test asserting the
 monochrome fallback *and* its log.
+
+**STATUS: DONE** — `feat/color-fonts`, stacked on branch 7. All four planned stages
+landed: COLR v0/v1 layers, bitmap strikes, COLR v1 gradients, and the emoji fallback
+chain. Showcase §36.
+
+### Test fixtures
+
+Two subsets of Noto Color Emoji (SIL OFL 1.1) ship as fixtures — COLR v1 at 230 KB and
+CBDT at 29 KB, from 4.8 MB and 10.2 MB upstream. Producing them needed a small
+sfnt subsetter (`testdata/gen/fonts/tools/`) because no `fonttools` is available and a
+15 MB fixture pair against a 1.6 MB fixture directory was not defensible.
+
+Twemoji was fetched first for COLR **v0** coverage and then dropped: its artwork is
+CC-BY-4.0, and `docs/DEPENDENCIES.md` permits MIT/BSD/Apache only. That leaves a real
+gap — **COLR v0 has no real-font coverage**, since the Noto fixture is v1-only. A small
+synthetic v0 font built in test code would close it honestly; v0's structure is simple
+enough (a flat base-glyph → layer-range table) that a hand-built one is not
+self-confirming the way a hand-built v1 paint graph would be.
+
+### Four bugs worth recording
+
+1. **Signed 24-bit offsets.** COLR v1 paint offsets are Offset24 and real fonts use
+   NEGATIVE ones — a shared paint sits earlier in the table. Reading them unsigned
+   turned -5 into 16,777,211 and walked off the end.
+2. **Wrong paint-format constants.** A draft had 12 as `PaintColrGlyph`; the real
+   records show it carries a u24 child-paint offset, i.e. a transform. Verified against
+   actual bytes rather than a re-reading.
+3. **A corrupt fixture masquerading as a parser bug.** After fixing 1 and 2 one glyph
+   still failed. Running the parser against the UNMODIFIED upstream font showed it
+   resolving perfectly, which isolated the fault to the fixture extractor (it had
+   swapped PaintTransform's two u24 fields). Testing against ground truth is what
+   separated these; without it the next hour would have gone into "fixing" correct code.
+4. **Bitmap bearing semantics.** `sbix`'s originOffsetY measures the image's BOTTOM from
+   the baseline while CBDT's bearingY measures its TOP. Treating them alike put CBDT
+   glyphs an em above the line — off-page, so they vanished while the tests still
+   reported ink from surrounding text.
+
+### A design change the data forced
+
+The layer model began as translation-only, then translation+mirror. Real emoji use
+genuine rotation and scale (a party popper's streamers), and refusing those discarded
+whole glyphs — so `ColorLayer` carries a full 2x3 affine. The lesson is the same one as
+the fixture bug: the shape of the data decides the model, not the other way round.
 
 ---
 
@@ -496,6 +606,23 @@ that fragmentation is the reason this is a real piece of work rather than a one-
 **Priority:** above #6 (`color-mix`), below the clipping work. A background on a `<span>`
 is common in real documents, and today it is silently dropped.
 
+**STATUS: DONE** — `feat/inline-box-backgrounds`, stacked on branch 3. Showcase §32,
+plus `<mark>` in the UA sheet now that its rule paints.
+
+Scope note worth recording. A first pass shipped background + border but dropped
+PADDING, on the reasoning that padding must also widen the box's advance and that was
+"layout work this slice does not do". That was scope-cutting dressed as a design
+decision: a padded rect that layout does not reserve space for draws a background wider
+than the text it sits behind, and the neighbouring text runs underneath it. The right
+fix was to make padding part of layout — a zero-ink EDGE GLYPH at each box boundary
+whose advance is padding+border. Because the breaker, VisibleWidth, intrinsic sizing,
+and alignment all read `Glyph.Advance` and nothing else, they reserve the space with no
+knowledge of inline boxes. It is the same trick `LetterSpacingPt` already used.
+
+The RTF specimen golden moved: RTF `\highlight` emits `background-color` on a `<span>`,
+so the corpus had been silently dropping highlights all along. That golden change is the
+feature landing on a real format, not a regression.
+
 ## Sequencing
 
 Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI is green.
@@ -504,12 +631,12 @@ Per `CLAUDE.md`, each item is its own branch → PR off `main`, merged when CI i
 | --- | --- | --- | --- |
 | 1 | `fix/font-terminal-fallback` | #1 + #3 | Same failure in the field; #3 makes #1's fallback reachable. Highest value: blank pages become text. |
 | 3 | `fix/overflow-clip-and-max-height` | #4a, #4b | **DONE** — stacked on branch 2. |
-| 3 | `feat/css-color-mix` | #6 | Self-contained, cheap. |
-| 4 | `feat/svg-host-cascade` | #2 | Medium; touches three signatures + a cache key. |
-| 5 | `feat/text-overflow-and-line-clamp` | #5 | Largest CSS item; depends on #1's reliable metrics. |
-| 6 | `feat/color-fonts` | #7 | Own sub-project, staged 1–4 internally; stage 4 depends on branch 1. |
+| 5 | `feat/css-color-mix` | #6 | **DONE** — stacked on branch 4. |
+| 6 | `feat/svg-host-cascade` | #2 | **DONE** — stacked on branch 5. |
+| 7 | `feat/text-overflow-and-line-clamp` | #5 | **DONE** — stacked on branch 6. |
+| 8 | `feat/color-fonts` | #7 | **DONE** — stacked on branch 7. All four stages. |
 | 2 | `fix/ua-emphasis-defaults` | #8 | **DONE** — stacked on branch 1. Regenerated goldens across every format. |
-| — | `feat/inline-box-backgrounds` | #9 | Found during #8. Needs per-line-fragment painting; `<mark>`'s UA rule lands with it. |
+| 4 | `feat/inline-box-backgrounds` | #9 | **DONE** — stacked on branch 3. `<mark>`'s UA rule landed with it. |
 
 Docs task alongside: #4c (verify line pitch, document in `docs/CSS-LAYOUT.md`), and a
 FEATURES.md entry per landed item — including the honest limits (#2 does not cross

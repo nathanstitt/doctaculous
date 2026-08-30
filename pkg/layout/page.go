@@ -152,6 +152,19 @@ const (
 	// brackets page-local: exact for a per-pixel filter, and a documented
 	// approximation for a spatial one (a blur cannot sample the pixels that fell on
 	// the other page), logged once by the paginator.
+	// TransformPushKind opens a CSS `transform` bracket (Item.Transform is set): the
+	// painter multiplies the item's matrix into the page matrix, so every item up to
+	// the matching TransformPopKind paints through it. Not a drawing primitive.
+	//
+	// A transform is a PAINT-TIME effect: it does not change layout, and the box keeps
+	// the space it occupied untransformed (CSS Transforms 1 §3). Emitting it as a
+	// bracket over the box's already-flattened subtree is what gives that for free —
+	// the same shape the filter bracket uses, and balanced for the same reason
+	// (pagination splits fragments, not items).
+	TransformPushKind
+	// TransformPopKind closes the most recent TransformPushKind, restoring the page
+	// matrix. Carries no geometry; the matrix lives on the matching push.
+	TransformPopKind
 	FilterPushKind
 	// FilterPopKind closes the most recent group opened by FilterPushKind: the
 	// painter runs the pushed filter chain over the group's pixels and composites
@@ -183,6 +196,10 @@ type Item struct {
 	// Vector is set when Kind is VectorKind: a vector scene (SVG) drawn into a
 	// content box.
 	Vector VectorItem
+	// Transform is set when Kind is TransformPushKind: the box's resolved matrix,
+	// already composed with its transform-origin, in page space.
+	Transform render.Matrix
+
 	// Filter is set when Kind is FilterPushKind: the CSS filter chain to apply to
 	// the bracketed subtree, plus the box's border-box rectangle. Unused (zero) for
 	// FilterPopKind, which carries no geometry.

@@ -71,6 +71,7 @@ func chapterName(i int) string {
 // directly: CoverHref and CoverMediaType come out of the manifest under either
 // convention, and a book with no cover reports none.
 func TestEPUBCoverIsSurfacedByBothConventions(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		style     genepub.CoverStyle
@@ -110,6 +111,7 @@ func TestEPUBCoverIsSurfacedByBothConventions(t *testing.T) {
 // common place an SVG appears in an EPUB, so rasterizing it here would undo the
 // series' whole point at its most visible point.
 func TestEPUBSVGCoverRendersAsVector(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenEPUBBytes(
 		buildCoverBook(t, "cover.svg", []byte(coverSVG), "image/svg+xml", genepub.CoverEPUB3),
 		WithViewportWidth(400), WithPageSize(400, 500),
@@ -131,6 +133,7 @@ func TestEPUBSVGCoverRendersAsVector(t *testing.T) {
 // must render too — and (as the control for the assertion above) must still
 // produce an image XObject.
 func TestEPUBRasterCoverRenders(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenEPUBBytes(
 		buildCoverBook(t, "cover.png", coverPNG(t), "image/png", genepub.CoverEPUB2),
 		WithViewportWidth(400), WithPageSize(400, 500),
@@ -151,6 +154,7 @@ func TestEPUBRasterCoverRenders(t *testing.T) {
 // it has no position within the spine to occupy; the front of the book is both
 // the only place it can go and the right one.
 func TestEPUBCoverIsTheFirstPage(t *testing.T) {
+	t.Parallel()
 	const ch2 = `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head>
 <body><h1>Two</h1><p>More text.</p></body></html>`
@@ -188,6 +192,7 @@ func TestEPUBCoverIsTheFirstPage(t *testing.T) {
 // identically except for the cover declaration, so any accidental change to the
 // no-cover path (a stray leading section, a spurious break-before) shows up.
 func TestEPUBWithNoCoverIsUnchanged(t *testing.T) {
+	t.Parallel()
 	// A book whose manifest carries the image but declares no cover: the media
 	// part is present either way, so only the DECLARATION differs.
 	plain := genepub.New().SetTitle("Covered").
@@ -230,6 +235,7 @@ func TestEPUBWithNoCoverIsUnchanged(t *testing.T) {
 // then show it twice. The book must report CoverInSpine and render the cover
 // exactly once.
 func TestEPUBCoverAlreadyInSpineIsNotDuplicated(t *testing.T) {
+	t.Parallel()
 	const coverPage = `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title></head>
 <body><img src="cover.svg" alt="cover"/></body></html>`
@@ -265,6 +271,7 @@ func TestEPUBCoverAlreadyInSpineIsNotDuplicated(t *testing.T) {
 // a cover part the container does not contain must not fail the open, must not
 // panic, and must leave the chapters rendering.
 func TestEPUBCoverMissingPartDegrades(t *testing.T) {
+	t.Parallel()
 	// Declare a cover for a media part, then confirm the href is reported even
 	// though we never assert the bytes resolve; the renderer's <img> degrades to
 	// a placeholder the same way any missing <img src> does.
@@ -300,6 +307,7 @@ func TestEPUBCoverMissingPartDegrades(t *testing.T) {
 // Eyeball: a green portrait rectangle scaled down to the page width, centered,
 // alone on the page; the chapter text starts on page 2.
 func TestEPUBCoverGolden(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenEPUBBytes(
 		buildCoverBook(t, "cover.svg", []byte(coverGoldenSVG), "image/svg+xml", genepub.CoverEPUB3),
 		WithViewportWidth(300), WithPageSize(300, 420), WithBundledFonts(),

@@ -519,19 +519,55 @@ func applyGridShorthand(cs *ComputedStyle, val string) {
 // background-origin and background-clip share box keywords: the first box keyword
 // sets origin (and clip, which defaults to it), a second sets clip — matching CSS.
 func applyBackground(cs *ComputedStyle, value string) {
-	parsed, ok := parseBackgroundShorthand(value)
-	if !ok {
-		return // invalid declaration: leave every longhand as the cascade left it
+	// `background` is a COMMA-SEPARATED LAYER LIST. Only the final layer may carry the
+	// background-color (CSS Backgrounds §3.10), which is exactly what made the common
+	// idiom fail: `background: linear-gradient(...), #07080d` — a gradient over a
+	// fallback colour — was unparseable as a single layer, so the whole declaration
+	// was dropped and the element painted nothing at all. That reads as "gradients are
+	// unsupported" rather than "the list was rejected".
+	parts := splitTopLevelCommas(value)
+	layers := make([]BackgroundLayer, 0, len(parts))
+	var bgColor color.RGBA
+	for i, part := range parts {
+		parsed, ok := parseBackgroundShorthand(part)
+		if !ok {
+			return // any invalid layer invalidates the whole declaration
+		}
+		// A colour is only legal in the LAST layer. One earlier is a parse error, not
+		// something to silently ignore, or `background: red, blue` would quietly paint.
+		if parsed.color != (color.RGBA{}) && i != len(parts)-1 {
+			return
+		}
+		if i == len(parts)-1 {
+			bgColor = parsed.color
+		}
+		layers = append(layers, BackgroundLayer{
+			Image:    parsed.image,
+			Gradient: parsed.gradient,
+			Repeat:   parsed.repeat,
+			Position: parsed.position,
+			Size:     parsed.size,
+			Origin:   parsed.origin,
+			Clip:     parsed.clip,
+			Attach:   parsed.attach,
+		})
 	}
-	cs.BackgroundColor = parsed.color
-	cs.BackgroundImage = parsed.image
-	cs.BackgroundGradient = parsed.gradient
-	cs.BackgroundRepeat = parsed.repeat
-	cs.BackgroundPosition = parsed.position
-	cs.BackgroundSize = parsed.size
-	cs.BackgroundOrigin = parsed.origin
-	cs.BackgroundClip = parsed.clip
-	cs.BackgroundAttach = parsed.attach
+	if len(layers) == 0 {
+		return
+	}
+	cs.BackgroundColor = bgColor
+	cs.BackgroundLayers = layers
+	// The first layer also populates the single-layer fields, so every existing
+	// consumer that reads BackgroundImage/BackgroundGradient keeps working unchanged.
+	first := layers[0]
+	cs.BackgroundImage = first.Image
+	cs.BackgroundGradient = first.Gradient
+	cs.BackgroundRepeat = first.Repeat
+	cs.BackgroundPosition = first.Position
+	cs.BackgroundSize = first.Size
+	cs.BackgroundOrigin = first.Origin
+	cs.BackgroundClip = first.Clip
+	cs.BackgroundAttach = first.Attach
 }
 
 // backgroundShorthand is one fully-parsed `background` value. Every field starts

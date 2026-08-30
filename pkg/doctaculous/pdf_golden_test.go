@@ -67,6 +67,7 @@ var pdfxGoldens = []struct {
 // TestPDFExtractMarkdownGolden renders each fixture to a PDF, extracts it to Markdown, and
 // compares to a committed pdfx-<name>.md golden.
 func TestPDFExtractMarkdownGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -88,6 +89,7 @@ func TestPDFExtractMarkdownGolden(t *testing.T) {
 // TestPDFExtractHTMLGolden renders each fixture to a PDF, extracts it to HTML, and compares
 // to a committed pdfx-<name>.html golden.
 func TestPDFExtractHTMLGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -133,6 +135,7 @@ func checkPDFXGolden(t *testing.T, path string, got []byte) {
 // caveat in the accompanying report). A vector-only page is a valid, parseable, text-free
 // document that exercises the same empty-extraction path.
 func TestPDFExtractEmptyPage(t *testing.T) {
+	t.Parallel()
 	pdf := roundTripPDF(t, `<!DOCTYPE html><html><head><style>body{margin:0}
 		div{width:100px;height:60px;border:2px solid black}</style></head><body><div></div></body></html>`)
 
@@ -157,6 +160,7 @@ func TestPDFExtractEmptyPage(t *testing.T) {
 // TestConvertPDFToMarkdownInvalidPDF feeds non-PDF bytes: it must return an error (from the
 // parser), not panic.
 func TestConvertPDFToMarkdownInvalidPDF(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	err := convertPDFToMarkdown(context.Background(), strings.NewReader("this is not a PDF"), &out, MarkdownOptions{})
 	if err == nil {

@@ -18,6 +18,7 @@ import (
 // styled box proves the CSS loaded; the image proves the <img> decoded. This is
 // the OpenURL smoke test: it proves the HTTP loader is wired through the pipeline.
 func TestOpenURLRendersRemoteResources(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -51,6 +52,7 @@ func TestOpenURLRendersRemoteResources(t *testing.T) {
 // OpenURL rejects a non-http(s) scheme with ErrUnsupportedScheme (so callers can
 // branch on it) and an empty URL with a clear error, both BEFORE any fetch.
 func TestOpenURLRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	_, err := OpenURL("file:///etc/passwd")
 	if !errors.Is(err, ErrUnsupportedScheme) {
 		t.Errorf("file: scheme err = %v, want ErrUnsupportedScheme", err)
@@ -63,6 +65,7 @@ func TestOpenURLRejectsBadInput(t *testing.T) {
 // A 404 on a sub-resource (the <img> and the <link>) must degrade: the page still
 // renders (placeholder image / no stylesheet), no error, no panic.
 func TestOpenURLSubResource404Degrades(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -96,6 +99,7 @@ func TestOpenURLSubResource404Degrades(t *testing.T) {
 // mandatory, unlike a sub-resource. The loader's ErrNotFound propagates through
 // OpenURL's %w wrap, so callers can still distinguish "absent" from other failures.
 func TestOpenURLDocument404Errors(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 	}))
@@ -114,6 +118,7 @@ func TestOpenURLDocument404Errors(t *testing.T) {
 // path is a transparent byte source (no pixel difference), so the existing goldens
 // cover its output without a new golden.
 func TestOpenURLMatchesMapLoaderRender(t *testing.T) {
+	t.Parallel()
 	const doc = `<!DOCTYPE html><html><head>
 		<link rel="stylesheet" href="s.css">
 		</head><body><div class="card">Same</div><img src="q.png"></body></html>`

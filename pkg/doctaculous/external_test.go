@@ -64,6 +64,7 @@ func imageHasInk(img image.Image) bool {
 // count, and rasterizes its first page without error. If the fixtures are
 // missing (e.g. a sparse checkout) the test skips rather than fails.
 func TestExternalCorpus(t *testing.T) {
+	t.Parallel()
 	if _, err := os.Stat(externalFixtureDir); errors.Is(err, os.ErrNotExist) {
 		t.Skipf("external fixtures not present at %s", externalFixtureDir)
 	}
@@ -104,6 +105,7 @@ func TestExternalCorpus(t *testing.T) {
 // and requires all pages to succeed, exercising the parallel render path over
 // real documents (rotation, composite fonts, multiple image filters).
 func TestExternalRasterizeAllPages(t *testing.T) {
+	t.Parallel()
 	if _, err := os.Stat(externalFixtureDir); errors.Is(err, os.ErrNotExist) {
 		t.Skipf("external fixtures not present at %s", externalFixtureDir)
 	}
@@ -142,6 +144,7 @@ func TestExternalRasterizeAllPages(t *testing.T) {
 // error, and the drawn green form boxes must come out semi-transparent (blended
 // toward the white background) rather than fully saturated.
 func TestExternalConstantAlphaApplied(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(externalFixtureDir, "cropped-rotated-scaled.pdf")
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		t.Skipf("fixture missing: %s", path)
@@ -193,6 +196,7 @@ func TestExternalConstantAlphaApplied(t *testing.T) {
 // to empty text (those renders are pinned invisible by design), so only the
 // conversion CALL must succeed for them.
 func TestExternalOfficeCorpus(t *testing.T) {
+	t.Parallel()
 	// Content invisible to the structure writers by design.
 	emptyTextOK := map[string]bool{
 		"comment.docx":                             true, // body is one comment-reference run

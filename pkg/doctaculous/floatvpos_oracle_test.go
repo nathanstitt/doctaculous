@@ -22,6 +22,7 @@ import (
 // so we can compare the figure box to the lede in ONE frame and see whether the residual
 // "figure too high" discrepancy the handoff describes actually exists in the fragment tree.
 func TestShowcaseFloatVerticalPositionOracle(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
 	defer srv.Close()
 

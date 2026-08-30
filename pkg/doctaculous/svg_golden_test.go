@@ -14,6 +14,7 @@ import (
 // against committed goldens (same tolerance as the other golden suites).
 // Regenerate: go test ./pkg/doctaculous -run TestSVGResvgGolden -update
 func TestSVGResvgGolden(t *testing.T) {
+	t.Parallel()
 	corpus := filepath.Join("..", "..", "testdata", "svg", "resvg")
 	goldenDir := filepath.Join("testdata", "golden", "svg-resvg")
 	var files []string

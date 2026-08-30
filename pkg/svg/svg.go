@@ -2,7 +2,9 @@ package svg
 
 import (
 	"fmt"
+	"image/color"
 
+	"github.com/nathanstitt/doctaculous/pkg/css"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -198,11 +200,65 @@ type IntrinsicSize struct {
 // the document.
 func (d *Document) Intrinsic() IntrinsicSize { return d.intrinsic }
 
+// HostContext carries the styling an SVG inherits from a HOST document it is
+// embedded in — the stylesheets that should cascade into it, and the computed values
+// it inherits from its parent box.
+//
+// It exists because an inline <svg> in HTML is not a standalone document: CSS says an
+// author rule like `.icon { fill: blue }` in the page's <style> applies to SVG
+// children, and `fill="currentColor"` resolves against the color the <svg> element
+// inherits. Neither is knowable from the SVG markup alone, and this engine re-parses
+// an inline <svg> from serialized markup (pkg/html hands the subtree back as a
+// string), so the host's contribution has to be passed in explicitly.
+//
+// The zero value is the standalone-document case and changes nothing.
+type HostContext struct {
+	// Sheets are the host document's author stylesheets, in document order. They
+	// cascade BELOW the SVG's own <style> elements, so an internal rule still wins a
+	// specificity tie — the SVG is the more specific context.
+	Sheets []css.Stylesheet
+
+	// Color is the computed `color` the <svg> element inherits from its parent box,
+	// backing `currentColor`. Zero alpha means "not supplied", leaving the SVG
+	// default (black).
+	Color color.RGBA
+
+	// FontSizePt is the computed font-size the <svg> inherits, in points, so relative
+	// units and text inside the SVG scale with the host. Zero means "not supplied".
+	FontSizePt float64
+
+	// FontFamily is the computed font-family the <svg> inherits. Empty means "not
+	// supplied".
+	FontFamily string
+
+	// Parent is the host document's node for the <svg> element's PARENT, continuing
+	// the ancestor chain past the SVG root so a descendant selector written against
+	// the page (`#sidebar .icon`) matches inside the SVG. Nil leaves the chain
+	// terminating at the root, where only selectors confined to the SVG subtree match.
+	Parent css.Node
+}
+
+// empty reports whether the context carries nothing, so the standalone path can skip
+// every host-related branch.
+func (h *HostContext) empty() bool {
+	return h == nil || (len(h.Sheets) == 0 && h.Color.A == 0 && h.FontSizePt == 0 && h.FontFamily == "" && h.Parent == nil)
+}
+
 // Parse parses an SVG document into a read-only Document. logf (nil ok)
 // receives one debug line per skipped-or-degraded feature encountered while
 // building the scene; each unsupported element name is logged at most once
 // regardless of how many times it appears.
+//
+// It is the standalone-document form of ParseWithHost, which see for an SVG embedded
+// in a host document whose CSS should cascade into it.
 func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
+	return ParseWithHost(data, nil, logf)
+}
+
+// ParseWithHost is Parse for an SVG embedded in a host document: host (nil ok)
+// supplies the stylesheets that cascade into the SVG and the values it inherits from
+// its parent box. A nil or empty host is byte-identical to Parse.
+func ParseWithHost(data []byte, host *HostContext, logf func(string, ...any)) (*Document, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -247,7 +303,7 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	}
 	b.idx = buildIndex(root, b.warnOnceMsg)
 	b.servers = newPaintServerResolver(b.idx, logf)
-	ctx := &cascadeCtx{idx: b.idx, logf: logf}
+	ctx := &cascadeCtx{idx: b.idx, logf: logf, host: host}
 	doc.root = b.buildGroup(root, rootStyle(root, ctx), ctx)
 	// The root <svg> element's own opacity attribute (e.g. <svg
 	// opacity="0.5">) applies to it just like any other element's, even
@@ -262,34 +318,66 @@ func Parse(data []byte, logf func(string, ...any)) (*Document, error) {
 	return doc, nil
 }
 
-// rootStyle returns the style the root <svg>'s CHILDREN inherit: the
-// defaults, plus the root element's own FONT and TEXT properties.
+// rootStyle returns the style the root <svg>'s CHILDREN inherit: the root element's
+// own resolved presentation properties, minus the ones CSS does not inherit.
 //
-// The narrowness is deliberate. buildGroup walks the root's children with a
-// parent style, and historically that was defaultStyle() — the root's own
-// presentation attributes were never resolved at all, so `<svg fill="red">`
-// does not tint its children today. That is a genuine, pre-existing gap, but
-// widening it here would change the rendering of every existing document that
-// sets a paint property on its root, moving goldens for a reason unrelated to
-// text. The font properties have no such history: they did not exist before
-// this change, so making them inherit from the root is purely additive and
-// cannot alter any previously-rendered pixel.
+// This used to copy back only the font and text properties, leaving `fill`, `stroke`,
+// and the rest of the paint vocabulary resolved-then-discarded. The consequence was
+// reported from the field: an icon authored as `<svg stroke="#f5a623"><path d="…"/>`
+// — stroke on the root, detail paths inheriting it — painted its filled body and NONE
+// of its stroked detail, so a weather icon reduced to a small dot and read as "the
+// icon is not rendering". `fill` on the root failed the same way, so it was never
+// stroke-specific.
 //
-// It is also not optional for text to work at all: the resvg corpus routinely
-// writes `<svg font-family="Noto Sans" font-size="48">` and expects every
-// <text> below to pick it up, which is the ordinary CSS inheritance a browser
-// performs. Fixing the general case is left as a separate, self-contained
-// change so its golden movement can be reviewed on its own.
+// The construction is deliberately INVERTED from the old one. Rather than listing the
+// properties that inherit (where anything forgotten is silently dropped, which is how
+// paint came to be missing), it starts from the root's fully-resolved style and clears
+// only the properties CSS marks non-inherited. A property added to Style later then
+// defaults to the spec's answer — inherited — rather than to "dropped".
+//
+// The non-inherited set matters as much as the inherited one: opacity, clip-path,
+// mask, filter, and the mask/overflow enums must NOT reach the children, or the root's
+// value would be applied twice — once to the root's own group and again to each child.
 func rootStyle(root *element, ctx *cascadeCtx) Style {
-	full := defaultStyle().apply(root, ctx)
-	s := defaultStyle()
-	s.fontFamily = full.fontFamily
-	s.fontSizePt = full.fontSizePt
-	s.fontBold = full.fontBold
-	s.fontItalic = full.fontItalic
-	s.fontWeight = full.fontWeight
-	s.textAnchor = full.textAnchor
-	s.direction = full.direction
+	base := defaultStyle()
+	// An embedded SVG inherits from its parent box, so the host's computed values seed
+	// the root BEFORE the root element's own attributes are resolved — the root can
+	// then override them, and anything it does not set inherits down the tree. This is
+	// what makes fill="currentColor" resolve to the host's `color` rather than the SVG
+	// default black, and what lets text inside the SVG follow the host's font.
+	if h := ctx.hostContext(); h != nil {
+		if h.Color.A != 0 {
+			base.color = h.Color
+		}
+		if h.FontSizePt > 0 {
+			base.fontSizePt = h.FontSizePt
+		}
+		if h.FontFamily != "" {
+			base.fontFamily = h.FontFamily
+		}
+	}
+	full := base.apply(root, ctx)
+	return inheritableFrom(full)
+}
+
+// inheritableFrom returns s with every NON-inherited property reset to its initial
+// value, giving the style a child should inherit.
+//
+// Each field below is non-inherited per SVG 1.1 / CSS Masking / CSS Filter Effects.
+// Leaving any of them in place would double-apply the root's value: the root's own
+// group already carries them, so a child inheriting them would composite the same
+// opacity, clip, mask, or filter a second time.
+func inheritableFrom(s Style) Style {
+	d := defaultStyle()
+	s.opacity = d.opacity
+	s.clipPathRef = d.clipPathRef
+	s.maskRef = d.maskRef
+	s.filterRef = d.filterRef
+	s.maskType = d.maskType
+	s.overflow = d.overflow
+	// display is not inherited either: `display="none"` on the root hides the whole
+	// document, which the caller handles, and must not hide each child independently.
+	s.display = d.display
 	return s
 }
 

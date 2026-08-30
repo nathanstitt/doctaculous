@@ -22,6 +22,7 @@ func mdOfCSV(t *testing.T, data string) string {
 }
 
 func TestCSVToMarkdownTable(t *testing.T) {
+	t.Parallel()
 	got := mdOfCSV(t, "Name,Qty\nWidgets,5\nGadgets,7\n")
 	want := "| Name | Qty |\n| --- | --- |\n| Widgets | 5 |\n| Gadgets | 7 |\n"
 	if got != want {
@@ -30,6 +31,7 @@ func TestCSVToMarkdownTable(t *testing.T) {
 }
 
 func TestCSVParsingQuirks(t *testing.T) {
+	t.Parallel()
 	// Quoted commas and embedded newlines, ragged rows (padded), a UTF-8 BOM,
 	// CRLF line endings, and markup that must stay literal.
 	src := "\uFEFFa,b,c\r\n\"x, y\",\"two\nlines\"\r\n<b>lit</b>\r\n"
@@ -59,6 +61,7 @@ func boxEscape(s string) string {
 }
 
 func TestTSVRoundTripsThroughCSV(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tsv := "Name\tQty\nWidgets\t5\n"
 
@@ -83,6 +86,7 @@ func TestTSVRoundTripsThroughCSV(t *testing.T) {
 }
 
 func TestCSVEmptyInput(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenCSVBytes(nil, WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenCSVBytes(empty): %v", err)
@@ -102,6 +106,7 @@ func TestCSVEmptyInput(t *testing.T) {
 // TestPDFToCSVTableExtraction pins the standout path: a ruled table inside a
 // PDF is recovered by the lattice detector and lands as CSV.
 func TestPDFToCSVTableExtraction(t *testing.T) {
+	t.Parallel()
 	const tableHTML = `<!DOCTYPE html><html><head><style>body{margin:0}
 	table{border-collapse:collapse} td,th{border:1px solid black;padding:6px}</style></head><body>
 	<h1>Report</h1>

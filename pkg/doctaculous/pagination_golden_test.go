@@ -61,6 +61,7 @@ var paginatedGoldens = []struct {
 // BOTH the between-block overflow split would-be (blocks stack two-per-page) AND the
 // forced break-before.
 func TestHTMLPaginatedGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	for _, f := range paginatedGoldens {
 		t.Run(f.name, func(t *testing.T) {

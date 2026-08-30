@@ -18,6 +18,7 @@ import (
 // (consumePendingPositioned). Here a 60x60 red abs box sits inside a relative wrapper
 // inside each container type; before the fix none of them painted (0 red pixels).
 func TestPositionedDescendantInContainerPaints(t *testing.T) {
+	t.Parallel()
 	red := color.RGBA{0xcc, 0x22, 0x22, 0xff}
 	// A relative wrapper holding an abs box (the abs box rides the wrapper's positioned
 	// layer; the wrapper is the abs box's containing block).

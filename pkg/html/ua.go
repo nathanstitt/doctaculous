@@ -63,12 +63,10 @@ th { font-weight: bold; }
 strong, b { font-weight: bold; }
 em, i, cite, var, dfn { font-style: italic; }
 u, ins { text-decoration: underline; }
-/* <mark> is deliberately absent. Its default is a background colour, and this engine
-   does not paint backgrounds on non-replaced INLINE boxes at all — an inline <span>
-   with an explicit background-color paints nothing, while the same span at
-   display:inline-block paints correctly. The rule would parse, cascade, and then do
-   nothing, which is worse than its absence: it would read as support. It belongs with
-   the inline-background work, not here. */
+/* <mark>'s yellow highlight, per the HTML Standard's rendering section. It landed with
+   inline-box background painting: before that, backgrounds on non-replaced inline boxes
+   were silently dropped, so this rule would have cascaded and then done nothing. */
+mark { background-color: #ffff00; color: #000000; }
 /* Preformatted text preserves whitespace and uses a monospace family (CSS2.1 sample
    UA sheet). pre-wrap on textarea so a long line still wraps inside the field. */
 pre { white-space: pre; font-family: monospace; }

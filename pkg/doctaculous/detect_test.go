@@ -56,6 +56,7 @@ func encodeTinyImage(t *testing.T, format Format) []byte {
 }
 
 func TestDetectFormatMagic(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		data []byte
@@ -89,6 +90,7 @@ func TestDetectFormatMagic(t *testing.T) {
 }
 
 func TestDetectFormatExtensionHint(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		data []byte
@@ -113,6 +115,7 @@ func TestDetectFormatExtensionHint(t *testing.T) {
 }
 
 func TestDetectFormatHTMLSniff(t *testing.T) {
+	t.Parallel()
 	positive := []string{
 		"<!DOCTYPE html><html><body>x</body></html>",
 		"<!doctype html>\n<p>x</p>",
@@ -148,6 +151,7 @@ func TestDetectFormatHTMLSniff(t *testing.T) {
 }
 
 func TestDetectFormatUnknown(t *testing.T) {
+	t.Parallel()
 	garbage := []byte{0x00, 0x01, 0x02, 0xFE, 0xBA, 0xD0}
 	if got := DetectFormat(garbage, ""); got != FormatUnknown {
 		t.Errorf("DetectFormat(garbage) = %q, want unknown", got)
@@ -161,6 +165,7 @@ func TestDetectFormatUnknown(t *testing.T) {
 }
 
 func TestDetectISOBMFF(t *testing.T) {
+	t.Parallel()
 	ftyp := func(major string, compat ...string) []byte {
 		body := []byte(major)
 		body = append(body, 0, 0, 0, 0) // minor version

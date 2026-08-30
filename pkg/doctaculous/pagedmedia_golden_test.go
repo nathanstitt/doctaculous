@@ -166,6 +166,7 @@ var pagedMediaGoldens = []struct {
 // regenerate, then eyeball every page PNG in review — the margin band insets, the
 // centered running footer, and the widows/orphans line splits are all visual.
 func TestHTMLPagedMediaGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	for _, f := range pagedMediaGoldens {
 		t.Run(f.name, func(t *testing.T) {

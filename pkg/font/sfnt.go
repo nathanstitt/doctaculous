@@ -62,7 +62,62 @@ func LoadSFNT(data []byte) (*Face, error) {
 	if sfntHasTable(sfnt, "CFF ") {
 		kind = ProgramKindCFF
 	}
-	return &Face{prog: prog, names: prog.nameToGID(), progData: sfnt, progKind: kind}, nil
+	f := &Face{prog: prog, names: prog.nameToGID(), progData: sfnt, progKind: kind}
+	f.colr, f.cpal = parseColorTables(sfnt)
+	f.numGlyphs = prog.numGlyphs()
+	f.sbix, f.cbdt = parseBitmapTables(sfnt, f.numGlyphs)
+	return f, nil
+}
+
+// parseColorTables reads COLR/CPAL from an sfnt, if present and well-formed. Both are
+// required: layers reference palette entries, so a COLR without a CPAL cannot be
+// resolved and is dropped rather than half-applied. A malformed table yields nil, so
+// the face renders monochrome instead of failing to load — a colour table is untrusted
+// document input and must never make an otherwise-usable font unusable.
+func parseColorTables(sfnt []byte) (*colrTable, *cpalTable) {
+	tables, _, err := ParseSFNTTables(firstFaceOf(sfnt))
+	if err != nil {
+		return nil, nil
+	}
+	colrRaw, okC := tables["COLR"]
+	cpalRaw, okP := tables["CPAL"]
+	if !okC || !okP {
+		return nil, nil
+	}
+	colr, ok := parseCOLR(colrRaw)
+	if !ok {
+		return nil, nil
+	}
+	cpal, ok := parseCPAL(cpalRaw)
+	if !ok {
+		return nil, nil
+	}
+	return colr, cpal
+}
+
+// parseBitmapTables reads the colour BITMAP tables from an sfnt: Apple's sbix, or
+// Google's CBLC index paired with its CBDT data. Both are optional and independent; a
+// malformed one yields nil so the face still loads and renders monochrome.
+func parseBitmapTables(sfnt []byte, numGlyphs int) (*sbixTable, *cbdtTable) {
+	tables, _, err := ParseSFNTTables(firstFaceOf(sfnt))
+	if err != nil {
+		return nil, nil
+	}
+	var sb *sbixTable
+	if raw, ok := tables["sbix"]; ok {
+		if t, ok := parseSbix(raw, numGlyphs); ok {
+			sb = t
+		}
+	}
+	var cb *cbdtTable
+	if cblc, ok := tables["CBLC"]; ok {
+		if cbdtRaw, ok2 := tables["CBDT"]; ok2 {
+			if t, ok3 := parseCBLC(cblc, cbdtRaw); ok3 {
+				cb = t
+			}
+		}
+	}
+	return sb, cb
 }
 
 // ParseSFNTTables reads the offset table and table directory into a tag->bytes
@@ -111,4 +166,53 @@ func sfntHasTable(data []byte, tag string) bool {
 		}
 	}
 	return false
+}
+
+// firstFaceOf returns the sfnt bytes whose table directory should be read.
+//
+// A TrueType Collection ("ttcf") has no table directory of its own — it is a header
+// pointing at one per face — so reading tables from the raw bytes finds nothing. The
+// outline parser already extracts the first face, so the colour tables must come from
+// the SAME face or they would describe glyphs the outlines do not have.
+//
+// The returned slice ALIASES data from the face's offset, which is what keeps the
+// absolute table offsets inside the directory valid: they are relative to the file
+// start, and slicing from 0 would shift every one of them. So this returns data
+// unchanged for a collection whose first face is not at offset 0... which is every
+// collection. Instead it returns data itself and lets ParseSFNTTables read the
+// directory at the face offset via a shifted view.
+func firstFaceOf(data []byte) []byte {
+	if len(data) < 16 || string(data[:4]) != "ttcf" {
+		return data
+	}
+	n := binary.BigEndian.Uint32(data[8:12])
+	if n == 0 {
+		return data
+	}
+	off := binary.BigEndian.Uint32(data[12:16])
+	if int(off) >= len(data) {
+		return data
+	}
+	// Table offsets in a collection's face directory are absolute from the FILE start,
+	// so the directory must be read at `off` while offsets still resolve against the
+	// whole file. collectionFace splices a view that satisfies both.
+	return collectionFace(data, off)
+}
+
+// collectionFace builds a byte slice whose first 12+16n bytes are the face's table
+// directory (read from off) but whose absolute offsets still address the original
+// file, by returning the original slice with the directory copied to the front.
+func collectionFace(data []byte, off uint32) []byte {
+	if int(off)+12 > len(data) {
+		return data
+	}
+	numTables := int(binary.BigEndian.Uint16(data[off+4:]))
+	dirLen := 12 + 16*numTables
+	if int(off)+dirLen > len(data) {
+		return data
+	}
+	out := make([]byte, len(data))
+	copy(out, data)
+	copy(out[:dirLen], data[off:int(off)+dirLen])
+	return out
 }

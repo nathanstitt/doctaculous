@@ -28,7 +28,17 @@ type Engine struct {
 	svgs *svgCache
 	// inlineSVGs memoizes parses of inline <svg> markup (no ref, no loader).
 	inlineSVGs *inlineSVGCache
-	logf       func(string, ...any)
+	// authorSheets are the document's AUTHOR stylesheets, retained so they can cascade
+	// into an inline <svg> (see Engine.svgHostContext). An inline <svg> is part of the
+	// host document's tree, so a rule like `.icon { fill: blue }` applies to its
+	// children — but the SVG is re-parsed from serialized markup by pkg/svg, which
+	// never sees the host's sheets unless they are handed to it explicitly.
+	//
+	// Only AUTHOR sheets are carried: the UA sheet styles HTML elements and has no
+	// SVG rules, and passing it would make every inline <svg> parse consult ~40
+	// irrelevant rules per element.
+	authorSheets []gcss.Stylesheet
+	logf         func(string, ...any)
 	// measures memoizes per-box min/max-content widths within ONE layout. measureContent
 	// is a pure function of the box subtree and the (fixed) face cache, but table auto
 	// layout, grid track sizing, and flex base sizing each measure every cell/item for
@@ -82,6 +92,11 @@ type minMaxContent struct {
 // logf. A nil faces builds a fresh cache; a nil loader means images cannot be fetched
 // (every <img> degrades to a placeholder); a nil logf is a no-op — so callers need
 // supply only what they have.
+// SetAuthorSheets supplies the document's author stylesheets so they cascade into
+// inline <svg> content. Optional: an engine without them lays out identically except
+// that inline SVG children are styled by their own markup alone.
+func (e *Engine) SetAuthorSheets(sheets []gcss.Stylesheet) { e.authorSheets = sheets }
+
 func New(faces *layoutfont.FaceCache, loader resource.ResourceLoader, logf func(string, ...any)) *Engine {
 	if faces == nil {
 		faces = layoutfont.NewFaceCache()
@@ -416,7 +431,12 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	// Fragment.Shadows). nil for an unshadowed box leaves its item stream
 	// byte-identical.
 	frag.Shadows = e.boxShadows(b)
-	frag.BgImage = e.resolveBackgroundImage(ctx, b, borderX, borderY, borderW, borderH, ed)
+	frag.BgImages = e.resolveBackgroundImages(ctx, b, borderX, borderY, borderW, borderH, ed)
+	if n := len(frag.BgImages); n > 0 {
+		// BgImage aliases the TOPMOST layer (the last emitted), for consumers that
+		// only understand one background.
+		frag.BgImage = frag.BgImages[n-1]
+	}
 	if len(in.collapsedBorders) > 0 {
 		// The collapsed grid strips were built from the interior's cell fragments —
 		// page-space X but the local content-top-0 Y frame (like in.children). Shift
@@ -633,7 +653,7 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 	case cssbox.TableFC:
 		in = e.layoutTable(ctx, b, contentW, contentX, childBand, childFC)
 	case cssbox.FlexFC:
-		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC)
+		in = e.layoutFlex(ctx, b, contentW, contentX, childBand, childFC, posCtx, posCB)
 	case cssbox.GridFC:
 		in = e.layoutGrid(ctx, b, contentW, contentX, childBand, childFC)
 	default:
@@ -1028,7 +1048,20 @@ func (e *Engine) resolveAbsolute(ctx context.Context, posCtx *positionedContext,
 		// auto-height box is positioned against a provisional zero content height — a
 		// documented deferral.)
 		translateFragment(frag, border.x-frag.X, border.y-frag.Y)
-		if isHeightAuto(d.box) && isAuto2(d.box.Style.Top, d.box.Style.FontSizePt) && !isAuto2(d.box.Style.Bottom, d.box.Style.FontSizePt) {
+		// height:auto with BOTH top and bottom specified: the used height is the space
+		// between them (CSS 10.6.4), not the content height. absRect already resolved
+		// it; the fragment keeps its own content-derived H otherwise, so this is the one
+		// case where the resolved height must be written back.
+		//
+		// Without it the box collapsed to its content height — zero for an empty one —
+		// so `top: 0; bottom: 20px`, the ordinary way to span a container vertically,
+		// painted nothing at all. The horizontal equivalent (left+right) already worked,
+		// which is what made the asymmetry surprising.
+		fsBox := d.box.Style.FontSizePt
+		if isHeightAuto(d.box) && !isAuto2(d.box.Style.Top, fsBox) && !isAuto2(d.box.Style.Bottom, fsBox) {
+			setFragmentHeight(frag, border.h)
+		}
+		if isHeightAuto(d.box) && isAuto2(d.box.Style.Top, fsBox) && !isAuto2(d.box.Style.Bottom, fsBox) {
 			e.logf("css layout: abs-pos bottom-only auto-height box positioned against a provisional height (approximate)")
 		}
 		fs := d.box.Style.FontSizePt
@@ -1226,6 +1259,13 @@ func establishesNewBFC(b *cssbox.Box) bool {
 	if b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed {
 		return true
 	}
+	// A transformed box establishes a containing block for its descendants (CSS
+	// Transforms 1 §3), and painting it as ONE atom is what lets the transform bracket
+	// wrap its background and its content together — Appendix E otherwise emits those
+	// in separate phases, so the matrix would move the background and leave the text.
+	if transformed(b) {
+		return true
+	}
 	if b.Display == cssbox.DisplayTableCell || b.Display == cssbox.DisplayTable {
 		return true // a table and a table cell each establish a BFC
 	}
@@ -1260,7 +1300,31 @@ func establishesNewBFC(b *cssbox.Box) bool {
 // filtered box with a positioned child is an everyday pattern (badges, overlays,
 // dropdowns), so this is not an exotic case.
 func establishesStackingContext(b *cssbox.Box) bool {
-	return b.Position != cssbox.PosStatic || filtered(b)
+	// A TRANSFORMED element establishes one too (CSS Transforms 1 §3). That is not a
+	// detail: the transform is painted as a matrix bracket around the box's items, and
+	// only a stacking context emits its background, its children, and its content as
+	// one contiguous run. A plain block splits them across Appendix E's decoration and
+	// content phases, so a bracket around it would transform its background without its
+	// text.
+	return b.Position != cssbox.PosStatic || filtered(b) || transformed(b)
+}
+
+// transformed reports whether b carries a non-identity CSS transform.
+//
+// The ZERO-VALUE guard is essential, not defensive. An anonymous box carries a
+// zero-value ComputedStyle rather than the CSS initial one (see isAnonymous), so its
+// Transform is all zeros — which is not the identity matrix, and would make every
+// anonymous box a stacking context and a BFC. That silently reordered painting and
+// broke a WPT reftest before the guard was added.
+func transformed(b *cssbox.Box) bool {
+	if b == nil {
+		return false
+	}
+	t := b.Style.Transform
+	if t == (gcss.Transform{}) {
+		return false // zero-value style (anonymous box): no transform, not a matrix of zeros
+	}
+	return !t.IsIdentity()
 }
 
 // isAnonymous reports whether b is an engine-generated anonymous box. Anonymous
@@ -1569,7 +1633,13 @@ func shiftFragmentExtras(f *Fragment, dx, dy float64) {
 		f.ClipRect.x += dx
 		f.ClipRect.y += dy
 	}
-	if f.BgImage != nil {
+	for _, bg := range f.BgImages {
+		bg.OriginX += dx
+		bg.OriginY += dy
+		bg.ClipX += dx
+		bg.ClipY += dy
+	}
+	if f.BgImage != nil && len(f.BgImages) == 0 {
 		f.BgImage.OriginX += dx
 		f.BgImage.OriginY += dy
 		f.BgImage.ClipX += dx
@@ -1629,5 +1699,25 @@ func debugTag(b *cssbox.Box) string {
 		return "inline"
 	default:
 		return "block"
+	}
+}
+
+// setFragmentHeight overrides a fragment's border-box height, growing or shrinking the
+// box itself without moving its origin or its children.
+//
+// Only the abs-positioned top+bottom case uses it: everywhere else a fragment's height
+// is content-derived and authoritative. The children are deliberately NOT rescaled —
+// CSS says the box's height comes from the offsets while its contents lay out normally
+// and may overflow, which is exactly what a taller-than-content box should do.
+func setFragmentHeight(f *Fragment, h float64) {
+	if f == nil || h < 0 {
+		return
+	}
+	f.H = h
+	if f.Clips {
+		f.ClipRect.h = h - (f.ClipRect.y - f.Y) - (f.Y + h - (f.ClipRect.y + f.ClipRect.h))
+		if f.ClipRect.h < 0 {
+			f.ClipRect.h = 0
+		}
 	}
 }

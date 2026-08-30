@@ -171,3 +171,16 @@ func TestUAEmphasisUsesParsableKeywords(t *testing.T) {
 		t.Error("font-weight:bolder now parses; the UA sheet comment about it is stale")
 	}
 }
+
+// <mark> carries the HTML Standard's yellow highlight. It was held out of the UA sheet
+// until inline-box backgrounds painted: before that the rule would have cascaded
+// correctly and then drawn nothing, which reads as support without being it.
+func TestUAMarkHighlight(t *testing.T) {
+	cs := uaStyle("mark")
+	if want := cssColor(0xff, 0xff, 0x00); cs.BackgroundColor != want {
+		t.Errorf("mark background-color = %v, want %v", cs.BackgroundColor, want)
+	}
+	if want := cssColor(0, 0, 0); cs.Color != want {
+		t.Errorf("mark color = %v, want %v", cs.Color, want)
+	}
+}

@@ -15,6 +15,7 @@ import (
 )
 
 func TestWriteImagePNGDefault(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(gen.TextPDF())
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
@@ -34,6 +35,7 @@ func TestWriteImagePNGDefault(t *testing.T) {
 }
 
 func TestWriteImageJPEGQuality(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(gen.VectorPDF())
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
@@ -61,6 +63,7 @@ func TestWriteImageJPEGQuality(t *testing.T) {
 }
 
 func TestWriteImageBadPage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(gen.TextPDF())
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
@@ -72,6 +75,7 @@ func TestWriteImageBadPage(t *testing.T) {
 }
 
 func TestEncodeImageRejectsNonImageFormat(t *testing.T) {
+	t.Parallel()
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	var buf bytes.Buffer
 	err := EncodeImage(&buf, img, ImageOptions{Format: FormatPDF})
@@ -81,6 +85,7 @@ func TestEncodeImageRejectsNonImageFormat(t *testing.T) {
 }
 
 func TestEncodeImageCropsToExactSize(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(0, 0, 400, 300))
 	var buf bytes.Buffer
 	opts := ImageOptions{
@@ -100,6 +105,7 @@ func TestEncodeImageCropsToExactSize(t *testing.T) {
 }
 
 func TestEncodeImageWithoutCropIsUnchanged(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(0, 0, 40, 30))
 	var withNil, absent bytes.Buffer
 	if err := EncodeImage(&withNil, src, ImageOptions{Format: FormatPNG, Crop: nil}); err != nil {
@@ -121,6 +127,7 @@ func TestEncodeImageWithoutCropIsUnchanged(t *testing.T) {
 }
 
 func TestEncodeImageCropErrorPropagates(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(0, 0, 40, 30))
 	var buf bytes.Buffer
 	err := EncodeImage(&buf, src, ImageOptions{
@@ -133,6 +140,7 @@ func TestEncodeImageCropErrorPropagates(t *testing.T) {
 }
 
 func TestEncodeImageRectReportsSaliencyCrop(t *testing.T) {
+	t.Parallel()
 	// The caller needs the coordinates the saliency scorer chose — to store
 	// them, show them, or re-apply the same crop later with StrategyRect.
 	src := image.NewRGBA(image.Rect(0, 0, 400, 200))
@@ -190,6 +198,7 @@ func TestEncodeImageRectReportsSaliencyCrop(t *testing.T) {
 }
 
 func TestEncodeImageRectWithoutCropReportsFullBounds(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(20, 10, 60, 40))
 	var buf bytes.Buffer
 	got, err := EncodeImageRect(&buf, src, ImageOptions{Format: FormatPNG})
@@ -202,6 +211,7 @@ func TestEncodeImageRectWithoutCropReportsFullBounds(t *testing.T) {
 }
 
 func TestEncodeImageRectMatchesEncodeImageBytes(t *testing.T) {
+	t.Parallel()
 	// EncodeImage must stay a thin wrapper: same bytes, both paths.
 	src := image.NewRGBA(image.Rect(0, 0, 80, 60))
 	opts := ImageOptions{

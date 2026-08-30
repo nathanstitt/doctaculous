@@ -11,6 +11,7 @@ import (
 // text: hard line breaks are the only structure plain text has, and they must
 // survive (with BOM/CRLF normalization applied).
 func TestTextRoundTripIdentity(t *testing.T) {
+	t.Parallel()
 	src := "\uFEFFfirst line\r\nsecond line\r\rindented   columns kept\n\nafter a blank line\n"
 	want := "first line\nsecond line\n\nindented   columns kept\n\nafter a blank line"
 
@@ -34,6 +35,7 @@ func TestTextRoundTripIdentity(t *testing.T) {
 // TestTextToMarkdownFencedBlock verifies .txt converts to Markdown as one
 // verbatim fenced code block (the <pre> semantic tag at work).
 func TestTextToMarkdownFencedBlock(t *testing.T) {
+	t.Parallel()
 	src := "log line one\nlog line two\n"
 	doc, err := OpenTextBytes([]byte(src), WithBundledFonts())
 	if err != nil {
@@ -55,6 +57,7 @@ func TestTextToMarkdownFencedBlock(t *testing.T) {
 // TestTextEscapesMarkup verifies markup-significant characters in the text
 // stay literal (they must not be parsed as HTML).
 func TestTextEscapesMarkup(t *testing.T) {
+	t.Parallel()
 	src := "a <b>not bold</b> & \"quoted\"\n"
 	doc, err := OpenTextBytes([]byte(src), WithBundledFonts())
 	if err != nil {
@@ -72,6 +75,7 @@ func TestTextEscapesMarkup(t *testing.T) {
 // TestTextInvalidUTF8Replaced verifies invalid bytes become U+FFFD instead of
 // corrupting the document.
 func TestTextInvalidUTF8Replaced(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenTextBytes([]byte("ok \xff\xfe end\n"), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenTextBytes: %v", err)
@@ -90,6 +94,7 @@ func TestTextInvalidUTF8Replaced(t *testing.T) {
 // taller than one without. Regression test for the empty-forced-line collapse
 // the text frontend exposed.
 func TestTextBlankLinesRender(t *testing.T) {
+	t.Parallel()
 	height := func(src string) int {
 		t.Helper()
 		doc, err := OpenTextBytes([]byte(src), WithBundledFonts())
@@ -110,6 +115,7 @@ func TestTextBlankLinesRender(t *testing.T) {
 // TestTextPagination verifies a long .txt paginates across pages and over-long
 // lines soft-wrap (pre-wrap) instead of clipping.
 func TestTextPagination(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("line of plain text\n", 400) +
 		strings.Repeat("an over-long unbroken line of text ", 40) + "\n"
 	doc, err := OpenTextBytes([]byte(long), WithBundledFonts(), WithPageSize(LetterWidthPt, LetterHeightPt))

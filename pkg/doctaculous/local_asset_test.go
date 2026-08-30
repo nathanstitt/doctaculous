@@ -16,6 +16,7 @@ import (
 // DirLoader fix the image was refused (../ escape) and the box painted only its
 // background-color; now the tiled image loads and the box carries image ink.
 func TestOpenHTMLFileLoadsParentRelativeAsset(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	mustWrite := func(rel string, data []byte) {
 		p := filepath.Join(root, rel)

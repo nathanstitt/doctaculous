@@ -75,6 +75,18 @@ type ComputedStyle struct {
 	// Background image (CSS Backgrounds 3). None are CSS-inherited. BackgroundImage is
 	// the resolved url() ref ("" = none); the rest carry the initial value when unset.
 	BackgroundImage string
+	// BackgroundLayers is the full comma-separated layer list, FIRST LAYER ON TOP
+	// (CSS Backgrounds §3.10). The single-value BackgroundImage/BackgroundGradient
+	// fields above mirror layer 0, so a consumer that only understands one background
+	// keeps working; the paint pass walks this to draw them all.
+	//
+	// Only the IMAGE varies per layer here. background-size/-repeat/-position and the
+	// rest are single-valued in this engine, and layout applies the computed longhand
+	// to every layer — so a layer record left zero means "use the element's value",
+	// not "use the initial value". Making those per-layer too is a separate slice.
+	//
+	// Nil means no list was given, and the single-value fields are the whole story.
+	BackgroundLayers []BackgroundLayer
 	// BackgroundGradient is set INSTEAD of BackgroundImage when background-image
 	// is a <gradient> function rather than a url(). The two are mutually
 	// exclusive: whichever form the declaration produced clears the other, so a
@@ -137,6 +149,11 @@ type ComputedStyle struct {
 	// time by the inline formatting context. small-caps is approximated upstream as
 	// uppercase (true small-caps needs synthesized small capitals — deferred).
 	TextTransform string
+	// Transform is the resolved CSS `transform` matrix, or the identity when the
+	// property is absent or "none". Not inherited. It is a PAINT-time effect: it does
+	// not change layout, and the box keeps the space it occupied untransformed
+	// (CSS Transforms 1 §3).
+	Transform Transform
 
 	// WhiteSpace is the CSS white-space property: "normal" | "nowrap" | "pre" |
 	// "pre-wrap" | "pre-line". Inherited; initial "normal". Decomposed into three
@@ -250,6 +267,25 @@ type ComputedStyle struct {
 	// "visible hidden" case, which browsers resolve to auto on the visible axis;
 	// dropping the clip entirely would be the worse error.
 	Overflow string
+
+	// TextOverflow is CSS Overflow 3 text-overflow: "clip" (the initial) | "ellipsis".
+	// Not inherited. It only takes effect on a line the box actually CLIPS — an
+	// overflowing line in an overflow:visible box still overflows visibly, matching
+	// browsers, because there is nothing to hide the truncation behind.
+	TextOverflow string
+
+	// LineClamp is the -webkit-line-clamp / line-clamp line count: 0 means none (the
+	// initial). Not inherited. A clamped box stops after N line boxes, shrinks its
+	// height to them, and marks line N with an ellipsis — so it is a LAYOUT effect,
+	// not only a paint one (a 2-line clamp on 5 lines of text makes the box 2 lines
+	// tall, which is what browsers report as its height).
+	LineClamp int
+
+	// BoxOrient is the legacy -webkit-box-orient. It is stored so the
+	// display:-webkit-box + -webkit-box-orient:vertical + -webkit-line-clamp idiom
+	// parses as a unit, but layout implements only the vertical orientation that
+	// idiom always uses. Not inherited.
+	BoxOrient string
 
 	// BreakBefore / BreakAfter are the CSS fragmentation break hints (break-before /
 	// break-after, plus the legacy page-break-before / page-break-after aliases). Read
@@ -874,6 +910,7 @@ func initialStyle() ComputedStyle {
 		TextAlign:          "start",
 		TextDecorationLine: "none",
 		TextTransform:      "none",
+		Transform:          identityTransform(),
 		WhiteSpace:         "normal",
 		OverflowWrap:       "normal",
 		WordBreak:          "normal",
@@ -963,8 +1000,21 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		// the url(), and vice versa. ok=false leaves BOTH untouched, which is
 		// what makes an unimplemented <image> keep the prior value rather than
 		// silently resetting the property to none.
-		if ref, grad, ok := parseBackgroundImage(d.Value); ok {
-			cs.BackgroundImage, cs.BackgroundGradient = ref, grad
+		// background-image takes the same comma-separated layer list as the shorthand.
+		//
+		// It sets ONLY the image of each layer. background-size, -repeat, -position and
+		// friends are separate longhands that may be declared either side of this one,
+		// so the layer records leave them zero and the LAYOUT side reads the final
+		// computed longhand values instead. Capturing them here would freeze whatever
+		// they happened to be at this point in the declaration block, which broke
+		// background-size when it was declared after background-image.
+		if layers, ok := parseBackgroundImageList(d.Value); ok {
+			cs.BackgroundLayers = layers
+			if len(layers) > 0 {
+				cs.BackgroundImage, cs.BackgroundGradient = layers[0].Image, layers[0].Gradient
+			} else {
+				cs.BackgroundImage, cs.BackgroundGradient = "", nil
+			}
 		}
 	case "filter":
 		// Kept RAW (see ComputedStyle.Filter): the grammar is parsed by
@@ -1036,8 +1086,24 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 	case "font-style":
 		cs.Italic = d.Value == "italic" || d.Value == "oblique"
 	case "line-height":
-		if l, ok := parseLength(newTokenizer(d.Value).next()); ok {
-			cs.LineHeight = l
+		// Accepts a unitless NUMBER (the commonest spelling, and a multiplier of the
+		// font size) as well as a length or "normal".
+		//
+		// An em or % value is COMPUTED HERE against this element's own font size, so
+		// what descendants inherit is a fixed length — CSS 2.1 §10.8.1. A number is
+		// deliberately left as a number, because it inherits as one and re-multiplies
+		// against each descendant's own font size. That difference is the whole reason
+		// the two units stay distinct: `line-height: 2` on a 10px parent gives a 40px
+		// child an 80px line box, while `line-height: 2em` gives it a 20px one.
+		if l, ok := parseNumberOrLength(newTokenizer(d.Value).next()); ok {
+			switch l.Unit {
+			case UnitEm:
+				cs.LineHeight = Length{Value: l.Value * cs.FontSizePt, Unit: UnitPt}
+			case UnitPercent:
+				cs.LineHeight = Length{Value: l.Value / 100 * cs.FontSizePt, Unit: UnitPt}
+			default:
+				cs.LineHeight = l
+			}
 		} else if d.Value == "normal" {
 			cs.LineHeight = Length{Unit: UnitAuto}
 		}
@@ -1065,6 +1131,14 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "uppercase", "lowercase", "capitalize", "none":
 			cs.TextTransform = d.Value
+		}
+	case "transform":
+		// "none" and any unimplemented function (notably the 3D ones) leave the
+		// previous value, per CSS error handling.
+		if t, ok := parseTransform(d.Value, cs.FontSizePt); ok {
+			cs.Transform = t
+		} else if strings.EqualFold(strings.TrimSpace(d.Value), "none") {
+			cs.Transform = identityTransform()
 		}
 	case "white-space":
 		switch d.Value {
@@ -1163,6 +1237,29 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		if v, ok := parseOverflowShorthand(d.Value); ok {
 			cs.Overflow = v
 		}
+	case "text-overflow":
+		// Only the two keywords this engine can express. CSS Overflow 4 also allows a
+		// custom <string> and a two-value form (start/end); both are rejected here
+		// rather than approximated, so the declaration drops and the initial stands.
+		switch d.Value {
+		case "clip", "ellipsis":
+			cs.TextOverflow = d.Value
+		}
+	case "-webkit-line-clamp", "line-clamp":
+		// "none" is the initial (no clamp); a positive integer clamps to that many
+		// lines. Zero and negatives are invalid, so the declaration drops.
+		if d.Value == "none" {
+			cs.LineClamp = 0
+			break
+		}
+		if n, err := strconv.Atoi(strings.TrimSpace(d.Value)); err == nil && n > 0 {
+			cs.LineClamp = n
+		}
+	case "-webkit-box-orient":
+		// Accepted so the -webkit-box clamp idiom parses as a whole, but the engine
+		// only implements the vertical orientation the idiom always uses; a horizontal
+		// value is stored and ignored by layout rather than silently changing it.
+		cs.BoxOrient = d.Value
 	case "overflow-x", "overflow-y":
 		// Modeled as the same single clip flag as the shorthand: this engine has no
 		// per-axis clipping, and a box clipping on one axis still needs a clip rect

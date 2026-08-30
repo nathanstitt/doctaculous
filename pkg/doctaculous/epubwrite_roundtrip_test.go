@@ -26,6 +26,7 @@ func epubOf(t *testing.T, doc *Document) []byte {
 // Markdown as converting the HTML directly (EPUB content documents are XHTML,
 // so the trip is essentially lossless).
 func TestEPUBWriteRoundTripParity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		html string
@@ -84,6 +85,7 @@ func TestEPUBWriteRoundTripParity(t *testing.T) {
 // mimetype first entry, chapter split, the nav TOC, and the fetched-image
 // manifest path.
 func TestEPUBWritePackageShape(t *testing.T) {
+	t.Parallel()
 	html := `<html><body><h1>One</h1><p>alpha</p><h1>Two</h1><p>beta</p></body></html>`
 	src, err := OpenHTMLBytes([]byte(html), WithBundledFonts())
 	if err != nil {
@@ -139,6 +141,7 @@ func TestEPUBWritePackageShape(t *testing.T) {
 
 // TestMarkdownToEPUBAndBack closes the loop from the Markdown frontend.
 func TestMarkdownToEPUBAndBack(t *testing.T) {
+	t.Parallel()
 	md := "# Doc Title\n\nBody with **bold** and _italic_ and a [link](https://x.test/p).\n\n" +
 		"- one\n- two\n\n> quoted\n\n```\ncode here\n```\n"
 	src, err := OpenMarkdownBytes([]byte(md), WithBundledFonts())
@@ -163,6 +166,7 @@ func TestMarkdownToEPUBAndBack(t *testing.T) {
 // TestEPUBOutputGolden renders a reopened writer-produced book — the visual
 // smoke check that a generated .epub lays out and rasterizes sanely.
 func TestEPUBOutputGolden(t *testing.T) {
+	t.Parallel()
 	const src = `<html><body>
 <h1>EPUB Output</h1>
 <p>A paragraph with <strong>bold</strong>, <em>italic</em>, and <a href="https://x.test">a link</a>.</p>

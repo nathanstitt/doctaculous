@@ -297,6 +297,16 @@ func (a ttProgram) advance(gid fonts.GID) float64       { return float64(a.f.Hor
 func (a ttProgram) nominalGID(r rune) (fonts.GID, bool) { return a.f.NominalGlyph(r) }
 func (a ttProgram) numGlyphs() int                      { return a.f.NumGlyphs }
 func (a ttProgram) hExtents() (asc, desc, gap float64, ok bool) {
+	// FontHExtents reads the hhea/OS2 tables through the upstream parser, which
+	// dereferences them without checking: a font whose hhea is absent or inconsistent
+	// with hmtx panics rather than reporting a miss. A font program is untrusted
+	// document input, so recover and report "no extents" — the caller then derives
+	// metrics from the outline bounds instead of taking the process down.
+	defer func() {
+		if r := recover(); r != nil {
+			asc, desc, gap, ok = 0, 0, 0, false
+		}
+	}()
 	return fontHExtents(a.f.FontHExtents())
 }
 

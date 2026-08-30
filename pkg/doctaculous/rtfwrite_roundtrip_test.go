@@ -49,6 +49,7 @@ func parityImageURI(t *testing.T) string {
 // (a lost heading level, a doubled list marker, a dropped link) shows up as a
 // diff.
 func TestRTFWriteRoundTripParity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		html string
@@ -111,6 +112,7 @@ func TestRTFWriteRoundTripParity(t *testing.T) {
 // TestMarkdownToRTFAndBack closes the loop from the Markdown frontend: a GFM
 // specimen → RTF → Markdown must preserve every construct's content.
 func TestMarkdownToRTFAndBack(t *testing.T) {
+	t.Parallel()
 	md := "# Doc Title\n\nBody with **bold** and _italic_ and a [link](https://x.test/p).\n\n" +
 		"- one\n- two\n\n1. first\n2. second\n\n> quoted\n\n```\ncode here\n```\n"
 	src, err := OpenMarkdownBytes([]byte(md), WithBundledFonts())
@@ -142,6 +144,7 @@ func TestMarkdownToRTFAndBack(t *testing.T) {
 // TestPDFToRTF proves the extraction path: a PDF's recovered structure writes
 // to RTF and the text survives a reopen.
 func TestPDFToRTF(t *testing.T) {
+	t.Parallel()
 	pdfDoc, err := OpenBytes(matrixPDF(t))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
@@ -159,6 +162,7 @@ func TestPDFToRTF(t *testing.T) {
 // TestRTFOutputGolden renders a reopened writer-produced document — the visual
 // smoke check that generated RTF lays out and rasterizes sanely.
 func TestRTFOutputGolden(t *testing.T) {
+	t.Parallel()
 	const src = `<html><body>
 <h1>RTF Output</h1>
 <p>A paragraph with <strong>bold</strong>, <em>italic</em>, and <a href="https://x.test">a link</a>.</p>
