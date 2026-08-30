@@ -528,10 +528,10 @@ bullet's design rationale is in its PR:
   covers CJK, so it would render as empty boxes; the showcase says so and the case is covered by unit
   tests against the classifier instead.
 - **Vertical `<text>` in SVG** (`pkg/svg/style.go`, `pkg/svg/draw/text.go`): `writing-mode` and
-  `text-orientation` are honoured on the SVG path too, which places `<text>` itself rather than
-  through the CSS inline layer and so inherited none of the HTML work for free. The pen walks down
-  the page by the font's vertical advance, and `text-anchor`, text decoration, bidi reordering and
-  the chunk model all follow the run's own inline axis rather than assuming X. SVG 1.1's `tb`/`tb-rl`
+  `text-orientation` are honoured on the SVG path, which places `<text>` through its own layout
+  rather than the CSS inline layer. The pen walks down the page by the font's vertical advance, and
+  `text-anchor`, text decoration, bidi reordering and the chunk model all follow the run's own inline
+  axis rather than assuming X. SVG 1.1's `tb`/`tb-rl`
   resolve onto `vertical-rl` so the renderer has one vocabulary; `sideways-rl`/`sideways-lr` are
   reported rather than folded into a mode the author did not ask for. Shown in `testdata/htmldoc/`
   §43 alongside the CSS demos.
@@ -541,11 +541,10 @@ bullet's design rationale is in its PR:
   the two agree by construction rather than by two implementations happening to match — which
   matters most for the UAX #50 approximation, where a drift between them would be invisible.
 
-  Three seams needed axis awareness rather than new machinery, each because it named X in code that
-  is otherwise axis-neutral: `applyAnchors` (a chunk aligns along its own axis), `reorderChunk` (the
-  bidi slot redeal), and `paintDecorationSegment` (the rule's span). The decoration rect is built in
-  the segment's unrotated frame and carried through the same matrix the glyph is, so an underline
-  turns with the text instead of staying axis-aligned.
+  Three passes are axis-aware rather than assuming X: `applyAnchors` (a chunk aligns along its own
+  axis), `reorderChunk` (the bidi slot redeal), and `paintDecorationSegment` (the rule's span). The
+  decoration rect is built in the segment's unrotated frame and carried through the same matrix the
+  glyph is, so an underline turns with the text instead of staying axis-aligned.
 
   **`direction: rtl` does not flip a vertical chunk's anchor.** `direction` reverses the inline axis,
   and in a vertical mode that axis runs top-to-bottom for both ltr and rtl — an rtl vertical run
@@ -554,16 +553,12 @@ bullet's design rationale is in its PR:
 
   **`writing-mode` on a `<tspan>` is ignored** — the property establishes the mode for a whole
   `<text>` (SVG 1.1 §10.7.2) — while still INHERITING from an ancestor, so a `<g writing-mode="tb">`
-  around a `<text>` applies. Both halves matter because style resolves per character here: without
-  the first, a mid-run declaration turns just the glyphs it covers through a right angle; a fix that
-  refused everything but `<text>` broke the second. Each was caught by its own resvg fixture.
+  around a `<text>` applies. The distinction matters because style resolves per character here: a
+  tspan declaration that were honoured would turn only the glyphs it covers, mid-run.
 
-  **19 of the 23 upstream `text/writing-mode/` fixtures are vendored** and their goldens eyeballed.
-  Vendoring them is what found the `<tspan>` bug above — the unit tests here assert the model, and
-  the fixtures assert conformance. The four held back are CJK-set and render as `.notdef` columns
-  against the bundled faces; committing those goldens would lock in tofu as expected output. Doing
-  that also surfaced an unrelated gap: **missing glyphs do not log on the SVG text path**, so those
-  four rendered full columns of tofu silently. See `docs/SVG.md`.
+  **19 of the 23 upstream `text/writing-mode/` fixtures are vendored**, goldens eyeballed. The four
+  held back are CJK-set and render as `.notdef` columns against the bundled faces, so their goldens
+  would lock in tofu as expected output; they land with a CJK face. See `docs/SVG.md`.
 
   **Not implemented:** multi-line stacking (one `<text>` is one vertical run, so `vertical-lr` places
   identically to `vertical-rl`); the deprecated `glyph-orientation-vertical`/`-horizontal`;
