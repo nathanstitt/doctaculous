@@ -4,7 +4,8 @@ Layers — keep them separate and independently testable. No cyclic deps between
 
 `pkg/pdf` parse · `pkg/pdf/filter` stream decode · `pkg/pdf/content` content-stream interpreter ·
 `pkg/render` device-independent paint ops (`Device` interface) · `pkg/render/raster` bitmap
-backend · `pkg/render/pdfwrite` PDF-writer backend · `pkg/omnidoc` public API ·
+backend · `pkg/render/pdfwrite` PDF-writer backend · `pkg/render/svgwrite` SVG-writer
+backend · `pkg/omnidoc` public API ·
 `cmd/omnidoc` thin CLI.
 
 **Reflowable documents** (DOCX and HTML) share a second pipeline that meets the PDF pipeline at
@@ -34,4 +35,12 @@ path would silently undo it.
 The `Device` interface is the seam: the interpreter (PDF), the reflow engine (DOCX/HTML), and the
 SVG painter stay backend-agnostic so a new backend can be added without touching parsing,
 interpretation, or layout.
+
+`pkg/render/svgwrite` is what that seam buys. Because all three frontends already paint through
+`render.Device`, one backend gives **every** input format vector SVG output — PDF included — with
+no per-format work. Output goes through `vectorPages` (`pkg/omnidoc/svgwrite_backend.go`), NOT
+`reflowPages`: the latter hands back `*layout.Pages`, which an opened PDF has no equivalent of, so
+a writer built on it is reflow-only (that is why `WritePDF` is). `vectorPages` passes the `Device`
+instead, and `raster.RunPage` shares the PDF page-setup between the raster and SVG backends so the
+two cannot drift.
 

@@ -123,6 +123,40 @@ type reflowPages interface{ layoutPages() *layout.Pages }
 // layoutPages exposes the laid-out pages for the PDF writer (WritePDF).
 func (r *reflowRenderer) layoutPages() *layout.Pages { return r.pages }
 
+// paintVector paints page index onto dev, which is any render.Device, mapping
+// document space to device space at scale (device units per point).
+//
+// This is what makes SVG output work for EVERY input format rather than only
+// reflow ones. It deliberately does NOT go through reflowPages: that interface
+// hands back *layout.Pages, which an opened PDF does not have, so a writer
+// built on it (WritePDF) is reflow-only. Since all three frontends already
+// paint through render.Device, exposing the Device rather than the page model
+// is what lets a PDF, a DOCX and an SVG all reach the same backend.
+func (r *reflowRenderer) paintVector(ctx context.Context, index int, dev render.Device, scale float64, opts RasterOptions) error {
+	if index < 0 || index >= len(r.pages.Pages) {
+		return errPageOutOfRange(index, len(r.pages.Pages))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Page space is already points, Y-down, origin top-left — the same
+	// convention the SVG writer emits — so this is a plain uniform scale with
+	// no flip, matching renderPage's raster path exactly.
+	paint.PaintPageWithOptions(dev, &r.pages.Pages[index], render.Scale(scale, scale), paint.Options{Logf: opts.Logf})
+	return nil
+}
+
+// canvasBackground reports the CSS-propagated root/body background, or a zero
+// (fully transparent) color when the document sets none.
+//
+// The browser's background-propagation rule makes a background on <html>/<body>
+// paint the whole canvas rather than just that box, and the layout engine
+// resolves it here. Vector output has to honor it for the same reason the
+// rasterizer does (see renderPage's canvas fill precedence) — otherwise a page
+// with `body { background: green }` rasterizes green but converts to SVG
+// transparent.
+func (r *reflowRenderer) canvasBackground() color.RGBA { return r.pages.CanvasBackground }
+
 // reflowTree is implemented by renderers that retain their source cssbox tree, so the
 // conversion backends (markdown/text) can walk the document structure.
 type reflowTree interface{ cssboxRoot() *cssbox.Box }
