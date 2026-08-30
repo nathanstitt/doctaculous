@@ -5,12 +5,27 @@ import (
 	"fmt"
 )
 
+// maxObjectDepth bounds how deeply arrays and dictionaries may nest. Nesting is
+// parsed by recursion (parseArray and parseDictOrStream both re-enter through
+// parseFromToken), so an unbounded depth is unbounded stack: measured, ~1.2 MB
+// of "[" survives but ~1.5 MB raises `fatal error: stack overflow` through
+// runtime.throw, which recover() cannot catch by construction. That makes it a
+// process kill rather than a failed parse, so the depth has to be refused before
+// the stack runs out. 256 is far past any real document -- the deepest structure
+// in a PDF is a handful of levels -- and matches the bounded style of the other
+// recursive walks here (walkPageTree 64, content interp 16, functions 32).
+const maxObjectDepth = 256
+
 // objParser parses PDF objects from a lexer. It supports the "N G R" indirect
 // reference form, which requires a small lookahead buffer.
 type objParser struct {
 	lex *lexer
 	// buffered holds peeked tokens not yet consumed.
 	buffered []token
+	// depth is the current array/dictionary nesting depth, bounded by
+	// maxObjectDepth. Held on the parser rather than threaded through every
+	// parse call because parseFromToken is re-entered from several places.
+	depth int
 }
 
 func newObjParser(src []byte) *objParser {
@@ -111,6 +126,12 @@ func (p *objParser) parseIntegerOrRef(first token) (Object, error) {
 }
 
 func (p *objParser) parseArray() (Object, error) {
+	if p.depth >= maxObjectDepth {
+		return nil, fmt.Errorf("pdf: array nesting deeper than %d", maxObjectDepth)
+	}
+	p.depth++
+	defer func() { p.depth-- }()
+
 	var arr Array
 	for {
 		t, err := p.take()
@@ -132,6 +153,12 @@ func (p *objParser) parseArray() (Object, error) {
 }
 
 func (p *objParser) parseDictOrStream() (Object, error) {
+	if p.depth >= maxObjectDepth {
+		return nil, fmt.Errorf("pdf: dictionary nesting deeper than %d", maxObjectDepth)
+	}
+	p.depth++
+	defer func() { p.depth-- }()
+
 	dict := Dict{}
 	for {
 		t, err := p.take()
@@ -190,8 +217,15 @@ func (p *objParser) parseStreamBody(dict Dict) (Object, error) {
 	start := pos
 
 	// Prefer a literal /Length when present and plausible.
+	//
+	// The bound is written as a subtraction rather than "start+n <= len(src)"
+	// because /Length comes from the file: a large enough value makes start+n
+	// overflow to a NEGATIVE number, which passes that comparison and then
+	// indexes the source slice out of range. Found by fuzzing, as
+	// `index out of range [-9223372036854775764]`. Comparing against the
+	// remaining length cannot overflow, since both sides are already in range.
 	if lenObj, ok := dict["Length"]; ok {
-		if n, ok := IntValue(lenObj); ok && n >= 0 && start+n <= len(src) {
+		if n, ok := IntValue(lenObj); ok && n >= 0 && n <= len(src)-start {
 			end := start + n
 			// Verify "endstream" follows (allowing whitespace). If not, fall back
 			// to scanning.
@@ -221,9 +255,14 @@ func (p *objParser) parseStreamBody(dict Dict) (Object, error) {
 	return &Stream{Dict: dict, Raw: bytes.Clone(raw)}, nil
 }
 
-// hasEndstremNear reports whether "endstream" appears at end after optional
-// whitespace.
+// hasEndstreamNear reports whether "endstream" appears at end after optional
+// whitespace. end is clamped rather than trusted: callers derive it from a
+// file-supplied /Length, and an out-of-range value here is a panic, not a
+// wrong answer.
 func hasEndstreamNear(src []byte, end int) bool {
+	if end < 0 || end > len(src) {
+		return false
+	}
 	i := end
 	for i < len(src) && isWhitespace(src[i]) {
 		i++
@@ -231,7 +270,15 @@ func hasEndstreamNear(src []byte, end int) bool {
 	return bytes.HasPrefix(src[i:], []byte("endstream"))
 }
 
+// skipToAfterEndstream returns the offset just past the "endstream" following
+// end, or end when none is there. Like hasEndstreamNear it clamps end, which is
+// derived from a file-supplied /Length: today it is only reached after that
+// function has vetted the same offset, but an indexing panic is too cheap to
+// prevent to leave resting on a caller's invariant.
 func skipToAfterEndstream(src []byte, end int) int {
+	if end < 0 || end > len(src) {
+		return end
+	}
 	i := end
 	for i < len(src) && isWhitespace(src[i]) {
 		i++

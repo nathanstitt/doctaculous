@@ -63,15 +63,41 @@ type Stage struct {
 	Params Params
 }
 
+// MaxDecodedSize bounds the output of a decoded stream. Compression filters
+// expand, so a stream's decoded size is a number the FILE controls, not one we
+// choose: measured, a 2.9 MB PDF whose content stream was a flate bomb decoded
+// to 2 GB and drove peak RSS to 4.5 GB in about a second, and the ratio holds
+// for larger inputs. An OOM is not recoverable, so it has to be refused rather
+// than caught.
+//
+// 512 MB is far above any legitimate stream — a decoded content stream or
+// embedded font is megabytes at the very most — while keeping a hostile one to
+// an allocation the process survives.
+const MaxDecodedSize = 512 << 20
+
+// ErrTooLarge is returned (wrapped) when a stream decodes to more than
+// [MaxDecodedSize] bytes.
+var ErrTooLarge = errors.New("decoded stream too large")
+
 // Decode applies a chain of filters in order to raw stream bytes and returns the
 // decoded data. DCTDecode (JPEG) and similar image-only filters are NOT decoded
 // here; see [IsImageFilter] — callers handle those at image-draw time.
+//
+// The size is checked after every stage, not just at the end, so a chain cannot
+// expand past the ceiling in steps. The decompressors additionally bound
+// themselves while reading (see readAllBounded), so an over-large flate stream
+// never allocates its output at all; this check covers the filters that decode
+// into a buffer of their own.
 func Decode(raw []byte, stages []Stage) ([]byte, error) {
 	data := raw
 	for i, st := range stages {
 		out, err := decodeStage(data, st)
 		if err != nil {
 			return nil, fmt.Errorf("filter %d (%s): %w", i, st.Name, err)
+		}
+		if len(out) > MaxDecodedSize {
+			return nil, fmt.Errorf("filter %d (%s): %w: %d bytes exceeds the %d-byte limit",
+				i, st.Name, ErrTooLarge, len(out), MaxDecodedSize)
 		}
 		data = out
 	}

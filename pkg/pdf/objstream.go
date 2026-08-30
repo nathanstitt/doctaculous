@@ -29,7 +29,30 @@ func (d *Document) loadObjStream(streamObjNum int) (*parsedObjStream, error) {
 		d.cacheMu.Unlock()
 		return ps, nil
 	}
+	// Refuse to re-enter a stream already being loaded. This is not the same
+	// recursion the parser's depth cap covers: the cycle here runs through the
+	// DOCUMENT, not the token stream --
+	//
+	//	loadObjStream -> GetInt(/N) -> Resolve -> loadObject
+	//	    -> parseObjectFromStream -> loadObjStream
+	//
+	// so a stream whose /N or /First is an indirect reference living inside that
+	// same stream recurses until the stack is gone. Each level builds a fresh
+	// parser, so no per-parser counter can see it. Found by fuzzing.
+	if d.objStreamLoading[streamObjNum] {
+		d.cacheMu.Unlock()
+		return nil, fmt.Errorf("pdf: object stream %d refers to itself", streamObjNum)
+	}
+	if d.objStreamLoading == nil {
+		d.objStreamLoading = map[int]bool{}
+	}
+	d.objStreamLoading[streamObjNum] = true
 	d.cacheMu.Unlock()
+	defer func() {
+		d.cacheMu.Lock()
+		delete(d.objStreamLoading, streamObjNum)
+		d.cacheMu.Unlock()
+	}()
 
 	entry, ok := d.xref[streamObjNum]
 	if !ok || entry.inStream {
@@ -73,6 +96,19 @@ func (d *Document) loadObjStream(streamObjNum int) (*parsedObjStream, error) {
 func parseObjStmData(data []byte, n, first int) (*parsedObjStream, error) {
 	if n <= 0 {
 		return &parsedObjStream{}, nil
+	}
+	// N comes from the file and sizes both slices below, so it has to be checked
+	// against what the data can actually hold BEFORE allocating. The header is N
+	// pairs of integers separated by whitespace, so each entry needs at least
+	// four bytes ("0 0 "); a stream claiming more than that is malformed
+	// whatever follows.
+	//
+	// Found by fuzzing: a 504-byte input declaring /N 40000000020 asked for a
+	// 320 GB slice. The header loop below would have rejected the very first
+	// pair, but the process was already dead -- an allocation cannot be
+	// validated after the fact.
+	if maxEntries := len(data) / 4; n > maxEntries {
+		return nil, fmt.Errorf("pdf: object stream declares %d objects, more than its %d bytes can hold", n, len(data))
 	}
 	// Parse the integer header.
 	hdr := newObjParser(data)
