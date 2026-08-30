@@ -145,7 +145,7 @@ func openDetected(ctx context.Context, f Format, data []byte, dir string, opts [
 		// the dir-rooted loader default (it would override the container
 		// loader the frontend installs) — a caller's explicit loader still wins.
 		return openReflowFrontend(ctx, OpenEPUBBytes, data, "", opts)
-	case FormatPNG, FormatJPEG, FormatHEIC:
+	case FormatPNG, FormatJPEG, FormatHEIC, FormatWebP:
 		// An image opens as a single page exactly its pixel size; the frontend
 		// stamps the format from the actual encoding.
 		return openReflowFrontend(ctx, OpenImageBytes, data, "", opts)

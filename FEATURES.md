@@ -92,8 +92,8 @@ bullet's design rationale is in its PR:
   min/max, margins incl. vertical collapsing, padding, borders, backgrounds), IFC (shaping/breaking,
   `text-align`, `line-height`), fragment tree.
 - **Replaced content + images** (`pkg/layout/css/image.go`+`replaced.go`): `<img>` decode (PNG/JPEG/
-  GIF stdlib, HEIC via `pkg/heif`) → CSS replaced-sizing → paint via `DrawImage`, with
-  `object-fit`/`object-position`.
+  GIF stdlib, HEIC via `pkg/heif`, WebP via `pkg/webp`) → CSS replaced-sizing → paint via
+  `DrawImage`, with `object-fit`/`object-position`.
 - **Floats + clear** (`pkg/layout/css/floats.go`): per-BFC float context, narrowing/wrapping,
   `clear`, own paint layer.
 - **Positioning** (`pkg/layout/css/positioning.go`): relative (paint-time offset) + absolute/fixed
@@ -662,7 +662,8 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
 **Stream + MIME input surface** (`pkg/doctaculous` format.go/open.go, first tinycld-adoption PR):
 
 - `FormatFromMIME`/`Format.MIME()` (params stripped/case-folded; explicit-Unknown pins for
-  legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream; unlisted `text/*` →
+  legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream (`image/webp`
+  was such a pin until the WebP reader landed); unlisted `text/*` →
   FormatText with `text/rtf` excepted; rows flip to PPTX/EPUB/RTF when those frontends land);
   `OpenReader`/`OpenReaderAs(ctx,..)` stream entry points (fully buffered) threading a real
   open-time context through layout — a cancelled open ERRORS rather than returning a silently
@@ -854,6 +855,27 @@ out-of-scope note):
   byte-identical output. Registered with `image.RegisterFormat`; `.heic` lights up as a
   document input, inside HTML/EPUB `<img>`, and transcodes to PNG inside DOCX/PPTX/RTF/EPUB
   outputs (`pkg/render/imageconv`). Image *sequences* (msf1) and AVIF stay refused.
+
+**WebP input** (`pkg/webp`, over `golang.org/x/image/webp` — BSD, already an approved dep):
+
+- Still WebP decodes everywhere the other raster formats do: `.webp` as a document input
+  (`FormatWebP`, MIME `image/webp`, capability bit input-only), content-first `DetectFormat`
+  magic (the RIFF `WEBP` form type, so WAV/AVI stay unknown), inside HTML/EPUB `<img>` by
+  content type or by sniffing, and transcoded to PNG inside DOCX/PPTX/RTF/EPUB outputs
+  (`pkg/render/imageconv`). Lossy VP8, lossless VP8L, and the extended VP8X container with an
+  alpha plane are all covered.
+- **Animated WebP is refused, and says so.** `x/image/webp` handles stills only, but its failure
+  is misleading: `DecodeConfig` parses VP8X, ignores the animation flag, and returns the canvas
+  size with NO error, while `Decode` then fails with a bare `webp: invalid format` —
+  indistinguishable from corrupt bytes. `pkg/webp` reads the flag upstream skips and returns a
+  named `ErrAnimated` from both entry points, and `OpenImageBytes`/`TranscodeToPNG` check it
+  explicitly so a valid animation is reported as unsupported rather than as a broken file.
+- Known limit, stated rather than implied: the `image.Decode` **sniffing** path cannot carry that
+  check. `image.sniff` returns the first registered format whose magic matches, in registration
+  order, and an importing package's `init` always runs after the package it imports — so no
+  registration here can outrank `x/image/webp`'s. Code that must not be fooled by an animated
+  file calls `webp.Decode`/`webp.DecodeConfig`, or `webp.IsAnimated` on the bytes; the two call
+  sites that matter do. A test pins the upstream behavior so this is revisited if it changes.
 
 **XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):
 

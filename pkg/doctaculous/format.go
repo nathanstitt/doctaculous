@@ -47,6 +47,11 @@ const (
 	// FormatHEIC is a HEIF/HEIC still image (HEVC-coded), decoded by the
 	// pure-Go pkg/heif decoder. Input only: the toolkit does not encode HEVC.
 	FormatHEIC Format = "heic"
+	// FormatWebP is a WebP still image, decoded by golang.org/x/image/webp
+	// (lossy VP8, lossless VP8L, and the extended VP8X container including
+	// alpha). Input only: animated WebP is rejected, and the toolkit does not
+	// yet encode WebP.
+	FormatWebP Format = "webp"
 	// FormatSVG is a Scalable Vector Graphics document (input only; a single
 	// page exactly the SVG's viewport), or its gzip-compressed .svgz form.
 	FormatSVG Format = "svg"
@@ -86,6 +91,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatPNG:      {input: true, output: true},
 	FormatJPEG:     {input: true, output: true},
 	FormatHEIC:     {input: true, output: false},
+	FormatWebP:     {input: true, output: false},
 	FormatSVG:      {input: true, output: false},
 }
 
@@ -125,7 +131,7 @@ func CanConvert(from, to Format) error {
 // ParseFormat maps a user-facing format name to a Format. It accepts the
 // canonical names plus common aliases (case-insensitive, with or without a
 // leading dot): pdf; docx; html, htm, xhtml; markdown, md; text, txt, plain;
-// png; jpeg, jpg; svg, svgz. Unrecognized names return ErrUnknownFormat.
+// png; jpeg, jpg; webp; svg, svgz. Unrecognized names return ErrUnknownFormat.
 func ParseFormat(s string) (Format, error) {
 	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), ".")) {
 	case "pdf":
@@ -156,6 +162,8 @@ func ParseFormat(s string) (Format, error) {
 		return FormatJPEG, nil
 	case "heic", "heif":
 		return FormatHEIC, nil
+	case "webp":
+		return FormatWebP, nil
 	case "svg", "svgz":
 		return FormatSVG, nil
 	default:
@@ -190,6 +198,7 @@ var mimeFormats = map[string]Format{
 	"image/jpg":            FormatJPEG,
 	"image/heic":           FormatHEIC,
 	"image/heif":           FormatHEIC,
+	"image/webp":           FormatWebP,
 	"image/svg+xml":        FormatSVG,
 
 	// Deliberate refusals. Legacy binary Office formats have no pure-Go reader
@@ -211,7 +220,8 @@ var mimeFormats = map[string]Format{
 // first — parameters such as "; charset=utf-8" are stripped and the type is
 // case-folded (mime.ParseMediaType, with a manual strip for malformed values).
 // Unrecognized types, and types the toolkit deliberately does not read (legacy
-// binary Office, HEIC/HEIF, generic zip/octet-stream), return FormatUnknown;
+// binary Office, HEIC/HEIF sequences, generic zip/octet-stream), return
+// FormatUnknown;
 // an unlisted text/* subtype falls back to FormatText (unknown text renders as
 // plain text, the browser rule) — listed text/* rows like text/rtf take their
 // own format first. Callers with untrusted or generic types compose with
@@ -268,6 +278,8 @@ func (f Format) MIME() string {
 		return "image/jpeg"
 	case FormatHEIC:
 		return "image/heic"
+	case FormatWebP:
+		return "image/webp"
 	case FormatSVG:
 		return "image/svg+xml"
 	default:
@@ -309,6 +321,8 @@ func FormatFromPath(path string) Format {
 		return FormatJPEG
 	case ".heic", ".heif":
 		return FormatHEIC
+	case ".webp":
+		return FormatWebP
 	case ".svg", ".svgz":
 		return FormatSVG
 	default:

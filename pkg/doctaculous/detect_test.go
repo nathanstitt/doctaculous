@@ -206,3 +206,57 @@ func TestDetectISOBMFF(t *testing.T) {
 		t.Errorf("DetectFormat(real heic) = %q", got)
 	}
 }
+
+// TestDetectFormatWebP covers content-first detection for WebP: the magic must
+// win over a misleading extension, and RIFF containers that are NOT WebP (WAV,
+// AVI) must stay unknown rather than being claimed by the "RIFF" prefix alone.
+func TestDetectFormatWebP(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"still-lossy.webp", "still-lossless.webp", "still-lossy-alpha.webp", "animated.webp"} {
+		data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		// Content beats the extension hint, even a wrong one. An animated file
+		// detects as WebP too — it is refused later by the decoder, with an
+		// error naming animation, which beats "unknown format" here.
+		if got := DetectFormat(data, "photo.bin"); got != FormatWebP {
+			t.Errorf("DetectFormat(%s) = %q, want webp", name, got)
+		}
+	}
+
+	// Other RIFF forms must not be mistaken for WebP.
+	riff := func(form string) []byte {
+		b := append([]byte("RIFF"), 0x24, 0, 0, 0)
+		return append(b, []byte(form)...)
+	}
+	for _, form := range []string{"WAVE", "AVI "} {
+		if got := detectMagic(riff(form)); got != FormatUnknown {
+			t.Errorf("detectMagic(RIFF %s) = %q, want unknown", form, got)
+		}
+	}
+	// A truncated RIFF header must not panic or match.
+	if got := detectMagic([]byte("RIFF\x24\x00\x00")); got != FormatUnknown {
+		t.Errorf("detectMagic(truncated RIFF) = %q, want unknown", got)
+	}
+}
+
+// TestOpenBytesWebP pins the end-to-end opener path: a .webp opens as a
+// one-page document through content detection alone.
+func TestOpenBytesWebP(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", "still-lossless.webp"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	doc, err := OpenBytes(data)
+	if err != nil {
+		t.Fatalf("OpenBytes(webp): %v", err)
+	}
+	if doc.Format() != FormatWebP {
+		t.Errorf("format = %q, want webp", doc.Format())
+	}
+	if n := doc.PageCount(); n != 1 {
+		t.Errorf("pages = %d, want 1", n)
+	}
+}
