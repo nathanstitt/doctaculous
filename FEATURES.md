@@ -460,6 +460,19 @@ bullet's design rationale is in its PR:
   expressible — hint rank is equivalent); `bdi`/`bdo` isolation; `effectiveDirection` (an anonymous
   box's Style is zero-valued, so `Direction` is `""` not `"ltr"` — never read the field directly);
   RTL text-indent edge. `dir=auto` degrades + logs.
+- **`writing-mode` parsed + reported** (`pkg/css/cascade.go`, `pkg/layout/css/block.go`):
+  `horizontal-tb` (the initial value) is honoured; `vertical-rl`/`vertical-lr` are parsed, carried,
+  and **degrade with a warn-once log** — they lay out horizontally, because the inline layer
+  advances a pen along X and vertical text needs a vertical advance model. The deprecated SVG 1.1
+  spellings (`lr`, `lr-tb`, `rl`, `rl-tb`) resolve to `horizontal-tb`, matching the SVG path;
+  `sideways-rl`/`sideways-lr` are dropped rather than folded into a vertical value, so the log
+  never misstates what was asked for. Inherited (CSS Writing Modes 4 §3.1) — pinned by a test,
+  since `inheritFrom` silently resets an unregistered field instead of inheriting it. This
+  property previously did not reach the cascade AT ALL: the declaration was dropped before
+  computation, so an author got a correct stylesheet, a wrong page, and no diagnostic anywhere.
+  Layout is deliberately unchanged; a test pins vertical boxes to horizontal dimensions so the
+  degradation stays honest rather than half-applied. **Vertical layout itself is not implemented**
+  — see `docs/CSS-LAYOUT.md`.
 - **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
   slice 2 of 5, retiring **all three** "laying out LTR" logs: tables mirror their solved column
   x-offsets (and `buildCollapsedBorders` flips its index→physical-side mapping, or collapsed
