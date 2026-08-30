@@ -7,6 +7,8 @@ import (
 	"image"
 	"os"
 	"strconv"
+
+	"github.com/nathanstitt/doctaculous/pkg/webp"
 )
 
 // OpenImage reads a PNG or JPEG image as a single-page document: the page is
@@ -44,6 +46,15 @@ func OpenImageBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 		format, mime = FormatJPEG, "image/jpeg"
 	case "heif":
 		format, mime = FormatHEIC, "image/heic"
+	case webp.FormatName:
+		// image.DecodeConfig reports an animated WebP's canvas size without
+		// error (x/image/webp parses VP8X but ignores the animation flag), so
+		// without this check a page would be built for an image that cannot
+		// decode. The toolkit reads still images only.
+		if webp.IsAnimated(data) {
+			return nil, fmt.Errorf("doctaculous: open image: %w", webp.ErrAnimated)
+		}
+		format, mime = FormatWebP, "image/webp"
 	default:
 		return nil, fmt.Errorf("doctaculous: image format %q: %w", kind, ErrUnsupportedFormat)
 	}

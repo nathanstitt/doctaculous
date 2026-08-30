@@ -18,6 +18,7 @@ import (
 	"image/png"
 
 	heif "github.com/nathanstitt/doctaculous/pkg/heif"
+	webp "github.com/nathanstitt/doctaculous/pkg/webp"
 
 	"github.com/nathanstitt/doctaculous/pkg/resource"
 )
@@ -139,11 +140,13 @@ func decodeImageBytes(data []byte, contentType string) (image.Image, error) {
 		return gif.Decode(bytes.NewReader(data))
 	case "image/heic", "image/heif":
 		return heif.Decode(bytes.NewReader(data))
+	case "image/webp":
+		return webp.Decode(bytes.NewReader(data))
 	default:
 		// Unknown/empty content type (e.g. a DirLoader extension it doesn't map):
 		// sniff the format from the bytes. image.Decode uses the formats registered
-		// by the imports above, so PNG/JPEG/GIF/HEIC still decode; anything else
-		// (SVG, WebP, ...) returns image.ErrFormat, which the caller degrades.
+		// by the imports above, so PNG/JPEG/GIF/HEIC/WebP still decode; anything
+		// else (SVG, ...) returns image.ErrFormat, which the caller degrades.
 		img, _, err := image.Decode(bytes.NewReader(data))
 		return img, err
 	}

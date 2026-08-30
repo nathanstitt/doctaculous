@@ -45,7 +45,7 @@ type ConvertOptions struct {
 	EPUB EPUBOptions
 	// HTMLOut applies when To == FormatHTML.
 	HTMLOut HTMLWriteOptions
-	// Image applies when To == FormatPNG or FormatJPEG; Image.Page selects the
+	// Image applies when To == FormatPNG, FormatJPEG, or FormatWebP; Image.Page selects the
 	// single page an image conversion encodes (an io.Writer holds one image).
 	Image ImageOptions
 
@@ -238,7 +238,7 @@ func (d *Document) Write(ctx context.Context, out io.Writer, to Format, opts Con
 			htmlOpts.Logf = opts.Logf
 		}
 		return d.WriteHTML(ctx, out, htmlOpts)
-	case FormatPNG, FormatJPEG:
+	case FormatPNG, FormatJPEG, FormatWebP:
 		imgOpts := opts.Image
 		imgOpts.Format = to
 		if imgOpts.Raster.Logf == nil {

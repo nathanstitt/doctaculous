@@ -1,7 +1,7 @@
 // Command doctaculous is the command-line interface to the doctaculous document
 // toolkit. The primary verb is "convert", which converts any supported input
 // (PDF, DOCX, HTML file, or http(s) URL) to any supported output (pdf, md, txt,
-// html, png, jpg), detecting formats from content and extensions. The focused
+// html, png, jpg, webp), detecting formats from content and extensions. The focused
 // subcommands remain: "rasterize" renders document pages to images, "topdf"
 // converts a reflow document to a PDF with searchable text, "tomd" converts one
 // to Markdown or plain text, and "tohtml" to HTML.
@@ -88,7 +88,7 @@ func run(args []string) error {
 
 // inferCommand picks a subcommand from the flags when none is named. It prefers the
 // output extension (--out): a .pdf output means "topdf", an image output (.png/.jpg/
-// .jpeg) means "rasterize". Failing that it falls back to the input: a .pdf input can
+// .jpeg/.webp) means "rasterize". Failing that it falls back to the input: a .pdf input can
 // only be rasterized, while an .html/.htm/.docx input or an http(s) URL means topdf.
 // It errors (rather than guessing) when neither extension is conclusive.
 func inferCommand(args []string) (string, error) {
@@ -105,7 +105,7 @@ func inferCommand(args []string) (string, error) {
 		return "todocx", nil
 	case ".csv", ".tsv", ".xlsx":
 		return "convert", nil
-	case ".png", ".jpg", ".jpeg":
+	case ".png", ".jpg", ".jpeg", ".webp":
 		return "rasterize", nil
 	}
 	if isHTTPURL(in) {
@@ -173,14 +173,15 @@ usage:
 
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, http(s) URLs. Outputs: pdf, docx,
-xlsx, pptx, epub, rtf, md, txt, html, csv, tsv, png, jpg. CSV/TSV/XLSX output carries the
+pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, webp, heic, svg, http(s) URLs.
+Outputs: pdf, docx, xlsx, pptx, epub, rtf, md, txt, html, csv, tsv, png, jpg, webp (lossless).
+CSV/TSV/XLSX output carries the
 document's tables (prose is dropped). Converting a document to its own format
 is not supported.
 
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;
-.png/.jpg => rasterize).
+.png/.jpg/.webp => rasterize).
 
 run "doctaculous convert -h" (or topdf/rasterize/... -h) for subcommand flags.
 `)

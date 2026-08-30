@@ -201,6 +201,7 @@ func TestFormatFromMIME(t *testing.T) {
 		{"text/html; charset", FormatHTML},
 		{"image/heic", FormatHEIC},
 		{"image/heif", FormatHEIC},
+		{"image/webp", FormatWebP},
 	}
 	for _, c := range cases {
 		if got := FormatFromMIME(c.in); got != c.want {
@@ -220,7 +221,6 @@ func TestFormatFromMIME(t *testing.T) {
 		"image/heif-sequence",
 		"application/zip",
 		"application/octet-stream",
-		"image/webp",
 		"application/json",
 		"",
 		"garbage",

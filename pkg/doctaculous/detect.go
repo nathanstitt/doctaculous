@@ -68,6 +68,8 @@ func detectMagic(data []byte) Format {
 		return FormatRTF
 	case bytes.HasPrefix(data, []byte{0x1f, 0x8b}):
 		return detectGzip(data)
+	case isRIFFWebP(data):
+		return FormatWebP
 	}
 	if f := classifyISOBMFF(data); f != FormatUnknown {
 		return f
@@ -80,6 +82,18 @@ func detectMagic(data []byte) Format {
 		return FormatPDF
 	}
 	return FormatUnknown
+}
+
+// isRIFFWebP reports whether data is a RIFF container whose form type is
+// WEBP. The check is deliberately narrow: RIFF also carries WAV and AVI, so
+// the "WEBP" form type at offset 8 — not the "RIFF" magic alone — is what
+// identifies the format. Animated files match too; they are refused later, by
+// the decoder, with an error that names animation (see pkg/webp), which is a
+// better report than "unknown format" from here.
+func isRIFFWebP(data []byte) bool {
+	return len(data) >= 12 &&
+		bytes.Equal(data[0:4], []byte("RIFF")) &&
+		bytes.Equal(data[8:12], []byte("WEBP"))
 }
 
 // detectGzip identifies a gzip-compressed document by sniffing its

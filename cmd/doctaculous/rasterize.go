@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,8 +27,8 @@ func rasterizeCmd(args []string) error {
 		maxHeight = fs.Int("max-height", 0, "fit the render within this many pixels tall, aspect preserved (0 = off)")
 		cropMode  = fs.String("crop", "", "crop to --crop-size: center, north, south, east, west, saliency (empty = off)")
 		cropSize  = fs.String("crop-size", "", "exact output size as WxH, e.g. 720x720 (required with --crop)")
-		format    = fs.String("format", "png", "output image format: png or jpg")
-		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg only)")
+		format    = fs.String("format", "png", "output image format: png, jpg, or webp (default: from the --out extension, else png)")
+		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg only; webp is lossless)")
 		workers   = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers")
 		pageSize  = fs.String("page-size", "letter", "HTML page size: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page (HTML only)")
 
@@ -60,8 +61,27 @@ func rasterizeCmd(args []string) error {
 	if *maxWidth < 0 || *maxHeight < 0 {
 		return fmt.Errorf("--max-width/--max-height must be non-negative, got %d/%d", *maxWidth, *maxHeight)
 	}
-	if *format != "png" && *format != "jpg" && *format != "jpeg" {
-		return fmt.Errorf("unsupported --format %q (want png or jpg)", *format)
+	// An explicit --format wins; otherwise the output extension chooses the
+	// encoding, so "--out page.webp" writes a WebP rather than a PNG with a
+	// misleading name. (Before this, --format's "png" default silently won and
+	// "--out page.jpg" produced a PNG.) An unrecognized extension keeps the png
+	// default: --out is a pattern, and not every name carries a usable suffix.
+	formatSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "format" {
+			formatSet = true
+		}
+	})
+	if !formatSet {
+		switch strings.ToLower(filepath.Ext(*out)) {
+		case ".jpg", ".jpeg":
+			*format = "jpg"
+		case ".webp":
+			*format = "webp"
+		}
+	}
+	if *format != "png" && *format != "jpg" && *format != "jpeg" && *format != "webp" {
+		return fmt.Errorf("unsupported --format %q (want png, jpg, or webp)", *format)
 	}
 	if *workers < 1 {
 		return fmt.Errorf("--workers must be at least 1, got %d", *workers)
@@ -82,8 +102,11 @@ func rasterizeCmd(args []string) error {
 	}
 
 	imgFormat := doctaculous.FormatPNG
-	if *format == "jpg" || *format == "jpeg" {
+	switch *format {
+	case "jpg", "jpeg":
 		imgFormat = doctaculous.FormatJPEG
+	case "webp":
+		imgFormat = doctaculous.FormatWebP
 	}
 	cropOpts, err := cropOptions(*cropMode, *cropSize)
 	if err != nil {

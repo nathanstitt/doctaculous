@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nathanstitt/doctaculous/pkg/webp"
 )
 
 // tinyPNGBytes encodes a small solid-color PNG.
@@ -131,6 +133,46 @@ func TestImageConversions(t *testing.T) {
 	}
 	if !strings.Contains(md.String(), "![](data:image/png;base64,") {
 		t.Errorf("png→md should carry the image:\n%s", md.String())
+	}
+}
+
+func TestOpenImageBytesWebP(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{
+		"still-lossy.webp",    // VP8
+		"still-lossless.webp", // VP8L
+		"still-lossy-alpha.webp",
+	} {
+		data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		doc, err := OpenImageBytes(data)
+		if err != nil {
+			t.Fatalf("OpenImageBytes(%s): %v", name, err)
+		}
+		if doc.Format() != FormatWebP {
+			t.Errorf("%s: format = %q, want webp", name, doc.Format())
+		}
+		if n := doc.PageCount(); n != 1 {
+			t.Errorf("%s: pages = %d, want 1", name, n)
+		}
+	}
+}
+
+// TestOpenImageBytesWebPAnimated pins the honest degradation. x/image/webp's
+// DecodeConfig reports an animated file's canvas size with no error, so
+// without an explicit check this would build a one-page document around an
+// image that cannot decode. The error must name animation rather than
+// surfacing a generic "invalid format".
+func TestOpenImageBytesWebPAnimated(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", "animated.webp"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if _, err := OpenImageBytes(data); !errors.Is(err, webp.ErrAnimated) {
+		t.Errorf("OpenImageBytes(animated webp) = %v, want webp.ErrAnimated", err)
 	}
 }
 

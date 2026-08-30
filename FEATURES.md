@@ -92,8 +92,8 @@ bullet's design rationale is in its PR:
   min/max, margins incl. vertical collapsing, padding, borders, backgrounds), IFC (shaping/breaking,
   `text-align`, `line-height`), fragment tree.
 - **Replaced content + images** (`pkg/layout/css/image.go`+`replaced.go`): `<img>` decode (PNG/JPEG/
-  GIF stdlib, HEIC via `pkg/heif`) → CSS replaced-sizing → paint via `DrawImage`, with
-  `object-fit`/`object-position`.
+  GIF stdlib, HEIC via `pkg/heif`, WebP via `pkg/webp`) → CSS replaced-sizing → paint via
+  `DrawImage`, with `object-fit`/`object-position`.
 - **Floats + clear** (`pkg/layout/css/floats.go`): per-BFC float context, narrowing/wrapping,
   `clear`, own paint layer.
 - **Positioning** (`pkg/layout/css/positioning.go`): relative (paint-time offset) + absolute/fixed
@@ -583,9 +583,9 @@ CLI `tomd <pdf>` / `tohtml`):
   PDF path is byte-identical); `OpenAs`/`OpenBytesAs` skip detection; every opener stamps
   `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write` dispatch any valid
   input→output pair (the legacy `ConvertXToY` wrappers were shims pinned byte-identical, since removed);
-  same-format conversion is a deliberate `ErrSameFormat` on the generic path only. PNG/JPEG are
-  output formats (`WriteImage`/`EncodeImage`; Convert-to-image writes one page, multi-page = CLI
-  `%d` fan-out). CLI: `convert <in> <out>` with `--from`/`--to`; all subcommands share one
+  same-format conversion is a deliberate `ErrSameFormat` on the generic path only. PNG/JPEG/WebP
+  are output formats (`WriteImage`/`EncodeImage`; Convert-to-image writes one page, multi-page =
+  CLI `%d` fan-out). CLI: `convert <in> <out>` with `--from`/`--to`; all subcommands share one
   detection-based opener (rasterize no longer assumes unknown extensions are PDF; topdf `--print`
   actually applies print media now). A new format lands by flipping its capability bit + one switch
   case in `openDetected`/`Write` — see the sibling contract in.
@@ -662,7 +662,8 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
 **Stream + MIME input surface** (`pkg/doctaculous` format.go/open.go, first tinycld-adoption PR):
 
 - `FormatFromMIME`/`Format.MIME()` (params stripped/case-folded; explicit-Unknown pins for
-  legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream; unlisted `text/*` →
+  legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream (`image/webp`
+  was such a pin until the WebP reader landed); unlisted `text/*` →
   FormatText with `text/rtf` excepted; rows flip to PPTX/EPUB/RTF when those frontends land);
   `OpenReader`/`OpenReaderAs(ctx,..)` stream entry points (fully buffered) threading a real
   open-time context through layout — a cancelled open ERRORS rather than returning a silently
@@ -854,6 +855,52 @@ out-of-scope note):
   byte-identical output. Registered with `image.RegisterFormat`; `.heic` lights up as a
   document input, inside HTML/EPUB `<img>`, and transcodes to PNG inside DOCX/PPTX/RTF/EPUB
   outputs (`pkg/render/imageconv`). Image *sequences* (msf1) and AVIF stay refused.
+
+**WebP input + output** (`pkg/webp`, over `golang.org/x/image/webp` for decode — BSD, already an
+approved dep — and `github.com/HugoSmits86/nativewebp` for encode — MIT, pure Go, whose only
+dependency is `x/image`, so no new transitive surface):
+
+- Still WebP decodes everywhere the other raster formats do: `.webp` as a document input
+  (`FormatWebP`, MIME `image/webp`), content-first `DetectFormat`
+  magic (the RIFF `WEBP` form type, so WAV/AVI stay unknown), inside HTML/EPUB `<img>` by
+  content type or by sniffing, and transcoded to PNG inside DOCX/PPTX/RTF/EPUB outputs
+  (`pkg/render/imageconv`). Lossy VP8, lossless VP8L, and the extended VP8X container with an
+  alpha plane are all covered.
+- **Animated WebP returns a typed `ErrAnimated`.** `x/image/webp` handles stills only, and its
+  failure mode is misleading: `DecodeConfig` parses VP8X, ignores the animation flag, and returns
+  the canvas size with NO error, while `Decode` then fails with a bare `webp: invalid format` —
+  the same error corrupt bytes produce. `pkg/webp` reads the flag upstream skips and returns
+  `ErrAnimated` from both entry points; `OpenImageBytes` and `TranscodeToPNG` check it, so a
+  valid animation is reported as unsupported instead of broken.
+- The `image.Decode` **sniffing** path cannot carry that check. `image.sniff` returns the first
+  registered format whose magic matches, in registration order, and an importing package's `init`
+  always runs after the package it imports — so no registration here can outrank
+  `x/image/webp`'s. Code that must not be fooled by an animated file calls
+  `webp.Decode`/`webp.DecodeConfig`, or `webp.IsAnimated` on the bytes; the two call sites that
+  matter do. A test pins the upstream behavior so this gets revisited if it changes.
+- **Output is lossless VP8L**, wired as a full image target: `Convert`/`WriteImage`/`EncodeImage`
+  to `FormatWebP`, the CLI's `rasterize --format webp` and any `.webp` output path (which also
+  infers the `rasterize` subcommand). Round-trips are verified **pixel-exact** against
+  `x/image`'s independent decoder, including alpha, at sizes down to 1×1 and up to the format's
+  16384-pixel ceiling (`webp.MaxDimension`, VP8L's 14-bit dimension field) — one pixel over is a
+  clean error, not a truncated file. The showcase pairs `img/quad.webp` with `img/quad.png`, and
+  the two decode to 0 differing pixels across all 4096.
+- **WebP output is a PNG-class target, not a JPEG-class one.** There is no pure-Go lossy VP8
+  encoder and the toolkit takes no CGo, so a photographic page encoded to WebP comes out much
+  larger than a lossy encoder would produce, possibly larger than the equivalent JPEG — ask for
+  JPEG when the output needs to be small. `ImageOptions.Quality` is a **no-op** for WebP, pinned
+  by a test: two quality values produce byte-identical output.
+- `webp.Encode` buffers and writes once, checking the error. `nativewebp.Encode` ignores the
+  error from every write it makes to the destination, so passing it the caller's `io.Writer`
+  would report a failed write — full disk, closed pipe — as a successful encode. A test pins that
+  a failing writer surfaces the error.
+- No animated output: the toolkit rasterizes pages to still images, so a multi-page document
+  becomes one file per page (the `%d` fan-out), never one animation.
+- Bug fixed on the way in: `rasterize` took its encoding from `--format` alone, whose `png`
+  default always won, so `--out page.jpg` wrote a **PNG under a .jpg name** with no diagnostic
+  (`.webp` would have done the same). The output extension now picks the format when `--format`
+  is absent; an explicit `--format` still wins. Regression test in
+  `cmd/doctaculous/rasterize_test.go`.
 
 **XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):
 
