@@ -75,6 +75,14 @@ Both are entirely new subsystems, not adaptations:
   `pkg/font` does not do — plus a vertical advance model throughout. Every
   metric in the codebase is horizontal-only today.
 
+  > **SUPERSEDED.** Both halves of this have since shipped: `pkg/font` exposes
+  > vertical metrics (`Face.GlyphVAdvance`), and the CSS path lays out a
+  > vertical line. The premise that this was a "genuinely new subsystem" was
+  > wrong — the metrics were already reachable through a dependency the repo
+  > consumed. Left as written because it records the reasoning at the time;
+  > `docs/SVG.md` carries the current status, which is that SVG's own text
+  > placement still needs wiring to the model that now exists.
+
 Shipping either badly would be worse than deferring it. Both degrade
 gracefully: `<textPath>` renders its text on a straight baseline with a logged
 warning, `writing-mode` renders horizontally with a logged warning. Neither

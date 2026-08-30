@@ -17,25 +17,39 @@ func countWritingModeWarnings(msgs []string) []string {
 	return got
 }
 
-// A vertical writing-mode is not implemented, and saying so is the whole point of this
-// path. The property previously did not reach the cascade at all, so an author got a
-// silent no-op: a correct stylesheet, a wrong page, and no diagnostic anywhere. Every
-// other unsupported case in this engine logs; this one did not.
-func TestVerticalWritingModeIsLoggedNotSilent(t *testing.T) {
-	for _, wm := range []string{"vertical-rl", "vertical-lr"} {
-		var msgs []string
-		logf := func(f string, a ...any) { msgs = append(msgs, fmt.Sprintf(f, a...)) }
-		src := `<html><body style="margin:0"><div style="writing-mode:` + wm + `">NOW</div></body></html>`
-		layoutTreeFor(t, src, 200, logf)
+// vertical-lr lays out identically to vertical-rl in this phase: the two differ only in
+// which side SUBSEQUENT lines stack from, and only one line is produced. Equating them
+// silently would be exactly the half-applied support the degrade-honestly rule exists to
+// prevent, so the remaining difference reports itself.
+//
+// This replaces a phase-0 test asserting that BOTH vertical values reported themselves
+// unimplemented — no longer true of vertical-rl, which now lays out.
+func TestVerticalLRReportsItsUnimplementedStackingDirection(t *testing.T) {
+	var msgs []string
+	logf := func(f string, a ...any) { msgs = append(msgs, fmt.Sprintf(f, a...)) }
+	src := `<html><body style="margin:0"><div style="writing-mode:vertical-lr">NOW</div></body></html>`
+	layoutTreeFor(t, src, 200, logf)
 
-		got := countWritingModeWarnings(msgs)
-		if len(got) != 1 {
-			t.Errorf("%s logged %d times, want exactly 1; messages: %v", wm, len(got), msgs)
-			continue
-		}
-		if !strings.Contains(got[0], wm) {
-			t.Errorf("%s: log line does not name the value: %q", wm, got[0])
-		}
+	got := countWritingModeWarnings(msgs)
+	if len(got) != 1 {
+		t.Fatalf("vertical-lr logged %d times, want exactly 1; messages: %v", len(got), msgs)
+	}
+	if !strings.Contains(got[0], "vertical-lr") {
+		t.Errorf("log line does not name the value: %q", got[0])
+	}
+}
+
+// vertical-rl is the implemented mode: it must NOT report itself unimplemented. A
+// diagnostic that contradicts the rendering is its own bug, and the mirror image of the
+// silent no-op phase 0 replaced.
+func TestVerticalRLDoesNotWarn(t *testing.T) {
+	var msgs []string
+	logf := func(f string, a ...any) { msgs = append(msgs, fmt.Sprintf(f, a...)) }
+	src := `<html><body style="margin:0"><div style="writing-mode:vertical-rl">NOW</div></body></html>`
+	layoutTreeFor(t, src, 200, logf)
+
+	if got := countWritingModeWarnings(msgs); len(got) != 0 {
+		t.Errorf("vertical-rl warned about writing-mode: %v", got)
 	}
 }
 
@@ -57,10 +71,11 @@ func TestHorizontalWritingModeDoesNotWarn(t *testing.T) {
 // Warn-ONCE. writing-mode is inherited, so a vertical container hands the value to
 // every descendant box; a per-box log would emit one identical line per element in the
 // subtree, which for a real sidebar label (one span per letter) is a page of noise.
+// Asserted on vertical-lr, the value that still reports something.
 func TestVerticalWritingModeWarnsOncePerValue(t *testing.T) {
 	var msgs []string
 	logf := func(f string, a ...any) { msgs = append(msgs, fmt.Sprintf(f, a...)) }
-	src := `<html><body style="margin:0"><div style="writing-mode:vertical-rl">` +
+	src := `<html><body style="margin:0"><div style="writing-mode:vertical-lr">` +
 		`<div>N</div><div>O</div><div>W</div><div><span>!</span></div></div></body></html>`
 	layoutTreeFor(t, src, 200, logf)
 
@@ -69,43 +84,62 @@ func TestVerticalWritingModeWarnsOncePerValue(t *testing.T) {
 	}
 }
 
-// The two vertical values are keyed separately, so a document using both reports both
-// rather than the first one seen masking the other.
-func TestBothVerticalValuesEachWarn(t *testing.T) {
-	var msgs []string
-	logf := func(f string, a ...any) { msgs = append(msgs, fmt.Sprintf(f, a...)) }
-	src := `<html><body style="margin:0">` +
-		`<div style="writing-mode:vertical-rl">A</div>` +
-		`<div style="writing-mode:vertical-lr">B</div></body></html>`
-	layoutTreeFor(t, src, 200, logf)
+// The cascade still carries both vertical values distinctly — the parse and inheritance
+// work phase 0 did is what phase 2 builds on, so a regression there must not hide behind
+// the layout now succeeding.
+func TestBothVerticalValuesReachLayout(t *testing.T) {
+	for _, wm := range []string{"vertical-rl", "vertical-lr"} {
+		root := layoutTreeFor(t, `<html><body style="margin:0">`+
+			`<div style="writing-mode:`+wm+`;font-size:20px">NOW</div></body></html>`, 200, nil)
 
-	got := countWritingModeWarnings(msgs)
-	if len(got) != 2 {
-		t.Fatalf("two distinct vertical values logged %d lines, want 2; messages: %v", len(got), got)
-	}
-	joined := strings.Join(got, "\n")
-	if !strings.Contains(joined, "vertical-rl") || !strings.Contains(joined, "vertical-lr") {
-		t.Errorf("both values should be named across the log lines, got:\n%s", joined)
+		var vertical bool
+		var walk func(*Fragment)
+		walk = func(f *Fragment) {
+			for li := range f.Lines {
+				if f.Lines[li].Vertical {
+					vertical = true
+				}
+			}
+			for _, c := range f.Children {
+				walk(c)
+			}
+		}
+		walk(root)
+		if !vertical {
+			t.Errorf("%s did not produce a vertical line", wm)
+		}
 	}
 }
 
-// Phase 0 parses and REPORTS; it deliberately does not change layout. This pins that:
-// a vertical value must lay out byte-identically to horizontal until the vertical
-// advance model lands, so the degradation is honest rather than half-applied.
-func TestVerticalWritingModeDoesNotChangeLayoutYet(t *testing.T) {
-	const body = `<div style="width:100px;%s">NOW</div>`
-	horiz := layoutTreeFor(t, `<html><body style="margin:0">`+
-		fmt.Sprintf(body, "")+`</body></html>`, 200, nil)
-	vert := layoutTreeFor(t, `<html><body style="margin:0">`+
-		fmt.Sprintf(body, "writing-mode:vertical-rl")+`</body></html>`, 200, nil)
+// Inheritance: writing-mode set on a container must reach a descendant's line, which is
+// the trap inheritFrom documents. Phase 0 covered this at the cascade; here it is
+// asserted through to the laid-out result, where it actually matters.
+func TestVerticalWritingModeInheritsToDescendantLines(t *testing.T) {
+	root := layoutTreeFor(t, `<html><body style="margin:0">`+
+		`<div style="writing-mode:vertical-rl;font-size:20px"><div><span>NOW</span></div></div>`+
+		`</body></html>`, 200, nil)
 
-	hb, vb := firstTextBox(horiz), firstTextBox(vert)
-	if hb == nil || vb == nil {
-		t.Fatal("expected a text-bearing fragment in both trees")
+	var vertical, any bool
+	var walk func(*Fragment)
+	walk = func(f *Fragment) {
+		for li := range f.Lines {
+			if len(f.Lines[li].Glyphs) > 0 {
+				any = true
+				if f.Lines[li].Vertical {
+					vertical = true
+				}
+			}
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
 	}
-	if hb.W != vb.W || hb.H != vb.H {
-		t.Errorf("vertical box = %vx%v, horizontal = %vx%v; phase 0 must not alter layout",
-			vb.W, vb.H, hb.W, hb.H)
+	walk(root)
+	if !any {
+		t.Fatal("no glyph-bearing line found")
+	}
+	if !vertical {
+		t.Error("a nested box did not inherit the container's vertical writing-mode")
 	}
 }
 

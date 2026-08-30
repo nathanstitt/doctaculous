@@ -60,11 +60,17 @@ func TestVMetricsReportsAbsentVheaHonestly(t *testing.T) {
 	}
 }
 
-// Type1 carries no vertical writing metrics at all — the format predates them. That
-// is a different answer from "TrueType face with no vmtx", and the API keeps them
-// distinct: here ok=false for BOTH the advance and the metrics, so a caller learns
-// the format cannot answer rather than receiving a fabricated em.
-func TestType1ReportsNoVerticalMetrics(t *testing.T) {
+// Type1 carries no vertical writing metrics — the format predates them — but it still
+// has to yield a USABLE vertical advance, because the bundled sans-serif and serif
+// faces are Type1 and they are what nearly all HTML renders with. One em is the
+// standard substitute.
+//
+// This originally asserted the opposite (ok=false, "the format cannot answer"), which
+// read as principled but left the DEFAULT text path with no vertical advance at all.
+// The distinction worth keeping is authored-vs-synthesized, and VMetrics carries it;
+// making the advance unavailable did not add honesty, it just moved the fallback out to
+// callers that know less about the font than this package does.
+func TestType1SynthesizesAVerticalAdvance(t *testing.T) {
 	face, ok := LoadStandard("sans-serif", Style{}) // TeXGyreHeros, a Type1 .pfb
 	if !ok {
 		t.Fatal("LoadStandard(sans-serif) failed")
@@ -74,12 +80,56 @@ func TestType1ReportsNoVerticalMetrics(t *testing.T) {
 		t.Fatal("no GID for 'A'")
 	}
 
-	if adv, ok := face.GlyphVAdvance(gid); ok {
-		t.Errorf("Type1 face reported a vertical advance of %v; the format has none, "+
-			"and synthesizing one here would invent a metric the font cannot supply", adv)
+	adv, ok := face.GlyphVAdvance(gid)
+	if !ok {
+		t.Fatal("no vertical advance for a Type1 face; vertical layout in the default " +
+			"font would have nothing to advance by")
 	}
+	if d := adv - 1; d > 0.001 || d < -0.001 {
+		t.Errorf("vertical advance = %v em, want ~1 em (synthesized)", adv)
+	}
+
+	// The synthesis must NOT be the horizontal advance: vertical spacing does not vary
+	// with how wide a letter is, and 'A' is nowhere near an em wide. This is the
+	// assertion that catches the tempting shortcut.
+	h := face.GlyphAdvance(gid)
+	if h > 0.99 {
+		t.Fatalf("fixture is wrong: 'A' has a %v em horizontal advance, too close to 1 "+
+			"to distinguish a synthesized vertical advance from a copied horizontal one", h)
+	}
+	if d := adv - h; d < 0.01 && d > -0.01 {
+		t.Errorf("vertical advance %v matches the horizontal advance %v; the synthesis "+
+			"is copying the wrong axis", adv, h)
+	}
+
+	// Still no AUTHORED metrics — that distinction is the one that matters, and it stays.
 	if _, _, _, ok := face.VMetrics(); ok {
-		t.Error("Type1 face reported vertical metrics; the format has none")
+		t.Error("Type1 face reported authored vertical metrics; the format has none")
+	}
+}
+
+// Every bundled generic family must yield a usable vertical advance. This is the test
+// that would have caught the original gap: the TrueType case was covered and passed,
+// while sans-serif and serif — the actual defaults — silently returned nothing.
+func TestEveryGenericFamilyHasAVerticalAdvance(t *testing.T) {
+	for _, fam := range []string{"sans-serif", "serif", "monospace", "cursive", "fantasy"} {
+		face, ok := LoadStandard(fam, Style{})
+		if !ok {
+			continue // not bundled; nothing to assert
+		}
+		gid, ok := face.GID('A')
+		if !ok {
+			t.Errorf("%s: no GID for 'A'", fam)
+			continue
+		}
+		adv, ok := face.GlyphVAdvance(gid)
+		if !ok {
+			t.Errorf("%s: no vertical advance; vertical text in this family cannot lay out", fam)
+			continue
+		}
+		if adv <= 0 {
+			t.Errorf("%s: vertical advance = %v, want positive downward", fam, adv)
+		}
 	}
 }
 

@@ -338,17 +338,33 @@ func paintFilterBracket(dev render.Device, push *layout.Item, inner []layout.Ite
 // transform em → page points → device:
 //
 //	scale(size, -size)  — em to points, flipping Y so the font's up becomes page down
+//	rotate(Rotate)      — text-orientation, about the glyph's own origin (usually absent)
 //	translate(X, Y)     — move to the glyph's baseline origin in page space
 //	mat                 — page points to device pixels
 //
 // paintGlyph draws one glyph. When the glyph carries font identity (Face+GID), it
 // uses DrawGlyph so text-emitting backends (PDF) can embed real text; otherwise it
 // falls back to filling the raw outline. The em -> device transform is the same in
-// both cases: Scale(size,-size) · Translate(X,Y) · mat.
+// both cases: Scale(size,-size) · [Rotate] · Translate(X,Y) · mat.
 func paintGlyph(dev render.Device, g *layout.GlyphItem, mat render.Matrix) {
-	m := render.Scale(g.SizePt, -g.SizePt).
-		Mul(render.Translate(g.XPt, g.YPt)).
-		Mul(mat)
+	m := render.Scale(g.SizePt, -g.SizePt)
+	// text-orientation rotates the glyph about its OWN origin, which is why this sits
+	// between the em scale and the translate to page position: at this point the origin
+	// is still (0,0). Rotating after the translate would swing the glyph around the
+	// page origin instead — visually dramatic, and the easy mistake to make here.
+	//
+	// The angle composes here UNNEGATED, which is worth stating because the em scale it
+	// sits inside carries a -1 Y flip and that invites a compensating negation. Measured
+	// through the composed matrix: at +90 degrees the em-space advance direction (1,0)
+	// maps to page (0,+1) — straight DOWN, which is what a vertical line needs. Negating
+	// sends it up the page instead.
+	//
+	// Guarded rather than composed unconditionally so an unrotated glyph — every glyph
+	// in every horizontal document — takes the exact matrix it did before this existed.
+	if g.Rotate != 0 {
+		m = m.Mul(render.Rotate(g.Rotate))
+	}
+	m = m.Mul(render.Translate(g.XPt, g.YPt)).Mul(mat)
 	// A colour glyph (COLR/CPAL) paints as a stack of coloured outlines rather than one
 	// filled path. Expanding it HERE rather than in the item stream means every backend
 	// — raster, PDF, anything reading layout.Item — gets colour emoji without changing

@@ -1215,6 +1215,49 @@ func TestWritingModeInherits(t *testing.T) {
 	}
 }
 
+func TestTextOrientationParse(t *testing.T) {
+	for _, tc := range []struct{ decl, want string }{
+		{"mixed", "mixed"},
+		{"upright", "upright"},
+		{"sideways", "sideways"},
+		// sideways-right is the CSS Writing Modes 3 spelling of sideways, kept for the
+		// same reason writing-mode keeps the SVG 1.1 spellings: stylesheets use it.
+		{"sideways-right", "sideways"},
+		// Garbage drops, leaving the initial value.
+		{"bogus", "mixed"},
+		// use-glyph-orientation is a deprecated SVG-compat value with no defined
+		// behaviour for CSS content. Dropped rather than guessed at.
+		{"use-glyph-orientation", "mixed"},
+	} {
+		sheet := Parse("p { text-orientation: " + tc.decl + "; }")
+		r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+		if cs := r.ComputeRoot(&fakeNode{tag: "p"}); cs.TextOrientation != tc.want {
+			t.Errorf("text-orientation: %s => %q, want %q", tc.decl, cs.TextOrientation, tc.want)
+		}
+	}
+}
+
+// text-orientation is INHERITED (CSS Writing Modes 4 §5.1) — the same inheritFrom trap
+// writing-mode documents, where omitting the field silently resets to initial instead of
+// inheriting, without failing to compile or logging.
+//
+// It matters more here than the symmetry suggests: the property is a no-op in a
+// HORIZONTAL writing mode, so a value declared on a horizontal ancestor has no visible
+// effect there and only shows up on a vertical descendant. Break the inheritance and the
+// declaration appears to do nothing at all, with nothing to point at.
+func TestTextOrientationInherits(t *testing.T) {
+	r := NewResolver([]OriginSheet{{Sheet: Parse(`div { text-orientation: upright; }`), Origin: OriginAuthor}}, nil)
+	parent := &fakeNode{tag: "div"}
+	child := &fakeNode{tag: "span", parent: parent}
+	ps := r.ComputeRoot(parent)
+	if ps.TextOrientation != "upright" {
+		t.Fatalf("parent text-orientation = %q, want upright", ps.TextOrientation)
+	}
+	if cs := r.Compute(child, ps); cs.TextOrientation != "upright" {
+		t.Errorf("child text-orientation = %q, want inherited upright", cs.TextOrientation)
+	}
+}
+
 func TestFlexFlowShorthand(t *testing.T) {
 	// flex-flow sets flex-direction + flex-wrap in either order; an omitted component
 	// resets to its initial value per the shorthand rules.

@@ -1258,3 +1258,52 @@ a.seen:visited { color: #6a9a3a; }
   text-align: center;
   line-height: 64px;
 }
+
+/* §43: vertical writing modes. The label carries no positioning of its own — its box
+   grows downward from the writing-mode alone, which is the point being shown. */
+.wmrow { display: flex; }
+.wmlabel {
+  writing-mode: vertical-rl;
+  font-size: 22px;
+  letter-spacing: 1px;
+  background: #9b3d2e;
+  color: #f7f2e4;
+  padding: 8px 6px;
+  margin-right: 14px;
+}
+.wmbody { flex: 1; }
+/* Both cells are the SAME width, so the horizontal one visibly overflows and the
+   vertical one does not. The dashed outline marks the box each was given. */
+.wmcmp { margin: 12px 0; }
+.wmcell {
+  display: inline-block;
+  vertical-align: top;
+  margin-right: 34px;
+  text-align: center;
+}
+.wmh, .wmv {
+  width: 40px;
+  font-size: 24px;
+  border: 1px dashed #c9c2b0;
+  color: #3a4a5a;
+}
+.wmv { writing-mode: vertical-rl; }
+/* text-orientation demo cells. Block-level (not inline-block) so they are sized by the
+   containing block rather than the intrinsic measure, which still runs on the horizontal
+   axis for a vertical box. */
+.wmo {
+  writing-mode: vertical-rl;
+  width: 44px;
+  height: 130px;
+  font-size: 24px;
+  border: 1px dashed #c9c2b0;
+  color: #3a4a5a;
+}
+.wmo-up { text-orientation: upright; }
+.wmo-side { text-orientation: sideways; }
+.wmtag {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+  color: #8a8375;
+}

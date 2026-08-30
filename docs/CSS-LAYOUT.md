@@ -51,19 +51,47 @@ gracefully.
   block centering; deferred margin-collapse edge cases (empty-block collapse-through, clearance,
   `min-height` interaction).
 
-- **Vertical writing modes** — `writing-mode: vertical-rl|vertical-lr` is parsed, inherited and
-  reported (warn-once), but lays out horizontally; `text-orientation` is not parsed at all. The
-  inline layer states the horizontal axis in its API (`Place(align, originX, availWidth, widthPt,
-  …)`, `VisibleWidth`), so vertical text needs those inputs reinterpreted as block/inline extents —
-  either by renaming to logical terms or by transposing at the `pkg/layout/css/inline.go` boundary.
-  **The commonly cited blocker no longer applies:** `vhea`/`vmtx` metrics ARE reachable —
-  `textlayout` exposes `VerticalAdvance` on the `fonts.FontMetrics` interface `pkg/font` already
-  consumes, and synthesizes a one-em advance for faces without a `vhea` table (measured: every
-  bundled Latin face reports `v-adv = -1000`, note the negative Y-down convention). The remaining
-  cost is layout, not fonts. The display list is already glyph-granular (`GlyphKind` carries a
-  per-glyph `XPt, YPt`, and paint composes one matrix per glyph), so glyph rotation for
-  `text-orientation: mixed` needs no new plumbing. Out of scope even when this lands: vertical
-  alternate glyph forms (`vert`/`vrt2` GSUB) and `text-combine-upright`.
+- **Vertical writing modes — remaining work.** A single vertical line ships, with
+  `text-orientation` deciding which way each glyph faces (see FEATURES.md). What is left is mostly
+  what needs more than one line, plus two sizing seams:
+
+  - **Vertical line wrapping**, and with it `vertical-lr`. A run longer than the block extent
+    currently overflows and logs. Wrapping needs a break loop against the block extent (the breaker
+    itself is axis-neutral — it takes a scalar limit — so this is placement, not breaking), and once
+    there are multiple lines they must stack: right-to-left for `vertical-rl`, left-to-right for
+    `vertical-lr`, which is the only difference between the two values.
+  - **The `Vertical_Orientation` table (UAX #50).** `text-orientation: mixed` decides upright-vs-
+    rotated per glyph from this Unicode property, and neither the standard library nor `textlayout`
+    ships it, so the check approximates it from script tables plus the CJK punctuation and
+    full-width blocks. Vendoring the real table is the correct fix — check `DEPENDENCIES.md` first,
+    and note the approximation deliberately errs toward rotating, so the failure mode of the gap is
+    visible rather than silent.
+  - **Shrink-to-fit sizing on the block axis.** An inline-block, float, or auto-width absolute box in
+    a vertical mode is sized by `measureMaxContent`/`measureMinContent`, which shape the content and
+    break it at a *width* — so the box comes out as wide as its text is long instead of about one em.
+    Measured: an inline-block holding "ABCDEF" at 20px is 78.9pt wide. It logs. Transposing means
+    turning `measureContent`, which table, grid, flex and inline-block sizing all share, so it wants
+    its own change with its own tests rather than riding along on a feature branch. Block-level
+    vertical boxes do not go through it and are correct today.
+  - **Atomic inline boxes, hard breaks, and decorations** in a vertical line: each is skipped with a
+    log today. Decorations need span geometry computed on the block axis — `appendDecoRules` and
+    `appendInlineBoxDecorations` build X ranges throughout.
+  - **Float avoidance.** The vertical path places its baseline in the middle of the full content box
+    and does not consult the float context, so a vertical line beside a float overlaps it. This is
+    the one gap that paints WRONG ink rather than omitting it, so it logs. Fixing it means insetting
+    the baseline against `leftEdge`/`rightEdge` — cheap for one line, and properly solved by the same
+    band query wrapping needs.
+  - **Alignment and justification** along the vertical axis: `Place` is pure scalar arithmetic and
+    would transpose cleanly, but nothing calls it on the vertical path yet.
+
+  The vertical path deliberately does NOT reuse the horizontal loop's float-band, alignment and
+  indent machinery — each is stated in X, and threading an axis flag through it was rejected in
+  favour of transposing at the `layoutInline` boundary, which keeps every horizontal document on its
+  existing path. If wrapping lands, revisit that call: the duplication is cheap for one line and
+  would stop being so.
+
+  Out of scope regardless: vertical alternate glyph forms (`vert`/`vrt2` GSUB) and
+  `text-combine-upright`.
 
 - **Web-font descriptors** — synthetic bold/oblique, `unicode-range` subsetting, `font-display`,
   variable-font axes, `local()` beyond the disk adapter; a content-addressed fetch cache (FaceCache

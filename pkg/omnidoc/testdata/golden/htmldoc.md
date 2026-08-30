@@ -1151,3 +1151,55 @@ The trap: an _anonymous_ box carries a zero‑value style, and a zero matrix is 
 #### What is refused
 
 The 3D functions — `translate3d`, `rotateX`, `perspective`, `matrix3d` — are rejected rather than flattened. This engine has no 3D pipeline, and dropping the Z terms would paint something confidently wrong; a refused declaration drops and the previous value stands, which is at least visible. `transform-origin` is not yet settable — the centre is used unconditionally.
+
+**43 / WRITING MODES**
+
+## `writing-mode`: vertical text
+
+A vertical writing mode turns the baseline through a right angle: the pen walks _down_ the page and lines stack across it. The property reached the cascade but nothing honoured it, so a sidebar label styled `writing-mode: vertical-rl` laid itself out horizontally and overflowed the narrow box it was given.
+
+### A vertical label beside horizontal text
+
+NOW
+
+The label to the left is a single `div` with `writing-mode: vertical-rl` and no other positioning. Its box grows _downward_ to fit the text's own extent, the way a horizontal box grows sideways — which is what makes it size itself correctly instead of spilling out of a fixed width.
+
+Look for: the letters stacked _evenly_. The vertical advance comes from the font's vertical metric — one em — not from each letter's width. Advancing by width instead spaces an `N` and a `W` differently, which reads as plausible-but-wrong text rather than as a bug, and is precisely how the first implementation of this passed its own test.
+
+### The same string, both modes
+
+NOW
+
+horizontal‑tb
+
+NOW
+
+vertical‑rl
+
+Both boxes are 40 px wide. The horizontal one overflows its width; the vertical one turns the run down the page and takes the height it needs. That difference — a box that _grows along the text's own axis_ — is the whole of what turning the line vertical delivers; which way each glyph _faces_ within it is the next question.
+
+### `text-orientation`: which way each glyph faces
+
+A vertical line has to decide, per glyph, whether it stands upright or lies on its side. `mixed` — the initial value — keeps upright scripts upright and turns everything else a quarter turn, which is how CJK text sets with Latin embedded in it. `upright` stands every glyph up; `sideways` turns every glyph, including the ones `mixed` would leave alone.
+
+Wax
+
+mixed (initial)
+
+Wax
+
+upright
+
+Wax
+
+sideways
+
+Look for: `mixed` and `sideways` agree here, because Latin rotates under both — the two differ only on the scripts `mixed` keeps upright. Note also that the `upright` run is _taller_: an upright glyph advances a full em regardless of how wide the letter is, while a rotated one advances by its own width.
+
+The case that actually separates `mixed` from `sideways` — a Han character standing upright beside recumbent Latin — **cannot be shown here**: no bundled face covers CJK, so it would render as a row of empty boxes and demonstrate nothing. It is covered by unit tests against the classifier instead, which is the honest place for a claim the page cannot make visually.
+
+Which glyphs stay upright is Unicode's `Vertical_Orientation` property (UAX #50). Neither the standard library nor this engine's font dependency ships that table, so the check here approximates it from the script tables plus the CJK punctuation and full‑width blocks — and errs toward _rotating_, because a wrongly‑rotated glyph looks obviously wrong while a wrongly‑upright one just looks like `upright` was intended.
+
+#### What is not implemented
+
+One line only. There is no vertical line _wrapping_: a run longer than the block extent overflows and logs, rather than starting a second line beside the first. `vertical-lr` is accepted and lays out identically to `vertical-rl` — the two differ only in which side subsequent lines stack from, and there are none — so it logs rather than quietly equating them. A _shrink‑to‑fit_ vertical box (inline‑block, float) is still measured on the horizontal axis, so it comes out as wide as its text is long; transposing that means turning the intrinsic‑measure seam that table, grid and flex sizing all share, so it logs instead. Text decoration and inline‑box backgrounds are skipped on a vertical line: every span the painter computes is an X range, and drawing them anyway would rule a line across the page instead of beside the text. Vertical alternate glyph forms (the `vert`/ `vrt2` font features) are out of scope — a rotated glyph is the rotated Latin form, not a purpose‑designed vertical one.

@@ -469,19 +469,64 @@ bullet's design rationale is in its PR:
   expressible, and hint rank is equivalent. `bdi`/`bdo` isolation. `effectiveDirection` — an
   anonymous box's Style is zero-valued, so `Direction` is `""` not `"ltr"`; never read the field
   directly. And the RTL text-indent edge. `dir=auto` degrades + logs.
-- **`writing-mode` parsed + reported** (`pkg/css/cascade.go`, `pkg/layout/css/block.go`):
-  `horizontal-tb` (the initial value) is honoured; `vertical-rl`/`vertical-lr` are parsed, carried,
-  and **degrade with a warn-once log** — they lay out horizontally, because the inline layer
-  advances a pen along X and vertical text needs a vertical advance model. The deprecated SVG 1.1
-  spellings (`lr`, `lr-tb`, `rl`, `rl-tb`) resolve to `horizontal-tb`, matching the SVG path;
-  `sideways-rl`/`sideways-lr` are dropped rather than folded into a vertical value, so the log
-  never misstates what was asked for. Inherited (CSS Writing Modes 4 §3.1) — pinned by a test,
-  since `inheritFrom` silently resets an unregistered field instead of inheriting it. This
-  property previously did not reach the cascade AT ALL: the declaration was dropped before
-  computation, so an author got a correct stylesheet, a wrong page, and no diagnostic anywhere.
-  Layout is deliberately unchanged; a test pins vertical boxes to horizontal dimensions so the
-  degradation stays honest rather than half-applied. **Vertical layout itself is not implemented**
-  — see `docs/CSS-LAYOUT.md`.
+- **`writing-mode`: vertical text, single line** (`pkg/css/cascade.go`,
+  `pkg/layout/css/inline.go`, `pkg/layout/css/fragment.go`): `horizontal-tb` (the initial value) is
+  honoured; `vertical-rl` **lays out** — the baseline runs down the page, every glyph on a line
+  shares one X, and the pen advances along Y by the font's vertical metric. An auto-sized box grows
+  along the text's own axis, so a vertical label sizes itself instead of overflowing. The deprecated
+  SVG 1.1 spellings (`lr`, `lr-tb`, `rl`, `rl-tb`) resolve to `horizontal-tb`, matching the SVG path;
+  `sideways-rl`/`sideways-lr` are dropped rather than folded into a vertical value. Inherited
+  (CSS Writing Modes 4 §3.1) — pinned by a test, since `inheritFrom` silently resets an unregistered
+  field instead of inheriting it. Shown in `testdata/htmldoc/` §43.
+
+  Implemented by transposing at the `layoutInline` boundary: shaping is shared (it is
+  axis-independent), and a separate emit path walks the pen down. Horizontal documents take the
+  identical path they did before — pinned by a test, and by the whole golden corpus rendering
+  unchanged. `LineFragment.Vertical` marks the line; `GlyphFragment.Y` carries the per-glyph offset
+  and is zero on every horizontal line, so existing whole-line Y shifts (block stacking, table rows,
+  pagination) keep working untouched.
+
+  **Not implemented, each logged:** vertical line *wrapping* (one line only — a longer run overflows
+  and says so); `vertical-lr`'s stacking direction (it lays out as `vertical-rl` and logs, since the
+  two differ only in which side subsequent lines stack from and there is one line); atomic inline
+  boxes; hard line breaks; **float avoidance** — a vertical line beside a float is drawn straight
+  *through* it, the one gap here that produces overlapping ink rather than missing ink, so it is
+  logged rather than left to be discovered; **shrink-to-fit sizing** — an inline-block or float in a
+  vertical mode is still measured on the horizontal axis, so its cross size comes out as long as its
+  text (transposing that means turning the intrinsic-measure seam table/grid/flex sizing all share);
+  and text-decoration and inline-box backgrounds, skipped because every span the painter computes is
+  an X range and drawing them would rule a line across the page instead of beside the text.
+- **`text-orientation`** (`pkg/css/cascade.go`, `pkg/layout/css/inline.go`,
+  `pkg/layout/paint/paint.go`): `mixed` (the initial value) | `upright` | `sideways`, plus the CSS
+  Writing Modes 3 alias `sideways-right`. Decides, per glyph, whether it stands upright in a vertical
+  line or lies on its side. Inherited (§5.1) and a no-op in a horizontal writing mode, per spec — but
+  parsed and carried there anyway, since a value set on a horizontal ancestor must still reach a
+  vertical descendant. Shown in `testdata/htmldoc/` §43.
+
+  The rotation composes into the **per-glyph matrix paint already builds** (`layout.GlyphItem.Rotate`,
+  applied inside `paintGlyph`), not a `TransformPush`/`Pop` bracket around the run: the turn is about
+  each glyph's own origin, so a shared bracket would need a per-glyph translation anyway and would not
+  amortize, while costing two display-list items and a recursive paint call per push — on the hottest
+  path in painting, under the *initial* value. Zero rotation is skipped rather than multiplied
+  through, so every glyph emitted before this existed paints byte-identically.
+
+  A rotated glyph advances the pen by its **horizontal** extent, since it is lying on its side; an
+  upright one advances a full em. That is what makes `sideways` proportional and `upright`
+  fixed-pitch, and asserting it is what distinguishes real orientation from a rotation that merely
+  looks right.
+
+  **Which glyphs stay upright under `mixed` approximates Unicode's `Vertical_Orientation`
+  (UAX #50)** — neither the standard library nor `textlayout` ships that table. The check covers the
+  scripts a vertical line is actually set in (Han, Hiragana, Katakana, Hangul, Bopomofo, Yi) plus the
+  CJK punctuation and full-width blocks stdlib's script tables exclude, and **errs toward rotating**:
+  a wrongly-rotated glyph is visibly odd, while a wrongly-upright one silently looks like `upright`
+  was intended. Vendoring the real table is the correct fix and is recorded as outstanding.
+
+  **Not implemented:** vertical alternate glyph forms (the `vert`/`vrt2` GSUB features) — a rotated
+  glyph is the rotated Latin form, not a purpose-designed vertical one. `text-combine-upright` is out
+  of scope. The `mixed` upright case **cannot be shown in the visual showcase**: no bundled face
+  covers CJK, so it would render as empty boxes; the showcase says so and the case is covered by unit
+  tests against the classifier instead.
 - **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
   slice 2 of 5, retiring **all three** "laying out LTR" logs. Tables mirror their solved column
   x-offsets, and `buildCollapsedBorders` flips its index→physical-side mapping — without that flip,
@@ -514,15 +559,23 @@ bullet's design rationale is in its PR:
   — the underlying library returns a negative one (it negates for a Y-down convention, so a
   1000-upem face reports -1000), and the flip happens once at the adapter so no caller carries the
   convention. A caller taking the raw sign would run the pen backwards up the page with nothing to
-  catch it, so a test pins it. Three outcomes are kept distinct rather than collapsed: a face with a
-  real `vhea` reports its authored values; a TrueType face WITHOUT `vmtx` still returns a usable
-  advance (upstream synthesizes one em — the correct fallback, and what browsers do) but
-  `VMetrics` reports `ok=false` so a synthesized metric is never presented as authored; Type1 and
-  bare CFF report `ok=false` for both, because the formats have no vertical metrics at all. Both
-  branches are covered by bundled faces (Inconsolata `.ttf`, TeX Gyre Heros `.pfb`). `FontVExtents`
-  panics on inconsistent tables exactly as `FontHExtents` does, so it carries the same `recover`.
-  This retires the "needs `vhea`/`vmtx` reading `pkg/font` does not have" blocker cited for vertical
-  text; what remains is layout. **Nothing consumes these yet** — vertical layout is not implemented.
+  catch it, so a test pins it. **`GlyphVAdvance` answers for every face:** where the font states no
+  vertical advance — a TrueType face without `vmtx`, or a format carrying none at all like Type1 and
+  bare CFF — one em is synthesized, which is the correct fallback and what browsers do. `VMetrics`
+  keeps the distinction that matters, reporting `ok=false` unless the face genuinely carries `vhea`,
+  so a synthesized metric is never presented as authored. Covered across bundled faces (Inconsolata
+  `.ttf`, TeX Gyre Heros `.pfb`) and asserted for every generic family. `FontVExtents` panics on
+  inconsistent tables exactly as `FontHExtents` does, so it carries the same `recover`. This retires
+  the "needs `vhea`/`vmtx` reading `pkg/font` does not have" blocker long cited for vertical text.
+
+  The advance originally returned `ok=false` for Type1 and bare CFF, on the reasoning that the format
+  "cannot answer". That read as principled and was wrong in practice: **the bundled `sans-serif` and
+  `serif` faces are Type1**, so the default text path — what nearly all HTML renders with — got no
+  vertical advance at all, and the only covered format was `monospace`. The synthesis belongs here,
+  where the em size is known, rather than in each caller. Found by measuring the laid-out glyph
+  advances when vertical layout first consumed this API; the original tests passed throughout,
+  because they exercised the TrueType face and treated Type1 as the marginal case rather than the
+  common one.
 - **`.notdef` for unmappable runes** (`pkg/font/notdef.go`, `pkg/layout/inline/shape.go`): a rune that
   neither the run's family nor any script fallback can map now draws the tofu box instead of rendering
   as NOTHING. `Face.NotdefGlyph` follows the browser order. It takes the font's own glyph 0 when that
@@ -1325,8 +1378,10 @@ read+write vocabulary for the tinycld text adoption path):
   outlines, not selectable or searchable text.**
 - Known scope limits of SVG text, each degrading with a log. **`<textPath>`** renders its text on a
   straight baseline, since arc-length parameterization of a `render.Path` is a subsystem of its own.
-  **`writing-mode`** renders horizontally, since the layout path has no vertical advance model; the
-  metrics themselves now ship — see "Vertical font metrics". **`<tref>` is dropped, not deferred** —
+  **`writing-mode`** renders horizontally: SVG's own text layout is a separate path from the CSS
+  inline layer, so the vertical line layout that ships for HTML does not reach it. The metrics and
+  the CSS-side model both exist now — see "Vertical font metrics" and "`writing-mode`: vertical
+  text" — so what remains here is wiring SVG's `<text>` placement to them, not new machinery. **`<tref>` is dropped, not deferred** —
   SVG 2 removed it and no current browser implements it. A ligature or cursive join spanning a
   `<tspan>` boundary does not form, since the two sides reach the shaper as separate runs. An
   `objectBoundingBox` paint server on text resolves against an approximated box, because a text
