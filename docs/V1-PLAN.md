@@ -86,14 +86,45 @@ for this class.
 Note the audit reported `nan` as hanging too; it does not — NaN degrades safely.
 Fix the parse anyway: accepting NaN as a valid CSS number is wrong regardless.
 
-### 0c. Unbounded counts from attributes — audit-reported, reproduce first
+### 0c. Unbounded counts from attributes — **DONE**
 
-Each takes a small integer straight from markup with no cap:
+Each took a small integer straight from markup with no cap. **All four reproduced**
+(the audit was right here), each hanging `OpenHTMLBytes` indefinitely:
 
-- `<td colspan="900000000">` and `rowspan` — `pkg/layout/css/table.go`. HTML itself
-  caps these at 1000 and 65534; we do not.
-- `grid-row: 1 / 500000000` — `pkg/layout/css/grid_place.go`.
-- `grid-template-columns: repeat(200000000, 1px)` — `pkg/css/grid_value.go`.
+- `<td colspan="900000000">` and `rowspan` — HTML caps these at 1000 and 65534.
+- `grid-row: 1 / 500000000`.
+- `grid-template-columns: repeat(200000000, 1px)`.
+
+**Verification changed three things.**
+
+*The parse site was not where the plan said.* `colspan`/`rowspan` are read by
+`attrSpan` in `pkg/layout/css/build.go`, not `table.go`. All three attributes
+(`colspan`, `rowspan`, `<col span>`) flow through that one function, so a single
+clamp fixes them — and its doc comment already cited HTML's clamping rule while
+implementing only the lower half of it.
+
+*Clamping the attribute is not sufficient.* The ceiling bounds one cell, but the
+cost is per cell: 50 cells at the clamped maximum (1000 × 65534) still took **64
+seconds**. The reason is that `buildGrid`'s `ensure` grows the grid to whatever a
+span demands, so a `rowspan` fabricates rows the document does not have. Clipping
+`rowspan` to `len(visualRows)` — which CSS 2.1 17.5.1 requires anyway — is what
+actually bounds it. That case is now 0.01s.
+
+*Two of these terminate without the fix, and would pass a naive timeout test.*
+`repeat(200000000, 1px)` completes in 13.4s unclamped; the 50-cell table in 64s.
+Neither is a crash, both are denial of service. The regression test therefore
+asserts a **5-second budget** rather than mere termination — every bounded case
+finishes in under 0.1s, so that is ~2 orders of magnitude of headroom while still
+failing if a bound is removed. Verified by reverting each fix individually.
+
+Fixed by clamping in `attrSpan` (`maxColSpan`/`maxRowSpan`), clipping `rowspan` to
+the real row count in `buildGrid`, and bounding the expanded track count, explicit
+line numbers, and `span` counts against `maxGridTracks` in `pkg/css/grid_value.go`.
+The track bound is on the *expanded* count, not the repetition count, since
+`repeat(N, a b c)` yields N×3 tracks.
+
+Covered by `pkg/layout/css/unbounded_counts_test.go` (11 termination cases plus
+the attribute-clamp table) and `pkg/css/grid_bounds_test.go`.
 
 ### 0d. Stack overflows that `recover()` cannot catch — audit-reported
 

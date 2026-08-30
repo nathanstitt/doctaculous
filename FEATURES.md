@@ -121,6 +121,14 @@ bullet's design rationale is in its PR:
 - **CSS 2.1 §17 tables** (`pkg/layout/css/table.go`+`tableborder.go`+`tablefix.go`+`measure.go`):
   anonymous-table fixup, the grid model, fixed and auto column-width solving, colspan/rowspan,
   `vertical-align`, captions, `<col>`/`<colgroup>`, and both `border-collapse` models.
+- **Bounded span and track counts** (`pkg/layout/css/build.go`+`table.go`, `pkg/css/grid_value.go`):
+  the table grid and the grid occupancy map both materialize one entry per covered slot, so a count
+  named in markup is an allocation, not a description. `colspan`/`<col span>` clamp to 1000 and
+  `rowspan` to 65534 (HTML's own ceilings), a `rowspan` is additionally clipped to the rows the
+  document actually has, and an explicit track list, grid line number, or `span` count is bounded at
+  100,000 tracks. Without these a `<td colspan="900000000">` or `repeat(200000000, 1px)` did not
+  render slowly — it did not return. Clamping rather than rejecting matches HTML: an over-large span
+  means "span everything", and the grid-extent pass trims it to the real count anyway.
 - **Web fonts** (`pkg/css/fontface.go`, `pkg/font/sfnt.go`/`woff1.go`/`woff2*.go`,
   `pkg/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode including the glyf/loca transform,
   `local()` through `DiskFontProvider`, and family-fallback-list resolution.

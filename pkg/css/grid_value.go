@@ -33,6 +33,12 @@ type TrackSize struct {
 	Min, Max SizingFn
 }
 
+// maxGridTracks bounds how many tracks one explicit track list may expand to.
+// The value is arbitrary but far past any real layout: browsers apply a similar
+// ceiling (Chromium's is 10,000,000 grid lines) because the track list is
+// materialized, so the count is an allocation rather than a description.
+const maxGridTracks = 100000
+
 // repeatKind distinguishes a fixed-count repeat from the auto-repeat forms.
 type repeatKind int
 
@@ -519,7 +525,7 @@ func parseGridLine(s string) (GridLine, bool) {
 				if n < 1 {
 					n = 1
 				}
-				return GridLine{Kind: LineSpan, N: n}, true
+				return GridLine{Kind: LineSpan, N: clampGridLine(n)}, true
 			}
 			// span with no number → span 1
 			return GridLine{Kind: LineSpan, N: 1}, true
@@ -530,9 +536,24 @@ func parseGridLine(s string) (GridLine, bool) {
 		if n == 0 {
 			return GridLine{}, false // line 0 is invalid
 		}
-		return GridLine{Kind: LineNum, N: n}, true
+		return GridLine{Kind: LineNum, N: clampGridLine(n)}, true
 	}
 	return GridLine{}, false
+}
+
+// clampGridLine bounds an explicit line number (or span count) to the same
+// ceiling the track list uses. Placement materializes one occupancy entry per
+// covered cell, so `grid-row: 1 / 500000000` is 500 million map inserts before
+// anything is drawn. The sign is preserved: negative line numbers count back
+// from the end of the explicit grid.
+func clampGridLine(n int) int {
+	if n > maxGridTracks {
+		return maxGridTracks
+	}
+	if n < -maxGridTracks {
+		return -maxGridTracks
+	}
+	return n
 }
 
 // splitSlashParts splits s on `/` tokens and returns the raw substrings.
@@ -703,6 +724,19 @@ func parseRepeat(tz *tokenizer) (repeatRun, bool) {
 	}
 	if len(inner) == 0 {
 		return repeatRun{}, false
+	}
+	// Bound the EXPANDED track count, not the repetition count: repeat(N, a b c)
+	// yields N*3 tracks, and every one of them becomes a real TrackSize that the
+	// sizing algorithm walks. repeat(200000000, 1px) is not a layout anyone can
+	// see -- it is an allocation. Clamping the repetitions (rather than dropping
+	// the declaration) keeps the leading tracks a document might actually use.
+	if rk == repeatFixed {
+		if maxReps := maxGridTracks / len(inner); count > maxReps {
+			count = maxReps
+		}
+		if count < 1 {
+			count = 1
+		}
 	}
 	return repeatRun{kind: rk, count: count, inner: inner}, true
 }
