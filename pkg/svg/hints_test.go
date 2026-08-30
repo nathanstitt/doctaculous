@@ -72,6 +72,7 @@ func TestSVGPresentationHintsSyncedWithStyleApply(t *testing.T) {
 		"kerning":            "0",
 		"font-kerning":       "none",
 		"writing-mode":       "vertical-rl",
+		"text-orientation":   "upright",
 		"text-anchor":        "middle",
 		"direction":          "rtl",
 		"unicode-bidi":       "bidi-override",

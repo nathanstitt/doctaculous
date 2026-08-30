@@ -1169,6 +1169,12 @@ vertical‑rl
 
 Both boxes are 40 px wide. The horizontal one overflows its width; the vertical one turns the run down the page and takes the height it needs. That difference — a box that grows along the text's own axis — is the whole of what turning the line vertical delivers; which way each glyph faces within it is the next question.
 
+The same properties in SVG
+
+SVG places <text> itself rather than through the CSS inline layer, so it inherited none of the above for free — it laid every vertical value out horizontally and said so. It now shares the orientation classifier and the vertical advance, so the two paths agree by construction rather than by two implementations happening to match.
+
+Look for: the underlined run. Its rule turns with the glyphs rather than staying axis‑aligned, because the decoration rect is built in the segment's own unrotated frame and carried through the same matrix the glyph is. SVG 1.1's tb and tb-rl spellings resolve onto vertical-rl, and text-anchor aligns a vertical chunk along its axis — down the page, not across it.
+
 text-orientation: which way each glyph faces
 
 A vertical line has to decide, per glyph, whether it stands upright or lies on its side. mixed — the initial value — keeps upright scripts upright and turns everything else a quarter turn, which is how CJK text sets with Latin embedded in it. upright stands every glyph up; sideways turns every glyph, including the ones mixed would leave alone.

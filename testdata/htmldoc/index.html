@@ -1883,6 +1883,29 @@ newline is kept.</p>
       is the whole of what turning the line vertical delivers; which way each glyph
       <em>faces</em> within it is the next question.</p>
 
+    <h3>The same properties in SVG</h3>
+    <p class="caption">SVG places <code>&lt;text&gt;</code> itself rather than through the
+      CSS inline layer, so it inherited none of the above for free &mdash; it laid every
+      vertical value out horizontally and said so. It now shares the orientation
+      classifier and the vertical advance, so the two paths agree by construction rather
+      than by two implementations happening to match.</p>
+    <svg width="360" height="150" viewBox="0 0 360 150" font-size="20">
+      <text x="30" y="24" writing-mode="vertical-rl">Wax</text>
+      <text x="100" y="24" writing-mode="vertical-rl" text-orientation="upright">Wax</text>
+      <text x="170" y="24" writing-mode="vertical-rl" text-decoration="underline">Wax</text>
+      <text x="250" y="24" writing-mode="vertical-rl" text-orientation="upright" fill="#9b3d2e">&#9679;&#9679;&#9679;</text>
+      <text x="30" y="140" font-size="10" fill="#8a8375">mixed</text>
+      <text x="96" y="140" font-size="10" fill="#8a8375">upright</text>
+      <text x="160" y="140" font-size="10" fill="#8a8375">underlined</text>
+      <text x="240" y="140" font-size="10" fill="#8a8375">fill</text>
+    </svg>
+    <p class="caption">Look for: the underlined run. Its rule turns with the glyphs rather
+      than staying axis&#8209;aligned, because the decoration rect is built in the
+      segment's own unrotated frame and carried through the same matrix the glyph is.
+      SVG&nbsp;1.1's <code>tb</code> and <code>tb-rl</code> spellings resolve onto
+      <code>vertical-rl</code>, and <code>text-anchor</code> aligns a vertical chunk along
+      <em>its</em> axis &mdash; down the page, not across it.</p>
+
     <h3><code>text-orientation</code>: which way each glyph faces</h3>
     <p class="caption">A vertical line has to decide, per glyph, whether it stands upright
       or lies on its side. <code>mixed</code> &mdash; the initial value &mdash; keeps

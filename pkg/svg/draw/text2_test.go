@@ -886,12 +886,13 @@ func TestFontShorthandResetClearsStaleDegradationFlags(t *testing.T) {
 	}
 }
 
-// TestWritingModeDegradesWithADiagnostic pins the claim FEATURES.md makes:
-// writing-mode is listed among the scope limits that degrade WITH a log, so a
-// vertical value must actually produce one rather than being silently ignored.
-// Vertical text needs vhea/vmtx metrics the engine does not parse, so the text
-// still lays out horizontally — but the user has to be told.
-func TestWritingModeDegradesWithADiagnostic(t *testing.T) {
+// writing-mode resolves to one vocabulary the renderer can switch on, and a vertical
+// value is now HONORED rather than degraded — so none of them may log.
+//
+// This replaces a test asserting the opposite (every vertical value flagged as ignored,
+// with a diagnostic), which was correct while the engine had no vertical advance model
+// and is exactly what this change retires.
+func TestWritingModeResolves(t *testing.T) {
 	styleOf := func(src string) (svg.Style, []string) {
 		t.Helper()
 		doc, logs := parseSVG(t, src)
@@ -902,28 +903,111 @@ func TestWritingModeDegradesWithADiagnostic(t *testing.T) {
 		return txt.Chars[0].Style, logs
 	}
 
-	for _, mode := range []string{"tb", "tb-rl", "vertical-rl", "vertical-lr"} {
+	for _, tc := range []struct{ mode, want string }{
+		// SVG 1.1's tb/tb-rl are top-to-bottom with lines stacking right-to-left,
+		// which is exactly vertical-rl; they normalize onto it so the renderer has
+		// one set of strings to branch on.
+		{"tb", "vertical-rl"},
+		{"tb-rl", "vertical-rl"},
+		{"vertical-rl", "vertical-rl"},
+		{"vertical-lr", "vertical-lr"},
+		// Horizontal: the initial value plus the deprecated SVG 1.1 spellings.
+		{"horizontal-tb", ""},
+		{"lr", ""},
+		{"lr-tb", ""},
+		{"rl", ""},
+		{"rl-tb", ""},
+	} {
 		st, logs := styleOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
-		  ><text x="10" y="100" writing-mode="` + mode + `">Text</text></svg>`)
-		if !st.WritingModeIgnored() {
-			t.Errorf("writing-mode=%q was honored or dropped silently; want it flagged as degraded", mode)
+		  ><text x="10" y="100" writing-mode="` + tc.mode + `">Text</text></svg>`)
+		if got := st.WritingMode(); got != tc.want {
+			t.Errorf("writing-mode=%q resolved to %q, want %q", tc.mode, got, tc.want)
+		}
+		if want := tc.want != ""; st.Vertical() != want {
+			t.Errorf("writing-mode=%q: Vertical() = %v, want %v", tc.mode, st.Vertical(), want)
+		}
+		// Nothing here is a degradation any more, so nothing may log — a stale
+		// diagnostic that contradicts the rendering is its own bug.
+		if anyContains(logs, "writing-mode") {
+			t.Errorf("writing-mode=%q logged despite being supported; logs = %v", tc.mode, logs)
+		}
+	}
+}
+
+// sideways-rl/sideways-lr are real CSS values but distinct modes this engine does not
+// model. They must be REPORTED rather than folded into vertical-rl: quietly treating
+// them as a mode the author did not ask for is the failure this project's rules exist
+// to prevent.
+func TestUnmodelledWritingModeIsReported(t *testing.T) {
+	for _, mode := range []string{"sideways-rl", "sideways-lr", "bogus"} {
+		doc, logs := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+		  ><text x="10" y="100" writing-mode="`+mode+`">Text</text></svg>`)
+		txt := firstText(t, doc)
+		if len(txt.Chars) == 0 {
+			t.Fatal("no characters lowered")
+		}
+		if st := txt.Chars[0].Style; st.Vertical() {
+			t.Errorf("writing-mode=%q was treated as vertical; it is a mode this engine "+
+				"does not model and must not be folded into one", mode)
 		}
 		if !anyContains(logs, "writing-mode") {
-			t.Errorf("writing-mode=%q degraded without a diagnostic; logs = %v", mode, logs)
+			t.Errorf("writing-mode=%q was dropped without a diagnostic; logs = %v", mode, logs)
+		}
+	}
+}
+
+// text-orientation resolves alongside writing-mode, with mixed as the initial value
+// (stored as "") and sideways-right as the CSS Writing Modes 3 alias of sideways.
+func TestTextOrientationResolves(t *testing.T) {
+	for _, tc := range []struct{ val, want string }{
+		{"mixed", ""},
+		{"upright", "upright"},
+		{"sideways", "sideways"},
+		{"sideways-right", "sideways"},
+	} {
+		doc, logs := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+		  ><text x="10" y="100" writing-mode="vertical-rl" text-orientation="`+tc.val+`">Text</text></svg>`)
+		txt := firstText(t, doc)
+		if len(txt.Chars) == 0 {
+			t.Fatal("no characters lowered")
+		}
+		if got := txt.Chars[0].Style.TextOrientation(); got != tc.want {
+			t.Errorf("text-orientation=%q resolved to %q, want %q", tc.val, got, tc.want)
+		}
+		if anyContains(logs, "text-orientation") {
+			t.Errorf("text-orientation=%q logged despite being supported; logs = %v", tc.val, logs)
 		}
 	}
 
-	// horizontal-tb is the initial value, and lr/rl are SVG 1.1 spellings of
-	// it — none of them is a degradation, so none may log.
-	for _, mode := range []string{"horizontal-tb", "lr", "lr-tb", "rl", "rl-tb"} {
-		st, logs := styleOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
-		  ><text x="10" y="100" writing-mode="` + mode + `">Text</text></svg>`)
-		if st.WritingModeIgnored() {
-			t.Errorf("writing-mode=%q is horizontal and must not be flagged as degraded", mode)
-		}
-		if anyContains(logs, "writing-mode") {
-			t.Errorf("writing-mode=%q is horizontal and must not log; logs = %v", mode, logs)
-		}
+	// An unrecognized value falls back to mixed AND says so.
+	doc, logs := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><text x="10" y="100" text-orientation="use-glyph-orientation">Text</text></svg>`)
+	txt := firstText(t, doc)
+	if got := txt.Chars[0].Style.TextOrientation(); got != "" {
+		t.Errorf("an unrecognized text-orientation resolved to %q, want the mixed default", got)
+	}
+	if !anyContains(logs, "text-orientation") {
+		t.Errorf("an unrecognized text-orientation was dropped without a diagnostic; logs = %v", logs)
+	}
+}
+
+// Both properties INHERIT: the SVG cascade copies the parent Style wholesale, so a
+// value on <text> must reach a <tspan> inside it. Pinned because the render path reads
+// the style at each CHARACTER, so a break here would leave a tspan laying out
+// horizontally in the middle of a vertical run.
+func TestWritingModeAndOrientationInherit(t *testing.T) {
+	doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"
+	  ><text x="10" y="100" writing-mode="vertical-rl" text-orientation="upright"><tspan>Text</tspan></text></svg>`)
+	txt := firstText(t, doc)
+	if len(txt.Chars) == 0 {
+		t.Fatal("no characters lowered")
+	}
+	st := txt.Chars[0].Style
+	if !st.Vertical() {
+		t.Error("a tspan did not inherit its text's vertical writing-mode")
+	}
+	if st.TextOrientation() != "upright" {
+		t.Errorf("tspan text-orientation = %q, want inherited upright", st.TextOrientation())
 	}
 }
 

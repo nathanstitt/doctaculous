@@ -17,15 +17,29 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   arbitrary distance along a curve, so it is a start and not a solution. Degrades to a straight
   baseline with a log.
 
-- **`writing-mode`** (25 fixtures) — degrades to horizontal with a log, in the SVG path only.
+- **`writing-mode` — remaining work.** Vertical `<text>` ships (see FEATURES.md): the pen walks
+  down the page, `text-orientation` turns each glyph, and `text-anchor`, decorations and bidi
+  reordering all follow the run's own axis. What is left:
 
-  Both reasons this used to cite are now retired. The metrics half is done
-  (`Face.GlyphVAdvance` answers for every face — see FEATURES.md), and so is the advance model:
-  **the CSS path lays out a vertical line.** SVG places `<text>` itself rather than through the CSS
-  inline layer, so it does not inherit that for free. What remains is wiring SVG's own placement to
-  the vertical advance — an adaptation of existing pieces, not the new subsystem this was originally
-  deferred as. The CSS side's own remaining work (wrapping, `text-orientation`) is in
-  `docs/CSS-LAYOUT.md`; SVG needs only the single-line case those already cover.
+  - **Four resvg fixtures are held back**, of the 23 in the upstream `text/writing-mode/` tranche:
+    `japanese-with-tb`, `tb-and-punctuation`, `mixed-languages-with-tb`, and
+    `mixed-languages-with-tb-and-underline`. Each is set in CJK, no bundled face covers it, and
+    they render as columns of `.notdef` boxes — committing those goldens would lock in tofu as
+    expected output. They land with a CJK face, if one is ever vendored (check `DEPENDENCIES.md`).
+    The other 19 are in `testdata/svg/resvg/text/writing-mode/`.
+  - **Missing glyphs do not log on the SVG text path.** Rendering the held-back fixtures produced
+    full columns of `.notdef` with zero diagnostics; `pkg/layout/inline`'s `warnMissingGlyph` fires
+    for the CSS path but the logger is evidently not threaded through here. That is its own bug and
+    is not fixed by this work.
+  - **Multi-line stacking.** One `<text>` is one vertical run, so `vertical-lr` places its run
+    identically to `vertical-rl` — the two differ only in the side subsequent lines stack from.
+    SVG 1.1's `tb`/`tb-rl` resolve onto `vertical-rl`.
+  - **`glyph-orientation-vertical`/`-horizontal`**, the deprecated SVG 1.1 spellings of what
+    `text-orientation` now does. Not parsed; a document using them gets the `mixed` default.
+  - **letter-spacing/word-spacing on an UPRIGHT vertical run.** Those are defined along the inline
+    axis, and an upright glyph's advance comes from the font's vertical metric rather than from the
+    spacing-adjusted horizontal one. A *sideways* run honours them, since it advances by the
+    adjusted horizontal extent.
 
 - **Filters not implemented** (each renders the element unfiltered with a log): `feTurbulence`,
   `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting` + light sources, `feMorphology`,
