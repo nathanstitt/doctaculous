@@ -512,8 +512,7 @@ bullet's design rationale is in its PR:
 
   A rotated glyph advances the pen by its **horizontal** extent, since it is lying on its side; an
   upright one advances a full em. That is what makes `sideways` proportional and `upright`
-  fixed-pitch, and asserting it is what distinguishes real orientation from a rotation that merely
-  looks right.
+  fixed-pitch — a `sideways` run is shorter than the `upright` one for the same string.
 
   **Which glyphs stay upright under `mixed` approximates Unicode's `Vertical_Orientation`
   (UAX #50)** — neither the standard library nor `textlayout` ships that table. The check covers the
@@ -598,21 +597,16 @@ bullet's design rationale is in its PR:
   convention. A caller taking the raw sign would run the pen backwards up the page with nothing to
   catch it, so a test pins it. **`GlyphVAdvance` answers for every face:** where the font states no
   vertical advance — a TrueType face without `vmtx`, or a format carrying none at all like Type1 and
-  bare CFF — one em is synthesized, which is the correct fallback and what browsers do. `VMetrics`
-  keeps the distinction that matters, reporting `ok=false` unless the face genuinely carries `vhea`,
-  so a synthesized metric is never presented as authored. Covered across bundled faces (Inconsolata
+  bare CFF — one em is synthesized, which is the correct fallback and what browsers do. That is the
+  COMMON path, not an edge case: **the bundled `sans-serif` and `serif` faces are Type1**, so nearly
+  every HTML page takes it and only `monospace` carries real metrics. The synthesis lives here, where
+  the em size is known, rather than in each caller — a caller improvising one would reach for the
+  glyph's horizontal advance and space a vertical line by how wide each letter is. `VMetrics` keeps
+  the distinction that matters, reporting `ok=false` unless the face genuinely carries `vhea`, so a
+  synthesized metric is never presented as authored. Covered across bundled faces (Inconsolata
   `.ttf`, TeX Gyre Heros `.pfb`) and asserted for every generic family. `FontVExtents` panics on
   inconsistent tables exactly as `FontHExtents` does, so it carries the same `recover`. This retires
   the "needs `vhea`/`vmtx` reading `pkg/font` does not have" blocker long cited for vertical text.
-
-  The advance originally returned `ok=false` for Type1 and bare CFF, on the reasoning that the format
-  "cannot answer". That read as principled and was wrong in practice: **the bundled `sans-serif` and
-  `serif` faces are Type1**, so the default text path — what nearly all HTML renders with — got no
-  vertical advance at all, and the only covered format was `monospace`. The synthesis belongs here,
-  where the em size is known, rather than in each caller. Found by measuring the laid-out glyph
-  advances when vertical layout first consumed this API; the original tests passed throughout,
-  because they exercised the TrueType face and treated Type1 as the marginal case rather than the
-  common one.
 - **`.notdef` for unmappable runes** (`pkg/font/notdef.go`, `pkg/layout/inline/shape.go`): a rune that
   neither the run's family nor any script fallback can map now draws the tofu box instead of rendering
   as NOTHING. `Face.NotdefGlyph` follows the browser order. It takes the font's own glyph 0 when that
@@ -623,9 +617,15 @@ bullet's design rationale is in its PR:
   glyph→character mapping still locates it. `Glyph.Face` is cleared so every backend fills the same
   outline: handing a text backend GID 0 would emit the font's blank `.notdef`, making the box visible
   in a raster and invisible in a PDF of the same page. **Each distinct missing rune is warned about
-  exactly once per `Shape` call**, through the `logf` the CSS engine and the SVG text path already
-  thread in. The shaper is one of the degradation sites that genuinely has a logger, so this really does
-  log rather than only claiming to. Invisible characters are excluded (`invisibleRune`): a space variant,
+  exactly once per `Shape` call**, through the `logf` the CSS engine and the SVG text path thread in.
+  On the SVG side that logger is a constructor argument (`draw.NewWithLogf`, mirroring
+  `layoutfont.NewOSFontProviderWithLogf`) rather than a field left to default, so a renderer that can
+  draw a page of tofu is never silent by accident. All three entry points carry it — standalone
+  `.svg`, inline `<svg>`, and an SVG background — each pinned end to end. The family named in the
+  message is the one actually tried: SVG appends a generic fallback to every list, and since SVG's
+  own initial family is `sans-serif`, `familyWithFallback` does not append a generic the list already
+  ends with (it still does when the generic appears earlier but not last, since only the final entry
+  makes the chain terminal). Invisible characters are excluded (`invisibleRune`): a space variant,
   format control, or variation selector draws no ink even where it IS mapped, so giving it a box would
   invent a mark the author never wrote. This repo's own showcase carries a U+202F that regressed exactly
   that way before the exclusion existed. It applies to the shared CSS/SVG text path; DOCX/PDF and any

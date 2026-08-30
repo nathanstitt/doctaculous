@@ -2,6 +2,7 @@ package draw
 
 import (
 	"math"
+	"strings"
 
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/layout/inline"
@@ -1447,10 +1448,24 @@ func (r *Renderer) shapeChars(chars []svg.TextChar) []shapedChar {
 // first, name by name, exactly as written.
 func familyWithFallback(family string) string {
 	if family == "" {
-		return "sans-serif"
+		return genericFallbackFamily
 	}
-	return family + ", sans-serif"
+	// Don't append a fallback the list already ends with. This string is not
+	// only a lookup key — the shaper quotes it verbatim in its missing-glyph
+	// diagnostic, where "sans-serif, sans-serif" reads as though two distinct
+	// families were tried and both failed. SVG's own initial font-family IS
+	// sans-serif, so an element that states none hit this on every unmappable
+	// rune, in exactly the message meant to explain the tofu.
+	if family == genericFallbackFamily || strings.HasSuffix(family, ", "+genericFallbackFamily) {
+		return family
+	}
+	return family + ", " + genericFallbackFamily
 }
+
+// genericFallbackFamily is the generic keyword appended to every SVG family
+// list as its last resort. It always resolves (see pkg/font/standard), which is
+// what makes the chain terminal.
+const genericFallbackFamily = "sans-serif"
 
 // mapGlyphsToChars pairs each shaped glyph with the index (in the whole
 // character list) of the source character it came from, dropping the
