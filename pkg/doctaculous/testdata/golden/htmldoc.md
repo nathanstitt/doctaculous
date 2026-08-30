@@ -1056,6 +1056,10 @@ Two auto margins centre it.
 
 A column: `margin-top` is the main axis and `margin-left` the cross one. Both apply, and the line grows to hold the item's margin box rather than letting a cross margin overflow it.
 
+#### An auto-height column grows for its children's margins
+
+The container has no stated height, so its height _is_ its content extent — and that extent has to enclose the children's margin boxes. The tinted background is the container itself: it ends below the third item, with the middle item's 40px `margin-bottom` inside it rather than spilling past. Line packing, free‑space distribution and cross sizing all counted margins already; the branch that content‑sizes a column with an indefinite main size still summed the border box, so the children were placed correctly and then overflowed the container that should have grown for them. The case above uses an explicit `height`, which takes the other branch and was always right — which is why it took an auto‑height column to show the gap.
+
 #### The block control
 
 The same `margin-top` on a _block_ child was always correct, and still is — a test pins the two to the same position. This distinction matters: the original report contrasted a flex column against a plain block whose bare `margin-top` measured zero, but that is CSS margin _collapsing_ through the body, not a bug. Only the flex case was wrong.

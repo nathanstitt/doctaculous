@@ -356,7 +356,12 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 			sum := gaps
 			for i := ln.start; i < ln.end; i++ {
 				ln.usedMain[i-ln.start] = sizings[i].hypothetical
-				sum += ln.usedMain[i-ln.start]
+				// Content-size the line by the items' OUTER main extent. usedMain stays
+				// the border-box size (it is what placement lays out), but the line —
+				// and hence an auto-height container's content height — has to enclose
+				// the margin boxes, or a trailing margin overflows the container it is
+				// supposed to have grown.
+				sum += sizings[i].outerMain(ln.usedMain[i-ln.start])
 			}
 			lineMain[li] = sum
 		} else {

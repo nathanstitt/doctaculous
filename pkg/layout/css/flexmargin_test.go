@@ -84,6 +84,79 @@ func TestFlexMarginConsumesMainSpace(t *testing.T) {
 	}
 }
 
+// flexContainerHeight lays out a flex container holding three 20px children, the middle
+// one carrying childStyle, and returns the CONTAINER's used height.
+func flexContainerHeight(t *testing.T, parentStyle, childStyle string) float64 {
+	t.Helper()
+	root := layoutWithLoader(t,
+		`<body><div id="c" style="`+parentStyle+`">`+
+			`<div style="height:20px"></div>`+
+			`<div style="height:20px;`+childStyle+`"></div>`+
+			`<div style="height:20px"></div></div></body>`,
+		400, resource.MapLoader{}, nil)
+	var container *Fragment
+	var walk func(f *Fragment)
+	walk = func(f *Fragment) {
+		if len(f.Children) == 3 && container == nil {
+			container = f
+		}
+		for _, c := range f.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	if container == nil {
+		t.Fatal("flex container fragment not found")
+	}
+	return container.H
+}
+
+// An auto-height flex column must be tall enough to contain its children's MARGIN
+// boxes. Line packing, free-space distribution, and cross sizing were all converted to
+// outer sizes when margins landed, but the indefinite-main branch that content-sizes the
+// line kept summing the border box. The margins were still applied at placement, so the
+// children were positioned correctly and simply overflowed the container that was
+// supposed to have grown for them.
+//
+// Measured before the fix: margin-bottom:40px on the middle child gave a container
+// height of 80 where CSS requires 100. margin-top happened to read as correct because
+// the leading margin shifts every subsequent child, so the overflow landed past the last
+// one rather than between them — which is why this needs both directions asserted.
+func TestFlexColumnContentHeightIncludesChildMargins(t *testing.T) {
+	const col = "display:flex;flex-direction:column"
+
+	if h := flexContainerHeight(t, col, ""); h != 60 {
+		t.Fatalf("baseline column height = %v, want 60 (3 x 20px); the fixture is wrong", h)
+	}
+	for _, tc := range []struct {
+		name, child string
+		want        float64
+	}{
+		{"leading margin", "margin-top:40px", 100},
+		{"trailing margin", "margin-bottom:40px", 100},
+		{"both margins", "margin-top:15px;margin-bottom:25px", 100},
+	} {
+		if h := flexContainerHeight(t, col, tc.child); h != tc.want {
+			t.Errorf("column with %s: height = %v, want %v", tc.name, h, tc.want)
+		}
+	}
+
+	// A CROSS-axis margin must NOT grow a column's height — it is horizontal there.
+	if h := flexContainerHeight(t, col, "margin-left:40px"); h != 60 {
+		t.Errorf("column with a cross-axis margin: height = %v, want 60 (unchanged)", h)
+	}
+}
+
+// The same content-sizing rule for a definite-height container must not change: an
+// explicit height wins over the content extent, margins or not. This is the control that
+// keeps the fix scoped to the indefinite-main branch.
+func TestFlexDefiniteHeightUnaffectedByChildMargins(t *testing.T) {
+	h := flexContainerHeight(t, "display:flex;flex-direction:column;height:60px", "margin-bottom:40px")
+	if h != 60 {
+		t.Errorf("explicit height:60px with a child margin = %v, want 60", h)
+	}
+}
+
 // `gap` still works and does not double-count with margins — it worked before this
 // change and must not regress.
 func TestFlexGapStillWorks(t *testing.T) {
