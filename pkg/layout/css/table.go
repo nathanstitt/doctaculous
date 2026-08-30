@@ -208,6 +208,15 @@ func buildGrid(tbl *cssbox.Box) *tableGrid {
 			if rs < 1 {
 				rs = 1
 			}
+			// A rowspan cannot reach past the rows the document actually has
+			// (CSS 2.1 17.5.1: it is clipped to the row group). Clipping here
+			// rather than in the extent pass below matters for cost, not just
+			// correctness: the occupancy loop calls ensure() once per covered
+			// slot, so an unclipped rowspan fabricates empty rows -- 65534 of
+			// them for a one-row table, times every cell in it.
+			if rs > len(visualRows)-ri {
+				rs = len(visualRows) - ri
+			}
 			gc := &gridCell{box: cb, row: ri, col: col, colSpan: cs, rowSpan: rs}
 			g.cells = append(g.cells, gc)
 			gr.cells = append(gr.cells, gc)

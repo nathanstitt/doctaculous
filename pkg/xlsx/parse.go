@@ -17,6 +17,15 @@ const (
 	relSharedStrings  = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
 )
 
+// Hard sheet limits from the format (XLSX is 16384 columns by 1048576 rows).
+// Anything past these is malformed input, and every parse path that sizes an
+// allocation from a reference has to bound it against them: the grid in
+// parseSheet is dense, so an out-of-range address is an out-of-range make.
+const (
+	maxSheetCols = 16384
+	maxSheetRows = 1048576
+)
+
 // parseWorkbook locates and parses the workbook and its satellite parts.
 func parseWorkbook(pkg *pkgReader) (*Workbook, error) {
 	wbPart := "xl/workbook.xml"
@@ -684,13 +693,13 @@ func parseColElement(e xml.StartElement, sheet *Sheet) {
 			}
 		}
 	}
-	if !hasWidth || minCol < 0 || maxCol < minCol {
+	if !hasWidth || minCol < 0 || maxCol < minCol || minCol >= maxSheetCols {
 		return
 	}
 	// Guard against a min..max covering the full 16384-column sheet: only the
 	// used range matters to consumers, but the map must stay bounded.
-	if maxCol-minCol > 16383 {
-		maxCol = minCol + 16383
+	if maxCol > maxSheetCols-1 {
+		maxCol = maxSheetCols - 1
 	}
 	if sheet.ColWidths == nil {
 		sheet.ColWidths = map[int]float64{}
@@ -724,18 +733,28 @@ func parsePaneElement(e xml.StartElement, sheet *Sheet) {
 }
 
 // parseRef converts an A1-style reference to zero-based (row, col); (-1, -1)
-// when malformed.
+// when malformed or outside the sheet.
+//
+// Both axes are bounded because the result sizes the dense grid in parseSheet:
+// an unbounded column loop overflows int (14 letters wraps negative, panicking
+// make with "len out of range"), and a large row number allocates until the
+// process is killed. Neither is recoverable from a caller's perspective, so a
+// reference beyond the sheet is rejected as malformed rather than clamped --
+// clamping would silently move a cell to a different address.
 func parseRef(ref string) (row, col int) {
 	i := 0
 	for i < len(ref) && ref[i] >= 'A' && ref[i] <= 'Z' {
 		col = col*26 + int(ref[i]-'A'+1)
+		if col > maxSheetCols {
+			return -1, -1
+		}
 		i++
 	}
 	if i == 0 || i == len(ref) {
 		return -1, -1
 	}
 	n, err := strconv.Atoi(ref[i:])
-	if err != nil || n < 1 {
+	if err != nil || n < 1 || n > maxSheetRows {
 		return -1, -1
 	}
 	return n - 1, col - 1

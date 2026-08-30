@@ -2,6 +2,7 @@ package css
 
 import (
 	"image/color"
+	"math"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1850,9 +1851,16 @@ func splitComma(s string) []string { return strings.Split(s, ",") }
 
 // parseNonNegNumber parses a unitless non-negative number (flex-grow/flex-shrink).
 // A negative or non-numeric value yields ok=false (the property keeps its prior value).
+//
+// Non-finite values are rejected: strconv.ParseFloat accepts "inf", "infinity",
+// and "nan", but the CSS <number> grammar has no such tokens, so they are
+// malformed input rather than large numbers. Letting them through is not merely
+// inaccurate -- an infinite flex-grow makes the free-space distribution loop in
+// layout/css never converge, hanging the layout with no context check to
+// interrupt it.
 func parseNonNegNumber(s string) (float64, bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil || v < 0 {
+	if err != nil || v < 0 || math.IsInf(v, 0) || math.IsNaN(v) {
 		return 0, false
 	}
 	return v, true

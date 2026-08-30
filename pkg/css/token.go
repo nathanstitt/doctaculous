@@ -2,6 +2,7 @@ package css
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 )
 
@@ -194,9 +195,15 @@ func (t *tokenizer) readNumeric() Token {
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // parseFloat parses a CSS number, returning 0 on malformed input (never panics).
+//
+// An out-of-range literal returns 0 rather than the ±Inf strconv reports it as.
+// readNumeric only ever hands us digits, "." and a leading "-", so "inf" cannot
+// be spelled here -- but a long enough run of digits still overflows to
+// infinity, and an infinite Token.Num poisons every downstream consumer (an
+// infinite flex-grow, for one, makes the flex free-space loop never converge).
 func parseFloat(s string) float64 {
 	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) {
 		return 0
 	}
 	return f

@@ -37,6 +37,18 @@ func TestParseRef(t *testing.T) {
 		{"12", -1, -1},
 		{"A", -1, -1},
 		{"A0", -1, -1},
+
+		// Sheet bounds. The last legal cell parses; one past it on either axis
+		// is malformed. Without these the column loop overflows int (14 letters
+		// wraps negative) and the row accepts any int64, both of which size the
+		// dense grid in parseSheet and take the process down.
+		{"XFD1", 0, 16383},
+		{"A1048576", 1048575, 0},
+		{"XFE1", -1, -1},
+		{"A1048577", -1, -1},
+		{"ZZZZZZZZZ1", -1, -1},
+		{"ZZZZZZZZZZZZZZ1", -1, -1},
+		{"A999999999999", -1, -1},
 	}
 	for _, c := range cases {
 		row, col := parseRef(c.ref)

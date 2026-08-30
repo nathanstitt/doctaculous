@@ -12,6 +12,7 @@ import (
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
 	"github.com/nathanstitt/omnidoc/pkg/pdf/extract"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 	"github.com/nathanstitt/omnidoc/pkg/render/raster"
 )
 
@@ -75,6 +76,25 @@ func (r *pdfRenderer) renderPage(ctx context.Context, index int, opts RasterOpti
 	return raster.RenderPage(ctx, pg, raster.Options{
 		DPI:          opts.dpi(),
 		Background:   opts.Background,
+		Logf:         opts.Logf,
+		FontProvider: opts.fontProvider(),
+	})
+}
+
+// paintVector interprets page index's content stream against dev, an arbitrary
+// render.Device, so a PDF can be converted to a vector format.
+//
+// The PDF content interpreter has always been backend-agnostic — it drives a
+// render.Device and never touches pixels — so this needs no new PDF machinery,
+// only the page setup that raster.RunPage already shares with the rasterizer.
+// That shared path is why a PDF rendered to SVG and the same PDF rasterized
+// cannot drift.
+func (r *pdfRenderer) paintVector(ctx context.Context, index int, dev render.Device, scale float64, opts RasterOptions) error {
+	pg, err := r.doc.Page(index)
+	if err != nil {
+		return fmt.Errorf("page %d: %w", index, err)
+	}
+	return raster.RunPage(ctx, pg, dev, scale, raster.Options{
 		Logf:         opts.Logf,
 		FontProvider: opts.fontProvider(),
 	})
