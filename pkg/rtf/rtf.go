@@ -60,6 +60,11 @@ type paraState struct {
 	listID, listLevel int
 }
 
+// maxListLevel bounds \ilvl, the list nesting depth. The RTF spec allows 0-8
+// and Word exposes nine levels; 64 is far past any real document while keeping
+// the emitter's one-tag-per-level output bounded.
+const maxListLevel = 64
+
 // listItem is one accumulated list paragraph awaiting assembly.
 type listItem struct {
 	level, id int
@@ -368,7 +373,16 @@ func (c *converter) control(tok token) {
 	case "ls":
 		t.para.listID = tok.param
 	case "ilvl":
-		t.para.listLevel = tok.param
+		// Clamped because the HTML emitter opens one <ul>/<ol> per level: an
+		// unbounded \ilvl is an unbounded write, not a deep list. Measured, a
+		// 30-byte document with \ilvl100000 produced 1.4 MB of markup (a 46,000x
+		// amplification) and \ilvl2000000000 never finished at all.
+		//
+		// The RTF spec allows levels 0-8 and Word exposes nine; the cap is set
+		// well above that so no real document is affected, while a hostile one is
+		// bounded. A level past the cap collapses to the deepest real level
+		// rather than being dropped, which is what a reader would show anyway.
+		t.para.listLevel = min(max(tok.param, 0), maxListLevel)
 
 	// Character formatting.
 	case "plain":

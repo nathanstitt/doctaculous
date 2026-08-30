@@ -194,6 +194,23 @@ func decodeRawImage(data []byte, w, h, bpc int, cs imageCS) (*image.RGBA, error)
 	if bpc != 1 && bpc != 2 && bpc != 4 && bpc != 8 && bpc != 16 {
 		return nil, fmt.Errorf("unsupported BitsPerComponent %d", bpc)
 	}
+	// w and h come from the file's /Width and /Height with only a > 0 check, so
+	// every product below is attacker-controlled and must be bounded BEFORE it is
+	// computed. The row math (w*nComps*bpc) and the short-data check (rowBytes*h)
+	// are int multiplies that wrap: at h = 2^60 the product goes negative, the
+	// "short sample data" guard passes, and image.NewRGBA is reached with an
+	// impossible height -- which panics rather than returning an error.
+	//
+	// Comparing against the cap by DIVISION rather than multiplication cannot
+	// overflow. The w/h > 0 test is not redundant: it makes this function safe on
+	// its own terms rather than relying on each caller having checked, and it
+	// keeps the division below well-defined.
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("bad image dimensions %dx%d", w, h)
+	}
+	if w > maxPixels/h {
+		return nil, fmt.Errorf("image %dx%d exceeds the %d-pixel cap", w, h, maxPixels)
+	}
 	rowBits := w * cs.nComps * bpc
 	rowBytes := (rowBits + 7) / 8
 	if len(data) < rowBytes*h {

@@ -12,6 +12,12 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
 
 - **Parsing**: classic xref tables, xref streams (`/Type /XRef`), and object streams (`/ObjStm`).
   A broken `startxref` falls back to an object-scan rebuild.
+- **Every raster allocation is bounded** (`maxPixels`, ~134M px): the page canvas and every image
+  decoded onto it both take their dimensions from the file, so both are capped. The page path can
+  compare in `float64` (which cannot wrap); the image path compares by **division**, because its
+  row arithmetic (`w*nComps*bpc`, `rowBytes*h`) is integer and a large `/Height` wraps the product
+  negative — sliding past a naive size check and panicking inside `image.NewRGBA`. A refused image
+  is logged and skipped; the rest of the page still renders.
 - **Encryption** (`pkg/pdf/crypt.go`): Standard Security Handler with an empty user password, over
   RC4 (V1/V2), AES-128 (V4/AESV2), and AES-256 (V5/R6/AESV3). A doc with a real password returns
   `ErrEncryptedNeedsPassword`; an unsupported handler returns `ErrEncrypted`.
@@ -663,6 +669,15 @@ bullet's design rationale is in its PR:
 - **Parse + cascade** (`pkg/docx`, `pkg/docx/style`): the ZIP/OPC container, `document.xml`
   (paragraphs, runs, `w:t`/`w:br`/`w:tab`), run and paragraph properties, section geometry
   (`w:sectPr`), and the full `docDefaults → basedOn → direct` cascade.
+- **Zip bombs are bounded in aggregate, not just per part** (`maxTotalPartBytes`, 512 MiB; the same
+  budget in `pkg/epub`): both readers already capped each part at 256 MiB, but both do bulk reads —
+  `word/media/*` for DOCX, every container entry for EPUB — so N parts each just under the per-part
+  cap multiplied. Measured, a 4 MB `.docx` holding 20 compressible media parts decompressed to
+  **4.2 GB** and drove peak RSS to 6 GB, with every individual part inside its limit the whole way.
+  Over-budget parts are dropped, so a hostile document degrades to missing images rather than
+  taking the process down; DOCX takes parts in sorted order so the truncation is deterministic
+  rather than following map iteration. PPTX and XLSX need no such budget — they fetch one part at a
+  time and never accumulate.
 - **CSS-engine convergence** (`pkg/docx/cssbox`): DOCX lowers straight to `cssbox` +
   `ComputedStyle` and runs through the shared CSS engine, with page geometry supplied as a
   synthesized `@page` stylesheet. The old flat model and engine are deleted.
@@ -972,6 +987,10 @@ document model consumed externally by tinycld/text):
   flipped, and the input capability bit. Landed with a cross-cutting engine fix — **data: image
   URIs decode without a resource loader**, because `resource.LoadDataURL` short-circuits the image
   cache, which is the browser rule. `rtf-specimen` golden.
+- **Bounded list nesting** (`maxListLevel`, 64): the HTML emitter opens one `<ul>`/`<ol>` per
+  `\ilvl` level, so an unbounded value is an unbounded write rather than a deep list — a 34-byte
+  document with `\ilvl2000000000` never finished, and `\ilvl100000` turned 30 bytes into 1.4 MB of
+  markup. RTF allows levels 0–8 and Word exposes nine, so the clamp cannot reach a real document.
 
 **RTF output** (`pkg/render/rtfwrite`, `WriteRTF`, `convert.. out.rtf`):
 
