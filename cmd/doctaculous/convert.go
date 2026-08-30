@@ -31,7 +31,7 @@ func (l *stringList) Set(v string) error {
 
 // convertCmd parses flags for the "convert" subcommand — the generic verb that
 // converts any supported input (PDF, DOCX, HTML file, or http(s) URL) to any
-// supported output (pdf, md, txt, html, png, jpg). The input format is
+// supported output (pdf, md, txt, html, png, jpg, webp). The input format is
 // detected from content and extension (--from overrides); the output format
 // comes from the output filename's extension (--to overrides). Converting a
 // document to its own format is not supported.
@@ -40,8 +40,8 @@ func convertCmd(args []string) error {
 	var (
 		in   = fs.String("in", "", "input document or http(s) URL (alternative to the first positional argument)")
 		out  = fs.String("out", "", "output file (alternative to the second positional argument; \"-\" writes to stdout and requires --to)")
-		from = fs.String("from", "", "input format override: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, or jpg (default: detected from content and extension)")
-		to   = fs.String("to", "", "output format override: pdf, docx, xlsx, md, txt, html, csv, tsv, png, or jpg (default: from the output extension)")
+		from = fs.String("from", "", "input format override: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, or webp (default: detected from content and extension)")
+		to   = fs.String("to", "", "output format override: pdf, docx, xlsx, md, txt, html, csv, tsv, png, jpg, or webp (default: from the output extension)")
 
 		pageSize = fs.String("page-size", "letter", "HTML pagination: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers (pdf and image outputs)")
@@ -62,13 +62,13 @@ func convertCmd(args []string) error {
 		// html output
 		fragment = fs.Bool("fragment", false, "emit only body markup, no <html>/<head> wrapper (html output)")
 
-		// png/jpg output
+		// png/jpg/webp output
 		dpi       = fs.Float64("dpi", 150, "render resolution in DPI (image output; with --max-width/--max-height: a resolution ceiling)")
 		maxWidth  = fs.Int("max-width", 0, "fit the render within this many pixels wide, aspect preserved (image output; 0 = off)")
 		maxHeight = fs.Int("max-height", 0, "fit the render within this many pixels tall, aspect preserved (image output; 0 = off)")
 		cropMode  = fs.String("crop", "", "crop to --crop-size: center, north, south, east, west, saliency (image output; empty = off)")
 		cropSize  = fs.String("crop-size", "", "exact output size as WxH, e.g. 720x720 (required with --crop)")
-		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg output)")
+		quality   = fs.Int("quality", 90, "JPEG quality 1-100 (jpg output; webp is lossless)")
 		page      = fs.Int("page", 1, "1-based page to render (image output)")
 		pages     = fs.String("pages", "", "page range for image output, e.g. 1-3,5 or \"all\" (overrides --page; needs %d in the output name)")
 
@@ -76,7 +76,7 @@ func convertCmd(args []string) error {
 	)
 	fs.Var(&sheets, "sheet", "xlsx input: render only this worksheet by name; repeat or comma-separate for several, in order (default: all visible sheets)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: doctaculous convert <input.pdf|.docx|.html|.md|.txt|URL> <output.pdf|.docx|.md|.txt|.html|.png|.jpg> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: doctaculous convert <input.pdf|.docx|.html|.md|.txt|URL> <output.pdf|.docx|.md|.txt|.html|.png|.jpg|.webp> [flags]\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderArgs(args, convertValueFlags)); err != nil {
@@ -115,7 +115,8 @@ func convertCmd(args []string) error {
 
 	// Image targets fan out to one encoded file per selected page; everything
 	// else streams one document to the writer.
-	if toFormat == doctaculous.FormatPNG || toFormat == doctaculous.FormatJPEG {
+	if toFormat == doctaculous.FormatPNG || toFormat == doctaculous.FormatJPEG ||
+		toFormat == doctaculous.FormatWebP {
 		if output == "-" {
 			return fmt.Errorf("image output requires a file path (use %%d for multi-page output)")
 		}
@@ -273,8 +274,11 @@ func openInput(input string, from doctaculous.Format, pageSize string, bundledFo
 func renderPages(doc *doctaculous.Document, indices []int, outPattern string, imgOpts doctaculous.ImageOptions) error {
 	if len(indices) > 1 && !strings.Contains(outPattern, "%d") {
 		ext := "png"
-		if imgOpts.Format == doctaculous.FormatJPEG {
+		switch imgOpts.Format {
+		case doctaculous.FormatJPEG:
 			ext = "jpg"
+		case doctaculous.FormatWebP:
+			ext = "webp"
 		}
 		return fmt.Errorf("rendering %d pages requires a %%d placeholder in the output name (e.g. page-%%d.%s)", len(indices), ext)
 	}

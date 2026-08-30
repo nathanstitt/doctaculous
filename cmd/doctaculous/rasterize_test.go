@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"image"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -9,8 +11,57 @@ import (
 	"reflect"
 	"testing"
 
+	// Registered decoders so image.DecodeConfig can sniff what the CLI wrote.
+	_ "image/jpeg"
+
+	_ "github.com/nathanstitt/doctaculous/pkg/webp"
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 )
+
+// TestRasterizeFormatFromOutExtension pins that the output extension chooses
+// the encoding when --format is not given. Before this, --format's "png"
+// default silently won, so "--out page.jpg" wrote a PNG under a .jpg name —
+// a wrong-format file with no diagnostic at all.
+func TestRasterizeFormatFromOutExtension(t *testing.T) {
+	in := writeFixture(t, gen.VectorPDF())
+	dir := t.TempDir()
+
+	for _, tc := range []struct{ name, sniff string }{
+		{"out.png", "png"},
+		{"out.jpg", "jpeg"},
+		{"out.jpeg", "jpeg"},
+		{"out.webp", "webp"},
+	} {
+		out := filepath.Join(dir, tc.name)
+		if err := rasterizeCmd([]string{in, "--out", out, "--dpi", "72"}); err != nil {
+			t.Fatalf("rasterizeCmd(%s): %v", tc.name, err)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("read %s: %v", tc.name, err)
+		}
+		_, got, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("%s is not a decodable image: %v", tc.name, err)
+		}
+		if got != tc.sniff {
+			t.Errorf("--out %s produced a %q, want %q", tc.name, got, tc.sniff)
+		}
+	}
+
+	// An explicit --format still wins over the extension.
+	out := filepath.Join(dir, "explicit.webp")
+	if err := rasterizeCmd([]string{in, "--out", out, "--dpi", "72", "--format", "png"}); err != nil {
+		t.Fatalf("rasterizeCmd(explicit): %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read explicit.webp: %v", err)
+	}
+	if _, got, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || got != "png" {
+		t.Errorf("--format png --out .webp produced %q (err %v), want png", got, err)
+	}
+}
 
 func TestResolvePagesSingle(t *testing.T) {
 	got, err := resolvePages("", 2, 5)

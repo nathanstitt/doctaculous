@@ -1,11 +1,13 @@
 //go:build ignore
 
 // Command gen_assets generates the small, hermetic raster fixtures the HTML
-// showcase document references (img/quad.png, img/photo.jpg, img/icon.gif). It is
-// run by hand (`go run gen_assets.go` from this directory) when the images need to
-// change; the produced files are committed so the golden test stays offline. Each
-// image exercises a distinct decoder on the engine's <img> path: PNG, baseline
-// JPEG (DCTDecode-equivalent), and GIF.
+// showcase document references (img/quad.png, img/photo.jpg, img/icon.gif,
+// img/quad.webp). It is run by hand (`go run gen_assets.go` from this directory)
+// when the images need to change; the produced files are committed so the golden
+// test stays offline. Each image exercises a distinct decoder on the engine's
+// <img> path: PNG, baseline JPEG (DCTDecode-equivalent), GIF, and lossless WebP
+// (VP8L, encoded by pkg/webp — the only one of the four the toolkit both writes
+// and reads).
 package main
 
 import (
@@ -16,6 +18,8 @@ import (
 	"image/png"
 	"math"
 	"os"
+
+	"github.com/nathanstitt/doctaculous/pkg/webp"
 )
 
 func main() {
@@ -23,6 +27,10 @@ func main() {
 	must(writeJPEG("img/photo.jpg", gradientDisc(160, 120)))
 	must(writeGIF("img/icon.gif", monogram(48)))
 	must(writePNG("img/tile.png", weave(32)))
+	// The same quad as lossless WebP. Paired with quad.png in the showcase, it
+	// makes the decoder's correctness visible: VP8L is lossless, so the two
+	// must render as identical pixels, unlike the lossy HEIC beside them.
+	must(writeWebP("img/quad.webp", quad(64)))
 }
 
 // weave is a small seamless tile for background-image: a faint diagonal hatch in the
@@ -143,6 +151,15 @@ func writePNG(path string, img image.Image) error {
 	}
 	defer f.Close()
 	return png.Encode(f, img)
+}
+
+func writeWebP(path string, img image.Image) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return webp.Encode(f, img)
 }
 
 func writeJPEG(path string, img image.Image) error {

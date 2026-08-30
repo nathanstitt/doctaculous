@@ -9,15 +9,19 @@ import (
 	"io"
 
 	"github.com/nathanstitt/doctaculous/pkg/crop"
+	"github.com/nathanstitt/doctaculous/pkg/webp"
 )
 
 // ImageOptions controls image-encoded output (WriteImage, and Convert to
-// FormatPNG/FormatJPEG).
+// FormatPNG/FormatJPEG/FormatWebP).
 type ImageOptions struct {
-	// Format selects the encoding: FormatPNG (the default when zero) or
-	// FormatJPEG. Any other format is an error.
+	// Format selects the encoding: FormatPNG (the default when zero),
+	// FormatJPEG, or FormatWebP. Any other format is an error.
 	Format Format
-	// Quality is the JPEG quality, 1..100; default 90 when zero. Ignored for PNG.
+	// Quality is the JPEG quality, 1..100; default 90 when zero. Ignored for
+	// PNG and for WebP — both are lossless here, so there is nothing to trade
+	// away. (WebP output is always lossless VP8L; the toolkit has no pure-Go
+	// lossy VP8 encoder. See webp.Encode.)
 	Quality int
 	// Page is the zero-based page Convert encodes when the target is an image —
 	// an io.Writer holds exactly one encoded image, so multi-page image output is
@@ -119,6 +123,11 @@ func encodeImageTo(out io.Writer, img image.Image, opts ImageOptions) error {
 	case FormatJPEG:
 		if err := jpeg.Encode(out, img, &jpeg.Options{Quality: opts.quality()}); err != nil {
 			return fmt.Errorf("doctaculous: encode jpeg: %w", err)
+		}
+	case FormatWebP:
+		// Lossless VP8L; opts.Quality does not apply. See webp.Encode.
+		if err := webp.Encode(out, img); err != nil {
+			return fmt.Errorf("doctaculous: encode webp: %w", err)
 		}
 	default:
 		return fmt.Errorf("doctaculous: encode image: %s is not an image format: %w", f, ErrUnsupportedFormat)

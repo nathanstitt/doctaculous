@@ -295,6 +295,20 @@
     <p class="caption">The same quad image as an Apple&#8209;encoded HEIC decoded by the
       in&#8209;tree HEVC decoder, beside its lossless PNG twin &mdash; identical layout, near&#8209;identical
       pixels (HEIC is lossy 4:2:0).</p>
+
+    <div class="gallery">
+      <figure>
+        <img class="fit contain" src="img/quad.webp" alt="quad webp">
+        <figcaption>WebP (lossless VP8L)</figcaption>
+      </figure>
+      <figure>
+        <img class="fit contain" src="img/quad.png" alt="quad png reference">
+        <figcaption>PNG reference</figcaption>
+      </figure>
+    </div>
+    <p class="caption">The same quad again, round&#8209;tripped through the toolkit's own WebP
+      encoder and back through its decoder. VP8L is lossless, so unlike the HEIC pair above these
+      two must be pixel&#8209;identical &mdash; any visible difference is a bug.</p>
   </section>
 
   <!-- ===================== 9 · FORMS ===================== -->

@@ -154,6 +154,12 @@ PNG reference
 
 The same quad image as an Apple‑encoded HEIC decoded by the in‑tree HEVC decoder, beside its lossless PNG twin — identical layout, near‑identical pixels (HEIC is lossy 4:2:0).
 
+WebP (lossless VP8L)
+
+PNG reference
+
+The same quad again, round‑tripped through the toolkit's own WebP encoder and back through its decoder. VP8L is lossless, so unlike the HEIC pair above these two must be pixel‑identical — any visible difference is a bug.
+
 **09 / FORMS**
 
 ## Form Controls

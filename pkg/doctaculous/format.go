@@ -47,10 +47,10 @@ const (
 	// FormatHEIC is a HEIF/HEIC still image (HEVC-coded), decoded by the
 	// pure-Go pkg/heif decoder. Input only: the toolkit does not encode HEVC.
 	FormatHEIC Format = "heic"
-	// FormatWebP is a WebP still image, decoded by golang.org/x/image/webp
-	// (lossy VP8, lossless VP8L, and the extended VP8X container including
-	// alpha). Input only: animated WebP is rejected, and the toolkit does not
-	// yet encode WebP.
+	// FormatWebP is a WebP still image. Input decodes lossy VP8, lossless
+	// VP8L, and the extended VP8X container including alpha; animated WebP is
+	// rejected. Output is always lossless VP8L — there is no pure-Go lossy VP8
+	// encoder — so WebP is a PNG-class output, not a JPEG-class one.
 	FormatWebP Format = "webp"
 	// FormatSVG is a Scalable Vector Graphics document (input only; a single
 	// page exactly the SVG's viewport), or its gzip-compressed .svgz form.
@@ -91,7 +91,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatPNG:      {input: true, output: true},
 	FormatJPEG:     {input: true, output: true},
 	FormatHEIC:     {input: true, output: false},
-	FormatWebP:     {input: true, output: false},
+	FormatWebP:     {input: true, output: true},
 	FormatSVG:      {input: true, output: false},
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/doctaculous/pkg/crop"
+	"github.com/nathanstitt/doctaculous/pkg/webp"
 	"github.com/nathanstitt/doctaculous/testdata/gen"
 )
 
@@ -31,6 +32,57 @@ func TestWriteImagePNGDefault(t *testing.T) {
 	}
 	if img.Bounds().Dx() < 1 || img.Bounds().Dy() < 1 {
 		t.Errorf("decoded image is empty: %v", img.Bounds())
+	}
+}
+
+// TestWriteImageWebP renders a real document page to WebP and verifies the
+// bytes are a decodable WebP of the rasterized size — the full backend path,
+// not just the encoder in isolation.
+func TestWriteImageWebP(t *testing.T) {
+	t.Parallel()
+	doc, err := OpenBytes(gen.TextPDF())
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	var buf bytes.Buffer
+	opts := ImageOptions{Format: FormatWebP, Raster: RasterOptions{DPI: 72, BundledFonts: true}}
+	if err := doc.WriteImage(context.Background(), &buf, 0, opts); err != nil {
+		t.Fatalf("WriteImage(webp): %v", err)
+	}
+	img, err := webp.Decode(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("output is not a decodable WebP: %v", err)
+	}
+	if img.Bounds().Dx() < 1 || img.Bounds().Dy() < 1 {
+		t.Errorf("decoded image is empty: %v", img.Bounds())
+	}
+}
+
+// TestWriteImageWebPIgnoresQuality pins the documented contract that Quality
+// is a no-op for WebP: the encoding is lossless, so two different quality
+// values must produce byte-identical output rather than silently pretending
+// the knob did something.
+func TestWriteImageWebPIgnoresQuality(t *testing.T) {
+	t.Parallel()
+	doc, err := OpenBytes(gen.VectorPDF())
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	encode := func(q int) []byte {
+		var buf bytes.Buffer
+		opts := ImageOptions{
+			Format:  FormatWebP,
+			Quality: q,
+			Raster:  RasterOptions{DPI: 72, BundledFonts: true},
+		}
+		if err := doc.WriteImage(context.Background(), &buf, 0, opts); err != nil {
+			t.Fatalf("WriteImage(webp, quality=%d): %v", q, err)
+		}
+		return buf.Bytes()
+	}
+	if lo, hi := encode(1), encode(100); !bytes.Equal(lo, hi) {
+		t.Errorf("quality changed WebP output (%d vs %d bytes); it is documented as ignored",
+			len(lo), len(hi))
 	}
 }
 

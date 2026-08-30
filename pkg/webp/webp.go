@@ -1,5 +1,10 @@
-// Package webp adds the container checks that golang.org/x/image/webp does
-// not make, and registers the WebP decoder with the standard image package.
+// Package webp reads and writes WebP still images.
+//
+// Decoding wraps golang.org/x/image/webp, adding the container checks it does
+// not make, and registers the decoder with the standard image package.
+// Encoding wraps github.com/HugoSmits86/nativewebp, which produces lossless
+// VP8L — see Encode for what that means for callers expecting WebP's lossy
+// mode.
 //
 // x/image/webp decodes WebP still images — lossy VP8, lossless VP8L, and the
 // extended VP8X container including an alpha plane — but it does not handle
@@ -20,6 +25,10 @@
 // package, so image.Decode handles WebP toolkit-wide. Note that the sniffing
 // path cannot carry the animation check — see the comment on FormatName — so
 // code that must distinguish animation calls Decode/DecodeConfig here.
+//
+// Writing animation is likewise out of scope: the toolkit rasterizes pages to
+// still images, and a multi-page document becomes one file per page, not one
+// animation.
 package webp
 
 import (
@@ -29,6 +38,7 @@ import (
 	"image"
 	"io"
 
+	nativewebp "github.com/HugoSmits86/nativewebp"
 	xwebp "golang.org/x/image/webp"
 )
 
@@ -94,6 +104,55 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 		return image.Config{}, ErrAnimated
 	}
 	return xwebp.DecodeConfig(bytes.NewReader(data))
+}
+
+// MaxDimension is the largest width or height a WebP image may have. VP8L
+// stores each dimension in a 14-bit field as "size - 1", so 16384 is the
+// format's ceiling, not the encoder's choice.
+const MaxDimension = 1 << 14
+
+// Encode writes img to w as a lossless WebP.
+//
+// The encoding is always VP8L (lossless). WebP's better-known lossy VP8 mode
+// is NOT available: no pure-Go VP8 encoder exists, and the toolkit takes no
+// CGo dependencies (see docs/DEPENDENCIES.md). The practical consequence is
+// that WebP output is an excellent PNG replacement — smaller and faster, and
+// pixel-exact — but not a JPEG replacement: encoding a photographic page
+// losslessly produces a much larger file than a lossy encoder would, and
+// possibly larger than the equivalent JPEG. Callers wanting small photographic
+// output should ask for JPEG.
+//
+// Because the encoding is lossless, there is no quality knob to expose;
+// ImageOptions.Quality is documented as ignored for WebP targets rather than
+// silently accepting a value that changes nothing.
+//
+// An image wider or taller than MaxDimension cannot be represented and returns
+// an error rather than a truncated file.
+func Encode(w io.Writer, img image.Image) error {
+	if img == nil {
+		return errors.New("webp: encode: nil image")
+	}
+	b := img.Bounds()
+	if b.Dx() <= 0 || b.Dy() <= 0 {
+		return fmt.Errorf("webp: encode: degenerate image size %dx%d", b.Dx(), b.Dy())
+	}
+	if b.Dx() > MaxDimension || b.Dy() > MaxDimension {
+		return fmt.Errorf("webp: encode: image is %dx%d, exceeding the format's %d-pixel limit",
+			b.Dx(), b.Dy(), MaxDimension)
+	}
+
+	// nativewebp.Encode does not check the error from any of its writes to w, so
+	// a failing destination (full disk, closed pipe, aborted HTTP response) would
+	// otherwise be reported as a successful encode. Buffer the image and do the
+	// write here, where the error is checked.
+	var buf bytes.Buffer
+	if err := nativewebp.Encode(&buf, img, nil); err != nil {
+		return fmt.Errorf("webp: encode: %w", err)
+	}
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("webp: encode: write: %w", err)
+	}
+	return nil
 }
 
 // FormatName is the name x/image/webp registers with the image package, and
