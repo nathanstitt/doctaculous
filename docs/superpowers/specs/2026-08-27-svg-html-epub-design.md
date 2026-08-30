@@ -98,7 +98,7 @@ painting the image once, with a log.
 ### 5. EPUB needs almost nothing, and gets a cover path
 
 `epubLoader` already maps `.svg` → `image/svg+xml`
-(`pkg/doctaculous/epub_frontend.go:105`), and `extractChapter`'s regex scan
+(`pkg/omnidoc/epub_frontend.go:105`), and `extractChapter`'s regex scan
 passes inline `<svg>` through verbatim into the HTML path. So EPUB inherits
 decisions 2 and 4 for free.
 

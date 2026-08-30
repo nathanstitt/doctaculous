@@ -27,5 +27,5 @@ These are non-negotiable. A change that violates one is wrong regardless of what
   golangci-lint via `.golangci.yml` as an unmodified third-party copy.
 - **Concurrency-first.** Multi-page work fans out across goroutines (bounded worker pool sized to
   `GOMAXPROCS`). A parsed `*Document` is read-only after Open so it's shared without locks.
-- Module path: `github.com/nathanstitt/doctaculous`.
+- Module path: `github.com/nathanstitt/omnidoc`.
 

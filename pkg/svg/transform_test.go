@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 func TestParseTransform(t *testing.T) {

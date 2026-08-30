@@ -15,7 +15,7 @@ package style
 import (
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
 )
 
 // Resolver computes effective properties for a document. Build one per document

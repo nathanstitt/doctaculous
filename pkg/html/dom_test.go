@@ -3,7 +3,7 @@ package html
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 func TestElementSatisfiesCSSNode(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // viewBox is a parsed viewBox attribute: min point and extent in user units.

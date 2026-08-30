@@ -3,7 +3,7 @@ package svg
 import (
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // parseColorValue parses an SVG/CSS color value: a named color keyword

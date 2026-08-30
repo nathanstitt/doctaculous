@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # render.sh — render the HTML showcase in this directory to one PNG per page,
-# exactly the way a user would: build the doctaculous CLI, then run
-# `doctaculous rasterize` against index.html. Prints the directory the images
+# exactly the way a user would: build the omnidoc CLI, then run
+# `omnidoc rasterize` against index.html. Prints the directory the images
 # were written to.
 #
 # Usage:
@@ -71,10 +71,10 @@ if [[ "$page_size" == "letter" ]]; then
   size_flag=(--page-size letter)
 fi
 
-echo "building doctaculous CLI..." >&2
-cli="$(mktemp "${TMPDIR:-/tmp}/doctaculous.XXXXXX")"
+echo "building omnidoc CLI..." >&2
+cli="$(mktemp "${TMPDIR:-/tmp}/omnidoc.XXXXXX")"
 trap 'rm -f "$cli"' EXIT
-( cd "$repo_root" && go build -o "$cli" ./cmd/doctaculous )
+( cd "$repo_root" && go build -o "$cli" ./cmd/omnidoc )
 
 echo "rendering $input ..." >&2
 "$cli" rasterize "$input" \

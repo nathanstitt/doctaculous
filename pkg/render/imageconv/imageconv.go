@@ -17,9 +17,9 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
-	_ "github.com/nathanstitt/doctaculous/pkg/heif"
+	_ "github.com/nathanstitt/omnidoc/pkg/heif"
 
-	"github.com/nathanstitt/doctaculous/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/webp"
 )
 
 // TranscodeToPNG decodes image bytes in any registered format and re-encodes

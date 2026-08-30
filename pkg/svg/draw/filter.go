@@ -4,9 +4,9 @@ import (
 	"image"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
-	svgfilter "github.com/nathanstitt/doctaculous/pkg/svg/filter"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
+	svgfilter "github.com/nathanstitt/omnidoc/pkg/svg/filter"
 )
 
 // maxFilterPixels bounds how many pixels one filter region may allocate.

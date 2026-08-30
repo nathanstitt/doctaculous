@@ -4,8 +4,8 @@ Layers — keep them separate and independently testable. No cyclic deps between
 
 `pkg/pdf` parse · `pkg/pdf/filter` stream decode · `pkg/pdf/content` content-stream interpreter ·
 `pkg/render` device-independent paint ops (`Device` interface) · `pkg/render/raster` bitmap
-backend · `pkg/render/pdfwrite` PDF-writer backend · `pkg/doctaculous` public API ·
-`cmd/doctaculous` thin CLI.
+backend · `pkg/render/pdfwrite` PDF-writer backend · `pkg/omnidoc` public API ·
+`cmd/omnidoc` thin CLI.
 
 **Reflowable documents** (DOCX and HTML) share a second pipeline that meets the PDF pipeline at
 `render.Device`. There is **one recursive, format-neutral box model** (`pkg/layout/cssbox`) that the

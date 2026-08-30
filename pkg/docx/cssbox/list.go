@@ -1,10 +1,10 @@
 package cssbox
 
 import (
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	"github.com/nathanstitt/doctaculous/pkg/docx/style"
-	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/docx/style"
+	lcssbox "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // listCounter tracks per-(numId, ilvl) counter values as paragraphs are lowered

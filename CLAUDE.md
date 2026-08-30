@@ -1,4 +1,4 @@
-# Doctaculous
+# Omnidoc
 
 Pure-Go, MIT-licensed document toolkit. Long-term goal: convert any document to any other format,
 author/sign PDF/DOCX/HTML, and rasterize pages to images. The core pipeline (parse → interpret →

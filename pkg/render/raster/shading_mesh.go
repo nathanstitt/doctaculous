@@ -5,9 +5,9 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/function"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Mesh shadings (ISO 32000-1 §8.7.4.5.5–.8, ShadingType 4–7) describe a surface

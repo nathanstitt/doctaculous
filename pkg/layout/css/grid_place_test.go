@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 func autoLine() gcss.GridLine      { return gcss.GridLine{Kind: gcss.LineAuto} }

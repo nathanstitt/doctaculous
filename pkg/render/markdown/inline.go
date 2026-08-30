@@ -3,8 +3,8 @@ package markdown
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
 )
 
 // inline serializes a box's inline subtree to a single line of Markdown (or plain

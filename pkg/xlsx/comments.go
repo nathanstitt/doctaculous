@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/beevik/etree"
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // Comment is one classic cell note. Row and Col are 1-based (A1-space — a

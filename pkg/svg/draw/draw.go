@@ -6,9 +6,9 @@ import (
 	"math"
 	"sync"
 
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 // Renderer draws one svg.Document. It is stateless and safe for concurrent

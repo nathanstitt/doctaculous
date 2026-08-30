@@ -6,10 +6,10 @@ import (
 	"strings"
 	"unicode"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/inline"
 )
 
 // cssDefaultLineMult is the line-height multiplier applied to the natural font

@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 // shapeSpaced shapes text at 12pt Arial with the given letter/word spacing, returning

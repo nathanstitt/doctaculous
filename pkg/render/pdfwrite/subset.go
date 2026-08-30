@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/font"
 )
 
 // subsetTrueType returns an SFNT containing only the glyph programs for keep (plus

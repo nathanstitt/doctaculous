@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/render/raster"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render/raster"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 const filterHdr = `xmlns="http://www.w3.org/2000/svg"`

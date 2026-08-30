@@ -4,8 +4,8 @@ import (
 	"context"
 	"math"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // flexItemSizing is the per-item input to the §9.7 flexible-length resolution: the

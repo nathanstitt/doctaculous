@@ -3,8 +3,8 @@ package font
 import (
 	"github.com/benoitkugler/textlayout/fonts"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
 )
 
 // simpleFont is a GlyphSource for a simple (single-byte) font: a /TrueType font

@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // absChild lays out one absolutely-positioned child inside a relative container and

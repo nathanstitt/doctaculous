@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
 )
 
 // DiskFontProvider implements pkgfont.Provider (the injectable font-resolution layer).

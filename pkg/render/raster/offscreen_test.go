@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // TestRenderOffscreenReturnsPaintedPixels is the core contract test for the

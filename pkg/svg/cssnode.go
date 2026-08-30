@@ -1,6 +1,6 @@
 package svg
 
-import "github.com/nathanstitt/doctaculous/pkg/css"
+import "github.com/nathanstitt/omnidoc/pkg/css"
 
 // cssNode adapts a parsed SVG *element to css.Node so pkg/css selectors can
 // match against the SVG tree. It is a thin, stateless wrapper: it caches

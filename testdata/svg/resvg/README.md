@@ -4,8 +4,8 @@ SVG files copied verbatim from https://github.com/RazrFalcon/resvg-test-suite
 at commit `d8e064337faf01bc5a9579187a56dbdbe3eacc72`, MIT licensed (Copyright (c)
 2018 Reizner Evgeniy — see LICENSE in that repository). Each file exercises one
 feature. Goldens are OUR renderer's committed output
-(`pkg/doctaculous/testdata/golden/svg-resvg/`), not resvg's reference PNGs —
-the sweep locks doctaculous against regression, not against resvg.
+(`pkg/omnidoc/testdata/golden/svg-resvg/`), not resvg's reference PNGs —
+the sweep locks omnidoc against regression, not against resvg.
 
 Curation rule: a file lands here only when every feature it uses is shipped;
 new tranches arrive with the PR that ships their feature.

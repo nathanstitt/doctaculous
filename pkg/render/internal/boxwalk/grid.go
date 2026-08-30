@@ -3,7 +3,7 @@ package boxwalk
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // GridCell is one origin cell in an occupancy grid: the cell box, its origin

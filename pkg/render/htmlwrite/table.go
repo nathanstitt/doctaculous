@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
 )
 
 // table renders a DisplayTable box as an HTML <table>. Unlike GFM pipe tables, HTML

@@ -3,7 +3,7 @@ package css
 import (
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // propagateCanvasBackground implements CSS background propagation (CSS Backgrounds

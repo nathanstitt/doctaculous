@@ -1,7 +1,7 @@
-![doctaculous — any document to any other document, in pure Go](docs/assets/doctaculous-banner.svg)
+![omnidoc — any document to any other document, in pure Go](docs/assets/omnidoc-banner.svg)
 
-[![CI](https://github.com/nathanstitt/doctaculous/actions/workflows/ci.yml/badge.svg)](https://github.com/nathanstitt/doctaculous/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/nathanstitt/doctaculous.svg)](https://pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous)
+[![CI](https://github.com/nathanstitt/omnidoc/actions/workflows/ci.yml/badge.svg)](https://github.com/nathanstitt/omnidoc/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/nathanstitt/omnidoc.svg)](https://pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc)
 [![Go 1.26](https://img.shields.io/badge/Go-1.26-00758d?labelColor=211c17)](go.mod)
 [![CGo free](https://img.shields.io/badge/CGo-none-c8401a?labelColor=211c17)](#why)
 [![MIT](https://img.shields.io/badge/license-MIT-c8401a?labelColor=211c17)](LICENSE)
@@ -10,87 +10,90 @@ A pure-Go document toolkit: parse, lay out, rasterize, extract, convert, and edi
 documents. It brings its own PDF interpreter and its own CSS layout engine. No
 CGo, no native bindings, no copyleft.
 
-## Read/Write fourteen formats and convert between them
+Read and write fourteen formats, and convert between any two of them.
+
+## Fourteen formats, in and out
 
 Every supported format is both an input **and** an output. All 182 ordered pairs
 convert (a format to itself is a deliberate `ErrSameFormat`):
 
 > `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg` · `webp`
 
-Plus two input-only formats: **`heic`** and **`svg`**. HEIF/HEIC stills decode
-through an in-tree pure-Go HEVC intra decoder (no libheif, no CGo), so an
-iPhone photo converts to any of the fourteen outputs and drops into HTML/EPUB
-`<img>` unchanged. Standalone `.svg`/`.svgz` documents open as a vector page —
-paths, shapes, transforms, solid fill/stroke — and convert to PDF as real
-vectors, not a rasterized image. WebP reads lossy VP8, lossless VP8L, and
-alpha; it writes lossless VP8L, so it replaces PNG rather than JPEG.
+Two more formats are input-only: **`heic`** and **`svg`**. HEIF/HEIC stills decode
+through an in-tree pure-Go HEVC intra decoder — no libheif, no CGo — so an iPhone
+photo converts to any of the fourteen outputs and drops into an HTML or EPUB
+`<img>` unchanged. Standalone `.svg`/`.svgz` files open as a vector page (paths,
+shapes, transforms, solid fill/stroke) and convert to PDF as real vectors rather
+than a rasterized image. WebP reads lossy VP8, lossless VP8L, and alpha; it writes
+lossless VP8L, so it replaces PNG rather than JPEG.
 
 ```sh
-doctaculous convert report.docx report.pdf         # typeset through the CSS engine
-doctaculous convert https://example.com page.png   # fetch, lay out, rasterize
-doctaculous convert statement.pdf tables.xlsx      # tables recovered from ruling lines & whitespace
-doctaculous convert book.epub book.docx            # ebook → Word, images and all
-doctaculous convert notes.md deck.pptx             # each heading becomes a slide
-doctaculous convert photo.heic photo.webp          # iPhone photo → lossless WebP
-doctaculous rasterize input.pdf --page 1 --out page1.png --dpi 150
+omnidoc convert report.docx report.pdf         # typeset through the CSS engine
+omnidoc convert https://example.com page.png   # fetch, lay out, rasterize
+omnidoc convert statement.pdf tables.xlsx      # tables recovered from ruling lines & whitespace
+omnidoc convert book.epub book.docx            # ebook → Word, images and all
+omnidoc convert notes.md deck.pptx             # each heading becomes a slide
+omnidoc convert photo.heic photo.webp          # iPhone photo → lossless WebP
+omnidoc rasterize input.pdf --page 1 --out page1.png --dpi 150
 ```
 
 `convert` sniffs the input format from **content first** (magic bytes, OPC/zip
 classification, HTML sniffing), then the extension; the output format comes from
 the output extension. `--from`/`--to` override both. HTML input can also be an
 `http(s)` URL, with relative resources, `data:` URIs, and web fonts resolved.
-Image output writes one page by default, or many with
-`--pages all` and a `%d` in the output name (`page-%d.png`);
-`--max-width`/`--max-height` produce fit-within thumbnails without knowing page
-sizes up front, and `--crop <gravity|saliency> --crop-size WxH` fills an exact
-pixel box rather than fitting within one — the difference between a 720×720
-square and a 720×540 fit. `--crop saliency` picks the window from image content
-(edge energy, saturation, skin likelihood, centre bias; no model, pure Go).
+Image output writes one page by default, or many with `--pages all` and a `%d` in
+the output name (`page-%d.png`).
+
+Thumbnails come in two shapes. `--max-width`/`--max-height` fit within a bound
+without knowing page sizes up front. `--crop <gravity|saliency> --crop-size WxH`
+fills an exact pixel box instead — the difference between a 720×720 square and a
+720×540 fit. `--crop saliency` picks the window from image content: edge energy,
+saturation, skin likelihood, and centre bias, with no model and no CGo.
 
 **Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
 rendering specimen, one document exercising every implemented HTML/CSS/image
 slice. [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
-is the PDF `doctaculous convert` typesets from it: 18 Letter pages with running
+is the PDF `omnidoc convert` typesets from it: 18 Letter pages with running
 headers, page counters, a WOFF2 script wordmark, floats, flexbox, grid, and
 tables, all as selectable text.
 
 ## Quick start
 
 ```sh
-go install github.com/nathanstitt/doctaculous/cmd/doctaculous@latest
+go install github.com/nathanstitt/omnidoc/cmd/omnidoc@latest
 ```
 
 Or as a library:
 
 ```go
-import "github.com/nathanstitt/doctaculous/pkg/doctaculous"
+import "github.com/nathanstitt/omnidoc/pkg/omnidoc"
 
 // Open sniffs the format from content — PDF, DOCX, XLSX, EPUB, RTF, HTML, …
-doc, err := doctaculous.Open("input.pdf")
+doc, err := omnidoc.Open("input.pdf")
 
 // Rasterize a page (RasterizePages renders many pages concurrently;
 // a parsed document is read-only and goroutine-safe).
-img, err := doc.RasterizePage(ctx, 0, doctaculous.RasterOptions{DPI: 150})
+img, err := doc.RasterizePage(ctx, 0, omnidoc.RasterOptions{DPI: 150})
 
 // Or convert in one call — any input format to any output format.
-err = doctaculous.ConvertFile(ctx, "report.docx", "report.pdf", doctaculous.ConvertOptions{})
+err = omnidoc.ConvertFile(ctx, "report.docx", "report.pdf", omnidoc.ConvertOptions{})
 
 // Streams work too, with explicit formats when there's no filename to sniff.
-err = doctaculous.Convert(ctx, in, out, doctaculous.ConvertOptions{
-    From: doctaculous.FormatPDF,
-    To:   doctaculous.FormatMarkdown,
+err = omnidoc.Convert(ctx, in, out, omnidoc.ConvertOptions{
+    From: omnidoc.FormatPDF,
+    To:   omnidoc.FormatMarkdown,
 })
 ```
 
 For hosts routing uploads: `OpenReader(ctx, r)` / `OpenReaderAs` accept plain
 `io.Reader`s, and `FormatFromMIME` maps content types onto the capability table
 (`Format.ValidInput()` is the gate). Full API reference:
-[pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous](https://pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous).
+[pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc](https://pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc).
 
 ## How it works
 
-There are three routes through the code, and everything meets at a single
-format-neutral CSS box tree and a single backend-agnostic paint interface.
+Three routes run through the code. They all meet at one format-neutral CSS box
+tree and one backend-agnostic paint interface.
 
 ```text
  DOCX · HTML · Markdown · text          ┌────────────────────────┐      render.Device
@@ -129,8 +132,8 @@ equal `html → md`), golden images, and WPT-style reftests.
 
 ## Beyond conversion: native office models
 
-Two packages are supported public surfaces of their own, built for programs that
-edit files rather than convert them:
+Two packages stand on their own as supported public surfaces, built for programs
+that edit files rather than convert them:
 
 - **`pkg/xlsx`** is a preservation-first spreadsheet editor. `Edit` + `Save` of an
   untouched workbook is **part-for-part byte-identical**; edits rewrite only the
@@ -144,12 +147,12 @@ edit files rather than convert them:
 
 ## Why?
 
-The high-fidelity incumbents (PDFium, MuPDF, Poppler) require CGo and/or carry
-copyleft licenses. doctaculous implements the whole stack in Go: PDF
+The high-fidelity incumbents — PDFium, MuPDF, Poppler — require CGo, carry
+copyleft licenses, or both. omnidoc implements the whole stack in Go instead: PDF
 interpretation, font parsing, CSS layout, rasterization, OOXML. It cross-compiles
-freely, builds as a single static binary, and stays MIT. The few dependencies
-are pure-Go and permissively licensed (see `go.mod`); the one vendored decoder
-is Apache-2.0.
+freely, builds as a single static binary, and stays MIT. The few dependencies are
+pure-Go and permissively licensed (see `go.mod`); the one vendored decoder is
+Apache-2.0.
 
 Built for [tinycld](https://github.com/tinycld), where it powers document
 thumbnails, text extraction, and editing of xlsx/docx with the
@@ -158,9 +161,9 @@ packages respectively.
 
 ## Limitations
 
-Unsupported constructs degrade gracefully. You get a skip and a debug log, or a
-typed error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …), never a
-panic, and one bad page can't kill a batch. The notable gaps today:
+Unsupported constructs degrade rather than crash. You get a skip and a debug log,
+or a typed error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …) — never
+a panic, and one bad page can't kill a batch. The gaps worth knowing about:
 
 - **Bidi/RTL is implemented but not complete.** `direction: rtl` mirrors tables,
   flex, and grid; text reorders per UAX#9 (with bracket mirroring); Arabic shapes
@@ -195,7 +198,7 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 | Layout | `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/layout/inline` | The box model, the CSS engine, shaping & line breaking |
 | Fonts | `pkg/font`, `pkg/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled resolution, per-rune script fallback |
 | Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, and structure output |
-| API / CLI | `pkg/doctaculous`, `cmd/doctaculous` | Public entry points, format detection, the conversion matrix |
+| API / CLI | `pkg/omnidoc`, `cmd/omnidoc` | Public entry points, format detection, the conversion matrix |
 
 The `render.Device` interface is the seam. Parsing, interpretation, and layout
 never know which backend they're painting into, so new backends bolt on without
@@ -203,8 +206,7 @@ touching them.
 
 ## Testing
 
-Fidelity work is only as good as what it's tested against, so the corpus carries
-a lot of weight here:
+Fidelity claims are only worth what the corpus behind them proves:
 
 - **Generated fixtures.** Test PDFs, DOCX, and XLSX are built deterministically
   in `testdata/gen` (readable Go, not opaque blobs). Materialize them with

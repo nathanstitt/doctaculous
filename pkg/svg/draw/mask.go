@@ -3,8 +3,8 @@ package draw
 import (
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 // buildMask resolves msk (already known non-nil by the caller) into a

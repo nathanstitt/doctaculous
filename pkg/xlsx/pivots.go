@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/beevik/etree"
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // PivotTable is one pivot table: its source data, placement, and field

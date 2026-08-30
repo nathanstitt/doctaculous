@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // TestNamedPageSizeHonoredUnderExplicitSize pins the fix: with an explicit

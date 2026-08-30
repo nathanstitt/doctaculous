@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 // A float's outer top may not be higher than the margin-box bottom of an earlier

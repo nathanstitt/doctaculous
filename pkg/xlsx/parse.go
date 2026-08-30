@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // Relationship type URIs (OPC).

@@ -23,7 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/nathanstitt/doctaculous/testdata/gen"
+	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 
 // fixture pairs a stable name with a deterministic byte builder.

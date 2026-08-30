@@ -3,8 +3,8 @@ package paint
 import (
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // maxBackgroundTiles caps the number of tiles a single background image may paint, a

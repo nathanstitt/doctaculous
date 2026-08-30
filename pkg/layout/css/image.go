@@ -17,10 +17,10 @@ import (
 	"image/jpeg"
 	"image/png"
 
-	heif "github.com/nathanstitt/doctaculous/pkg/heif"
-	webp "github.com/nathanstitt/doctaculous/pkg/webp"
+	heif "github.com/nathanstitt/omnidoc/pkg/heif"
+	webp "github.com/nathanstitt/omnidoc/pkg/webp"
 
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // decodedImage is a memoized image-decode result for one source ref. It records
