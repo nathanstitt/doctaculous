@@ -17,10 +17,13 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   arbitrary distance along a curve, so it is a start and not a solution. Degrades to a straight
   baseline with a log.
 
-- **`writing-mode`** (25 fixtures) — needs `vhea`/`vmtx` vertical metrics `pkg/font` does not
-  parse, plus a vertical advance model; every metric in the engine is horizontal-only. Degrades to
+- **`writing-mode`** (25 fixtures) — needs a vertical advance model; the layout path is
+  horizontal-only. Degrades to horizontal with a log.
 
-  horizontal with a log.
+  The metrics half of this is now DONE and the old wording here ("needs `vhea`/`vmtx` vertical
+  metrics `pkg/font` does not parse") is retired: `Face.GlyphVAdvance`/`Face.VMetrics` expose them,
+  including upstream's one-em synthesis for faces with no `vmtx` — see FEATURES.md. What remains is
+  laying text out along a vertical axis, shared with the CSS side (`docs/CSS-LAYOUT.md`).
 
 - **Filters not implemented** (each renders the element unfiltered with a log): `feTurbulence`,
   `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting` + light sources, `feMorphology`,

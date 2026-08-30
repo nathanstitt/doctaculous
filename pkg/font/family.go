@@ -324,3 +324,31 @@ func (f *Face) GlyphName(gid uint16) string { return f.prog.gp.glyphName(fonts.G
 func (f *Face) Metrics() (ascent, descent, lineGap float64) {
 	return f.prog.metrics()
 }
+
+// GlyphVAdvance returns gid's VERTICAL advance in em units as a positive downward
+// distance, for laying out a vertical writing mode, plus whether the font supplied
+// one. It is GlyphAdvance's counterpart.
+//
+// The sign is worth stating because it is the trap here: the underlying library
+// returns a NEGATIVE advance (it negates for a Y-down convention, so a 1000-upem
+// face reports -1000). This package normalizes to positive-downward once, at the
+// program adapter, so a caller can add it to a pen Y without thinking about it. A
+// caller that assumed the raw upstream sign would run the pen backwards up the page
+// with nothing to catch it — the value is plausible, merely inverted.
+//
+// ok=false means the format carries no vertical metrics at all (Type1, bare CFF).
+// A TrueType face with no `vmtx` table still returns ok=true with a synthesized
+// one-em advance, which is the correct fallback and what browsers do; most Latin
+// faces land there. Use VMetrics to tell an authored metric from a synthesized one.
+func (f *Face) GlyphVAdvance(gid uint16) (float64, bool) {
+	return f.prog.vAdvanceEm(fonts.GID(gid))
+}
+
+// VMetrics returns the face's vertical-writing line metrics in em units, and whether
+// the face genuinely carries a `vhea` table. Unlike Metrics, it does NOT substitute
+// an approximation when the font is silent: reporting ok=false lets a caller tell an
+// authored vertical metric from a guess, which matters because most Latin faces have
+// no vhea at all and a fabricated number would hide that.
+func (f *Face) VMetrics() (ascent, descent, lineGap float64, ok bool) {
+	return f.prog.vMetrics()
+}

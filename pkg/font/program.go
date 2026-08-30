@@ -38,6 +38,24 @@ type glyphProgram interface {
 	// font units (ascender positive, descender negative, Y-up convention), ok=false
 	// if the program exposes no such metrics (e.g. bare CFF).
 	hExtents() (ascender, descender, lineGap float64, ok bool)
+	// vAdvance returns gid's VERTICAL advance in font units, as a positive
+	// downward distance, and whether the font supplied it.
+	//
+	// The sign is this package's, not upstream's. textlayout returns a NEGATIVE
+	// value (it negates for a Y-down convention: a face with upem 1000 reports
+	// -1000), and the adapters below flip it once, here, so no caller has to know.
+	// A caller that assumed the raw sign would advance the pen the wrong way with
+	// no error anywhere — the metric is plausible, just inverted.
+	//
+	// ok=false means the program exposes no vertical advance at all (Type1), as
+	// distinct from a TrueType face with no vmtx table, where upstream synthesizes
+	// one em and ok is true.
+	vAdvance(gid fonts.GID) (float64, bool)
+	// vExtents is hExtents' vertical counterpart: the font's vertical ascender,
+	// descender and line gap in font units, ok=false when the face carries no vhea
+	// table. Most Latin faces do not, which is not an error — the caller falls back
+	// to a one-em advance, matching what browsers do.
+	vExtents() (ascender, descender, lineGap float64, ok bool)
 }
 
 // program wraps a parsed font program. It is read-only after construction and
@@ -175,6 +193,37 @@ func (p *program) metrics() (ascent, descent, lineGap float64) {
 	return ascent, descent, lineGap
 }
 
+// vAdvanceEm returns gid's vertical advance in em units as a POSITIVE downward
+// distance, and whether the font supplied one. It is advanceEm's counterpart for
+// vertical writing modes.
+//
+// ok=false means the format carries no vertical metrics at all (Type1, bare CFF).
+// A TrueType face without a vmtx table still reports ok=true: upstream synthesizes a
+// one-em advance, which is the correct fallback and what browsers do. A caller that
+// wants "did the designer author this?" must ask vMetrics, not this.
+func (p *program) vAdvanceEm(gid fonts.GID) (float64, bool) {
+	adv, ok := p.gp.vAdvance(gid)
+	if !ok {
+		return 0, false
+	}
+	return adv / p.upm, true
+}
+
+// vMetrics returns the face's VERTICAL line metrics in em units, and whether the
+// face genuinely carries a vhea table. Unlike metrics(), this does NOT fall back to
+// an approximation when the font is silent: most Latin faces have no vhea, and
+// inventing a plausible number would erase the distinction between an authored
+// vertical metric and a guess. The caller decides what to do with ok=false.
+func (p *program) vMetrics() (ascent, descent, lineGap float64, ok bool) {
+	asc, desc, gap, ok := p.gp.vExtents()
+	if !ok {
+		return 0, 0, 0, false
+	}
+	// Same normalization as metrics(): font units, descender negative (Y up), to em
+	// with a positive descent magnitude.
+	return asc / p.upm, -desc / p.upm, gap / p.upm, true
+}
+
 // nameToGID builds a glyph-name→GID map by walking every glyph's name. Simple
 // fonts resolve a PDF code → glyph name (via /Encoding) → GID through this map.
 // It is built once per font and cached on the program by the caller.
@@ -310,6 +359,36 @@ func (a ttProgram) hExtents() (asc, desc, gap float64, ok bool) {
 	return fontHExtents(a.f.FontHExtents())
 }
 
+// vAdvance flips upstream's sign: textlayout negates the vmtx advance for a Y-down
+// convention, so a face with upem 1000 reports -1000. This package's contract is a
+// positive downward distance (see glyphProgram.vAdvance), and flipping it once here
+// keeps the convention out of every caller.
+//
+// Upstream SYNTHESIZES a one-em advance when the face has no vmtx table, which is
+// the correct fallback and what browsers do, so ok is true for any TrueType face.
+func (a ttProgram) vAdvance(gid fonts.GID) (float64, bool) {
+	return -float64(a.f.VerticalAdvance(gid)), true
+}
+
+func (a ttProgram) vExtents() (asc, desc, gap float64, ok bool) {
+	// FontVExtents resolves through the same getPositionCommon path as FontHExtents,
+	// so it carries the same hazard: a font whose tables are absent or inconsistent
+	// panics inside the upstream parser rather than reporting a miss. Font programs
+	// are untrusted document input; recover and report "no extents".
+	defer func() {
+		if r := recover(); r != nil {
+			asc, desc, gap, ok = 0, 0, 0, false
+		}
+	}()
+	return fontHExtents(a.f.FontVExtents())
+}
+
+// Bare CFF carries no vertical metrics: advances come from the PDF /Widths array and
+// there is no vmtx/vhea equivalent. Report the miss rather than synthesizing, so a
+// caller can tell "no vertical metrics" from "one em".
+func (a cffProgram) vAdvance(fonts.GID) (float64, bool)          { return 0, false }
+func (a cffProgram) vExtents() (asc, desc, gap float64, ok bool) { return 0, 0, 0, false }
+
 // t1Program adapts a classic *type1.Font. type1.Font implements fonts.Face but
 // exposes no glyph count, so numGlyphs is derived by probing GlyphName and cached.
 type t1Program struct {
@@ -327,6 +406,12 @@ func (a *t1Program) nominalGID(r rune) (fonts.GID, bool) { return a.f.NominalGly
 func (a *t1Program) hExtents() (asc, desc, gap float64, ok bool) {
 	return fontHExtents(a.f.FontHExtents())
 }
+
+// Classic Type1 has no vertical writing metrics — the format predates them. Report
+// the miss rather than synthesizing one em, so a caller can distinguish "this format
+// cannot answer" from "this face has no vmtx and upstream filled in an em".
+func (a *t1Program) vAdvance(fonts.GID) (float64, bool)          { return 0, false }
+func (a *t1Program) vExtents() (asc, desc, gap float64, ok bool) { return 0, 0, 0, false }
 
 // numGlyphs probes GlyphName upward until it stops returning names. Type1 fonts
 // have at most 256 encoded glyphs but may carry more in their charstrings; we cap

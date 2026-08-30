@@ -500,6 +500,21 @@ bullet's design rationale is in its PR:
   paragraph now shapes instead of being silently dropped. Results cache per (script, style); the
   fallback consults bundled faces only. A fallback glyph carries the face it resolved from, since a
   GID is only meaningful against its own face.
+- **Vertical font metrics** (`pkg/font/program.go`, `family.go`): `Face.GlyphVAdvance` and
+  `Face.VMetrics` expose `vmtx`/`vhea` alongside the horizontal `GlyphAdvance`/`Metrics`, for
+  vertical writing modes. **The advance is normalized to a POSITIVE downward distance in em units**
+  — the underlying library returns a negative one (it negates for a Y-down convention, so a
+  1000-upem face reports -1000), and the flip happens once at the adapter so no caller carries the
+  convention. A caller taking the raw sign would run the pen backwards up the page with nothing to
+  catch it, so a test pins it. Three outcomes are kept distinct rather than collapsed: a face with a
+  real `vhea` reports its authored values; a TrueType face WITHOUT `vmtx` still returns a usable
+  advance (upstream synthesizes one em — the correct fallback, and what browsers do) but
+  `VMetrics` reports `ok=false` so a synthesized metric is never presented as authored; Type1 and
+  bare CFF report `ok=false` for both, because the formats have no vertical metrics at all. Both
+  branches are covered by bundled faces (Inconsolata `.ttf`, TeX Gyre Heros `.pfb`). `FontVExtents`
+  panics on inconsistent tables exactly as `FontHExtents` does, so it carries the same `recover`.
+  This retires the "needs `vhea`/`vmtx` reading `pkg/font` does not have" blocker cited for vertical
+  text; what remains is layout. **Nothing consumes these yet** — vertical layout is not implemented.
 - **`.notdef` for unmappable runes** (`pkg/font/notdef.go`, `pkg/layout/inline/shape.go`): a rune that
   neither the run's family nor any script fallback can map now draws the tofu box instead of rendering
   as NOTHING. `Face.NotdefGlyph` follows the browser order — the font's own glyph 0 when it has
@@ -1276,8 +1291,8 @@ read+write vocabulary for the tinycld text adoption path):
   outlines, not selectable or searchable text.**
 - Known scope limits of SVG text, each degrading with a log: **`<textPath>`** renders its text on a
   straight baseline (arc-length parameterization of a `render.Path` is a subsystem of its own) and
-  **`writing-mode`** renders horizontally (vertical metrics need `vhea`/`vmtx` reading `pkg/font`
-  does not do). **`<tref>` is dropped, not deferred** — it was removed from SVG 2 and is
+  **`writing-mode`** renders horizontally (the layout path has no vertical advance model; the
+  metrics themselves now ship — see "Vertical font metrics"). **`<tref>` is dropped, not deferred** — it was removed from SVG 2 and is
   unimplemented in every current browser. A ligature or
   cursive join spanning a `<tspan>` boundary does not form, since the two sides reach the shaper as
   separate runs. An `objectBoundingBox` paint server on text resolves against an approximated box (a
