@@ -374,7 +374,8 @@ bullet's design rationale is in its PR:
   while the identical rule on a block child worked. Margins are counted where they must be: line
   packing uses the OUTER size, free-space distribution and `justify-content` position the margin
   box, the line grows to hold a cross margin, and `stretch` fills the line less the item's cross
-  margins. Showcase §38.
+  margins — and an auto-height container's own content extent encloses its children's margin boxes,
+  so a trailing margin does not overflow the container that should have grown for it. Showcase §38.
 - **`line-height`, all forms** (`pkg/css/value.go` `UnitNumber`, `pkg/layout/css/inline.go`): the
   **unitless multiplier** (`line-height: 1.5`) — the commonest spelling — plus `em`, `%`, lengths,
   and `normal`. The unitless form was previously rejected as an invalid length and the declaration

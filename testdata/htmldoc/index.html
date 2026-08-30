@@ -1612,6 +1612,23 @@ newline is kept.</p>
       <code>margin-left</code> the cross one. Both apply, and the line grows to hold the
       item's margin box rather than letting a cross margin overflow it.</p>
 
+    <h4>An auto-height column grows for its children's margins</h4>
+    <div class="fmrow fmcol">
+      <div class="fmitem"></div>
+      <div class="fmitem alt" style="margin-bottom:40px"></div>
+      <div class="fmitem"></div>
+    </div>
+    <p class="caption">The container has no stated height, so its height <em>is</em> its
+      content extent &mdash; and that extent has to enclose the children's margin boxes.
+      The tinted background is the container itself: it ends below the third item, with
+      the middle item's 40px <code>margin-bottom</code> inside it rather than spilling
+      past. Line packing, free&#8209;space distribution and cross sizing all counted
+      margins already; the branch that content&#8209;sizes a column with an indefinite
+      main size still summed the border box, so the children were placed correctly and
+      then overflowed the container that should have grown for them. The case above uses
+      an explicit <code>height</code>, which takes the other branch and was always
+      right &mdash; which is why it took an auto&#8209;height column to show the gap.</p>
+
     <h4>The block control</h4>
     <p class="caption">The same <code>margin-top</code> on a <em>block</em> child was
       always correct, and still is &mdash; a test pins the two to the same position. This
