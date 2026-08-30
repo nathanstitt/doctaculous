@@ -491,10 +491,42 @@ bullet's design rationale is in its PR:
   two differ only in which side subsequent lines stack from and there is one line); atomic inline
   boxes; hard line breaks; **float avoidance** — a vertical line beside a float is drawn straight
   *through* it, the one gap here that produces overlapping ink rather than missing ink, so it is
-  logged rather than left to be discovered; and text-decoration and inline-box backgrounds, skipped
-  because every span the painter computes is an X range and drawing them would rule a line across the
-  page instead of beside the text. `text-orientation` is not parsed — glyphs are upright, which is
-  `upright` behaviour and what a Latin label wants, but `mixed` is the CSS initial value.
+  logged rather than left to be discovered; **shrink-to-fit sizing** — an inline-block or float in a
+  vertical mode is still measured on the horizontal axis, so its cross size comes out as long as its
+  text (transposing that means turning the intrinsic-measure seam table/grid/flex sizing all share);
+  and text-decoration and inline-box backgrounds, skipped because every span the painter computes is
+  an X range and drawing them would rule a line across the page instead of beside the text.
+- **`text-orientation`** (`pkg/css/cascade.go`, `pkg/layout/css/inline.go`,
+  `pkg/layout/paint/paint.go`): `mixed` (the initial value) | `upright` | `sideways`, plus the CSS
+  Writing Modes 3 alias `sideways-right`. Decides, per glyph, whether it stands upright in a vertical
+  line or lies on its side. Inherited (§5.1) and a no-op in a horizontal writing mode, per spec — but
+  parsed and carried there anyway, since a value set on a horizontal ancestor must still reach a
+  vertical descendant. Shown in `testdata/htmldoc/` §43.
+
+  The rotation composes into the **per-glyph matrix paint already builds** (`layout.GlyphItem.Rotate`,
+  applied inside `paintGlyph`), not a `TransformPush`/`Pop` bracket around the run: the turn is about
+  each glyph's own origin, so a shared bracket would need a per-glyph translation anyway and would not
+  amortize, while costing two display-list items and a recursive paint call per push — on the hottest
+  path in painting, under the *initial* value. Zero rotation is skipped rather than multiplied
+  through, so every glyph emitted before this existed paints byte-identically.
+
+  A rotated glyph advances the pen by its **horizontal** extent, since it is lying on its side; an
+  upright one advances a full em. That is what makes `sideways` proportional and `upright`
+  fixed-pitch, and asserting it is what distinguishes real orientation from a rotation that merely
+  looks right.
+
+  **Which glyphs stay upright under `mixed` approximates Unicode's `Vertical_Orientation`
+  (UAX #50)** — neither the standard library nor `textlayout` ships that table. The check covers the
+  scripts a vertical line is actually set in (Han, Hiragana, Katakana, Hangul, Bopomofo, Yi) plus the
+  CJK punctuation and full-width blocks stdlib's script tables exclude, and **errs toward rotating**:
+  a wrongly-rotated glyph is visibly odd, while a wrongly-upright one silently looks like `upright`
+  was intended. Vendoring the real table is the correct fix and is recorded as outstanding.
+
+  **Not implemented:** vertical alternate glyph forms (the `vert`/`vrt2` GSUB features) — a rotated
+  glyph is the rotated Latin form, not a purpose-designed vertical one. `text-combine-upright` is out
+  of scope. The `mixed` upright case **cannot be shown in the visual showcase**: no bundled face
+  covers CJK, so it would render as empty boxes; the showcase says so and the case is covered by unit
+  tests against the classifier instead.
 - **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
   slice 2 of 5, retiring **all three** "laying out LTR" logs. Tables mirror their solved column
   x-offsets, and `buildCollapsedBorders` flips its index→physical-side mapping — without that flip,

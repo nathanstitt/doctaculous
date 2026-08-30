@@ -401,15 +401,21 @@ type ComputedStyle struct {
 	// WritingMode: "horizontal-tb" (initial) | "vertical-rl" | "vertical-lr".
 	// Inherited (CSS Writing Modes 4 §3.1) — it is in inheritFrom alongside Direction.
 	//
-	// Only horizontal-tb is honoured. A vertical value is parsed, carried, and
-	// reported by the layout engine as unsupported, then laid out horizontally.
-	// It is stored rather than dropped so the degradation can be detected and logged
-	// once per box: the property previously did not reach the cascade at all, so an
-	// author got a silent no-op — a correct stylesheet, a wrong page, and no
-	// diagnostic. Vertical layout needs a vertical advance model in the inline layer
-	// (the font metrics themselves are available); until that lands, saying so is the
-	// honest behaviour. The SVG path reports the same limitation (pkg/svg/style.go).
+	// horizontal-tb and vertical-rl are laid out. vertical-lr places its single line
+	// identically to vertical-rl and reports the difference (the two differ only in the
+	// side subsequent lines stack from, and line stacking is not implemented). See
+	// pkg/layout/css/inline.go layoutInlineVertical for what a vertical line does and
+	// does not cover. The SVG path still lays every vertical value out horizontally and
+	// reports it (pkg/svg/style.go).
 	WritingMode string
+	// TextOrientation: "mixed" (initial) | "upright" | "sideways". Inherited
+	// (CSS Writing Modes 4 §5.1) — it is in inheritFrom alongside WritingMode.
+	//
+	// It has NO effect in a horizontal writing mode, per spec: the property orients
+	// glyphs within a vertical line, and there is no such line to orient them in. It is
+	// parsed and carried regardless, because it inherits — a value set on a horizontal
+	// ancestor still has to reach a vertical descendant that does honour it.
+	TextOrientation string
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -891,10 +897,11 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.CaptionSide = parent.CaptionSide
 	cs.EmptyCells = parent.EmptyCells
 	cs.Direction = parent.Direction
-	cs.WritingMode = parent.WritingMode // CSS Writing Modes 4: writing-mode is inherited
-	cs.Page = parent.Page               // CSS Paged Media: `page` is inherited
-	cs.Widows = parent.Widows           // CSS: widows is inherited
-	cs.Orphans = parent.Orphans         // CSS: orphans is inherited
+	cs.WritingMode = parent.WritingMode         // CSS Writing Modes 4: writing-mode is inherited
+	cs.TextOrientation = parent.TextOrientation // CSS Writing Modes 4 §5.1: inherited
+	cs.Page = parent.Page                       // CSS Paged Media: `page` is inherited
+	cs.Widows = parent.Widows                   // CSS: widows is inherited
+	cs.Orphans = parent.Orphans                 // CSS: orphans is inherited
 	// table-layout, vertical-align, break-*, break-inside, filter are NOT inherited
 	// (per CSS). filter in particular must not inherit: it applies once to the box's
 	// whole rendered subtree, so inheriting it would re-apply the effect at every
@@ -972,14 +979,15 @@ func initialStyle() ComputedStyle {
 		AlignContent: "start",
 		// GridAutoColumns/GridAutoRows default to nil: layout treats nil as one auto track.
 		// GridTemplateColumns/Rows/Areas default to zero value (empty = no explicit template).
-		BorderCollapse: "separate",
-		TableLayout:    "auto",
-		VerticalAlign:  "baseline",
-		CaptionSide:    "top",
-		EmptyCells:     "show",
-		Direction:      "ltr",
-		WritingMode:    "horizontal-tb",
-		UnicodeBidi:    "normal",
+		BorderCollapse:  "separate",
+		TableLayout:     "auto",
+		VerticalAlign:   "baseline",
+		CaptionSide:     "top",
+		EmptyCells:      "show",
+		Direction:       "ltr",
+		WritingMode:     "horizontal-tb",
+		TextOrientation: "mixed",
+		UnicodeBidi:     "normal",
 		// BorderSpacingH/V default to 0 (zero value).
 		Widows:  2, // CSS initial widows
 		Orphans: 2, // CSS initial orphans
@@ -1358,6 +1366,18 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 			cs.WritingMode = "horizontal-tb"
 		case "vertical-rl", "vertical-lr":
 			cs.WritingMode = d.Value
+		}
+	case "text-orientation":
+		// `sideways-right` is the CSS Writing Modes 3 alias of `sideways`, kept for the
+		// same reason the writing-mode case keeps the SVG 1.1 spellings: a stylesheet in
+		// the wild uses it and mapping it costs one line. `use-glyph-orientation` is a
+		// deprecated SVG-compat value with no defined behaviour for CSS content, so it is
+		// dropped rather than guessed at.
+		switch d.Value {
+		case "mixed", "upright", "sideways":
+			cs.TextOrientation = d.Value
+		case "sideways-right":
+			cs.TextOrientation = "sideways"
 		}
 	case "unicode-bidi":
 		switch d.Value {

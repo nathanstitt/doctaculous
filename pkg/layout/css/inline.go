@@ -3,6 +3,7 @@ package css
 import (
 	"context"
 	"image/color"
+	"math"
 	"strings"
 	"unicode"
 
@@ -295,13 +296,35 @@ func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, cont
 	line := inline.MakeLine(glyphs)
 	baselineX := contentX + contentW/2
 
-	// The pen starts one ascent DOWN from the content top, exactly as a horizontal line's
-	// first baseline does (baselineY = penY + ascentOfLine). Starting at 0 instead would
-	// put the first glyph's origin on the content edge and clip everything above its
-	// baseline — the top of the first letter — which is subtle enough on a short label to
-	// pass an ink-box test while being visibly wrong.
+	// text-orientation is resolved once for the whole line: it is inherited and this
+	// path lays out a single box's inline content, so every glyph shares the box's value.
+	orient := b.Style.TextOrientation
+	if orient == "" {
+		// An anonymous box carries a zero-valued Style, where "" is not the CSS initial
+		// value — the same trap isAnonymous documents for width/height, and the one that
+		// made every anonymous box a stacking context in the transform work.
+		orient = "mixed"
+	}
+
+	// Where the pen starts depends on how the glyphs are oriented, and getting this wrong
+	// clips the first glyph rather than erroring.
+	//
+	//   - UPRIGHT: the glyph keeps its own baseline, so the pen starts one ascent down
+	//     from the content top, exactly as a horizontal line's first baseline does.
+	//   - SIDEWAYS: the glyph is turned a quarter turn about its origin, so its ascent no
+	//     longer extends UP from the pen — it extends to the side. The pen starts at the
+	//     content top, and the ascent is taken out of the cross axis instead (below).
+	//
+	// A line under `mixed` can hold both, so the inset follows the FIRST glyph: it is the
+	// one that would be clipped by the content edge.
 	var emitted []GlyphFragment
-	penY := ascentOfLine(line)
+	leadingInset := 0.0
+	if len(glyphs) > 0 {
+		if _, sideways := glyphRotation(orient, &glyphs[0]); !sideways {
+			leadingInset = ascentOfLine(line)
+		}
+	}
+	penY := leadingInset
 	for gi := range glyphs {
 		g := &glyphs[gi]
 		if g.Break {
@@ -319,15 +342,33 @@ func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, cont
 				"css layout: an atomic inline box in a vertical writing-mode is not implemented; it is not placed")
 			continue
 		}
+		rot, sideways := glyphRotation(orient, g)
 		adv := verticalAdvanceOf(g)
+		if sideways {
+			// A rotated glyph lies on its side, so what advances the pen down the page is
+			// its HORIZONTAL extent — the same measure that would advance a horizontal
+			// line. Using the vertical advance here would space sideways Latin text by one
+			// em per letter, which is the fixed-pitch look of `upright`, not `mixed`.
+			adv = g.Advance
+		}
+		// Cross-axis placement. An UPRIGHT glyph straddles its baseline the way horizontal
+		// text does, so the vertical baseline runs down the middle of the box and the glyph
+		// centres on it. A SIDEWAYS glyph has been turned about its origin, which puts its
+		// ascent to one side of the baseline and its descent to the other — so the baseline
+		// itself has to move, by half the difference, to leave the glyph centred.
+		x := baselineX
+		if sideways {
+			x -= (g.AscentPt - g.DescentPt) / 2
+		}
 		if g.Outline != nil || hasColorInk(g) {
 			emitted = append(emitted, GlyphFragment{
-				Outline: g.Outline, X: baselineX, Y: penY, AdvancePt: adv, SizePt: g.SizePt,
+				Outline: g.Outline, X: x, Y: penY, AdvancePt: adv, SizePt: g.SizePt,
 				Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 				AscentPt:        g.AscentPt,
 				DescentPt:       g.DescentPt,
 				BaselineShiftPt: g.BaselineShiftPt,
 				Face:            g.Face, GID: g.GID, Runes: g.Runes,
+				Rotate: rot,
 			})
 		}
 		penY += adv
@@ -344,12 +385,31 @@ func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, cont
 		}
 	}
 
-	// The used extent runs from the content top to the last glyph's descender: penY is
-	// already one ascent past the top and has been advanced once per glyph, so the final
-	// advance carries it past the last glyph's origin. Nothing further is added — the
-	// trailing advance IS the descent allowance, the same way a horizontal line's height
-	// ends at its own descent rather than at the next baseline.
-	height = penY - ascentOfLine(line)
+	// The used extent runs from the content top to the last glyph's descender. penY has
+	// been advanced once per glyph, so the final advance already carries it past the last
+	// glyph's origin — that trailing advance IS the descent allowance, the same way a
+	// horizontal line's height ends at its own descent rather than at the next baseline.
+	//
+	// The leading inset is subtracted back off because it positions the first glyph
+	// WITHIN the extent rather than adding to it. It is zero for a sideways line, which
+	// is why it is tracked rather than assumed to be ascentOfLine.
+	height = penY - leadingInset
+
+	// A shrink-to-fit box (inline-block, float, table cell, flex/grid item) is sized by
+	// the intrinsic measure helpers, and those measure the HORIZONTAL axis — they shape
+	// the content and break it at a width. In a vertical writing mode the axes swap, so a
+	// shrink-to-fit vertical box comes out as wide as its text is long instead of about
+	// one em wide. Measured: an inline-block holding "ABCDEF" at 20px is sized 78.9pt
+	// wide where a browser gives it roughly the em.
+	//
+	// Transposing that is a change to measureContent, which table, grid, flex and
+	// inline-block sizing all share — outside this phase, and the kind of shared seam
+	// that should not be turned by a feature branch without its own tests. Block-level
+	// vertical boxes (the label case) do not go through it and are correct.
+	if isShrinkToFit(b) {
+		e.warnOnce("css-writing-mode-vertical-shrink-to-fit",
+			"css layout: a shrink-to-fit box in a vertical writing-mode is sized on the horizontal axis; its cross size is too large")
+	}
 
 	// A float intruding on this line is not avoided: the baseline is placed in the middle
 	// of the full content box, so the text is drawn straight THROUGH the float rather than
@@ -373,6 +433,102 @@ func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, cont
 
 	lines = append(lines, LineFragment{BaselineY: contentTopY, Glyphs: emitted, Vertical: true})
 	return lines, height, nil
+}
+
+// isShrinkToFit reports whether b's inline size comes from the intrinsic measure
+// helpers rather than from its containing block — an inline-block, a float, or an
+// absolutely positioned box with an auto width. Those measure the horizontal axis, so a
+// vertical box among them is sized on the wrong axis (see the caller).
+//
+// Table cells, flex items and grid items are also intrinsically sized but reach it
+// through their own container's algorithm rather than this path, so they are not listed
+// here; a vertical box inside one is not diagnosed. Said plainly rather than implied,
+// because a diagnostic that looks exhaustive and is not is its own trap.
+func isShrinkToFit(b *cssbox.Box) bool {
+	if b.Float != cssbox.FloatNone {
+		return true
+	}
+	if b.Display == cssbox.DisplayInlineBlock {
+		return true
+	}
+	return b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed
+}
+
+// quarterTurn is the clockwise rotation a sideways glyph takes in a vertical line:
+// 90 degrees, so the glyph's own baseline runs down the page.
+const quarterTurn = math.Pi / 2
+
+// glyphRotation resolves CSS text-orientation for one glyph in a vertical line,
+// returning its clockwise rotation in radians and whether it ended up sideways.
+//
+//   - upright  — no glyph rotates. This is what a short Latin label wants, and it is
+//     what the vertical layout did before text-orientation was parsed at all.
+//   - sideways — every glyph rotates a quarter turn, including CJK.
+//   - mixed    — the INITIAL value: upright scripts stay upright, everything else
+//     rotates. This is the CJK default, where Han/Kana/Hangul read down the page in
+//     their normal orientation and embedded Latin lies on its side.
+//
+// An unrecognized value is treated as mixed, matching the initial value, because the
+// cascade only stores values it recognized.
+func glyphRotation(orient string, g *inline.Glyph) (radians float64, sideways bool) {
+	switch orient {
+	case "upright":
+		return 0, false
+	case "sideways":
+		return quarterTurn, true
+	}
+	if uprightInVertical(g.Runes) {
+		return 0, false
+	}
+	return quarterTurn, true
+}
+
+// uprightInVertical reports whether a glyph's runes belong to a script that stays
+// upright in a vertical line under text-orientation: mixed.
+//
+// This APPROXIMATES the Unicode Vertical_Orientation property (UAX #50), which is the
+// spec's actual authority and which neither the standard library nor the textlayout
+// dependency ships a table for. Vendoring the real table is the correct long-term fix
+// and is recorded as such; what is here covers the scripts a vertical line is actually
+// set in — Han, Hiragana, Katakana, Hangul, Bopomofo, Yi — plus the CJK punctuation and
+// full-width forms that stdlib's script tables exclude but which must stay upright with
+// the text they punctuate.
+//
+// Where it differs from UAX #50 it errs toward ROTATING, which is the safer error: a
+// wrongly-rotated glyph is visibly odd, whereas a wrongly-upright one in a Latin run
+// silently produces the fixed-pitch stacking that `upright` is for, and reads as
+// intentional.
+//
+// A glyph with no runes (a synthetic bullet, an inline-box edge) is not upright; it has
+// no script to consult and rotating a zero-ink glyph is a no-op anyway.
+func uprightInVertical(runes []rune) bool {
+	if len(runes) == 0 {
+		return false
+	}
+	for _, r := range runes {
+		if !uprightRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// uprightRune is uprightInVertical's per-rune test. See that function for what this
+// approximates and why.
+func uprightRune(r rune) bool {
+	switch {
+	// The blocks stdlib's script tables miss: CJK symbols and punctuation (U+3000-303F,
+	// the ideographic space, brackets and full stop), and the halfwidth/fullwidth forms
+	// (U+FF00-FFEF) whose full-width members are set upright with CJK text.
+	case r >= 0x3000 && r <= 0x303F, r >= 0xFF00 && r <= 0xFFEF:
+		return true
+	}
+	return unicode.Is(unicode.Han, r) ||
+		unicode.Is(unicode.Hiragana, r) ||
+		unicode.Is(unicode.Katakana, r) ||
+		unicode.Is(unicode.Hangul, r) ||
+		unicode.Is(unicode.Bopomofo, r) ||
+		unicode.Is(unicode.Yi, r)
 }
 
 // verticalAdvanceOf is a glyph's advance down the page, in points.

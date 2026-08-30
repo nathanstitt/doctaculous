@@ -71,12 +71,16 @@ func glyphInk(f *Fragment) inkBox {
 // the box it was given. Under writing-mode:vertical-rl it must paint a TALL, NARROW one
 // instead. Asserting the aspect flip rather than exact numbers keeps the test honest
 // about what is being claimed (the axis changed) without pinning font metrics.
+// The extent is asserted against text-orientation: upright, where each glyph advances a
+// full em. Under the initial `mixed` the Latin here rotates and advances by its own
+// width instead, which is correct but makes the extent a sum of letter widths rather
+// than a number this test can state without pinning font metrics.
 func TestVerticalWritingModeTurnsTheLineVertical(t *testing.T) {
 	const body = `<div style="width:40px;font-size:24px;%s">NOW</div>`
 	horiz := layoutTreeFor(t, `<html><body style="margin:0">`+
 		fmt.Sprintf(body, "")+`</body></html>`, 200, nil)
 	vert := layoutTreeFor(t, `<html><body style="margin:0">`+
-		fmt.Sprintf(body, "writing-mode:vertical-rl")+`</body></html>`, 200, nil)
+		fmt.Sprintf(body, "writing-mode:vertical-rl;text-orientation:upright")+`</body></html>`, 200, nil)
 
 	h, v := glyphInk(horiz), glyphInk(vert)
 	if h.n != 3 || v.n != 3 {
@@ -89,11 +93,29 @@ func TestVerticalWritingModeTurnsTheLineVertical(t *testing.T) {
 		t.Errorf("vertical ink box = %vx%v, want taller than wide", v.w(), v.h())
 	}
 	// The vertical extent is 3 glyphs at one em each, NOT the sum of their horizontal
-	// widths — vertical advance does not vary with how wide a letter is. Deliberately
-	// not asserted equal to the horizontal extent: an earlier version of this test did
-	// exactly that and passed only because the pen was (wrongly) advancing by width.
+	// widths — an upright glyph's advance does not vary with how wide a letter is.
+	// Deliberately not asserted equal to the horizontal extent: an earlier version of this
+	// test did exactly that and passed only because the pen was (wrongly) advancing by width.
 	if d := v.h() - 3*24; d > 0.5 || d < -0.5 {
 		t.Errorf("vertical extent = %v, want 72 (3 glyphs x 24pt em)", v.h())
+	}
+}
+
+// The DEFAULT orientation is `mixed`, which rotates Latin — so the same box with no
+// text-orientation must come out shorter than the upright one, because a rotated glyph
+// advances by its width. This is the control that keeps the test above from silently
+// becoming a test of the default.
+func TestDefaultOrientationIsShorterThanUpright(t *testing.T) {
+	const body = `<div style="width:40px;font-size:24px;writing-mode:vertical-rl;%s">NOW</div>`
+	def := layoutTreeFor(t, `<html><body style="margin:0">`+
+		fmt.Sprintf(body, "")+`</body></html>`, 200, nil)
+	up := layoutTreeFor(t, `<html><body style="margin:0">`+
+		fmt.Sprintf(body, "text-orientation:upright")+`</body></html>`, 200, nil)
+
+	d, u := glyphInk(def), glyphInk(up)
+	if d.h() >= u.h() {
+		t.Errorf("default (mixed) extent %v is not shorter than upright %v; the default "+
+			"should rotate Latin and advance by width", d.h(), u.h())
 	}
 }
 
@@ -140,18 +162,23 @@ func TestVerticalLineGlyphsShareXAndAdvanceInY(t *testing.T) {
 	}
 }
 
-// The pen must advance by the VERTICAL metric, not the horizontal one. This is the
-// assertion that distinguishes real vertical layout from text that merely stacks: a
-// vertical advance does not vary with a glyph's width, so N, O and W — visibly
+// An UPRIGHT glyph must advance by the font's VERTICAL metric, not its horizontal one.
+// This is the assertion that distinguishes real vertical layout from text that merely
+// stacks: a vertical advance does not vary with a glyph's width, so N, O and W — visibly
 // different widths — must be spaced identically, at one em.
 //
 // The first version of this feature had no such check and passed while advancing by
 // horizontal widths. The aspect-ratio test above could not see it, because the total
 // extent came out close either way.
+//
+// Pinned on `upright` specifically. A SIDEWAYS glyph is lying down, so advancing by its
+// horizontal extent is correct there — TestSidewaysAdvancesByHorizontalExtent covers
+// that, and the two together are what keep the axes from being confused in either
+// direction.
 func TestVerticalAdvanceIsTheFontsVerticalMetricNotItsWidth(t *testing.T) {
 	const sizePt = 24
 	root := layoutTreeFor(t, `<html><body style="margin:0">`+
-		`<div style="writing-mode:vertical-rl;font-size:24px">NOW</div></body></html>`, 200, nil)
+		`<div style="writing-mode:vertical-rl;font-size:24px;text-orientation:upright">NOW</div></body></html>`, 200, nil)
 
 	var ln *LineFragment
 	var walk func(*Fragment)
@@ -187,13 +214,17 @@ func TestVerticalAdvanceIsTheFontsVerticalMetricNotItsWidth(t *testing.T) {
 	}
 }
 
-// The first glyph's origin sits one ascent below the content top, not on it. A pen
-// starting at zero puts the first letter's baseline on the box edge and clips
+// An UPRIGHT first glyph's origin sits one ascent below the content top, not on it. A
+// pen starting at zero puts the first letter's baseline on the box edge and clips
 // everything above it — which on a short label is subtle enough to survive an ink-box
 // test while being plainly wrong on the page.
+//
+// A SIDEWAYS glyph is the opposite case: its ascent runs to the side rather than up, so
+// the inset must be zero there. TestLeadingInsetFollowsOrientation asserts both halves
+// against each other; this one pins the upright number itself.
 func TestVerticalFirstGlyphClearsTheContentTop(t *testing.T) {
 	root := layoutTreeFor(t, `<html><body style="margin:0">`+
-		`<div style="writing-mode:vertical-rl;font-size:24px">NOW</div></body></html>`, 200, nil)
+		`<div style="writing-mode:vertical-rl;font-size:24px;text-orientation:upright">NOW</div></body></html>`, 200, nil)
 
 	var ln *LineFragment
 	var walk func(*Fragment)

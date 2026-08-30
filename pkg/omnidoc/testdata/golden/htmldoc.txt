@@ -1167,8 +1167,30 @@ NOW
 
 vertical‑rl
 
-Both boxes are 40 px wide. The horizontal one overflows its width; the vertical one turns the run down the page and takes the height it needs. That difference — a box that grows along the text's own axis — is the whole of what this phase delivers.
+Both boxes are 40 px wide. The horizontal one overflows its width; the vertical one turns the run down the page and takes the height it needs. That difference — a box that grows along the text's own axis — is the whole of what turning the line vertical delivers; which way each glyph faces within it is the next question.
+
+text-orientation: which way each glyph faces
+
+A vertical line has to decide, per glyph, whether it stands upright or lies on its side. mixed — the initial value — keeps upright scripts upright and turns everything else a quarter turn, which is how CJK text sets with Latin embedded in it. upright stands every glyph up; sideways turns every glyph, including the ones mixed would leave alone.
+
+Wax
+
+mixed (initial)
+
+Wax
+
+upright
+
+Wax
+
+sideways
+
+Look for: mixed and sideways agree here, because Latin rotates under both — the two differ only on the scripts mixed keeps upright. Note also that the upright run is taller: an upright glyph advances a full em regardless of how wide the letter is, while a rotated one advances by its own width.
+
+The case that actually separates mixed from sideways — a Han character standing upright beside recumbent Latin — cannot be shown here: no bundled face covers CJK, so it would render as a row of empty boxes and demonstrate nothing. It is covered by unit tests against the classifier instead, which is the honest place for a claim the page cannot make visually.
+
+Which glyphs stay upright is Unicode's Vertical_Orientation property (UAX #50). Neither the standard library nor this engine's font dependency ships that table, so the check here approximates it from the script tables plus the CJK punctuation and full‑width blocks — and errs toward rotating, because a wrongly‑rotated glyph looks obviously wrong while a wrongly‑upright one just looks like upright was intended.
 
 What is not implemented
 
-One line only. There is no vertical line wrapping: a run longer than the block extent overflows and logs, rather than starting a second line beside the first. vertical-lr is accepted and lays out identically to vertical-rl — the two differ only in which side subsequent lines stack from, and there are none — so it logs rather than quietly equating them. Glyphs are upright; text-orientation and the rotation mixed implies are a later phase. Text decoration and inline‑box backgrounds are skipped on a vertical line: every span the painter computes is an X range, and drawing them anyway would rule a line across the page instead of beside the text.
+One line only. There is no vertical line wrapping: a run longer than the block extent overflows and logs, rather than starting a second line beside the first. vertical-lr is accepted and lays out identically to vertical-rl — the two differ only in which side subsequent lines stack from, and there are none — so it logs rather than quietly equating them. A shrink‑to‑fit vertical box (inline‑block, float) is still measured on the horizontal axis, so it comes out as wide as its text is long; transposing that means turning the intrinsic‑measure seam that table, grid and flex sizing all share, so it logs instead. Text decoration and inline‑box backgrounds are skipped on a vertical line: every span the painter computes is an X range, and drawing them anyway would rule a line across the page instead of beside the text. Vertical alternate glyph forms (the vert/ vrt2 font features) are out of scope — a rotated glyph is the rotated Latin form, not a purpose‑designed vertical one.

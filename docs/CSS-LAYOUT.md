@@ -51,19 +51,28 @@ gracefully.
   block centering; deferred margin-collapse edge cases (empty-block collapse-through, clearance,
   `min-height` interaction).
 
-- **Vertical writing modes — remaining work.** A single vertical line ships (see FEATURES.md); what
-  is left is everything that needs more than one line, plus glyph orientation:
+- **Vertical writing modes — remaining work.** A single vertical line ships, with
+  `text-orientation` deciding which way each glyph faces (see FEATURES.md). What is left is mostly
+  what needs more than one line, plus two sizing seams:
 
   - **Vertical line wrapping**, and with it `vertical-lr`. A run longer than the block extent
     currently overflows and logs. Wrapping needs a break loop against the block extent (the breaker
     itself is axis-neutral — it takes a scalar limit — so this is placement, not breaking), and once
     there are multiple lines they must stack: right-to-left for `vertical-rl`, left-to-right for
     `vertical-lr`, which is the only difference between the two values.
-  - **`text-orientation`** (`mixed` | `upright` | `sideways`) is not parsed; glyphs are upright,
-    which is `upright` behaviour and what a short Latin label wants, but `mixed` is the initial
-    value and rotates Latin 90° CW. The display list is already glyph-granular (`GlyphKind` carries
-    a per-glyph `XPt, YPt`, and paint composes one matrix per glyph), so the rotation needs no new
-    plumbing — compose into the existing per-glyph matrix rather than adding a rotation field.
+  - **The `Vertical_Orientation` table (UAX #50).** `text-orientation: mixed` decides upright-vs-
+    rotated per glyph from this Unicode property, and neither the standard library nor `textlayout`
+    ships it, so the check approximates it from script tables plus the CJK punctuation and
+    full-width blocks. Vendoring the real table is the correct fix — check `DEPENDENCIES.md` first,
+    and note the approximation deliberately errs toward rotating, so the failure mode of the gap is
+    visible rather than silent.
+  - **Shrink-to-fit sizing on the block axis.** An inline-block, float, or auto-width absolute box in
+    a vertical mode is sized by `measureMaxContent`/`measureMinContent`, which shape the content and
+    break it at a *width* — so the box comes out as wide as its text is long instead of about one em.
+    Measured: an inline-block holding "ABCDEF" at 20px is 78.9pt wide. It logs. Transposing means
+    turning `measureContent`, which table, grid, flex and inline-block sizing all share, so it wants
+    its own change with its own tests rather than riding along on a feature branch. Block-level
+    vertical boxes do not go through it and are correct today.
   - **Atomic inline boxes, hard breaks, and decorations** in a vertical line: each is skipped with a
     log today. Decorations need span geometry computed on the block axis — `appendDecoRules` and
     `appendInlineBoxDecorations` build X ranges throughout.

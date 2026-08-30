@@ -1880,7 +1880,39 @@ newline is kept.</p>
     <p class="caption">Both boxes are 40&nbsp;px wide. The horizontal one overflows its
       width; the vertical one turns the run down the page and takes the height it needs.
       That difference &mdash; a box that <em>grows along the text's own axis</em> &mdash;
-      is the whole of what this phase delivers.</p>
+      is the whole of what turning the line vertical delivers; which way each glyph
+      <em>faces</em> within it is the next question.</p>
+
+    <h3><code>text-orientation</code>: which way each glyph faces</h3>
+    <p class="caption">A vertical line has to decide, per glyph, whether it stands upright
+      or lies on its side. <code>mixed</code> &mdash; the initial value &mdash; keeps
+      upright scripts upright and turns everything else a quarter turn, which is how CJK
+      text sets with Latin embedded in it. <code>upright</code> stands every glyph up;
+      <code>sideways</code> turns every glyph, including the ones
+      <code>mixed</code> would leave alone.</p>
+    <div class="wmcmp">
+      <div class="wmcell"><div class="wmo">Wax</div><span class="wmtag">mixed (initial)</span></div>
+      <div class="wmcell"><div class="wmo wmo-up">Wax</div><span class="wmtag">upright</span></div>
+      <div class="wmcell"><div class="wmo wmo-side">Wax</div><span class="wmtag">sideways</span></div>
+    </div>
+    <p class="caption">Look for: <code>mixed</code> and <code>sideways</code> agree here,
+      because Latin rotates under both &mdash; the two differ only on the scripts
+      <code>mixed</code> keeps upright. Note also that the <code>upright</code> run is
+      <em>taller</em>: an upright glyph advances a full em regardless of how wide the
+      letter is, while a rotated one advances by its own width.</p>
+    <p class="caption">The case that actually separates <code>mixed</code> from
+      <code>sideways</code> &mdash; a Han character standing upright beside recumbent
+      Latin &mdash; <strong>cannot be shown here</strong>: no bundled face covers CJK, so
+      it would render as a row of empty boxes and demonstrate nothing. It is covered by
+      unit tests against the classifier instead, which is the honest place for a claim
+      the page cannot make visually.</p>
+    <p class="caption">Which glyphs stay upright is Unicode's
+      <code>Vertical_Orientation</code> property (UAX&nbsp;#50). Neither the standard
+      library nor this engine's font dependency ships that table, so the check here
+      approximates it from the script tables plus the CJK punctuation and full&#8209;width
+      blocks &mdash; and errs toward <em>rotating</em>, because a wrongly&#8209;rotated
+      glyph looks obviously wrong while a wrongly&#8209;upright one just looks like
+      <code>upright</code> was intended.</p>
 
     <h4>What is not implemented</h4>
     <p class="caption">One line only. There is no vertical line <em>wrapping</em>: a run
@@ -1888,11 +1920,15 @@ newline is kept.</p>
       beside the first. <code>vertical-lr</code> is accepted and lays out identically to
       <code>vertical-rl</code> &mdash; the two differ only in which side subsequent lines
       stack from, and there are none &mdash; so it logs rather than quietly equating them.
-      Glyphs are upright; <code>text-orientation</code> and the rotation
-      <code>mixed</code> implies are a later phase. Text decoration and inline&#8209;box
+      A <em>shrink&#8209;to&#8209;fit</em> vertical box (inline&#8209;block, float) is
+      still measured on the horizontal axis, so it comes out as wide as its text is long;
+      transposing that means turning the intrinsic&#8209;measure seam that table, grid and
+      flex sizing all share, so it logs instead. Text decoration and inline&#8209;box
       backgrounds are skipped on a vertical line: every span the painter computes is an
       X&nbsp;range, and drawing them anyway would rule a line across the page instead of
-      beside the text.</p>
+      beside the text. Vertical alternate glyph forms (the <code>vert</code>/
+      <code>vrt2</code> font features) are out of scope &mdash; a rotated glyph is the
+      rotated Latin form, not a purpose&#8209;designed vertical one.</p>
   </section>
 
 </body>

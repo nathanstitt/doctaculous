@@ -373,6 +373,12 @@ type GlyphFragment struct {
 	Face  *font.Face
 	GID   uint16
 	Runes []rune
+	// Rotate turns this glyph clockwise about its own pen origin, in radians — CSS
+	// text-orientation within a vertical line. Zero on every glyph of a horizontal line
+	// and on an upright glyph of a vertical one. Copied straight to
+	// layout.GlyphItem.Rotate, which documents why the rotation rides on the glyph
+	// rather than on a transform bracket around the run.
+	Rotate float64
 }
 
 // AppendItems appends f's drawing primitives, and its descendants', to dst in CSS 2.1
@@ -993,7 +999,7 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			// existing document while carrying the vertical advance where there is one.
 			dst = append(dst, layout.Item{
 				Kind:  layout.GlyphKind,
-				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY + g.Y - g.BaselineShiftPt, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes},
+				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY + g.Y - g.BaselineShiftPt, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes, Rotate: g.Rotate},
 			})
 		}
 		dst = appendUnderlines(dst, ln)

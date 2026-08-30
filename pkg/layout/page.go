@@ -306,6 +306,22 @@ type GlyphItem struct {
 	Face  *font.Face
 	GID   uint16
 	Runes []rune
+
+	// Rotate turns the glyph clockwise about its OWN pen origin, in radians. It carries
+	// CSS text-orientation: a Latin glyph in a vertical line under the initial `mixed`
+	// value is rotated a quarter turn so the run reads down the page, while an upright
+	// CJK glyph on the same line is not.
+	//
+	// Zero (the default) is skipped outright rather than multiplied through, so every
+	// glyph emitted before this field existed paints byte-identically.
+	//
+	// It rides on the glyph rather than on a TransformPush/Pop bracket around the run,
+	// which is the other seam that could carry it. Two reasons: the rotation is about
+	// each glyph's OWN origin, so a shared bracket would need a per-glyph translation
+	// anyway and would not actually amortize; and the bracket costs two display-list
+	// items plus a recursive paint call per push, which under `mixed` — the initial
+	// value, so the common case for CJK — would land on the hottest path in painting.
+	Rotate float64
 }
 
 // RuleItem is an axis-aligned filled rectangle in page space (points, Y-down). It
