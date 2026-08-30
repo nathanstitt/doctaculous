@@ -29,10 +29,17 @@ func cancelDoc() []byte {
 
 // hugeParagraph is a single block child holding a very large inline run. It is
 // the shape that the between-block-children check CANNOT catch: one paragraph is
-// one child, so cancellation only works if layoutInline checks per line.
+// one child, so cancellation only works if layoutInline checks per line. It is
+// sized so that laying it out takes hundreds of milliseconds — enough to fire a
+// cancel partway through and tell that apart from a run to completion.
+//
+// The repeat count is deliberately no larger than that: the mid-layout test lays
+// this out once uncancelled to get its baseline, and at 20000 repeats that
+// single layout peaked at ~18 GB RSS under -race, over a CI runner's memory. At
+// 500 it is ~600 ms and a few hundred MB, still 30x the test's 20 ms floor.
 func hugeParagraph() []byte {
 	return []byte("<html><body><p style=\"color:black\">" +
-		strings.Repeat("wordy text that must be broken into many many lines ", 20000) +
+		strings.Repeat("wordy text that must be broken into many many lines ", 500) +
 		"</p></body></html>")
 }
 

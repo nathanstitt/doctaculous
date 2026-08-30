@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nathanstitt/omnidoc/pkg/pdf/filter"
 )
 
 // The four defects below were all found by FuzzParse rather than by reading the
@@ -228,11 +230,19 @@ func TestStreamLengthOverflow(t *testing.T) {
 // TestDecodedStreamSizeBounded covers a compression bomb. Measured before the
 // cap: a 2.9 MB PDF whose content stream decoded to 2 GB drove peak RSS to
 // 4.5 GB in about a second, and the ratio holds for larger inputs.
+//
+// The ceiling is lowered for the duration of the test rather than decoding past
+// the real 512 MB one. Allocating half a gigabyte here cost ~8 GB of peak RSS
+// under -race, which OOM-killed the CI runner; the refusal path exercised is
+// identical either way.
 func TestDecodedStreamSizeBounded(t *testing.T) {
+	const limit = 64 << 10
+	filter.SetMaxDecodedSizeForTest(t, limit)
+
 	var z bytes.Buffer
 	w := zlib.NewWriter(&z)
 	chunk := bytes.Repeat([]byte("0 0 m "), 1000)
-	for range 100000 { // ~600 MB decoded, past the 512 MB ceiling
+	for range 20 { // ~120 KB decoded, past the lowered ceiling
 		if _, err := w.Write(chunk); err != nil {
 			t.Fatalf("compress: %v", err)
 		}

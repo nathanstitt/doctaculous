@@ -63,9 +63,10 @@ func rawDeflate(data []byte) ([]byte, error) {
 // One byte past the limit is read so that hitting it exactly is distinguishable
 // from a stream that merely ends there.
 func readAllBounded(r io.Reader) ([]byte, error) {
-	out, err := io.ReadAll(io.LimitReader(r, MaxDecodedSize+1))
-	if len(out) > MaxDecodedSize {
-		return nil, fmt.Errorf("%w: exceeds the %d-byte limit", ErrTooLarge, MaxDecodedSize)
+	limit := maxDecodedSize
+	out, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if int64(len(out)) > limit {
+		return nil, fmt.Errorf("%w: exceeds the %d-byte limit", ErrTooLarge, limit)
 	}
 	return out, err
 }

@@ -75,6 +75,15 @@ type Stage struct {
 // an allocation the process survives.
 const MaxDecodedSize = 512 << 20
 
+// maxDecodedSize is the ceiling the decoders actually enforce. It is a variable
+// only so that a test can lower it: proving the cap at its real value means
+// allocating half a gigabyte of output, and under -race the shadow memory for
+// that pushes peak RSS past 8 GB — enough to get a CI runner OOM-killed. A
+// small limit drives the identical code path for a few kilobytes.
+//
+// Nothing outside [SetMaxDecodedSizeForTest] may write it.
+var maxDecodedSize int64 = MaxDecodedSize
+
 // ErrTooLarge is returned (wrapped) when a stream decodes to more than
 // [MaxDecodedSize] bytes.
 var ErrTooLarge = errors.New("decoded stream too large")
@@ -95,9 +104,9 @@ func Decode(raw []byte, stages []Stage) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("filter %d (%s): %w", i, st.Name, err)
 		}
-		if len(out) > MaxDecodedSize {
+		if limit := maxDecodedSize; int64(len(out)) > limit {
 			return nil, fmt.Errorf("filter %d (%s): %w: %d bytes exceeds the %d-byte limit",
-				i, st.Name, ErrTooLarge, len(out), MaxDecodedSize)
+				i, st.Name, ErrTooLarge, len(out), limit)
 		}
 		data = out
 	}
