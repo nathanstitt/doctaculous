@@ -55,10 +55,10 @@ func xyzD65ToLinearSRGB(x, y, z float64) (r, g, b float64) {
 
 // D50 and D65 white points (CIE 1931 2-degree observer), used by the Bradford
 // adaptation below and as Lab's reference white.
-var (
-	whiteD50 = [3]float64{0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585}
-	whiteD65 = [3]float64{0.3127 / 0.3290, 1.0, (1.0 - 0.3127 - 0.3290) / 0.3290}
-)
+// Only D50 is needed: it is CIE Lab's reference white, and the Lab conversions below
+// divide by it. The D65 white point is implicit in the sRGB<->XYZ matrices and the
+// Bradford adaptation, which carry it in their coefficients rather than as a vector.
+var whiteD50 = [3]float64{0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585}
 
 // xyzD65ToD50 chromatically adapts XYZ from a D65 to a D50 white point (Bradford).
 // CIE Lab is defined against D50, so lab()/lch() interpolation must adapt first;
@@ -107,7 +107,8 @@ func labToXYZD50(l, a, b float64) (x, y, z float64) {
 		}
 		return (116*f - 16) / labKappa
 	}
-	yv := math.Pow((l+16)/116, 3)
+	f := (l + 16) / 116
+	yv := f * f * f
 	if l <= labKappa*labEpsilon {
 		yv = l / labKappa
 	}

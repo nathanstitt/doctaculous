@@ -143,14 +143,17 @@ func parseColorMixFloat(s string) (floatRGBA, bool) {
 	if (has1 && (p1 < 0 || p1 > 100)) || (has2 && (p2 < 0 || p2 > 100)) {
 		return floatRGBA{}, false
 	}
+	// Only the SECOND colour's weight is needed downstream — the first is its
+	// complement — so the normalization below resolves p2 alone rather than carrying a
+	// p1 that nothing reads.
 	alphaScale := 1.0
 	switch {
 	case !has1 && !has2:
-		p1, p2 = 50, 50
+		p2 = 50
 	case has1 && !has2:
 		p2 = 100 - p1
 	case !has1 && has2:
-		p1 = 100 - p2
+		// p2 is already the given weight.
 	default:
 		sum := p1 + p2
 		// Both zero leaves no colour to mix; the value is invalid.
@@ -161,7 +164,7 @@ func parseColorMixFloat(s string) (floatRGBA, bool) {
 			// Under 100% additionally scales the result's alpha, which is why
 			// "red 20%, blue 20%" is a half-and-half at alpha 0.4 rather than opaque.
 			alphaScale = math.Min(sum/100, 1)
-			p1, p2 = p1/sum*100, p2/sum*100
+			p2 = p2 / sum * 100
 		}
 	}
 	t := p2 / 100 // weight of the SECOND colour
