@@ -72,7 +72,10 @@ func OpenSVGBytes(data []byte, opts ...OpenOption) (*Document, error) {
 		Items: []layout.Item{{
 			Kind: layout.VectorKind,
 			Vector: layout.VectorItem{
-				Scene: svgdraw.New(sd),
+				// The same logger svg.Parse got above. Text degrades at DRAW time,
+				// not parse time, so passing it only to the parser reported the
+				// malformed-input half and silently dropped the missing-glyph half.
+				Scene: svgdraw.NewWithLogf(sd, cfg.logf),
 				XPt:   0, YPt: 0, WPt: sd.WidthPt, HPt: sd.HeightPt,
 			},
 		}},

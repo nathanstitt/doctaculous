@@ -322,7 +322,7 @@ func (e *Engine) replacedFragment(ctx context.Context, b *cssbox.Box, w, h, bord
 		// and nothing paints — the same degradation a failed image decode gets.
 		vc := &VectorContent{CX: contentX, CY: contentY, CW: w, CH: h}
 		if doc != nil {
-			vc.Scene = fitSceneTo(doc, w, h)
+			vc.Scene = fitSceneTo(doc, w, h, e.logf)
 		}
 		frag.Vector = vc
 	} else {

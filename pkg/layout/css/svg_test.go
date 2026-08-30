@@ -186,10 +186,10 @@ func TestFitSceneToLeavesAMatchingBoxUnwrapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, wrapped := fitSceneTo(doc, 40, 20).(scaledScene); wrapped {
+	if _, wrapped := fitSceneTo(doc, 40, 20, nil).(scaledScene); wrapped {
 		t.Error("a box matching the SVG's own viewport was wrapped in a scale adapter")
 	}
-	s, wrapped := fitSceneTo(doc, 80, 20).(scaledScene)
+	s, wrapped := fitSceneTo(doc, 80, 20, nil).(scaledScene)
 	if !wrapped {
 		t.Fatal("a box differing from the SVG's viewport was NOT scaled; the drawing would " +
 			"occupy only part of its box")

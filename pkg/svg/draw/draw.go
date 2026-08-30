@@ -21,9 +21,18 @@ type Renderer struct {
 	// Doc is the parsed document this Renderer paints.
 	Doc *svg.Document
 	// Logf receives one debug line for degraded fidelity encountered while
-	// painting (currently: the gradient-stroke fallback, the pattern
-	// nesting/cell-count/draw-call-budget caps, each logged at most once per
-	// DrawVector call). nil means silent.
+	// painting: the gradient-stroke fallback and the pattern
+	// nesting/cell-count/draw-call-budget caps (each at most once per
+	// DrawVector call), plus every TEXT degradation the shaper reports — a
+	// family with no bundled face, and a rune no face can map, which draws
+	// .notdef.
+	//
+	// nil means silent, and silent is the wrong default for a renderer that can
+	// draw a page of tofu. Leaving this unset is what made CJK text in SVG
+	// render as columns of empty boxes with no diagnostic anywhere, while the
+	// identical text through the CSS path logged once per rune. Prefer
+	// NewWithLogf over assigning the field after New, so a caller that has a
+	// logger cannot silently skip it.
 	Logf func(string, ...any)
 
 	// faceOnce/faceCache lazily hold the font-face cache SVG text shaping
@@ -39,9 +48,24 @@ type Renderer struct {
 	faceCache *layoutfont.FaceCache
 }
 
-// New returns a Renderer for doc.
+// New returns a Renderer for doc that reports no diagnostics. Prefer
+// NewWithLogf wherever a logger is available; see Renderer.Logf for why silence
+// is a poor default here.
 func New(doc *svg.Document) *Renderer {
 	return &Renderer{Doc: doc}
+}
+
+// NewWithLogf returns a Renderer for doc that reports its degradations to logf.
+// A nil logf is equivalent to New.
+//
+// It exists as a constructor rather than leaving callers to set the field
+// because every one of them had a logger in hand and none of them passed it —
+// the field defaulted to nil at three separate call sites, and the resulting
+// silence was only noticed when a page of tofu rendered without a word. Making
+// the logger a constructor argument puts it where a caller has to decide about
+// it. This mirrors layoutfont.NewOSFontProvider / NewOSFontProviderWithLogf.
+func NewWithLogf(doc *svg.Document, logf func(string, ...any)) *Renderer {
+	return &Renderer{Doc: doc, Logf: logf}
 }
 
 // warnFlags tracks, for one DrawVector call, which one-per-document

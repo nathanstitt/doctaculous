@@ -297,7 +297,14 @@ const (
 // newSVGScene wraps a parsed document as a layout.VectorScene ready for a
 // VectorItem. It is the one place pkg/layout/css names pkg/svg/draw, so the
 // vector seam stays a single, visible connection.
-func newSVGScene(doc *svg.Document) layout.VectorScene { return svgdraw.New(doc) }
+//
+// logf is the ENGINE's logger, threaded through so an embedded SVG reports its
+// degradations on the same channel the surrounding document does. Passing nil
+// here once meant an <img src=.svg> whose text could not be shaped rendered
+// tofu in silence, while the identical text as HTML logged per rune.
+func newSVGScene(doc *svg.Document, logf func(string, ...any)) layout.VectorScene {
+	return svgdraw.NewWithLogf(doc, logf)
+}
 
 // scaledScene adapts a scene authored at (srcW, srcH) points to a viewport of a
 // different size, by pre-multiplying a scale into the ctm.
@@ -340,8 +347,8 @@ func (s scaledScene) DrawVector(dev render.Device, ctm render.Matrix) {
 // box already matches the document's own viewport (the overwhelmingly common case
 // of an unsized <img>, and every standalone SVG), the renderer is returned
 // unwrapped so the drawn output is bit-for-bit what the standalone path produces.
-func fitSceneTo(doc *svg.Document, boxW, boxH float64) layout.VectorScene {
-	scene := newSVGScene(doc)
+func fitSceneTo(doc *svg.Document, boxW, boxH float64, logf func(string, ...any)) layout.VectorScene {
+	scene := newSVGScene(doc, logf)
 	if doc.WidthPt <= 0 || doc.HeightPt <= 0 {
 		return scene
 	}

@@ -265,7 +265,7 @@ func (e *Engine) backgroundSource(ctx context.Context, ref string) *BackgroundIm
 		}
 		iw, ih := svgBackgroundIntrinsic(p.doc)
 		return &BackgroundImageContent{
-			Scene:  newSVGScene(p.doc),
+			Scene:  newSVGScene(p.doc, e.logf),
 			SceneW: p.doc.WidthPt, SceneH: p.doc.HeightPt,
 			IntrinsicW: iw, IntrinsicH: ih,
 		}
