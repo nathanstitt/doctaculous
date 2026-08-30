@@ -21,6 +21,12 @@ import (
 type pdfRenderer struct {
 	doc *pdf.Document
 
+	// logf receives degradation messages from structure extraction, or is nil.
+	// It is the OPEN-time logger, captured here because extraction happens lazily
+	// on the first Write* call, by which point the open options are long gone --
+	// so there is no later opportunity to ask the caller for one.
+	logf func(string, ...any)
+
 	// extractOnce/extractRoot lazily hold the structure-recovery cssbox tree, built on
 	// the first WriteMarkdown/WriteText/WriteHTML (extraction is expensive and most
 	// callers only rasterize). The tree is read-only once built. This makes a PDF
@@ -37,11 +43,23 @@ func (r *pdfRenderer) pageCount() int { return r.doc.PageCount() }
 // cached; it never panics (the extractor recovers per page). A nil result (extraction
 // failure) yields an empty document downstream rather than an error, matching the
 // degrade-gracefully rule.
+//
+// Degrading is only honest if it SAYS so. Every PDF-to-anything conversion routes
+// through here, so a dropped error produced an empty output file and a nil error
+// -- the worst failure mode available, because it is indistinguishable from a
+// document that genuinely had no text. The error is now reported through the
+// open-time logger, and r.logf is threaded into extract.Lower so its own per-page
+// messages ("skipping page 3: ...", "page 0 content unavailable: ...") reach the
+// caller instead of being discarded at the nil it used to be handed.
 func (r *pdfRenderer) cssboxRoot() *cssbox.Box {
 	r.extractOnce.Do(func() {
-		root, err := extract.Lower(r.doc, nil)
+		root, err := extract.Lower(r.doc, r.logf)
 		if err != nil {
-			return // extractRoot stays nil; downstream writes an empty document
+			// extractRoot stays nil; downstream writes an empty document.
+			if r.logf != nil {
+				r.logf("omnidoc: PDF structure extraction failed, output will be empty: %v", err)
+			}
+			return
 		}
 		r.extractRoot = root
 	})

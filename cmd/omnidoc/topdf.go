@@ -55,7 +55,7 @@ func topdfCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or empty)", *pageSize)
 	}
 
-	doc, err := openInput(input, omnidoc.FormatUnknown, *pageSize, *bundledFonts, *print, nil)
+	doc, err := openInput(input, omnidoc.FormatUnknown, *pageSize, *bundledFonts, *print, nil, nil)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}

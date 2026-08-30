@@ -73,6 +73,8 @@ func convertCmd(args []string) error {
 		pages     = fs.String("pages", "", "page range for image output, e.g. 1-3,5 or \"all\" (overrides --page; needs %d in the output name)")
 
 		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
+
+		verbose = fs.Bool("v", false, "report to stderr what could not be rendered (skipped pages, unsupported constructs)")
 	)
 	fs.Var(&sheets, "sheet", "xlsx input: render only this worksheet by name; repeat or comma-separate for several, in order (default: all visible sheets)")
 	fs.Usage = func() {
@@ -108,7 +110,7 @@ func convertCmd(args []string) error {
 		}
 	}
 
-	doc, err := openInput(input, fromFormat, *pageSize, *bundledFonts, *print, sheets)
+	doc, err := openInput(input, fromFormat, *pageSize, *bundledFonts, *print, sheets, verboseLogf(*verbose))
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -267,10 +269,13 @@ func resolveInOut(inFlag, outFlag string, positional []string) (in, out string, 
 // (or as the explicit from format, when set). pageSize/bundledFonts/printMedia
 // shape the layout of inputs that flow through the HTML pipeline and are
 // ignored by PDF/DOCX inputs.
-func openInput(input string, from omnidoc.Format, pageSize string, bundledFonts, printMedia bool, sheets []string) (*omnidoc.Document, error) {
+func openInput(input string, from omnidoc.Format, pageSize string, bundledFonts, printMedia bool, sheets []string, logf func(string, ...any)) (*omnidoc.Document, error) {
 	opts := htmlOpts(pageSize, bundledFonts, printMedia)
 	if len(sheets) > 0 {
 		opts = append(opts, omnidoc.WithSheets(sheets...))
+	}
+	if logf != nil {
+		opts = append(opts, omnidoc.WithLogf(logf))
 	}
 	if isHTTPURL(input) {
 		if from != omnidoc.FormatUnknown && from != omnidoc.FormatHTML {
