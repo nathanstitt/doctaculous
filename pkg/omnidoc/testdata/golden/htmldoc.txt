@@ -1142,3 +1142,33 @@ The trap: an anonymous box carries a zero‑value style, and a zero matrix is no
 What is refused
 
 The 3D functions — translate3d, rotateX, perspective, matrix3d — are rejected rather than flattened. This engine has no 3D pipeline, and dropping the Z terms would paint something confidently wrong; a refused declaration drops and the previous value stands, which is at least visible. transform-origin is not yet settable — the centre is used unconditionally.
+
+43 / WRITING MODES
+
+writing-mode: vertical text
+
+A vertical writing mode turns the baseline through a right angle: the pen walks down the page and lines stack across it. The property reached the cascade but nothing honoured it, so a sidebar label styled writing-mode: vertical-rl laid itself out horizontally and overflowed the narrow box it was given.
+
+A vertical label beside horizontal text
+
+NOW
+
+The label to the left is a single div with writing-mode: vertical-rl and no other positioning. Its box grows downward to fit the text's own extent, the way a horizontal box grows sideways — which is what makes it size itself correctly instead of spilling out of a fixed width.
+
+Look for: the letters stacked evenly. The vertical advance comes from the font's vertical metric — one em — not from each letter's width. Advancing by width instead spaces an N and a W differently, which reads as plausible-but-wrong text rather than as a bug, and is precisely how the first implementation of this passed its own test.
+
+The same string, both modes
+
+NOW
+
+horizontal‑tb
+
+NOW
+
+vertical‑rl
+
+Both boxes are 40 px wide. The horizontal one overflows its width; the vertical one turns the run down the page and takes the height it needs. That difference — a box that grows along the text's own axis — is the whole of what this phase delivers.
+
+What is not implemented
+
+One line only. There is no vertical line wrapping: a run longer than the block extent overflows and logs, rather than starting a second line beside the first. vertical-lr is accepted and lays out identically to vertical-rl — the two differ only in which side subsequent lines stack from, and there are none — so it logs rather than quietly equating them. Glyphs are upright; text-orientation and the rotation mixed implies are a later phase. Text decoration and inline‑box backgrounds are skipped on a vertical line: every span the painter computes is an X range, and drawing them anyway would rule a line across the page instead of beside the text.

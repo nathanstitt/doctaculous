@@ -17,13 +17,15 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   arbitrary distance along a curve, so it is a start and not a solution. Degrades to a straight
   baseline with a log.
 
-- **`writing-mode`** (25 fixtures) — needs a vertical advance model; the layout path is
-  horizontal-only. Degrades to horizontal with a log.
+- **`writing-mode`** (25 fixtures) — degrades to horizontal with a log, in the SVG path only.
 
-  The metrics half of this is now DONE and the old wording here ("needs `vhea`/`vmtx` vertical
-  metrics `pkg/font` does not parse") is retired: `Face.GlyphVAdvance`/`Face.VMetrics` expose them,
-  including upstream's one-em synthesis for faces with no `vmtx` — see FEATURES.md. What remains is
-  laying text out along a vertical axis, shared with the CSS side (`docs/CSS-LAYOUT.md`).
+  Both reasons this used to cite are now retired. The metrics half is done
+  (`Face.GlyphVAdvance` answers for every face — see FEATURES.md), and so is the advance model:
+  **the CSS path lays out a vertical line.** SVG places `<text>` itself rather than through the CSS
+  inline layer, so it does not inherit that for free. What remains is wiring SVG's own placement to
+  the vertical advance — an adaptation of existing pieces, not the new subsystem this was originally
+  deferred as. The CSS side's own remaining work (wrapping, `text-orientation`) is in
+  `docs/CSS-LAYOUT.md`; SVG needs only the single-line case those already cover.
 
 - **Filters not implemented** (each renders the element unfiltered with a log): `feTurbulence`,
   `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting` + light sources, `feMorphology`,

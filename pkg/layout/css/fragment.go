@@ -292,6 +292,17 @@ type BorderEdge struct {
 type LineFragment struct {
 	BaselineY float64 // page-space Y of the line's baseline
 	Glyphs    []GlyphFragment
+	// Vertical marks a line laid out under a vertical writing-mode, where the baseline
+	// runs DOWN the page rather than across it: every glyph shares one X (the baseline's
+	// inline-axis position) and advances along Y via GlyphFragment.Y.
+	//
+	// The line's physical field names keep their horizontal meaning even here —
+	// BaselineY is still a page-space Y — because a vertical line's baseline is a
+	// vertical ruler whose position is an X, carried per glyph instead. Reading
+	// BaselineY as "the baseline" on a vertical line is therefore wrong; consult this
+	// flag first. The alternative (renaming the whole inline layer to logical axes) is
+	// deliberately deferred: see the writing-mode plan's decision (b).
+	Vertical bool
 }
 
 // GlyphFragment is one positioned glyph on a line. It mirrors layout.GlyphItem so
@@ -301,7 +312,17 @@ type LineFragment struct {
 type GlyphFragment struct {
 	Outline *render.Path
 	X       float64
-	// AdvancePt is the glyph's horizontal advance in page-space points. It sizes a
+	// Y offsets this glyph from the owning line's BaselineY, in page-space points,
+	// growing DOWNWARD. It is zero for every glyph on a horizontal line — where the
+	// whole line shares one baseline — and carries the pen's descent down the page on a
+	// vertical one (LineFragment.Vertical). Being an OFFSET rather than an absolute
+	// keeps the existing whole-line Y shifts (block stacking, table row placement, page
+	// fragmentation) working untouched: they translate BaselineY and every glyph
+	// follows, exactly as before.
+	Y float64
+	// AdvancePt is the glyph's advance along the line's INLINE axis in page-space
+	// points — horizontal on an ordinary line, vertical on one where
+	// LineFragment.Vertical is set. It sizes a
 	// text-decoration underline span: the span's right edge is the last glyph's
 	// X+AdvancePt (the visible glyph extent is approximated by the pen advance —
 	// adequate for underlines). The CSS engine always sets it; a zero value would
@@ -763,6 +784,13 @@ func (f *Fragment) appendShadows(dst []layout.Item, inset bool) []layout.Item {
 // way that depends on order). Shared by appendUnderlines and appendStrikes so the
 // run-detection logic lives once.
 func appendDecoRules(dst []layout.Item, ln *LineFragment, sel func(*GlyphFragment) bool, yOffFactor, thickFactor float64) []layout.Item {
+	// A vertical line's decorations would run down the page beside the text, not across
+	// it, and every span below is computed on X. Painting them anyway would draw a rule
+	// along the wrong axis — visibly wrong ink rather than a missing feature. Skipped
+	// here and reported once by the layout pass (see layoutInline).
+	if ln.Vertical {
+		return dst
+	}
 	i := 0
 	for i < len(ln.Glyphs) {
 		if g := &ln.Glyphs[i]; !sel(g) {
@@ -838,6 +866,11 @@ func glyphHasColorInk(g *GlyphFragment) bool {
 // Blank (inkless) glyphs participate, which is why they are retained at emit time: a
 // background must stay continuous across the spaces inside a span.
 func appendInlineBoxDecorations(dst []layout.Item, ln *LineFragment) []layout.Item {
+	// As in appendDecoRules: the rect below is built from X spans and would paint across
+	// the page on a line whose text runs down it. Skipped and reported, not guessed at.
+	if ln.Vertical {
+		return dst
+	}
 	i := 0
 	for i < len(ln.Glyphs) {
 		box := ln.Glyphs[i].InlineBox
@@ -954,9 +987,13 @@ func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 			// vertical-align: super/sub shifts the glyph off the line baseline (up = a
 			// smaller Y). BaselineShiftPt is 0 for the common case, leaving YPt at the
 			// line baseline (byte-identical).
+			//
+			// g.Y walks the pen DOWN a vertical line and is zero on a horizontal one, so
+			// adding it unconditionally keeps this expression byte-identical for every
+			// existing document while carrying the vertical advance where there is one.
 			dst = append(dst, layout.Item{
 				Kind:  layout.GlyphKind,
-				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY - g.BaselineShiftPt, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes},
+				Glyph: layout.GlyphItem{Outline: g.Outline, XPt: g.X, YPt: ln.BaselineY + g.Y - g.BaselineShiftPt, SizePt: g.SizePt, Color: g.Color, Face: g.Face, GID: g.GID, Runes: g.Runes},
 			})
 		}
 		dst = appendUnderlines(dst, ln)

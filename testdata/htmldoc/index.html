@@ -1846,5 +1846,54 @@ newline is kept.</p>
       not yet settable &mdash; the centre is used unconditionally.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">43 / WRITING MODES</span>
+    <h2><code>writing-mode</code>: vertical text</h2>
+    <p class="lede">A vertical writing mode turns the baseline through a right angle: the
+      pen walks <em>down</em> the page and lines stack across it. The property reached the
+      cascade but nothing honoured it, so a sidebar label styled
+      <code>writing-mode: vertical-rl</code> laid itself out horizontally and overflowed
+      the narrow box it was given.</p>
+
+    <h3>A vertical label beside horizontal text</h3>
+    <div class="wmrow">
+      <div class="wmlabel">NOW</div>
+      <div class="wmbody">
+        <p>The label to the left is a single <code>div</code> with
+          <code>writing-mode: vertical-rl</code> and no other positioning. Its box
+          grows <em>downward</em> to fit the text's own extent, the way a horizontal box
+          grows sideways &mdash; which is what makes it size itself correctly instead of
+          spilling out of a fixed width.</p>
+      </div>
+    </div>
+    <p class="caption">Look for: the letters stacked <em>evenly</em>. The vertical advance
+      comes from the font's vertical metric &mdash; one em &mdash; not from each letter's
+      width. Advancing by width instead spaces an <code>N</code> and a <code>W</code>
+      differently, which reads as plausible-but-wrong text rather than as a bug, and is
+      precisely how the first implementation of this passed its own test.</p>
+
+    <h3>The same string, both modes</h3>
+    <div class="wmcmp">
+      <div class="wmcell"><div class="wmh">NOW</div><span class="wmtag">horizontal&#8209;tb</span></div>
+      <div class="wmcell"><div class="wmv">NOW</div><span class="wmtag">vertical&#8209;rl</span></div>
+    </div>
+    <p class="caption">Both boxes are 40&nbsp;px wide. The horizontal one overflows its
+      width; the vertical one turns the run down the page and takes the height it needs.
+      That difference &mdash; a box that <em>grows along the text's own axis</em> &mdash;
+      is the whole of what this phase delivers.</p>
+
+    <h4>What is not implemented</h4>
+    <p class="caption">One line only. There is no vertical line <em>wrapping</em>: a run
+      longer than the block extent overflows and logs, rather than starting a second line
+      beside the first. <code>vertical-lr</code> is accepted and lays out identically to
+      <code>vertical-rl</code> &mdash; the two differ only in which side subsequent lines
+      stack from, and there are none &mdash; so it logs rather than quietly equating them.
+      Glyphs are upright; <code>text-orientation</code> and the rotation
+      <code>mixed</code> implies are a later phase. Text decoration and inline&#8209;box
+      backgrounds are skipped on a vertical line: every span the painter computes is an
+      X&nbsp;range, and drawing them anyway would rule a line across the page instead of
+      beside the text.</p>
+  </section>
+
 </body>
 </html>

@@ -194,17 +194,32 @@ func (p *program) metrics() (ascent, descent, lineGap float64) {
 }
 
 // vAdvanceEm returns gid's vertical advance in em units as a POSITIVE downward
-// distance, and whether the font supplied one. It is advanceEm's counterpart for
-// vertical writing modes.
+// distance, and whether a vertical layout can use it. It is advanceEm's counterpart
+// for vertical writing modes.
 //
-// ok=false means the format carries no vertical metrics at all (Type1, bare CFF).
-// A TrueType face without a vmtx table still reports ok=true: upstream synthesizes a
-// one-em advance, which is the correct fallback and what browsers do. A caller that
-// wants "did the designer author this?" must ask vMetrics, not this.
+// ok is true for every face, because one em is the correct vertical advance for a
+// font that does not state one — that is what upstream synthesizes for a TrueType
+// face with no vmtx, and what browsers use. This method extends the same synthesis to
+// the formats whose glyph programs cannot answer at all (Type1, bare CFF), so a
+// vertical layout gets a usable advance from ANY face rather than from some.
+//
+// That generality matters more than it looks: the bundled sans-serif and serif faces
+// — what nearly all HTML actually renders with — are Type1. Returning ok=false for
+// them, as this did when the vertical metrics first landed, left the default text path
+// with no vertical advance and pushed every caller into inventing its own fallback.
+// The one place a fallback belongs is here, where the em size is known.
+//
+// A caller that wants "did the designer AUTHOR this?" must ask vMetrics, which
+// deliberately refuses to guess.
 func (p *program) vAdvanceEm(gid fonts.GID) (float64, bool) {
 	adv, ok := p.gp.vAdvance(gid)
 	if !ok {
-		return 0, false
+		// No vertical metrics in this format. One em is the square the glyph is
+		// designed in and the standard substitute; it is uniform across glyphs, which
+		// is correct — vertical advance does not vary with a glyph's WIDTH, and using
+		// the horizontal advance here (the tempting shortcut) would space a vertical
+		// line by how wide each letter happens to be.
+		return 1, true
 	}
 	return adv / p.upm, true
 }

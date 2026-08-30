@@ -51,19 +51,38 @@ gracefully.
   block centering; deferred margin-collapse edge cases (empty-block collapse-through, clearance,
   `min-height` interaction).
 
-- **Vertical writing modes** — `writing-mode: vertical-rl|vertical-lr` is parsed, inherited and
-  reported (warn-once), but lays out horizontally; `text-orientation` is not parsed at all. The
-  inline layer states the horizontal axis in its API (`Place(align, originX, availWidth, widthPt,
-  …)`, `VisibleWidth`), so vertical text needs those inputs reinterpreted as block/inline extents —
-  either by renaming to logical terms or by transposing at the `pkg/layout/css/inline.go` boundary.
-  **The commonly cited blocker no longer applies:** `vhea`/`vmtx` metrics ARE reachable —
-  `textlayout` exposes `VerticalAdvance` on the `fonts.FontMetrics` interface `pkg/font` already
-  consumes, and synthesizes a one-em advance for faces without a `vhea` table (measured: every
-  bundled Latin face reports `v-adv = -1000`, note the negative Y-down convention). The remaining
-  cost is layout, not fonts. The display list is already glyph-granular (`GlyphKind` carries a
-  per-glyph `XPt, YPt`, and paint composes one matrix per glyph), so glyph rotation for
-  `text-orientation: mixed` needs no new plumbing. Out of scope even when this lands: vertical
-  alternate glyph forms (`vert`/`vrt2` GSUB) and `text-combine-upright`.
+- **Vertical writing modes — remaining work.** A single vertical line ships (see FEATURES.md); what
+  is left is everything that needs more than one line, plus glyph orientation:
+
+  - **Vertical line wrapping**, and with it `vertical-lr`. A run longer than the block extent
+    currently overflows and logs. Wrapping needs a break loop against the block extent (the breaker
+    itself is axis-neutral — it takes a scalar limit — so this is placement, not breaking), and once
+    there are multiple lines they must stack: right-to-left for `vertical-rl`, left-to-right for
+    `vertical-lr`, which is the only difference between the two values.
+  - **`text-orientation`** (`mixed` | `upright` | `sideways`) is not parsed; glyphs are upright,
+    which is `upright` behaviour and what a short Latin label wants, but `mixed` is the initial
+    value and rotates Latin 90° CW. The display list is already glyph-granular (`GlyphKind` carries
+    a per-glyph `XPt, YPt`, and paint composes one matrix per glyph), so the rotation needs no new
+    plumbing — compose into the existing per-glyph matrix rather than adding a rotation field.
+  - **Atomic inline boxes, hard breaks, and decorations** in a vertical line: each is skipped with a
+    log today. Decorations need span geometry computed on the block axis — `appendDecoRules` and
+    `appendInlineBoxDecorations` build X ranges throughout.
+  - **Float avoidance.** The vertical path places its baseline in the middle of the full content box
+    and does not consult the float context, so a vertical line beside a float overlaps it. This is
+    the one gap that paints WRONG ink rather than omitting it, so it logs. Fixing it means insetting
+    the baseline against `leftEdge`/`rightEdge` — cheap for one line, and properly solved by the same
+    band query wrapping needs.
+  - **Alignment and justification** along the vertical axis: `Place` is pure scalar arithmetic and
+    would transpose cleanly, but nothing calls it on the vertical path yet.
+
+  The vertical path deliberately does NOT reuse the horizontal loop's float-band, alignment and
+  indent machinery — each is stated in X, and threading an axis flag through it was rejected in
+  favour of transposing at the `layoutInline` boundary, which keeps every horizontal document on its
+  existing path. If wrapping lands, revisit that call: the duplication is cheap for one line and
+  would stop being so.
+
+  Out of scope regardless: vertical alternate glyph forms (`vert`/`vrt2` GSUB) and
+  `text-combine-upright`.
 
 - **Web-font descriptors** — synthetic bold/oblique, `unicode-range` subsetting, `font-display`,
   variable-font axes, `local()` beyond the disk adapter; a content-addressed fetch cache (FaceCache

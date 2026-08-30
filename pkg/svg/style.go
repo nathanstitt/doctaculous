@@ -1694,12 +1694,16 @@ func applyFontStretch(s *Style, attr func(string) (string, bool), logf func(stri
 }
 
 // applyWritingMode resolves writing-mode. Every vertical value DEGRADES to
-// horizontal: vertical text needs the vertical metrics in a font's vhea/vmtx
-// tables, which pkg/font does not parse, plus a vertical advance model
-// throughout the inline core — every metric in the engine is horizontal-only
-// today (see the SVG text design doc, decision 3, which defers writing-mode
-// alongside <textPath> as a genuinely new subsystem rather than an
-// adaptation).
+// horizontal HERE, in the SVG path, which lays text out itself rather than
+// through the CSS inline layer.
+//
+// Two reasons previously given for this no longer hold and should not be
+// repeated: pkg/font does expose vertical metrics (Face.GlyphVAdvance, which
+// answers for every face), and the engine does have a vertical advance model —
+// the CSS path lays out a vertical line. What is missing is the wiring from
+// SVG's own <text> placement to them, which is a real piece of work but an
+// adaptation, not the new subsystem the SVG text design doc's decision 3
+// assumed when it deferred this alongside <textPath>.
 //
 // Horizontal output for vertical text is wrong but legible, which is the
 // better failure here than dropping the text entirely. The log is what keeps

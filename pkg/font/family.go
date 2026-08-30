@@ -326,8 +326,8 @@ func (f *Face) Metrics() (ascent, descent, lineGap float64) {
 }
 
 // GlyphVAdvance returns gid's VERTICAL advance in em units as a positive downward
-// distance, for laying out a vertical writing mode, plus whether the font supplied
-// one. It is GlyphAdvance's counterpart.
+// distance, for laying out a vertical writing mode, plus whether a vertical layout can
+// use it. It is GlyphAdvance's counterpart.
 //
 // The sign is worth stating because it is the trap here: the underlying library
 // returns a NEGATIVE advance (it negates for a Y-down convention, so a 1000-upem
@@ -336,10 +336,15 @@ func (f *Face) Metrics() (ascent, descent, lineGap float64) {
 // caller that assumed the raw upstream sign would run the pen backwards up the page
 // with nothing to catch it — the value is plausible, merely inverted.
 //
-// ok=false means the format carries no vertical metrics at all (Type1, bare CFF).
-// A TrueType face with no `vmtx` table still returns ok=true with a synthesized
-// one-em advance, which is the correct fallback and what browsers do; most Latin
-// faces land there. Use VMetrics to tell an authored metric from a synthesized one.
+// ok is true for every bundled face. Where the font states no vertical advance — a
+// TrueType face with no `vmtx`, or a format carrying no vertical metrics at all like
+// Type1 and bare CFF — one em is synthesized, which is the correct fallback and what
+// browsers do. Most Latin faces land there, INCLUDING the bundled sans-serif and
+// serif, so that is the common path rather than the exotic one.
+//
+// Use VMetrics to tell an authored metric from a synthesized one. This method
+// deliberately does not push "no answer" onto the caller: there is always a right
+// answer, and this package is the layer that knows the em size to compute it from.
 func (f *Face) GlyphVAdvance(gid uint16) (float64, bool) {
 	return f.prog.vAdvanceEm(fonts.GID(gid))
 }

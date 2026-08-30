@@ -46,6 +46,16 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	// ShapeContext, not Shape: this is the one call that can run long before the
 	// per-line loop below is ever reached (see the cancellation note there).
 	glyphs := inline.ShapeContext(ctx, e.faces, runs, e.logf)
+
+	// A vertical writing-mode takes a separate, self-contained path. Shaping above is
+	// axis-independent (it measures runes against a face), so it is shared; everything
+	// below assumes a pen walking X across a float-narrowed band and does not
+	// generalize. Splitting here rather than threading an axis flag through the loop is
+	// what keeps every horizontal document byte-identical.
+	if wm := b.Style.WritingMode; wm == "vertical-rl" || wm == "vertical-lr" {
+		return e.layoutInlineVertical(b, glyphs, contentW, contentTopY, contentX, bandOriginY, fc)
+	}
+
 	align := effectiveTextAlign(b)
 	// Used direction for this IFC: resolves start/end alignment (inside
 	// effectiveTextAlign) and the edge the first-line indent insets from. NOTE: this
@@ -246,6 +256,149 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 	}
 
 	return lines, penY - contentTopY, atomics
+}
+
+// layoutInlineVertical lays out one vertical line: the baseline runs DOWN the page and
+// the pen advances along Y by each glyph's vertical advance.
+//
+// This is the boundary transpose the writing-mode plan chose over renaming the inline
+// layer to logical axes. Shaping is shared with the horizontal path (it is
+// axis-independent); breaking, float bands, alignment and justification are not reused,
+// because each is stated in X and reproducing it here would be the wide rename by
+// another route. What that costs is listed under "not implemented" below, and each item
+// reports itself rather than failing quietly.
+//
+// The returned height is the line's INLINE extent — how far down the page the text
+// reaches — so an auto-height box grows along the text's own axis, which is what makes
+// a vertical label size itself correctly.
+//
+// Not implemented in this phase, each logged where it occurs: wrapping (a run longer
+// than the block extent overflows), vertical-lr line stacking (reported in block.go —
+// both vertical values place their single line identically, differing only in which side
+// subsequent lines stack from, and there is one line), hard line breaks, atomic inline
+// boxes, and text-decoration/inline-box decoration (see appendDecoRules).
+//
+// Float avoidance is absent and is NOT harmless: the horizontal path narrows each line's
+// band against the float context, and this one places its baseline in the middle of the
+// full content box, so a vertical line beside a float is drawn straight THROUGH it
+// (measured — a 60pt float and a vertical run in a 200pt body put the baseline at x=100,
+// inside the float). It logs.
+//
+// Text alignment along the vertical axis is the one omission left unlogged: with a single
+// line there is no free space to distribute along the block axis, so there is nothing an
+// author could have asked for that is being ignored. It becomes real with wrapping.
+func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, contentW, contentTopY, contentX, bandOriginY float64, fc *floatContext) (lines []LineFragment, height float64, atomics []*Fragment) {
+	// The baseline is a vertical ruler down the middle of the block extent. In a vertical
+	// writing mode the "line height" is measured ACROSS the page, so centring the ruler in
+	// the content box is what places the line's cross axis — the counterpart of centring a
+	// horizontal line's content area within its line box.
+	line := inline.MakeLine(glyphs)
+	baselineX := contentX + contentW/2
+
+	// The pen starts one ascent DOWN from the content top, exactly as a horizontal line's
+	// first baseline does (baselineY = penY + ascentOfLine). Starting at 0 instead would
+	// put the first glyph's origin on the content edge and clip everything above its
+	// baseline — the top of the first letter — which is subtle enough on a short label to
+	// pass an ink-box test while being visibly wrong.
+	var emitted []GlyphFragment
+	penY := ascentOfLine(line)
+	for gi := range glyphs {
+		g := &glyphs[gi]
+		if g.Break {
+			// A hard break would start a new vertical line beside this one, which is the
+			// stacking this phase does not do. Report and keep going on one line.
+			e.warnOnce("css-writing-mode-vertical-break",
+				"css layout: a hard line break in a vertical writing-mode is not implemented; the text stays on one line")
+			continue
+		}
+		if g.Atomic != nil {
+			// An atomic box (inline-block/image) would need its own cross-axis placement
+			// against a vertical baseline. Reserve nothing and say so, rather than
+			// placing it on the horizontal axis where it would land beside the text.
+			e.warnOnce("css-writing-mode-vertical-atomic",
+				"css layout: an atomic inline box in a vertical writing-mode is not implemented; it is not placed")
+			continue
+		}
+		adv := verticalAdvanceOf(g)
+		if g.Outline != nil || hasColorInk(g) {
+			emitted = append(emitted, GlyphFragment{
+				Outline: g.Outline, X: baselineX, Y: penY, AdvancePt: adv, SizePt: g.SizePt,
+				Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
+				AscentPt:        g.AscentPt,
+				DescentPt:       g.DescentPt,
+				BaselineShiftPt: g.BaselineShiftPt,
+				Face:            g.Face, GID: g.GID, Runes: g.Runes,
+			})
+		}
+		penY += adv
+	}
+
+	// Decorations are dropped for this line (appendDecoRules / appendInlineBoxDecorations
+	// bail on Vertical). Report it here, where the style is still in hand, so the reason
+	// is stated once rather than inferred from missing ink.
+	for gi := range glyphs {
+		if glyphs[gi].Underline || glyphs[gi].Strike || glyphs[gi].InlineBox.Paints() {
+			e.warnOnce("css-writing-mode-vertical-decoration",
+				"css layout: text-decoration and inline-box decoration in a vertical writing-mode are not implemented; they are not painted")
+			break
+		}
+	}
+
+	// The used extent runs from the content top to the last glyph's descender: penY is
+	// already one ascent past the top and has been advanced once per glyph, so the final
+	// advance carries it past the last glyph's origin. Nothing further is added — the
+	// trailing advance IS the descent allowance, the same way a horizontal line's height
+	// ends at its own descent rather than at the next baseline.
+	height = penY - ascentOfLine(line)
+
+	// A float intruding on this line is not avoided: the baseline is placed in the middle
+	// of the full content box, so the text is drawn straight THROUGH the float rather than
+	// beside it. Checked against the extent the line actually occupies.
+	if fc != nil {
+		bandY := bandOriginY
+		if l, r := fc.leftEdge(bandY, height), fc.rightEdge(bandY, height); l > contentX || r < contentX+contentW {
+			e.warnOnce("css-writing-mode-vertical-float",
+				"css layout: a float intruding on a vertical writing-mode line is not avoided; the text overlaps it")
+		}
+	}
+
+	// A single line only. If the text runs past the box's own block extent it overflows
+	// visibly, exactly as an unwrapped nowrap line does horizontally — but silence here
+	// would be indistinguishable from working wrapping, so it is reported.
+	if h := b.Style.Height; h.Unit != gcss.UnitAuto && h.Value > 0 && height > h.Value {
+		e.warnOnce("css-writing-mode-vertical-overflow",
+			"css layout: a vertical writing-mode run of %.0fpt overflows its %.0fpt block extent; vertical line wrapping is not implemented",
+			height, h.Value)
+	}
+
+	lines = append(lines, LineFragment{BaselineY: contentTopY, Glyphs: emitted, Vertical: true})
+	return lines, height, nil
+}
+
+// verticalAdvanceOf is a glyph's advance down the page, in points.
+//
+// Note the units: font.GlyphVAdvance returns EM units (a positive downward distance,
+// normalized at the program adapter), so it is scaled by the glyph's point size here.
+//
+// There is deliberately NO fallback to the glyph's horizontal advance. pkg/font
+// synthesizes one em for any face that states no vertical metric, so the ok=false path
+// is unreachable for a glyph that has a face; falling back to the horizontal advance
+// would space a vertical line by how WIDE each letter is — an 'i' and a 'W' would get
+// different vertical gaps — which looks plausible enough to survive review and is
+// wrong. An earlier revision of this function did exactly that, and it hid the fact
+// that the default Type1 faces were returning no vertical advance at all.
+//
+// A glyph with no face (whitespace, .notdef) keeps its own advance; there is no font
+// to ask.
+func verticalAdvanceOf(g *inline.Glyph) float64 {
+	if g.Face == nil {
+		return g.Advance
+	}
+	adv, ok := g.Face.GlyphVAdvance(g.GID)
+	if !ok {
+		return g.Advance
+	}
+	return adv * g.SizePt
 }
 
 // lineHeightGuess estimates a line's height for the float band query, before the
