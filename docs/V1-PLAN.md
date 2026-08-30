@@ -2,29 +2,167 @@
 
 What has to happen before tagging, and what deliberately waits for 1.1.
 
-The engine is ready. Every finding below is about **API scope** and **documentation
-integrity**, not rendering correctness — no wrong-output or data-loss bug survived the
-audit. The risk in shipping today is not that the code is wrong; it is that `go.mod`
-would freeze 50 packages we never meant to support, and that the backlog docs would
-ship telling users a shipped feature is missing.
+Rendering fidelity is ready. Two other things are not, and they are different in kind.
 
-Each claim below was verified against the code or by rendering, not taken from a doc.
-Where verification changed the answer, the entry says so.
+**The engine crashes and hangs on malformed input.** A 2,258-byte `.xlsx` panics out
+of `OpenXLSXBytes` and kills the CLI; a 66-byte HTML file hangs forever. Some of the
+crashes are `fatal error: stack overflow` raised through `runtime.throw`, which
+`recover()` cannot catch by construction — so the per-page recover guarantee does not
+hold. `README.md` promises the opposite, without qualification: *"never a panic, and
+one bad page can't kill a batch."* That sentence is currently false, and a document
+toolkit's whole job is eating files it did not author.
+
+**The API surface is accidental.** Tagging would freeze 50 packages when about six
+are public API, including a `render.Device` whose own doc comment records a prior
+breaking signature change.
+
+Neither is a rendering bug. Both are worse than one, because a rendering bug can be
+fixed in 1.0.1 without breaking anyone.
+
+Each claim below was verified against the code, by rendering, or by running a probe —
+not taken from a doc. Where verification changed the answer, the entry says so.
 
 ## Sequencing
 
-The API items come first and land together. They are the only entries here that
-`v2` cannot undo, and every one of them is mechanical rather than clever — the cost
-is review attention, not invention. Everything after that can ship in any order.
+Phase 0 comes first because it is a correctness and safety problem, and because
+fixing it after the tag means either a rushed 1.0.1 or a documented lie. The API
+items follow: they are the only entries `v2` cannot undo, and they are mechanical
+rather than clever — the cost is review attention, not invention. Everything after
+that can ship in any order.
 
 | Phase | Contents | Why here |
 | --- | --- | --- |
+| 0 | Crashes and hangs on malformed input | The README's central promise is false today |
 | 1 | API freeze (items 1–4) | Irreversible after the tag |
 | 2 | Doc integrity (items 5–7) | Cheap, and the docs are currently wrong |
 | 3 | `margin: 0 auto` (item 8) | Small fix, very visible, needs goldens |
-| 4 | Release surface (items 9–12) | Standard 1.0 hygiene |
+| 4 | Release surface (items 9–13) | Standard 1.0 hygiene |
 | — | Tag `v1.0.0` | |
 | 5 | 1.1 backlog | Degrades honestly today |
+
+---
+
+## Phase 0 — crashes and hangs on malformed input
+
+Every item here is reachable from a public entry point with a file a user could
+plausibly be handed. Line numbers move; grep the symbol.
+
+Two of these were reproduced end to end while writing this plan; the rest come from
+the audit and are marked as such. **Reproduce before fixing** — the audit's line
+numbers predate the rename, and one of its claims (that `nan` hangs) did not hold up.
+
+### 0a. `parseRef` overflows the column index — panics
+
+`pkg/xlsx/parse.go`, `parseRef`. The `col = col*26 + …` loop is unbounded. Measured:
+
+| ref | column | note |
+| --- | --- | --- |
+| `XFD1` | 16383 | the legal maximum |
+| `ZZZZZZZZZ1` | 5646683826133 | 344 million times the sheet width |
+| 14 letters | −6696602603409169451 | **negative** |
+
+That value reaches `make([][]Cell, maxRow+1)` and panics with `makeslice: len out of
+range`. Confirmed end to end: a 2,258-byte `.xlsx` crashes the CLI, and the panic
+escapes `OpenXLSXBytes` — so an embedding server dies too.
+
+**The fix already exists two hundred lines away.** `parseColElement` in the same file
+clamps with `if maxCol-minCol > 16383`, and says why. `parseRef` needs the same
+bound. This is the highest value-per-line item in the entire plan.
+
+### 0b. Non-finite CSS numbers hang the layout engine
+
+`pkg/css/cascade.go`, `parseNonNegNumber` rejects only `v < 0`, so `strconv.ParseFloat`
+passes `inf`, `Inf`, `+Inf`, and `nan` straight through — measured, all four return
+`ok=true`. An infinite `flex-grow` then makes the free-space loop in
+`pkg/layout/css/flex.go` never terminate.
+
+Reproduced: `<div style="display:flex"><div style="flex-grow:inf">a</div></div>` — 66
+bytes — hangs until killed (exit 124 under `timeout`). There is no `ctx` check on
+that path, so a deadline does not save the caller.
+
+Reject non-finite values in `parseNonNegNumber`. One check, and it is the whole fix
+for this class.
+
+Note the audit reported `nan` as hanging too; it does not — NaN degrades safely.
+Fix the parse anyway: accepting NaN as a valid CSS number is wrong regardless.
+
+### 0c. Unbounded counts from attributes — audit-reported, reproduce first
+
+Each takes a small integer straight from markup with no cap:
+
+- `<td colspan="900000000">` and `rowspan` — `pkg/layout/css/table.go`. HTML itself
+  caps these at 1000 and 65534; we do not.
+- `grid-row: 1 / 500000000` — `pkg/layout/css/grid_place.go`.
+- `grid-template-columns: repeat(200000000, 1px)` — `pkg/css/grid_value.go`.
+
+### 0d. Stack overflows that `recover()` cannot catch — audit-reported
+
+These raise `fatal error` via `runtime.throw`, which is **not recoverable**. This is
+the finding that undermines the batch guarantee, because the per-page `recover` is
+structurally unable to catch it:
+
+- `pkg/pdf/parser.go`, `parseArray` — recursion with no depth cap, while every
+  sibling has one (`resolve.go` 32, `page.go` 64, `function.go` 32).
+- `pkg/layout/css/build.go` — ~150k nested `<div>` (1.6 MB) kills the process.
+  Frames are large because `css.ComputedStyle` passes **by value** through
+  `Compute`→`inheritFrom`.
+
+### 0e. PDF page-tree has no visited-set — audit-reported
+
+`pkg/pdf/page.go`, `walkPageTree` caps depth but never marks visited nodes, so a
+cyclic tree expands exponentially: reported as 22 levels → 4.2M pages in 0.76 s. It
+runs inside `loadPages` during **open**, before any recover exists.
+
+### 0f. Overflow defeats the image-dimension guard — audit-reported
+
+`pkg/render/raster/page.go` — the bounds check multiplies width by height, so at
+w=h=2³¹ the product is negative and at 2³⁴ it is exactly zero. Both pass the guard,
+then `image.NewRGBA` allocates terabytes. Use an overflow-safe comparison.
+
+Related, same shape: RTF `\ilvl` amplifies 35 bytes to 56 MB (`pkg/rtf/rtf.go`), and
+docx/epub have a ~2,500× zip-bomb ratio (`zip.go`, `epub.go`) where pptx/xlsx are
+immune because they index lazily.
+
+### 0g. Silent wrong output on the PDF path
+
+`pkg/omnidoc/pdf_backend.go` returns bare on error with no log. Every
+PDF→anything conversion routes through it, so a failure produces an **empty output
+file and exit code 0** — the worst failure mode available, because it looks like
+success. A logger is reachable.
+
+Same class, lower blast radius: `applyDeclaration` in `pkg/css/cascade.go` silently
+drops every malformed or unsupported property, though `Resolver` already carries a
+`logf` used elsewhere in the file.
+
+### 0h. Add fuzz targets
+
+The audit's sharpest structural point: **there are no fuzz targets for `pdf`, `docx`,
+`pptx`, `rtf`, `epub`, `svg`, `css`, `font`, or `markdown`.** Fuzzing today covers
+`heif/hevc` and `xlsx/xmlpart` — precisely the two packages where the fewest crash
+bugs were found, which is not a coincidence worth ignoring.
+
+A `FuzzOpen` per parser would have caught nearly every item in this phase. Without
+them, Phase 0 fixes the bugs we happened to find rather than the class.
+
+Also worth noting: `pkg/pdf/filter/jbig2` is excluded from golangci-lint as vendored
+code, so it receives no static analysis at all despite containing several of the
+reported hangs.
+
+### Suggested order
+
+1. Clamp `parseRef` (0a) — one line, stops a live panic
+2. Reject non-finite numbers (0b) — one check, kills the hang class
+3. Cap `colspan`/`rowspan`/grid lines/`repeat()` (0c)
+4. Depth caps in `parseArray` and friends (0d)
+5. Visited-set in `walkPageTree` (0e)
+6. Overflow-safe dimension guard (0f)
+7. Plumb `Logf`, starting at `pdf_backend.go` (0g)
+8. `FuzzOpen` per parser, wired into CI (0h)
+
+Then re-read the "Limitations" paragraph in `README.md` — the one beginning
+"Unsupported constructs degrade rather than crash" — and confirm it is true before
+tagging. If any of this phase slips, that paragraph has to be qualified instead;
+shipping the promise while knowing it is false is the one option that is not open.
 
 ---
 
@@ -248,6 +386,10 @@ Two things confirmed **fine**, so nobody re-investigates them:
   (`pkg/render/imageconv/imageconv.go:25`) is 0% even cross-package, and it is the
   sole path stopping HEIC images from degrading to alt text in DOCX/EPUB/RTF/PPTX.
 
+  Read that number with Phase 0 in mind, though. `pkg/xlsx` sits at 84.3% and still
+  panics on a 2 KB file, because line coverage measures which lines ran on inputs we
+  wrote — and we do not write hostile inputs. That gap is what 0h is for.
+
 ---
 
 ## Deliberately waiting for 1.1
@@ -278,8 +420,18 @@ variable-font axes, and `writing-mode` for HTML — the last of which still need
 
 ## If this is too much
 
-Everything in Phase 1 exists because a `v1.0.0` tag is a promise about the exported
-API. If the appetite for that work is lower than the appetite for shipping, the
-honest alternative is to tag **`v0.9.0`** instead: it keeps the API unfrozen, ships
-all the same functionality, and lets Phases 2–4 land at their own pace. What is not
-a good option is tagging `v1.0.0` and quietly breaking the API in `v1.1`.
+Phases differ in how negotiable they are.
+
+**Phase 0 is not.** It is not about the version number — the crashes and hangs are
+equally real at `v0.9.0`, and the README makes the same promise either way. Tagging
+anything while a 2 KB file panics the CLI means shipping a known-false claim. The
+only alternative to fixing it is qualifying the README, and "unsupported constructs
+degrade rather than crash, except when they crash" is not a sentence worth writing.
+
+**Phase 1 is negotiable, via the version number.** It exists because a `v1.0.0` tag
+is a promise about the exported API. If the appetite for that work is lower than the
+appetite for shipping, tag **`v0.9.0`** instead: the API stays unfrozen, all the
+functionality ships, and Phases 2–4 land at their own pace. What is not a good option
+is tagging `v1.0.0` and quietly breaking the API in `v1.1`.
+
+So: Phase 0, then pick a number.
