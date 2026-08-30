@@ -892,9 +892,9 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.EmptyCells = parent.EmptyCells
 	cs.Direction = parent.Direction
 	cs.WritingMode = parent.WritingMode // CSS Writing Modes 4: writing-mode is inherited
-	cs.Page = parent.Page       // CSS Paged Media: `page` is inherited
-	cs.Widows = parent.Widows   // CSS: widows is inherited
-	cs.Orphans = parent.Orphans // CSS: orphans is inherited
+	cs.Page = parent.Page               // CSS Paged Media: `page` is inherited
+	cs.Widows = parent.Widows           // CSS: widows is inherited
+	cs.Orphans = parent.Orphans         // CSS: orphans is inherited
 	// table-layout, vertical-align, break-*, break-inside, filter are NOT inherited
 	// (per CSS). filter in particular must not inherit: it applies once to the box's
 	// whole rendered subtree, so inheriting it would re-apply the effect at every
