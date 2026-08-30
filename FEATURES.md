@@ -866,18 +866,18 @@ dependency is `x/image`, so no new transitive surface):
   content type or by sniffing, and transcoded to PNG inside DOCX/PPTX/RTF/EPUB outputs
   (`pkg/render/imageconv`). Lossy VP8, lossless VP8L, and the extended VP8X container with an
   alpha plane are all covered.
-- **Animated WebP is refused, and says so.** `x/image/webp` handles stills only, but its failure
-  is misleading: `DecodeConfig` parses VP8X, ignores the animation flag, and returns the canvas
-  size with NO error, while `Decode` then fails with a bare `webp: invalid format` —
-  indistinguishable from corrupt bytes. `pkg/webp` reads the flag upstream skips and returns a
-  named `ErrAnimated` from both entry points, and `OpenImageBytes`/`TranscodeToPNG` check it
-  explicitly so a valid animation is reported as unsupported rather than as a broken file.
-- Known limit, stated rather than implied: the `image.Decode` **sniffing** path cannot carry that
-  check. `image.sniff` returns the first registered format whose magic matches, in registration
-  order, and an importing package's `init` always runs after the package it imports — so no
-  registration here can outrank `x/image/webp`'s. Code that must not be fooled by an animated
-  file calls `webp.Decode`/`webp.DecodeConfig`, or `webp.IsAnimated` on the bytes; the two call
-  sites that matter do. A test pins the upstream behavior so this is revisited if it changes.
+- **Animated WebP returns a typed `ErrAnimated`.** `x/image/webp` handles stills only, and its
+  failure mode is misleading: `DecodeConfig` parses VP8X, ignores the animation flag, and returns
+  the canvas size with NO error, while `Decode` then fails with a bare `webp: invalid format` —
+  the same error corrupt bytes produce. `pkg/webp` reads the flag upstream skips and returns
+  `ErrAnimated` from both entry points; `OpenImageBytes` and `TranscodeToPNG` check it, so a
+  valid animation is reported as unsupported instead of broken.
+- The `image.Decode` **sniffing** path cannot carry that check. `image.sniff` returns the first
+  registered format whose magic matches, in registration order, and an importing package's `init`
+  always runs after the package it imports — so no registration here can outrank
+  `x/image/webp`'s. Code that must not be fooled by an animated file calls
+  `webp.Decode`/`webp.DecodeConfig`, or `webp.IsAnimated` on the bytes; the two call sites that
+  matter do. A test pins the upstream behavior so this gets revisited if it changes.
 - **Output is lossless VP8L**, wired as a full image target: `Convert`/`WriteImage`/`EncodeImage`
   to `FormatWebP`, the CLI's `rasterize --format webp` and any `.webp` output path (which also
   infers the `rasterize` subcommand). Round-trips are verified **pixel-exact** against
@@ -885,23 +885,21 @@ dependency is `x/image`, so no new transitive surface):
   16384-pixel ceiling (`webp.MaxDimension`, VP8L's 14-bit dimension field) — one pixel over is a
   clean error, not a truncated file. The showcase pairs `img/quad.webp` with `img/quad.png`, and
   the two decode to 0 differing pixels across all 4096.
-- Honest about what lossless means: WebP output is a **PNG-class target, not a JPEG-class one**.
-  There is no pure-Go lossy VP8 encoder and the toolkit takes no CGo, so a photographic page
-  encoded to WebP is much larger than a lossy encoder would produce, possibly larger than the
-  equivalent JPEG — callers wanting small photographic output should ask for JPEG.
-  `ImageOptions.Quality` is therefore documented and tested as a **no-op** for WebP (two quality
-  values produce byte-identical output) rather than silently accepting a knob that does nothing.
-- `webp.Encode` buffers and writes once, checking the error: `nativewebp.Encode` does not check
-  the error from any of its own writes to the destination, so handing it the caller's `io.Writer`
-  directly would report a failed write (full disk, closed pipe) as a successful encode. A test
-  pins that a failing writer surfaces the error.
-- Writing animation is out of scope in the same way reading it is: the toolkit rasterizes pages to
-  still images, and a multi-page document becomes one file per page (the `%d` fan-out), not one
-  animation.
-- Fixed while wiring the CLI: `rasterize` took its encoding from `--format` alone, whose `png`
-  default silently won, so `--out page.jpg` wrote a **PNG under a .jpg name** with no diagnostic
-  (and `.webp` would have done the same). The output extension now selects the format when
-  `--format` is not given; an explicit `--format` still wins. Regression test in
+- **WebP output is a PNG-class target, not a JPEG-class one.** There is no pure-Go lossy VP8
+  encoder and the toolkit takes no CGo, so a photographic page encoded to WebP comes out much
+  larger than a lossy encoder would produce, possibly larger than the equivalent JPEG — ask for
+  JPEG when the output needs to be small. `ImageOptions.Quality` is a **no-op** for WebP, pinned
+  by a test: two quality values produce byte-identical output.
+- `webp.Encode` buffers and writes once, checking the error. `nativewebp.Encode` ignores the
+  error from every write it makes to the destination, so passing it the caller's `io.Writer`
+  would report a failed write — full disk, closed pipe — as a successful encode. A test pins that
+  a failing writer surfaces the error.
+- No animated output: the toolkit rasterizes pages to still images, so a multi-page document
+  becomes one file per page (the `%d` fan-out), never one animation.
+- Bug fixed on the way in: `rasterize` took its encoding from `--format` alone, whose `png`
+  default always won, so `--out page.jpg` wrote a **PNG under a .jpg name** with no diagnostic
+  (`.webp` would have done the same). The output extension now picks the format when `--format`
+  is absent; an explicit `--format` still wins. Regression test in
   `cmd/doctaculous/rasterize_test.go`.
 
 **XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):

@@ -10,19 +10,20 @@ A pure-Go document toolkit: parse, lay out, rasterize, extract, convert, and edi
 documents. It brings its own PDF interpreter and its own CSS layout engine. No
 CGo, no native bindings, no copyleft.
 
-## Read/Write thirteen formats and convert between them
+## Read/Write fourteen formats and convert between them
 
-Every supported format is both an input **and** an output. All 156 ordered pairs
+Every supported format is both an input **and** an output. All 182 ordered pairs
 convert (a format to itself is a deliberate `ErrSameFormat`):
 
-> `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg`
+> `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg` · `webp`
 
 Plus two input-only formats: **`heic`** and **`svg`**. HEIF/HEIC stills decode
 through an in-tree pure-Go HEVC intra decoder (no libheif, no CGo), so an
-iPhone photo converts to any of the thirteen outputs and drops into HTML/EPUB
+iPhone photo converts to any of the fourteen outputs and drops into HTML/EPUB
 `<img>` unchanged. Standalone `.svg`/`.svgz` documents open as a vector page —
 paths, shapes, transforms, solid fill/stroke — and convert to PDF as real
-vectors, not a rasterized image.
+vectors, not a rasterized image. WebP reads lossy VP8, lossless VP8L, and
+alpha; it writes lossless VP8L, so it replaces PNG rather than JPEG.
 
 ```sh
 doctaculous convert report.docx report.pdf         # typeset through the CSS engine
@@ -30,6 +31,7 @@ doctaculous convert https://example.com page.png   # fetch, lay out, rasterize
 doctaculous convert statement.pdf tables.xlsx      # tables recovered from ruling lines & whitespace
 doctaculous convert book.epub book.docx            # ebook → Word, images and all
 doctaculous convert notes.md deck.pptx             # each heading becomes a slide
+doctaculous convert photo.heic photo.webp          # iPhone photo → lossless WebP
 doctaculous rasterize input.pdf --page 1 --out page1.png --dpi 150
 ```
 
@@ -178,6 +180,9 @@ panic, and one bad page can't kill a batch. The notable gaps today:
   AVIF are refused with a typed error, and nothing writes HEIC. Decoding is
   intra-only 4:2:0 at 8/10-bit (Main/Main 10/Main Still); P/B slices, range
   extensions, and >10-bit are rejected rather than approximated.
+- **WebP is stills-only, and writes lossless.** Animated WebP is refused with a
+  typed `ErrAnimated`. Output is VP8L, since no pure-Go lossy VP8 encoder
+  exists — expect PNG-sized files, not JPEG-sized ones.
 
 The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 
