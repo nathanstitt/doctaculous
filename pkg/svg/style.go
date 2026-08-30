@@ -1721,7 +1721,7 @@ func applyWritingMode(s *Style, attr func(string) (string, bool), logf func(stri
 		return
 	}
 	s.writingModeIgnored = true
-	logf("svg: writing-mode=%q ignored: vertical text needs vhea/vmtx metrics and a vertical advance model; laying out horizontally", val)
+	logf("svg: writing-mode=%q ignored: vertical text needs a vertical advance model in the layout path; laying out horizontally", val)
 }
 
 // applyFontVariant resolves font-variant. Like font-stretch it degrades:
