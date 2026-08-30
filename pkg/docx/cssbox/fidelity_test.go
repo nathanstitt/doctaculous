@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	"github.com/nathanstitt/doctaculous/pkg/docx/style"
-	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/docx/style"
+	lcssbox "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // lowerBody lowers a one-paragraph document and returns the body's blocks.

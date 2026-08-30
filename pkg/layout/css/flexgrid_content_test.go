@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/html"
 )
 
 // layoutHTML parses src, builds the cssbox tree, lays it out at width w, and returns

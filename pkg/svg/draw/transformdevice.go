@@ -3,7 +3,7 @@ package draw
 import (
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // transformDevice wraps a render.Device to pre-multiply every piece of

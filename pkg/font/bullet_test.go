@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // The bundled sans-serif face lacks the square bullet (and others); Glyph must still

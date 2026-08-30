@@ -5,8 +5,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
-	svgfilter "github.com/nathanstitt/doctaculous/pkg/svg/filter"
+	"github.com/nathanstitt/omnidoc/pkg/filtereffects"
+	svgfilter "github.com/nathanstitt/omnidoc/pkg/svg/filter"
 )
 
 // resolveFilterFunctions lowers a CSS `filter` function list into a single

@@ -3,8 +3,8 @@ package content
 import (
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Resources supplies page resources the interpreter needs: fonts, images,

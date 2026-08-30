@@ -5,10 +5,10 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/pageres"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/function"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // FillShading paints the active clip region (or the whole image if unclipped) by

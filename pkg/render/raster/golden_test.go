@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/testdata/gen"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 
 // update regenerates the committed golden PNGs instead of comparing against

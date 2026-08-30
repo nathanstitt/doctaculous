@@ -1,6 +1,6 @@
 package css
 
-import "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+import "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 
 // fixupTables walks the whole tree and repairs every DisplayTable subtree per CSS
 // 17.2.1 (anonymous table objects), so the grid builder can assume a well-formed

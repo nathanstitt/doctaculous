@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 func TestMarginBoxRectSharedTrailWidth(t *testing.T) {

@@ -3,7 +3,7 @@ package css
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // pageStrings holds, for one page, the CSS string values needed to resolve string(name,

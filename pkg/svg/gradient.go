@@ -4,8 +4,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/render/raster"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render/raster"
 )
 
 // paintServer is a fully-resolved gradient, ready to paint: a render.Shader

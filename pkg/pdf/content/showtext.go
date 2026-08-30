@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // hypot is math.Hypot, aliased for brevity in the glyph-placement math.

@@ -3,7 +3,7 @@ package css
 import (
 	"math"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // trackSpec is the resolved sizing of one grid track for the pure resolver: the min

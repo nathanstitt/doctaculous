@@ -4,9 +4,9 @@ import (
 	"context"
 	"math"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // defaultMarkInset is the bleed-band width synthesized when @page marks are requested
@@ -14,7 +14,7 @@ import (
 const defaultMarkInset = 8 // px-as-pt (≈6pt)
 
 // PagedConfig is the resolved paged-media configuration handed to LayoutPagedDoc by
-// the doctaculous backend: whether to paginate at all, a fallback page size (from
+// the omnidoc backend: whether to paginate at all, a fallback page size (from
 // WithPageSize / the Letter default), an explicit-size flag (so an API size overrides
 // an @page size), and the parsed @page rules (for size, margins, and margin boxes).
 //

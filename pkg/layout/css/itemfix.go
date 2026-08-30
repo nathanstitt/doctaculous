@@ -1,6 +1,6 @@
 package css
 
-import "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+import "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 
 // fixupFlexGrid walks the box tree and repairs every flex and grid container's
 // children into proper items (CSS Flexbox §4 / Grid §6): contiguous runs of

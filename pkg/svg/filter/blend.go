@@ -3,7 +3,7 @@ package filter
 import (
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // blendModePDFName maps an SVG feBlend `mode` value onto the PDF /BM name

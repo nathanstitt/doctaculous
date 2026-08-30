@@ -7,7 +7,7 @@ import (
 	"github.com/srwiley/rasterx"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // capFunc maps a render.LineCap to the rasterx CapFunc that draws it.

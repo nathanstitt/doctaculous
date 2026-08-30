@@ -3,7 +3,7 @@ package inline
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // glyphRun builds n identical-advance glyphs for the width arithmetic below.

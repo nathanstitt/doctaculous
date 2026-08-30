@@ -3,7 +3,7 @@ package inline
 import (
 	"testing"
 
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 func TestFlagsFor(t *testing.T) {

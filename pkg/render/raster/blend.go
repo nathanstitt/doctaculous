@@ -4,7 +4,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // The blend FUNCTIONS themselves moved to pkg/render (see render.SeparableBlend

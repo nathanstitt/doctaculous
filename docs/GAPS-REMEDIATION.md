@@ -1,6 +1,6 @@
 # Remediation plan: gaps reported from the Luckfox dashboard
 
-Source: `upnext/luckfox/docs/doctaculous-gaps.md`, reported against `fb42ebe`.
+Source: `upnext/luckfox/docs/omnidoc-gaps.md`, reported against `fb42ebe`.
 All findings below were **re-verified in this repo by measurement**, not accepted as
 written. Where the report's diagnosis was wrong, the corrected one is recorded here —
 the fix follows the measurement, not the report.
@@ -123,7 +123,7 @@ serialization as literal text.
 
 ### Constraint
 
-`TestInlineSVGGeneratesNoHTMLBoxes` (`pkg/doctaculous/svg_in_html_test.go:325`) asserts
+`TestInlineSVGGeneratesNoHTMLBoxes` (`pkg/omnidoc/svg_in_html_test.go:325`) asserts
 exactly one `VectorKind` item and **zero** other items — it deliberately forbids walking
 SVG children into the HTML box tree. That test encodes a real design decision and must
 keep passing; the fix must not generate HTML boxes.

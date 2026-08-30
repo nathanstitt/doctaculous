@@ -6,9 +6,9 @@ import (
 	"image"
 	"strconv"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/imageconv"
 )
 
 // emuPerPx is 9525 EMU per CSS pixel (96dpi; 12700 EMU per point).

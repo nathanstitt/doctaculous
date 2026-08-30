@@ -4,7 +4,7 @@ package boxwalk
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // IsBlockContainer reports whether a box participates as a block-level box (so its

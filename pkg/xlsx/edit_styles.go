@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/beevik/etree"
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // styleSheetOrder is the CT_Stylesheet child sequence.

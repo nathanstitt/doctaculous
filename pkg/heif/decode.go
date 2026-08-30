@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/nathanstitt/doctaculous/pkg/heif/hevc"
+	"github.com/nathanstitt/omnidoc/pkg/heif/hevc"
 )
 
 // Pixel decoding: coded items (single hvc1 or grid-of-tiles) to planar YCbCr

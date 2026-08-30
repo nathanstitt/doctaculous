@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
+	genxlsx "github.com/nathanstitt/omnidoc/testdata/gen/xlsx"
 )
 
 // cfFixture carries a typed cellIs rule with a dxf, plus a dataBar rule the

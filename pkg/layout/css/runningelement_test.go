@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
 func TestCaptureRunningElement(t *testing.T) {

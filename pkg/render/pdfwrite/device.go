@@ -7,8 +7,8 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // pageDevice implements render.Device by appending PDF content-stream operators to a

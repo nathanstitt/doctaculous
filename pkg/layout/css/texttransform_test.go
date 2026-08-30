@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // renderInlineText lays src out and returns the concatenated Runes of every laid-out

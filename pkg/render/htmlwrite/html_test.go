@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	layoutcss "github.com/nathanstitt/omnidoc/pkg/layout/css"
 )
 
 // renderHTML parses src, builds a cssbox tree, and re-serializes it to HTML with opts.

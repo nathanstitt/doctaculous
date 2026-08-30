@@ -6,7 +6,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // pendingForm is a named Form XObject referenced by a page's content stream

@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // firstBySemTag returns the first box (depth-first) whose SemTag equals tag, or nil.

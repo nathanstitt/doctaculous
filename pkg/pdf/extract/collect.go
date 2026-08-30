@@ -28,10 +28,10 @@ import (
 	"math"
 	"unicode"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/pageres"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // errNilDocument is returned by Collect/Lower for a nil *pdf.Document.

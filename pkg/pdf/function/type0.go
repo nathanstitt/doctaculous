@@ -3,7 +3,7 @@ package function
 import (
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // sampledFunc is a Type 0 (sampled) function. It stores a multidimensional table

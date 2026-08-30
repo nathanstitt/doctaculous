@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // superGlyphAndBaseline lays src out and returns, for the glyph whose runes equal

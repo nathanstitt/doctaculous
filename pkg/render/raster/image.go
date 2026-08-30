@@ -5,8 +5,8 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // csKind classifies an image color space by how its samples map to RGB. Indexed

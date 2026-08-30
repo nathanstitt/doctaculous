@@ -3,7 +3,7 @@ package extract
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // TestLowerPageShape drives lowerPage with a synthetic page (glyphs + rules built

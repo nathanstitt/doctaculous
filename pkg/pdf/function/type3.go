@@ -3,7 +3,7 @@ package function
 import (
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // stitchFunc is a Type 3 (stitching) function. It partitions its 1-input

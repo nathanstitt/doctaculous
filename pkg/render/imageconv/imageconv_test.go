@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/webp"
 )
 
 func fixture(t *testing.T, pkg, name string) []byte {

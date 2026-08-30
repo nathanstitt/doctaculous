@@ -5,10 +5,10 @@ import (
 	"sort"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/inline"
 )
 
 // The inline tests assert numeric glyph/atomic positions after a full Layout (not

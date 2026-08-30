@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // opaqueAlpha is full coverage (255), used by BuildClipMask's rectangular
@@ -150,7 +150,7 @@ func (d *pageDevice) registerScratchForm(scratch *pageDevice, alphaOnly bool) st
 // clip+mask compositing (attenuateByMask) combined this exact sentinel with
 // a clip mask before EndGroup ever saw it, silently erasing all content on
 // any element carrying both clip-path and mask (see
-// TestClipPathAndMaskBothApplyThroughPDF in pkg/doctaculous for the
+// TestClipPathAndMaskBothApplyThroughPDF in pkg/omnidoc for the
 // regression test, and pkg/render/pdfwrite/group.go's EndGroup doc comment
 // for the fix). The fix was structural, not defensive: EndGroup now takes
 // clipMask and softMask as two SEPARATE parameters (see render.Device's doc

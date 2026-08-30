@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // stop is one resolved gradient stop: a position in [0,1] and a straight

@@ -3,9 +3,9 @@ package css
 import (
 	"context"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // LayoutPaged lays out root at viewportW points and fragments the result into

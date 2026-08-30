@@ -67,7 +67,7 @@ func EncryptedNeedsPasswordPDF() []byte { return buildEncrypted(encRC4, "secret"
 
 // EncryptedTitle is the known /Title string embedded (encrypted) in the catalog
 // of the encrypted fixtures; tests assert it round-trips after decryption.
-const EncryptedTitle = "Doctaculous Secret"
+const EncryptedTitle = "Omnidoc Secret"
 
 // EncryptedContent is the known (decrypted) content stream of the fixtures.
 var EncryptedContent = []byte("1 0 0 rg 100 100 200 150 re f")

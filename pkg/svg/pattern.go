@@ -1,6 +1,6 @@
 package svg
 
-import "github.com/nathanstitt/doctaculous/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/render"
 
 // patternPaint is a fully-resolved <pattern> paint server, ready to paint by
 // repeated clipped draws of its tile content (no offscreen raster buffer —

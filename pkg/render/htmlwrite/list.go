@@ -3,8 +3,8 @@ package htmlwrite
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
 )
 
 // list renders a list container (a box whose children are DisplayListItem boxes) as a

@@ -4,8 +4,8 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // colrGradientShader evaluates a COLR v1 gradient for the shading pipeline.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	layoutcss "github.com/nathanstitt/omnidoc/pkg/layout/css"
 )
 
 // renderHTML builds a cssbox tree from src (the markdown writer's test

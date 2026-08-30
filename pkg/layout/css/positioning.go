@@ -3,8 +3,8 @@ package css
 import (
 	"context"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // rect is an axis-aligned rectangle in page space (points, Y-down): (x,y) is the

@@ -12,7 +12,7 @@ import (
 
 	xhtml "golang.org/x/net/html"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // Document is the result of parsing an HTML document: the owned DOM root plus the

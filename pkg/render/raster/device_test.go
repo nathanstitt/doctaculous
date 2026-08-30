@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 func newTestDevice(w, h int) (*Device, *image.RGBA) {

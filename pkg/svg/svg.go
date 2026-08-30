@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // defaultWidth and defaultHeight are the CSS replaced-element default size

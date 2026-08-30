@@ -1,6 +1,6 @@
 package content
 
-import "github.com/nathanstitt/doctaculous/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/render"
 
 // loadedFont is a font resolved for the current page, wrapping a GlyphSource the
 // backend provides. The interpreter uses it to decode text bytes into glyphs,

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf/filter/jbig2"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/filter/jbig2"
 )
 
 // DecodeJBIG2 decodes a PDF JBIG2Decode image stream to a row-major, MSB-first,

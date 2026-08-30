@@ -1,8 +1,8 @@
 package css
 
 import (
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // lineSplittable reports whether a top-level block fragment can be fragmented for

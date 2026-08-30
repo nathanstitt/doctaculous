@@ -9,13 +9,13 @@ import (
 	_ "image/jpeg" // register JPEG decoder for DCTDecode XObjects
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/filter"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/function"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/pageres"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/filter"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/function"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Options configures page rendering.

@@ -4,8 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // bgItem builds a BackgroundImageItem with a 10×10 intrinsic image and the origin and

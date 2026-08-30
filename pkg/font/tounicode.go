@@ -3,7 +3,7 @@ package font
 import (
 	"unicode/utf16"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // This file parses a font's /ToUnicode CMap into a code→rune map. Per PDF

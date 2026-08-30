@@ -3,7 +3,7 @@ package svg
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // maxClipPathChainDepth bounds a chain of clip-path="url(#...)" references

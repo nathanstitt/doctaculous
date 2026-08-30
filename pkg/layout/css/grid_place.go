@@ -1,6 +1,6 @@
 package css
 
-import gcss "github.com/nathanstitt/doctaculous/pkg/css"
+import gcss "github.com/nathanstitt/omnidoc/pkg/css"
 
 // gridArea is a resolved item placement: 0-based half-open track ranges
 // [colStart,colEnd) × [rowStart,rowEnd). Always normalized so end > start.

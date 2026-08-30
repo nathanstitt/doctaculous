@@ -3,7 +3,7 @@ package css
 import (
 	"sort"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
 // splitTableForPage splits a table fragment BETWEEN rows at pageBottom. The CSS table

@@ -3,7 +3,7 @@ package svg
 import (
 	"sort"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // inlineImportantIDs is the synthetic specificity given to an inline

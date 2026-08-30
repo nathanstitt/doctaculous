@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/filtereffects"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
 // bracketBalance walks an item list and reports the running filter-bracket depth's

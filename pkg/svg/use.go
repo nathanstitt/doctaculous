@@ -1,7 +1,7 @@
 package svg
 
 import (
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // maxUseDepth bounds <use> tree-recursion depth (a <use> instantiating a

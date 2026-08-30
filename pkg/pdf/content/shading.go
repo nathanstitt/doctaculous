@@ -1,6 +1,6 @@
 package content
 
-import "github.com/nathanstitt/doctaculous/pkg/pdf"
+import "github.com/nathanstitt/omnidoc/pkg/pdf"
 
 // setFillColorN handles "sc"/"scn": set the fill color (and, under the /Pattern
 // color space, a shading-pattern fill source). For a pattern name operand it

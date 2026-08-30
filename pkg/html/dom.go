@@ -1,6 +1,6 @@
 package html
 
-import "github.com/nathanstitt/doctaculous/pkg/css"
+import "github.com/nathanstitt/omnidoc/pkg/css"
 
 // DOMNode is the common interface over the owned tree (Element and Text). It is
 // produced by Parse and is read-only thereafter. It uses ParentElement (not

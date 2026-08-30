@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // tinyOutline returns a minimal non-nil path so a glyph is treated as drawable. The
