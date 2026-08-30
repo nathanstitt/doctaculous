@@ -932,3 +932,51 @@ of the boundary row/column lands differently. The committed golden is OUR
 output (as everywhere in this corpus), so the sweep still locks it against
 regression; the number is recorded here rather than papered over by widening
 the tolerance.
+
+## What shipped in the writing-mode tranche (PR 8)
+
+19 files from `text/writing-mode/`, landing with the SVG vertical-text work
+(`writing-mode` + `text-orientation` on the SVG path). They cover both
+vocabularies — `vertical-rl`/`vertical-lr` and SVG 1.1's `tb`/`tb-rl`, plus the
+horizontal spellings `lr`/`lr-tb`/`rl`/`rl-tb` that must NOT go vertical —
+inheritance from an ancestor `<g>`, an invalid value falling back to horizontal,
+per-tspan `dx`/`dy` inside a vertical run, `text-anchor` on a vertical chunk, and
+Arabic (bundled) with `rotate` and with an underline.
+
+### Notable exclusions (this tranche)
+
+Four of the 23 upstream files are held back, all for the same reason: they are
+set in Japanese, no bundled face covers CJK, and against the bundled faces they
+render as columns of `.notdef` boxes. Committing those goldens would lock in
+tofu as this engine's expected output, which is worse than not having the
+fixture — the sweep would then pass forever while rendering nothing legible.
+
+- `japanese-with-tb`
+- `tb-and-punctuation`
+- `mixed-languages-with-tb`
+- `mixed-languages-with-tb-and-underline`
+
+They land with a CJK face if one is ever vendored; that is a `DEPENDENCIES.md`
+question (a CJK font is megabytes), not a rendering one.
+
+### Bugs found in this tranche
+
+**`writing-mode` on a `<tspan>` was honoured.** `on-tspan.svg` states the rule in
+its own `<desc>`: the property applies to the `<text>` element. This engine
+resolves style per CHARACTER, so a `<tspan writing-mode="tb">` silently turned
+just the glyphs it covered through a right angle, mid-run. Fixed in
+`applyWritingMode` by refusing a `tspan`'s own declaration.
+
+The first fix refused every element except `<text>` — and broke
+`inheritance.svg`, where a `<g writing-mode="tb">` wraps the `<text>` and *must*
+apply, because the property inherits. Both fixtures now pin their own half; a
+unit test (`TestWritingModeAppliesToTextNotTspan`) pins them together, since the
+two rules pull in opposite directions.
+
+### Known gap surfaced here (not fixed)
+
+Rendering the four held-back fixtures produced full columns of `.notdef` with
+**zero diagnostics**. `pkg/layout/inline`'s `warnMissingGlyph` fires on the CSS
+path, but the logger is evidently not threaded through SVG's text path, so
+missing glyphs there are silent. Recorded in `docs/SVG.md`; it is its own bug
+and out of scope for the writing-mode work.

@@ -3,7 +3,6 @@ package css
 import (
 	"context"
 	"image/color"
-	"math"
 	"strings"
 	"unicode"
 
@@ -320,7 +319,7 @@ func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, cont
 	var emitted []GlyphFragment
 	leadingInset := 0.0
 	if len(glyphs) > 0 {
-		if _, sideways := glyphRotation(orient, &glyphs[0]); !sideways {
+		if _, sideways := inline.GlyphRotation(orient, glyphs[0].Runes); !sideways {
 			leadingInset = ascentOfLine(line)
 		}
 	}
@@ -342,8 +341,8 @@ func (e *Engine) layoutInlineVertical(b *cssbox.Box, glyphs []inline.Glyph, cont
 				"css layout: an atomic inline box in a vertical writing-mode is not implemented; it is not placed")
 			continue
 		}
-		rot, sideways := glyphRotation(orient, g)
-		adv := verticalAdvanceOf(g)
+		rot, sideways := inline.GlyphRotation(orient, g.Runes)
+		adv := inline.VerticalAdvancePt(g)
 		if sideways {
 			// A rotated glyph lies on its side, so what advances the pen down the page is
 			// its HORIZONTAL extent — the same measure that would advance a horizontal
@@ -452,109 +451,6 @@ func isShrinkToFit(b *cssbox.Box) bool {
 		return true
 	}
 	return b.Position == cssbox.PosAbsolute || b.Position == cssbox.PosFixed
-}
-
-// quarterTurn is the clockwise rotation a sideways glyph takes in a vertical line:
-// 90 degrees, so the glyph's own baseline runs down the page.
-const quarterTurn = math.Pi / 2
-
-// glyphRotation resolves CSS text-orientation for one glyph in a vertical line,
-// returning its clockwise rotation in radians and whether it ended up sideways.
-//
-//   - upright  — no glyph rotates. This is what a short Latin label wants, and it is
-//     what the vertical layout did before text-orientation was parsed at all.
-//   - sideways — every glyph rotates a quarter turn, including CJK.
-//   - mixed    — the INITIAL value: upright scripts stay upright, everything else
-//     rotates. This is the CJK default, where Han/Kana/Hangul read down the page in
-//     their normal orientation and embedded Latin lies on its side.
-//
-// An unrecognized value is treated as mixed, matching the initial value, because the
-// cascade only stores values it recognized.
-func glyphRotation(orient string, g *inline.Glyph) (radians float64, sideways bool) {
-	switch orient {
-	case "upright":
-		return 0, false
-	case "sideways":
-		return quarterTurn, true
-	}
-	if uprightInVertical(g.Runes) {
-		return 0, false
-	}
-	return quarterTurn, true
-}
-
-// uprightInVertical reports whether a glyph's runes belong to a script that stays
-// upright in a vertical line under text-orientation: mixed.
-//
-// This APPROXIMATES the Unicode Vertical_Orientation property (UAX #50), which is the
-// spec's actual authority and which neither the standard library nor the textlayout
-// dependency ships a table for. Vendoring the real table is the correct long-term fix
-// and is recorded as such; what is here covers the scripts a vertical line is actually
-// set in — Han, Hiragana, Katakana, Hangul, Bopomofo, Yi — plus the CJK punctuation and
-// full-width forms that stdlib's script tables exclude but which must stay upright with
-// the text they punctuate.
-//
-// Where it differs from UAX #50 it errs toward ROTATING, which is the safer error: a
-// wrongly-rotated glyph is visibly odd, whereas a wrongly-upright one in a Latin run
-// silently produces the fixed-pitch stacking that `upright` is for, and reads as
-// intentional.
-//
-// A glyph with no runes (a synthetic bullet, an inline-box edge) is not upright; it has
-// no script to consult and rotating a zero-ink glyph is a no-op anyway.
-func uprightInVertical(runes []rune) bool {
-	if len(runes) == 0 {
-		return false
-	}
-	for _, r := range runes {
-		if !uprightRune(r) {
-			return false
-		}
-	}
-	return true
-}
-
-// uprightRune is uprightInVertical's per-rune test. See that function for what this
-// approximates and why.
-func uprightRune(r rune) bool {
-	switch {
-	// The blocks stdlib's script tables miss: CJK symbols and punctuation (U+3000-303F,
-	// the ideographic space, brackets and full stop), and the halfwidth/fullwidth forms
-	// (U+FF00-FFEF) whose full-width members are set upright with CJK text.
-	case r >= 0x3000 && r <= 0x303F, r >= 0xFF00 && r <= 0xFFEF:
-		return true
-	}
-	return unicode.Is(unicode.Han, r) ||
-		unicode.Is(unicode.Hiragana, r) ||
-		unicode.Is(unicode.Katakana, r) ||
-		unicode.Is(unicode.Hangul, r) ||
-		unicode.Is(unicode.Bopomofo, r) ||
-		unicode.Is(unicode.Yi, r)
-}
-
-// verticalAdvanceOf is a glyph's advance down the page, in points.
-//
-// Note the units: font.GlyphVAdvance returns EM units (a positive downward distance,
-// normalized at the program adapter), so it is scaled by the glyph's point size here.
-//
-// There is deliberately NO fallback to the glyph's horizontal advance. pkg/font
-// synthesizes one em for any face that states no vertical metric, so the ok=false path
-// is unreachable for a glyph that has a face; falling back to the horizontal advance
-// would space a vertical line by how WIDE each letter is — an 'i' and a 'W' would get
-// different vertical gaps — which looks plausible enough to survive review and is
-// wrong. An earlier revision of this function did exactly that, and it hid the fact
-// that the default Type1 faces were returning no vertical advance at all.
-//
-// A glyph with no face (whitespace, .notdef) keeps its own advance; there is no font
-// to ask.
-func verticalAdvanceOf(g *inline.Glyph) float64 {
-	if g.Face == nil {
-		return g.Advance
-	}
-	adv, ok := g.Face.GlyphVAdvance(g.GID)
-	if !ok {
-		return g.Advance
-	}
-	return adv * g.SizePt
 }
 
 // lineHeightGuess estimates a line's height for the float band query, before the

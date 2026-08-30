@@ -26,8 +26,17 @@ type placedGlyph struct {
 	// element's user space, before any text-anchor shift.
 	penX, penY float64
 
-	// rotateRad is the per-character rotation about the glyph's own origin.
+	// rotateRad is the per-character rotation about the glyph's own origin. In
+	// a vertical writing mode it carries the text-orientation turn as well,
+	// summed with the character's own rotate= (see layoutText).
 	rotateRad float64
+
+	// vertical marks a glyph laid out in a vertical writing mode, where the pen
+	// walked down the page and `advance` is the font's VERTICAL advance. The
+	// later passes need it because they are otherwise free to assume the run
+	// extends along X: anchor shifts move along the run's own axis, and the
+	// decoration extents span it.
+	vertical bool
 
 	// xScale horizontally scales the glyph OUTLINE, for
 	// lengthAdjust="spacingAndGlyphs". It is 1 for every other case, and the
@@ -357,15 +366,28 @@ func (r *Renderer) paintDecorationLine(dev render.Device, run []placedGlyph, lin
 // underline parallel to the glyphs it sits under instead of staying axis
 // aligned.
 func (r *Renderer) paintDecorationSegment(dev render.Device, seg []placedGlyph, line string, declaring svg.Style, size float64, tm render.Matrix, alpha float64, warned *warnFlags) {
+	// The segment spans its own INLINE axis: X horizontally, Y in a vertical
+	// writing mode. Both are measured into the same x0/x1 pair because the rect
+	// below is built in the segment's UNROTATED frame — where the inline axis is
+	// always the local X — and the matrix then rotates and translates it into
+	// place. A vertical glyph already carries the text-orientation turn in
+	// rotateRad, so an upright vertical run's underline lands beside the text
+	// and a sideways one's lands under it, both without a second code path.
+	vertical := seg[0].vertical
+	inlinePen := func(g *placedGlyph) float64 {
+		if vertical {
+			return g.penY
+		}
+		return g.penX
+	}
 	x0, x1 := math.Inf(1), math.Inf(-1)
 	for i := range seg {
-		x0 = math.Min(x0, seg[i].penX)
-		x1 = math.Max(x1, seg[i].penX+seg[i].advance)
+		x0 = math.Min(x0, inlinePen(&seg[i]))
+		x1 = math.Max(x1, inlinePen(&seg[i])+seg[i].advance)
 	}
 	if !(x1 > x0) {
 		return // an all-zero-advance segment has no extent to decorate
 	}
-	baseY := seg[0].penY
 
 	thickness := size * decorationThicknessEm
 	var top float64
@@ -384,18 +406,28 @@ func (r *Renderer) paintDecorationSegment(dev render.Device, seg []placedGlyph, 
 		return
 	}
 
+	// The rect is built in the segment's own unrotated frame, with local X along
+	// the inline axis and local Y across it — the same frame a glyph's outline
+	// occupies before placedGlyph.matrix rotates it. Offsets are relative to the
+	// FIRST glyph's pen on the inline axis, so local (0,0) is that pen.
+	start := inlinePen(&seg[0])
 	rect := &render.Path{}
-	rect.MoveTo(x0-seg[0].penX, top)
-	rect.LineTo(x1-seg[0].penX, top)
-	rect.LineTo(x1-seg[0].penX, top+thickness)
-	rect.LineTo(x0-seg[0].penX, top+thickness)
+	rect.MoveTo(x0-start, top)
+	rect.LineTo(x1-start, top)
+	rect.LineTo(x1-start, top+thickness)
+	rect.LineTo(x0-start, top+thickness)
 	rect.Close()
 
 	m := render.Identity
 	if rot := seg[0].rotateRad; rot != 0 {
 		m = m.Mul(render.Rotate(rot))
 	}
-	m = m.Mul(render.Translate(seg[0].penX, baseY)).Mul(tm)
+	// Then translate that local origin to the first glyph's pen in user space.
+	// The rotation above has already oriented the frame, so this is the glyph's
+	// own pen either way — no axis swap here, which is what an earlier revision
+	// got wrong by swapping the translation as well as the measurement and
+	// scattering the rule beside the text.
+	m = m.Mul(render.Translate(seg[0].penX, seg[0].penY)).Mul(tm)
 
 	dp := render.TransformPath(rect, m)
 	if dp == nil {
@@ -433,6 +465,19 @@ func ascentFor(g *inline.Glyph, size float64) float64 {
 		return g.AscentPt / g.SizePt * size
 	}
 	return size * 0.8
+}
+
+// descentFor is ascentFor's counterpart: a glyph's descent (a positive magnitude
+// BELOW the baseline) rescaled to size points, with the 0.2em fallback that
+// complements ascentFor's 0.8em so the two always sum to one em.
+//
+// Only the vertical writing-mode path reads it, to centre a sideways glyph across
+// the baseline — see verticalGlyph.
+func descentFor(g *inline.Glyph, size float64) float64 {
+	if g.SizePt > 0 && g.DescentPt > 0 {
+		return g.DescentPt / g.SizePt * size
+	}
+	return size * 0.2
 }
 
 // The em fractions a text-decoration rule uses for its position and weight.
@@ -662,19 +707,42 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 		penX += c.DX
 		penY += c.DY
 
+		// In a vertical writing mode the pen walks DOWN the page: the advance
+		// is the font's vertical metric, and text-orientation decides whether
+		// the glyph stands upright or lies on its side. verticalGlyph returns
+		// both, plus the cross-axis shift that keeps a recumbent glyph centred
+		// on the vertical baseline.
+		//
+		// The horizontal path is untouched — vertical is false for every
+		// ordinary <text>, so advance stays g.advance and both offsets are 0.
+		vertical := c.Style.Vertical()
+		advance := g.advance
+		var orientRad, crossShift float64
+		if vertical {
+			advance, orientRad, crossShift = r.verticalGlyph(c.Style, &g.glyph, g.advance)
+		}
+
 		placed = append(placed, placedGlyph{
-			glyph:     g.glyph,
-			penX:      penX,
-			penY:      penY + r.baselineOffset(c.Style, &g.glyph),
-			rotateRad: c.RotateDeg * math.Pi / 180,
+			glyph: g.glyph,
+			penX:  penX + crossShift,
+			penY:  penY + r.baselineOffset(c.Style, &g.glyph),
+			// A character's own rotate= composes WITH the writing mode's
+			// orientation rather than replacing it. SVG defines rotate as an
+			// additional rotation of the glyph about its origin, and in a
+			// vertical run the glyph is already turned by text-orientation, so
+			// adding them keeps rotate="90" meaning "a further quarter turn" in
+			// either mode. orientRad is 0 horizontally, leaving this identical.
+			rotateRad: c.RotateDeg*math.Pi/180 + orientRad,
+			vertical:  vertical,
 			chunk:     chunk,
 			style:     c.Style,
 			xScale:    g.xScale,
 			// The glyph's EFFECTIVE advance, which every later pass (anchor
 			// measurement, decoration extent, bidi re-lay) must read instead
 			// of glyph.Advance so they see the spacing and textLength the pen
-			// actually walked.
-			advance:        g.advance,
+			// actually walked — and, in a vertical run, the VERTICAL advance
+			// the pen walked rather than the horizontal one it did not.
+			advance:        advance,
 			charIndex:      g.charIndex,
 			fillGradient:   asGradient(c.FillGradient()),
 			strokeGradient: asGradient(c.StrokeGradient()),
@@ -687,12 +755,52 @@ func (r *Renderer) layoutText(t *svg.Text) []placedGlyph {
 		// BETWEEN this glyph and the next, so it is added after the advance —
 		// which is precisely why it never introduces a leading or trailing
 		// space, and why the last glyph's index carries no gap.
-		penX += g.advance + gaps[i]
+		//
+		// Which axis it advances is the whole of the vertical change: the pen
+		// walk, the chunk bookkeeping, dx/dy and the absolute x/y overrides are
+		// all axis-agnostic and are shared.
+		if vertical {
+			penY += advance + gaps[i]
+		} else {
+			penX += advance + gaps[i]
+		}
 	}
 
 	reorderVisually(placed)
 	applyAnchors(placed, t)
 	return placed
+}
+
+// verticalGlyph resolves one glyph's placement in a vertical writing mode: how far the
+// pen advances down the page, how far the glyph is rotated about its own origin, and
+// how far the glyph shifts across the baseline.
+//
+// The three move together, which is why they are resolved in one place:
+//
+//   - An UPRIGHT glyph keeps its own baseline and advances by the font's VERTICAL
+//     metric — one em for a face with no vhea, which is the browser fallback. It sits
+//     centred on the vertical baseline, so it needs no cross shift.
+//   - A SIDEWAYS glyph is turned a quarter turn, so what advances the pen is its
+//     HORIZONTAL extent (it is lying on its side), and its ascent now extends across
+//     the baseline rather than above it. At +QuarterTurn em-space up maps to page +X,
+//     putting the ascent to the RIGHT, so the baseline shifts LEFT by half the
+//     ascent/descent difference to leave the glyph centred.
+//
+// Mixing those up is the failure mode worth naming: advancing a sideways glyph by the
+// vertical metric spaces it one em per letter, which renders as legible fixed-pitch
+// text and reads as intentional rather than as a bug.
+//
+// hAdvance is the glyph's EFFECTIVE horizontal advance — letter/word-spacing and any
+// textLength correction already folded in — so a sideways run honours those exactly as
+// a horizontal run does. An upright run does not: its advance comes from the font, and
+// SVG's spacing properties are defined along the inline axis, which is a gap noted in
+// FEATURES.md rather than silently split.
+func (r *Renderer) verticalGlyph(st svg.Style, g *inline.Glyph, hAdvance float64) (advance, rotateRad, crossShift float64) {
+	rot, sideways := inline.GlyphRotation(st.TextOrientation(), g.Runes)
+	if !sideways {
+		return inline.VerticalAdvancePt(g), rot, 0
+	}
+	return hAdvance, rot, -(ascentFor(g, g.SizePt) - descentFor(g, g.SizePt)) / 2
 }
 
 // baselineOffset returns how far DOWN (SVG's +Y) a character's baseline moves
@@ -1088,16 +1196,31 @@ func reorderChunk(run []placedGlyph) {
 	// this does not reproduce exactly: an absolute reset starts a NEW chunk
 	// (see svg.Text.Anchors), so within a single chunk there is at most the
 	// leading one, which is exactly the start captured here.
+	// The slots run along the chunk's own INLINE axis — X horizontally, Y in a
+	// vertical writing mode — so both the gap measurement and the redeal follow
+	// it. Everything else about the reorder is axis-independent: it permutes
+	// which glyph occupies each slot, not where the slots are.
+	vertical := run[0].vertical
+	penOf := func(g *placedGlyph) float64 {
+		if vertical {
+			return g.penY
+		}
+		return g.penX
+	}
 	leads := make([]float64, len(run))
 	for l := 1; l < len(run); l++ {
-		if gap := run[l].penX - (run[l-1].penX + run[l-1].advance); gap > 0 {
+		if gap := penOf(&run[l]) - (penOf(&run[l-1]) + run[l-1].advance); gap > 0 {
 			leads[l] = gap
 		}
 	}
-	pen := run[0].penX
+	pen := penOf(&run[0])
 	for s := range reordered {
 		pen += leads[order[s]]
-		reordered[s].penX = pen
+		if vertical {
+			reordered[s].penY = pen
+		} else {
+			reordered[s].penX = pen
+		}
 		pen += reordered[s].advance
 	}
 	copy(run, reordered)
@@ -1159,18 +1282,36 @@ func applyAnchors(placed []placedGlyph, t *svg.Text) {
 	for i < len(placed) {
 		chunk := placed[i].chunk
 		j := i
-		minX, maxX := math.Inf(1), math.Inf(-1)
+		// text-anchor aligns a chunk along its own INLINE axis, which is X for a
+		// horizontal run and Y for a vertical one. Both the measurement and the
+		// shift follow the axis; everything else about the rule is identical, so
+		// the axis is selected once here rather than duplicating the function.
+		vertical := placed[i].vertical
+		pen := func(g *placedGlyph) float64 {
+			if vertical {
+				return g.penY
+			}
+			return g.penX
+		}
+		lo, hi := math.Inf(1), math.Inf(-1)
 		for j < len(placed) && placed[j].chunk == chunk {
-			minX = math.Min(minX, placed[j].penX)
-			maxX = math.Max(maxX, placed[j].penX+placed[j].advance)
+			lo = math.Min(lo, pen(&placed[j]))
+			hi = math.Max(hi, pen(&placed[j])+placed[j].advance)
 			j++
 		}
-		width := maxX - minX
+		extent := hi - lo
 		anchor := placed[i].style.TextAnchor()
-		if placed[i].style.DirectionRTL() {
+		if placed[i].style.DirectionRTL() && !vertical {
 			// Map the direction-relative keywords onto physical edges for an
 			// rtl chunk: start is the right edge, end the left. "middle" is
 			// symmetric and unaffected.
+			//
+			// Skipped for a vertical run: `direction` reverses the INLINE axis,
+			// and in a vertical writing mode that axis runs top-to-bottom for
+			// both ltr and rtl — an rtl vertical run reverses the order lines
+			// STACK in, which is a multi-line concern this engine does not reach
+			// (one <text> is one vertical run). Applying the horizontal flip here
+			// would move a vertical chunk to the wrong end of its own axis.
 			switch anchor {
 			case "start":
 				anchor = "end"
@@ -1181,13 +1322,17 @@ func applyAnchors(placed []placedGlyph, t *svg.Text) {
 		var shift float64
 		switch anchor {
 		case "middle":
-			shift = -width / 2
+			shift = -extent / 2
 		case "end":
-			shift = -width
+			shift = -extent
 		}
 		if shift != 0 {
 			for k := i; k < j; k++ {
-				placed[k].penX += shift
+				if vertical {
+					placed[k].penY += shift
+				} else {
+					placed[k].penX += shift
+				}
 			}
 		}
 		i = j

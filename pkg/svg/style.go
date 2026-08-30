@@ -224,19 +224,32 @@ type Style struct {
 	// see addDecoration.
 	decorations []decoration
 
-	// fontStretchIgnored, fontVariantIgnored, kerningIgnored, and
-	// writingModeIgnored record that a font-stretch / font-variant /
-	// kerning|font-kerning / writing-mode value reached the cascade and was
-	// DEGRADED (logged and dropped) rather than honored — see the four
-	// appliers for why none of them can do anything real with the bundled
-	// faces and the horizontal-only metrics. Nothing in the render path reads
-	// them; they exist so a test can assert the degradation actually happened
-	// at the property that requested it, which a log line alone cannot pin
-	// down. Inherited, exactly like the properties they track.
+	// fontStretchIgnored, fontVariantIgnored, and kerningIgnored record that a
+	// font-stretch / font-variant / kerning|font-kerning value reached the
+	// cascade and was DEGRADED (logged and dropped) rather than honored — see
+	// the three appliers for why none of them can do anything real with the
+	// bundled faces. Nothing in the render path reads them; they exist so a
+	// test can assert the degradation actually happened at the property that
+	// requested it, which a log line alone cannot pin down. Inherited, exactly
+	// like the properties they track.
 	fontStretchIgnored bool
 	fontVariantIgnored bool
 	kerningIgnored     bool
-	writingModeIgnored bool
+
+	// writingMode is the resolved writing-mode: "" (unset, meaning the
+	// horizontal initial value) or "vertical-rl" / "vertical-lr".
+	//
+	// Unlike the three flags above this is READ by the render path: a vertical
+	// value turns the pen down the page (draw.layoutText) rather than being
+	// dropped with a log, which is what it used to be. The SVG 1.1 vertical
+	// spellings tb/tb-rl resolve to vertical-rl here, so the renderer has one
+	// vocabulary to switch on. Inherited.
+	writingMode string
+	// textOrientation is the resolved text-orientation: "" (unset, meaning the
+	// "mixed" initial value), "upright", or "sideways". It decides whether a
+	// glyph in a VERTICAL line stands upright or lies on its side, and has no
+	// effect in a horizontal one. Inherited.
+	textOrientation string
 }
 
 // decoration is one declared text-decoration line together with the resolved
@@ -392,7 +405,8 @@ func (parent Style) apply(el *element, ctx *cascadeCtx) Style {
 	applyFontStretch(&s, attr, logf)
 	applyFontVariant(&s, attr, logf)
 	applyKerning(&s, attr, logf)
-	applyWritingMode(&s, attr, logf)
+	applyWritingMode(&s, el.local, attr, logf)
+	applyTextOrientation(&s, attr, logf)
 	applyTextAnchor(&s, attr, logf)
 	applyDirection(&s, attr, logf)
 	applyUnicodeBidi(&s, attr, logf)
@@ -1693,39 +1707,92 @@ func applyFontStretch(s *Style, attr func(string) (string, bool), logf func(stri
 	logf("svg: font-stretch=%q ignored: no condensed/expanded face is bundled and no synthetic stretching exists", val)
 }
 
-// applyWritingMode resolves writing-mode. Every vertical value DEGRADES to
-// horizontal HERE, in the SVG path, which lays text out itself rather than
-// through the CSS inline layer.
+// applyWritingMode resolves writing-mode. A vertical value is HONORED: the pen
+// walks down the page (draw.layoutText) using the vertical advance pkg/font
+// exposes, mirroring what the CSS path does for HTML.
 //
-// Two reasons previously given for this no longer hold and should not be
-// repeated: pkg/font does expose vertical metrics (Face.GlyphVAdvance, which
-// answers for every face), and the engine does have a vertical advance model —
-// the CSS path lays out a vertical line. What is missing is the wiring from
-// SVG's own <text> placement to them, which is a real piece of work but an
-// adaptation, not the new subsystem the SVG text design doc's decision 3
-// assumed when it deferred this alongside <textPath>.
+// This used to degrade every vertical value to horizontal with a log, on the
+// stated grounds that the engine had no vertical advance model. Both halves of
+// that reason are now false — pkg/font answers GlyphVAdvance for every face,
+// and the CSS inline path lays out a vertical line — so what remained was
+// wiring SVG's own placement to them.
 //
-// Horizontal output for vertical text is wrong but legible, which is the
-// better failure here than dropping the text entirely. The log is what keeps
-// it honest: FEATURES.md lists writing-mode among the scope limits that
-// degrade WITH a diagnostic, so this must actually fire.
+// The value vocabulary is normalized here so the renderer switches on one set
+// of strings:
 //
-// Like font-stretch it goes through the cascade rather than being dropped at
-// the parser, so the diagnostic fires for a style="" or sheet rule too.
-func applyWritingMode(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+//   - horizontal-tb, and the deprecated SVG 1.1 spellings lr/lr-tb/rl/rl-tb,
+//     leave writingMode empty (the horizontal initial value).
+//   - vertical-rl / vertical-lr are stored as themselves.
+//   - tb / tb-rl are SVG 1.1's vertical spellings and resolve to vertical-rl.
+//     SVG 1.1 defines both as top-to-bottom with lines stacking right-to-left,
+//     which is exactly vertical-rl.
+//
+// sideways-rl / sideways-lr are NOT accepted: they are distinct modes, and
+// folding them into a vertical value would silently misreport what the author
+// asked for. They fall through to the log below.
+//
+// The property establishes the writing mode for a whole <text> element, so a
+// declaration on a <tspan> INSIDE one is ignored (SVG 1.1 §10.7.2, and resvg's
+// on-tspan.svg, which is what caught this being wrong). That matters here
+// because this engine resolves style per CHARACTER: without the check, a
+// tspan's value silently reorients just the glyphs it covers, turning one run
+// through a right angle partway along.
+//
+// Only a TSPAN's own declaration is refused, not every non-<text> element.
+// writing-mode is inherited, so a <g writing-mode="tb"> around a <text> still
+// applies to it — resvg's inheritance.svg pins exactly that, and refusing
+// everything but <text> broke it.
+func applyWritingMode(s *Style, tag string, attr func(string) (string, bool), logf func(string, ...any)) {
 	val, ok := attr("writing-mode")
 	if !ok || val == "inherit" {
 		return
 	}
-	val = strings.ToLower(strings.TrimSpace(val))
-	// horizontal-tb is the initial value and the only one the engine honors;
-	// lr/lr-tb/rl/rl-tb are the deprecated SVG 1.1 spellings of it.
-	switch val {
-	case "horizontal-tb", "lr", "lr-tb", "rl", "rl-tb":
+	if tag == "tspan" {
+		// Silently ignored, not logged: SVG's error-handling model treats an
+		// inapplicable presentation attribute as a no-op, and a document that
+		// puts writing-mode on a tspan is conforming, not broken.
 		return
 	}
-	s.writingModeIgnored = true
-	logf("svg: writing-mode=%q ignored: vertical text needs a vertical advance model in the layout path; laying out horizontally", val)
+	val = strings.ToLower(strings.TrimSpace(val))
+	switch val {
+	case "horizontal-tb", "lr", "lr-tb", "rl", "rl-tb":
+		s.writingMode = ""
+		return
+	case "vertical-rl", "vertical-lr":
+		s.writingMode = val
+		return
+	case "tb", "tb-rl":
+		s.writingMode = "vertical-rl"
+		return
+	}
+	logf("svg: writing-mode=%q not recognized; laying out horizontally", val)
+}
+
+// applyTextOrientation resolves text-orientation, which decides whether a glyph
+// in a VERTICAL line stands upright or lies on its side. It has no effect in a
+// horizontal writing mode, per CSS Writing Modes 4 §5.1, but is still resolved
+// and inherited there so a value set on a horizontal ancestor reaches a
+// vertical descendant.
+//
+// sideways-right is the CSS Writing Modes 3 spelling of sideways.
+// use-glyph-orientation is a deprecated SVG-compat value with no defined
+// behaviour here, so it is dropped rather than guessed at.
+func applyTextOrientation(s *Style, attr func(string) (string, bool), logf func(string, ...any)) {
+	val, ok := attr("text-orientation")
+	if !ok || val == "inherit" {
+		return
+	}
+	val = strings.ToLower(strings.TrimSpace(val))
+	switch val {
+	case "mixed":
+		s.textOrientation = ""
+	case "upright", "sideways":
+		s.textOrientation = val
+	case "sideways-right":
+		s.textOrientation = "sideways"
+	default:
+		logf("svg: text-orientation=%q not recognized; using mixed", val)
+	}
 }
 
 // applyFontVariant resolves font-variant. Like font-stretch it degrades:
@@ -1945,6 +2012,17 @@ func (s Style) FontVariantIgnored() bool { return s.fontVariantIgnored }
 // element and was degraded. See Style.kerningIgnored.
 func (s Style) KerningIgnored() bool { return s.kerningIgnored }
 
-// WritingModeIgnored reports whether a vertical writing-mode reached this
-// element and was degraded to horizontal. See Style.writingModeIgnored.
-func (s Style) WritingModeIgnored() bool { return s.writingModeIgnored }
+// WritingMode returns the resolved writing-mode: "" for the horizontal initial
+// value, or "vertical-rl" / "vertical-lr". See Style.writingMode.
+func (s Style) WritingMode() string { return s.writingMode }
+
+// Vertical reports whether this element's text runs down the page. It is the
+// predicate the render path actually branches on, spelled once here so a
+// caller never has to remember which strings count as vertical.
+func (s Style) Vertical() bool {
+	return s.writingMode == "vertical-rl" || s.writingMode == "vertical-lr"
+}
+
+// TextOrientation returns the resolved text-orientation: "" for the "mixed"
+// initial value, or "upright" / "sideways". See Style.textOrientation.
+func (s Style) TextOrientation() string { return s.textOrientation }
