@@ -51,7 +51,7 @@ Two of these were reproduced end to end while writing this plan; the rest come f
 the audit and are marked as such. **Reproduce before fixing** — the audit's line
 numbers predate the rename, and one of its claims (that `nan` hangs) did not hold up.
 
-### 0a. `parseRef` overflows the column index — panics
+### 0a. `parseRef` overflows the column index — panics — **DONE**
 
 `pkg/xlsx/parse.go`, `parseRef`. The `col = col*26 + …` loop is unbounded. Measured:
 
@@ -62,29 +62,66 @@ numbers predate the rename, and one of its claims (that `nan` hangs) did not hol
 | 14 letters | −6696602603409169451 | **negative** |
 
 That value reaches `make([][]Cell, maxRow+1)` and panics with `makeslice: len out of
-range`. Confirmed end to end: a 2,258-byte `.xlsx` crashes the CLI, and the panic
-escapes `OpenXLSXBytes` — so an embedding server dies too.
+range`. Confirmed end to end: the panic escapes `OpenXLSXBytes` — so an embedding
+server dies too.
 
-**The fix already exists two hundred lines away.** `parseColElement` in the same file
-clamps with `if maxCol-minCol > 16383`, and says why. `parseRef` needs the same
-bound. This is the highest value-per-line item in the entire plan.
+**Verification changed two things about this entry.**
 
-### 0b. Non-finite CSS numbers hang the layout engine
+*The row axis is the worse half, and was unrecorded.* `parseRef` bounded neither
+axis: `strconv.Atoi` accepts any row number, and `A999999999999` reaches
+`make([][]Cell, maxRow+1)` too. That is not a panic but an unbounded allocation —
+the process is killed by the OOM killer (`signal: killed`), which `recover()`
+cannot catch any more than it can catch a stack overflow. So 0a belonged with 0d
+as a defeater of the batch guarantee, not merely as a catchable panic.
+
+*The column overflow is not only the 14-letter wrap.* Any reference past the sheet
+width panics — `ZZZZZZZZZ1` (9 letters, a positive number) hits `makeslice` just as
+`XFE1` does. The negative wrap is one instance of "column exceeds the grid", not
+the bug itself.
+
+Fixed by bounding both axes in `parseRef` against named `maxSheetCols` /
+`maxSheetRows` constants, with the column check *inside* the loop so no input
+length can overflow `int`. An out-of-sheet address is rejected as malformed
+rather than clamped: clamping would silently move a cell to a different address.
+The existing `parseColElement` clamp now uses the same constants, and its start
+column is bounded too (a large `min` filled the width map with out-of-sheet keys).
+
+Covered by `pkg/xlsx/malformed_test.go` — table cases plus a `FuzzOpenBytes`
+target (16.7M executions clean), which is also the first fuzz target on this
+package, per 0h.
+
+### 0b. Non-finite CSS numbers hang the layout engine — **DONE**
 
 `pkg/css/cascade.go`, `parseNonNegNumber` rejects only `v < 0`, so `strconv.ParseFloat`
 passes `inf`, `Inf`, `+Inf`, and `nan` straight through — measured, all four return
-`ok=true`. An infinite `flex-grow` then makes the free-space loop in
-`pkg/layout/css/flex.go` never terminate.
+`ok=true`, and so does `infinity`, which the plan did not list. An infinite
+`flex-grow` then makes the free-space loop in `pkg/layout/css/flex.go` never
+terminate.
 
 Reproduced: `<div style="display:flex"><div style="flex-grow:inf">a</div></div>` — 66
-bytes — hangs until killed (exit 124 under `timeout`). There is no `ctx` check on
-that path, so a deadline does not save the caller.
+bytes — hangs until killed.
 
-Reject non-finite values in `parseNonNegNumber`. One check, and it is the whole fix
-for this class.
+**Verification changed two things here as well.**
+
+*The hang is in `OpenHTMLBytes`, not in rasterizing.* Layout runs during open, so
+it is not merely that "there is no `ctx` check on that path" — no `RasterizePage`
+deadline exists yet to be checked. The caller has no interruption point at all.
+
+*`parseNonNegNumber` was not the whole fix.* The tokenizer's own `parseFloat`
+(`pkg/css/token.go`) discarded `strconv`'s `ErrRange` and returned the `±Inf` it
+came with. `readNumeric` scans only digits, `.` and a leading `-`, so `inf` cannot
+be spelled through it — but 400 nines overflow to `+Inf` and reach the identical
+hang, through a value that looks like an ordinary number. Fixing only
+`parseNonNegNumber` would have left that door open for every consumer of
+`Token.Num`. Both are now guarded; `pkg/css/color.go` already documented this
+exact reasoning for colour components, so the convention was in place.
 
 Note the audit reported `nan` as hanging too; it does not — NaN degrades safely.
-Fix the parse anyway: accepting NaN as a valid CSS number is wrong regardless.
+Fixed anyway: accepting NaN as a valid CSS number is wrong regardless.
+
+Covered by `pkg/css/nonfinite_test.go` (parser level) and
+`pkg/omnidoc/malformed_input_test.go` (the 66-byte file, end to end, asserting
+termination). The formerly-infinite cases now return in ~100 ms.
 
 ### 0c. Unbounded counts from attributes — **DONE**
 
@@ -181,8 +218,10 @@ reported hangs.
 
 ### Suggested order
 
-1. Clamp `parseRef` (0a) — one line, stops a live panic
-2. Reject non-finite numbers (0b) — one check, kills the hang class
+1. ~~Bound `parseRef` (0a)~~ — **done**; stopped a live panic *and* an
+   unrecoverable OOM on the row axis
+2. ~~Reject non-finite numbers (0b)~~ — **done**; needed the tokenizer fix as
+   well as `parseNonNegNumber` to actually close the class
 3. Cap `colspan`/`rowspan`/grid lines/`repeat()` (0c)
 4. Depth caps in `parseArray` and friends (0d)
 5. Visited-set in `walkPageTree` (0e)
