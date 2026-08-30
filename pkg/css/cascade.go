@@ -398,6 +398,18 @@ type ComputedStyle struct {
 	// but nothing acts on it until inline bidi reordering lands (the embedding
 	// levels it controls have no meaning without the reordering pass).
 	UnicodeBidi string
+	// WritingMode: "horizontal-tb" (initial) | "vertical-rl" | "vertical-lr".
+	// Inherited (CSS Writing Modes 4 §3.1) — it is in inheritFrom alongside Direction.
+	//
+	// Only horizontal-tb is honoured. A vertical value is parsed, carried, and
+	// reported by the layout engine as unsupported, then laid out horizontally.
+	// It is stored rather than dropped so the degradation can be detected and logged
+	// once per box: the property previously did not reach the cascade at all, so an
+	// author got a silent no-op — a correct stylesheet, a wrong page, and no
+	// diagnostic. Vertical layout needs a vertical advance model in the inline layer
+	// (the font metrics themselves are available); until that lands, saying so is the
+	// honest behaviour. The SVG path reports the same limitation (pkg/svg/style.go).
+	WritingMode string
 }
 
 // Resolver computes the ComputedStyle of any node against parsed stylesheets
@@ -879,9 +891,10 @@ func inheritFrom(parent ComputedStyle) ComputedStyle {
 	cs.CaptionSide = parent.CaptionSide
 	cs.EmptyCells = parent.EmptyCells
 	cs.Direction = parent.Direction
-	cs.Page = parent.Page       // CSS Paged Media: `page` is inherited
-	cs.Widows = parent.Widows   // CSS: widows is inherited
-	cs.Orphans = parent.Orphans // CSS: orphans is inherited
+	cs.WritingMode = parent.WritingMode // CSS Writing Modes 4: writing-mode is inherited
+	cs.Page = parent.Page               // CSS Paged Media: `page` is inherited
+	cs.Widows = parent.Widows           // CSS: widows is inherited
+	cs.Orphans = parent.Orphans         // CSS: orphans is inherited
 	// table-layout, vertical-align, break-*, break-inside, filter are NOT inherited
 	// (per CSS). filter in particular must not inherit: it applies once to the box's
 	// whole rendered subtree, so inheriting it would re-apply the effect at every
@@ -965,6 +978,7 @@ func initialStyle() ComputedStyle {
 		CaptionSide:    "top",
 		EmptyCells:     "show",
 		Direction:      "ltr",
+		WritingMode:    "horizontal-tb",
 		UnicodeBidi:    "normal",
 		// BorderSpacingH/V default to 0 (zero value).
 		Widows:  2, // CSS initial widows
@@ -1332,6 +1346,18 @@ func applyDeclaration(cs *ComputedStyle, d Declaration) {
 		switch d.Value {
 		case "ltr", "rtl":
 			cs.Direction = d.Value
+		}
+	case "writing-mode":
+		// lr/lr-tb/rl/rl-tb are the deprecated SVG 1.1 spellings of horizontal-tb;
+		// the SVG path accepts them (pkg/svg/style.go applyWritingMode) and the two
+		// paths agreeing costs one line. sideways-rl/sideways-lr are NOT accepted:
+		// they are distinct modes, and silently folding them into a vertical value
+		// would misreport what the engine was asked to do.
+		switch d.Value {
+		case "horizontal-tb", "lr", "lr-tb", "rl", "rl-tb":
+			cs.WritingMode = "horizontal-tb"
+		case "vertical-rl", "vertical-lr":
+			cs.WritingMode = d.Value
 		}
 	case "unicode-bidi":
 		switch d.Value {

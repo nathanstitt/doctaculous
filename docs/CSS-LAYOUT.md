@@ -51,6 +51,20 @@ gracefully.
   block centering; deferred margin-collapse edge cases (empty-block collapse-through, clearance,
   `min-height` interaction).
 
+- **Vertical writing modes** — `writing-mode: vertical-rl|vertical-lr` is parsed, inherited and
+  reported (warn-once), but lays out horizontally; `text-orientation` is not parsed at all. The
+  inline layer states the horizontal axis in its API (`Place(align, originX, availWidth, widthPt,
+  …)`, `VisibleWidth`), so vertical text needs those inputs reinterpreted as block/inline extents —
+  either by renaming to logical terms or by transposing at the `pkg/layout/css/inline.go` boundary.
+  **The commonly cited blocker no longer applies:** `vhea`/`vmtx` metrics ARE reachable —
+  `textlayout` exposes `VerticalAdvance` on the `fonts.FontMetrics` interface `pkg/font` already
+  consumes, and synthesizes a one-em advance for faces without a `vhea` table (measured: every
+  bundled Latin face reports `v-adv = -1000`, note the negative Y-down convention). The remaining
+  cost is layout, not fonts. The display list is already glyph-granular (`GlyphKind` carries a
+  per-glyph `XPt, YPt`, and paint composes one matrix per glyph), so glyph rotation for
+  `text-orientation: mixed` needs no new plumbing. Out of scope even when this lands: vertical
+  alternate glyph forms (`vert`/`vrt2` GSUB) and `text-combine-upright`.
+
 - **Web-font descriptors** — synthetic bold/oblique, `unicode-range` subsetting, `font-display`,
   variable-font axes, `local()` beyond the disk adapter; a content-addressed fetch cache (FaceCache
   is keyed `(family, style)`).

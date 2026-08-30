@@ -1169,6 +1169,52 @@ func TestDirectionInheritsUnicodeBidiDoesNot(t *testing.T) {
 	}
 }
 
+func TestWritingModeParse(t *testing.T) {
+	for _, tc := range []struct{ decl, want string }{
+		{"horizontal-tb", "horizontal-tb"},
+		{"vertical-rl", "vertical-rl"},
+		{"vertical-lr", "vertical-lr"},
+		// The deprecated SVG 1.1 spellings all mean horizontal-tb. The SVG path
+		// accepts them (pkg/svg/style.go applyWritingMode); the two paths agree.
+		{"lr", "horizontal-tb"},
+		{"lr-tb", "horizontal-tb"},
+		{"rl", "horizontal-tb"},
+		{"rl-tb", "horizontal-tb"},
+		// Garbage is dropped, leaving the initial value.
+		{"bogus", "horizontal-tb"},
+		// sideways-* are real CSS values but distinct modes this engine does not
+		// model. They must be DROPPED, not folded into a vertical value: reporting
+		// "vertical-rl not implemented" for `sideways-rl` would misstate what the
+		// author asked for.
+		{"sideways-rl", "horizontal-tb"},
+		{"sideways-lr", "horizontal-tb"},
+	} {
+		sheet := Parse("p { writing-mode: " + tc.decl + "; }")
+		r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
+		if cs := r.ComputeRoot(&fakeNode{tag: "p"}); cs.WritingMode != tc.want {
+			t.Errorf("writing-mode: %s => %q, want %q", tc.decl, cs.WritingMode, tc.want)
+		}
+	}
+}
+
+// writing-mode is INHERITED (CSS Writing Modes 4 §3.1). inheritFrom is, in its own
+// words, "the single source of truth for which fields inherit; a property added to
+// ComputedStyle but omitted here silently resets to initial instead of inheriting" —
+// and omitting it neither fails to compile nor logs. This pins the inheritance so the
+// property cannot regress to stopping at the declaring element.
+func TestWritingModeInherits(t *testing.T) {
+	r := NewResolver([]OriginSheet{{Sheet: Parse(`div { writing-mode: vertical-rl; }`), Origin: OriginAuthor}}, nil)
+	parent := &fakeNode{tag: "div"}
+	child := &fakeNode{tag: "span", parent: parent}
+	ps := r.ComputeRoot(parent)
+	if ps.WritingMode != "vertical-rl" {
+		t.Fatalf("parent writing-mode = %q, want vertical-rl", ps.WritingMode)
+	}
+	if cs := r.Compute(child, ps); cs.WritingMode != "vertical-rl" {
+		t.Errorf("child writing-mode = %q, want inherited vertical-rl", cs.WritingMode)
+	}
+}
+
 func TestFlexFlowShorthand(t *testing.T) {
 	// flex-flow sets flex-direction + flex-wrap in either order; an omitted component
 	// resets to its initial value per the shorthand rules.

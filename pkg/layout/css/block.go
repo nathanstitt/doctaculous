@@ -638,6 +638,22 @@ func (e *Engine) layoutInterior(ctx context.Context, b *cssbox.Box, contentW, co
 		childBand = 0
 	}
 
+	// A vertical writing-mode is parsed and carried by the cascade but not implemented:
+	// the inline layer advances a pen along X, so the text lays out horizontally. Report
+	// it here — before the formatting-context dispatch, so it is reported once per box
+	// whatever kind of box it is — because the alternative is what this replaced: a
+	// silent no-op, where a correct stylesheet produces a wrong page with no diagnostic.
+	// The SVG path reports the same limitation (pkg/svg/style.go applyWritingMode).
+	//
+	// warnOnce, not logf: the property is inherited, so a vertical container hands the
+	// value to every descendant box and a per-box log would emit one identical line per
+	// element in the subtree. Keyed by the value so vertical-rl and vertical-lr each
+	// report, rather than the first one seen masking the other.
+	if wm := b.Style.WritingMode; wm == "vertical-rl" || wm == "vertical-lr" {
+		e.warnOnce("css-writing-mode-"+wm,
+			"css layout: writing-mode=%q not yet implemented; laying out horizontally", wm)
+	}
+
 	var in interior
 	switch b.Formatting {
 	case cssbox.InlineFC:
