@@ -10,19 +10,21 @@ A pure-Go document toolkit: parse, lay out, rasterize, extract, convert, and edi
 documents. It brings its own PDF interpreter and its own CSS layout engine. No
 CGo, no native bindings, no copyleft.
 
-## Read/Write thirteen formats and convert between them
+Read and write thirteen formats, and convert between any two of them.
+
+## Thirteen formats, in and out
 
 Every supported format is both an input **and** an output. All 156 ordered pairs
 convert (a format to itself is a deliberate `ErrSameFormat`):
 
 > `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg`
 
-Plus two input-only formats: **`heic`** and **`svg`**. HEIF/HEIC stills decode
-through an in-tree pure-Go HEVC intra decoder (no libheif, no CGo), so an
-iPhone photo converts to any of the thirteen outputs and drops into HTML/EPUB
-`<img>` unchanged. Standalone `.svg`/`.svgz` documents open as a vector page —
-paths, shapes, transforms, solid fill/stroke — and convert to PDF as real
-vectors, not a rasterized image.
+Two more formats are input-only: **`heic`** and **`svg`**. HEIF/HEIC stills decode
+through an in-tree pure-Go HEVC intra decoder — no libheif, no CGo — so an iPhone
+photo converts to any of the thirteen outputs and drops into an HTML or EPUB
+`<img>` unchanged. Standalone `.svg`/`.svgz` files open as a vector page (paths,
+shapes, transforms, solid fill/stroke) and convert to PDF as real vectors rather
+than a rasterized image.
 
 ```sh
 omnidoc convert report.docx report.pdf         # typeset through the CSS engine
@@ -37,13 +39,14 @@ omnidoc rasterize input.pdf --page 1 --out page1.png --dpi 150
 classification, HTML sniffing), then the extension; the output format comes from
 the output extension. `--from`/`--to` override both. HTML input can also be an
 `http(s)` URL, with relative resources, `data:` URIs, and web fonts resolved.
-Image output writes one page by default, or many with
-`--pages all` and a `%d` in the output name (`page-%d.png`);
-`--max-width`/`--max-height` produce fit-within thumbnails without knowing page
-sizes up front, and `--crop <gravity|saliency> --crop-size WxH` fills an exact
-pixel box rather than fitting within one — the difference between a 720×720
-square and a 720×540 fit. `--crop saliency` picks the window from image content
-(edge energy, saturation, skin likelihood, centre bias; no model, pure Go).
+Image output writes one page by default, or many with `--pages all` and a `%d` in
+the output name (`page-%d.png`).
+
+Thumbnails come in two shapes. `--max-width`/`--max-height` fit within a bound
+without knowing page sizes up front. `--crop <gravity|saliency> --crop-size WxH`
+fills an exact pixel box instead — the difference between a 720×720 square and a
+720×540 fit. `--crop saliency` picks the window from image content: edge energy,
+saturation, skin likelihood, and centre bias, with no model and no CGo.
 
 **Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
 rendering specimen, one document exercising every implemented HTML/CSS/image
@@ -87,8 +90,8 @@ For hosts routing uploads: `OpenReader(ctx, r)` / `OpenReaderAs` accept plain
 
 ## How it works
 
-There are three routes through the code, and everything meets at a single
-format-neutral CSS box tree and a single backend-agnostic paint interface.
+Three routes run through the code. They all meet at one format-neutral CSS box
+tree and one backend-agnostic paint interface.
 
 ```text
  DOCX · HTML · Markdown · text          ┌────────────────────────┐      render.Device
@@ -127,8 +130,8 @@ equal `html → md`), golden images, and WPT-style reftests.
 
 ## Beyond conversion: native office models
 
-Two packages are supported public surfaces of their own, built for programs that
-edit files rather than convert them:
+Two packages stand on their own as supported public surfaces, built for programs
+that edit files rather than convert them:
 
 - **`pkg/xlsx`** is a preservation-first spreadsheet editor. `Edit` + `Save` of an
   untouched workbook is **part-for-part byte-identical**; edits rewrite only the
@@ -142,12 +145,12 @@ edit files rather than convert them:
 
 ## Why?
 
-The high-fidelity incumbents (PDFium, MuPDF, Poppler) require CGo and/or carry
-copyleft licenses. omnidoc implements the whole stack in Go: PDF
+The high-fidelity incumbents — PDFium, MuPDF, Poppler — require CGo, carry
+copyleft licenses, or both. omnidoc implements the whole stack in Go instead: PDF
 interpretation, font parsing, CSS layout, rasterization, OOXML. It cross-compiles
-freely, builds as a single static binary, and stays MIT. The few dependencies
-are pure-Go and permissively licensed (see `go.mod`); the one vendored decoder
-is Apache-2.0.
+freely, builds as a single static binary, and stays MIT. The few dependencies are
+pure-Go and permissively licensed (see `go.mod`); the one vendored decoder is
+Apache-2.0.
 
 Built for [tinycld](https://github.com/tinycld), where it powers document
 thumbnails, text extraction, and editing of xlsx/docx with the
@@ -156,9 +159,9 @@ packages respectively.
 
 ## Limitations
 
-Unsupported constructs degrade gracefully. You get a skip and a debug log, or a
-typed error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …), never a
-panic, and one bad page can't kill a batch. The notable gaps today:
+Unsupported constructs degrade rather than crash. You get a skip and a debug log,
+or a typed error (`ErrEncryptedNeedsPassword`, `ErrUnsupportedFormat`, …) — never
+a panic, and one bad page can't kill a batch. The gaps worth knowing about:
 
 - **Bidi/RTL is implemented but not complete.** `direction: rtl` mirrors tables,
   flex, and grid; text reorders per UAX#9 (with bracket mirroring); Arabic shapes
@@ -198,8 +201,7 @@ touching them.
 
 ## Testing
 
-Fidelity work is only as good as what it's tested against, so the corpus carries
-a lot of weight here:
+Fidelity claims are only worth what the corpus behind them proves:
 
 - **Generated fixtures.** Test PDFs, DOCX, and XLSX are built deterministically
   in `testdata/gen` (readable Go, not opaque blobs). Materialize them with
