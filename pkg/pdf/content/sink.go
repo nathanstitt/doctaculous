@@ -1,6 +1,6 @@
 package content
 
-import "github.com/nathanstitt/doctaculous/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/render"
 
 // This file defines the optional capture sinks the interpreter emits to alongside
 // painting, for structure-recovery backends (PDF → text / Markdown / HTML extraction).

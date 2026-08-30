@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
-	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/layout/inline"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 // parseSVG parses src, failing the test on error, and returns the document

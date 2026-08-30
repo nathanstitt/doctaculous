@@ -6,9 +6,9 @@ import (
 	stddraw "image/draw"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/render/raster"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render/raster"
 )
 
 // fakeScene records the ctm it was drawn with and paints one Fill op.

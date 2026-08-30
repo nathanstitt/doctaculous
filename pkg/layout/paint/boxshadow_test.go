@@ -6,8 +6,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // black — the colour every shadow below paints in, so a pixel assertion reads as

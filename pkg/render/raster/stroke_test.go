@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // linePath returns a single open subpath from (x0,y0) to (x1,y1).

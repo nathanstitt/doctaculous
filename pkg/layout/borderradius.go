@@ -3,7 +3,7 @@ package layout
 import (
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // This file holds the resolved (absolute, points) form of CSS Backgrounds 3 §5

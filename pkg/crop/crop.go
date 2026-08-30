@@ -1,6 +1,6 @@
 // Package crop computes crop rectangles for exact-size image output.
 //
-// Sizing in the rest of doctaculous fits within a pixel box with aspect
+// Sizing in the rest of omnidoc fits within a pixel box with aspect
 // preserved (RasterOptions.MaxWidthPx/MaxHeightPx), which cannot produce an
 // exact N×N image from a non-square source. Cropping fills the target instead,
 // discarding what falls outside. Rect chooses the rectangle; Scale (scale.go)

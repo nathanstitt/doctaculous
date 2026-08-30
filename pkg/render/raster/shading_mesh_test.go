@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 func TestMeshBarycentricInterpolation(t *testing.T) {

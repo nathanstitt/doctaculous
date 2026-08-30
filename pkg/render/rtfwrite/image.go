@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
+	"github.com/nathanstitt/omnidoc/pkg/render/imageconv"
 	"strconv"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // twipsPerPx converts CSS pixels (96dpi) to twips.

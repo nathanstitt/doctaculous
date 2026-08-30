@@ -3,9 +3,9 @@ package paint
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // glyphRouteDev embeds render.Device (so it satisfies the full interface) and

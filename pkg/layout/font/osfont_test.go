@@ -3,7 +3,7 @@ package font
 import (
 	"testing"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
 )
 
 // OSFontProvider must satisfy the pkgfont.Provider interface.

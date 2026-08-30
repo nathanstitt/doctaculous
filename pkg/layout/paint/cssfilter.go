@@ -6,9 +6,9 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	svgfilter "github.com/nathanstitt/doctaculous/pkg/svg/filter"
+	"github.com/nathanstitt/omnidoc/pkg/filtereffects"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	svgfilter "github.com/nathanstitt/omnidoc/pkg/svg/filter"
 )
 
 // maxCSSFilterPixels bounds how many pixels one CSS `filter` may allocate for

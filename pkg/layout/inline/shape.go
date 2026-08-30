@@ -17,9 +17,9 @@ import (
 	"context"
 	"image/color"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Run is the neutral styled run: the shaper's single input, which both the flat

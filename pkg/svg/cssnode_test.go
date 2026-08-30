@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 func TestCSSNodeAdapter(t *testing.T) {

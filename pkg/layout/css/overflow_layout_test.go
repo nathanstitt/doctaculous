@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // TestClipFragmentFlaggedWithPaddingBox: an overflow:hidden box's fragment is flagged

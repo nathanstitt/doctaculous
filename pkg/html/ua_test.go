@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // cssColor builds an opaque RGBA for comparing computed colors.

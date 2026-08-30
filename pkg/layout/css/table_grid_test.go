@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 func cell(colSpan, rowSpan int) *cssbox.Box {

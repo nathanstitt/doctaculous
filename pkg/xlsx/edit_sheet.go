@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // worksheetOrder is the CT_Worksheet child sequence (ECMA-376), for inserting

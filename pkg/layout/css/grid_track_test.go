@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 func approxT(a, b float64) bool { return math.Abs(a-b) < 0.01 }

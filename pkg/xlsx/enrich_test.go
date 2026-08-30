@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
+	genxlsx "github.com/nathanstitt/omnidoc/testdata/gen/xlsx"
 )
 
 // enrichedWorkbook builds a fixture exercising the full enriched-read surface:

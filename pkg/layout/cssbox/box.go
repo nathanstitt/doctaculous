@@ -8,7 +8,7 @@
 // fan-out without locks.
 package cssbox
 
-import "github.com/nathanstitt/doctaculous/pkg/css"
+import "github.com/nathanstitt/omnidoc/pkg/css"
 
 // BoxKind is the structural role of a box.
 type BoxKind int

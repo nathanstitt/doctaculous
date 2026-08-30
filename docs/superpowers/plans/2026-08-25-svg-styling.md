@@ -41,7 +41,7 @@ pkg/svg/style.go               MODIFY  apply() takes the cascade context; attr c
 pkg/svg/svg.go                 MODIFY  build the index; defs walked-not-emitted; style no longer "unsupported"
 pkg/svg/length.go              MODIFY  retarget the stale "PR 2" em/ex comment to the text PR
 testdata/svg/resvg/            ADD     structure/style/** tranche + README section
-pkg/doctaculous/testdata/golden/svg-resvg/  ADD  goldens for the new tranche
+pkg/omnidoc/testdata/golden/svg-resvg/  ADD  goldens for the new tranche
 ```
 
 Each new `pkg/svg` file gets a sibling `_test.go`.
@@ -130,7 +130,7 @@ Run: `go test ./pkg/css` (WHOLE package — the selector and cascade suites are 
 Expected: PASS, all of it.
 
 Then run the HTML golden suites, which are the real proof that shared behavior is unchanged:
-`go test -count=1 ./pkg/doctaculous -run 'Golden|Showcase'` → PASS, and `git status` must show no `.png` modified.
+`go test -count=1 ./pkg/omnidoc -run 'Golden|Showcase'` → PASS, and `git status` must show no `.png` modified.
 
 - [ ] **Step 5: Commit**
 
@@ -662,7 +662,7 @@ func TestStyleElementNoLongerLogsUnsupported(t *testing.T) {
 **Files:**
 - Add: `testdata/svg/resvg/structure/style/**` (and any class/style permutations from other areas)
 - Modify: `testdata/svg/resvg/README.md`
-- Add: `pkg/doctaculous/testdata/golden/svg-resvg/structure/style/**.png`
+- Add: `pkg/omnidoc/testdata/golden/svg-resvg/structure/style/**.png`
 
 **Interfaces:** none — fixtures and goldens. The existing `TestSVGResvgGolden` sweep picks up new files automatically.
 
@@ -679,16 +679,16 @@ The README pins `d8e064337faf01bc5a9579187a56dbdbe3eacc72`. If HEAD differs, sti
   - ELIGIBLE: `<style>` elements (with/without `type`), `style=""` attributes, `class`, type/class/id/descendant/grouping selectors, `!important`, specificity and source-order cases, multiple sheets, sheets inside `<defs>`, CDATA-wrapped CSS.
   - EXCLUDE (and record the reason): `@import` (no loader), attribute selectors and `>`/`+`/`~` (unsupported, fail safe), `@media` beyond type-only, `:hover` and other dynamic pseudos, and anything pulling in a not-yet-shipped feature (gradients, `<use>`, text, filters, clip/mask, `<image>`).
   - Target 25–60 files. Preserve the upstream-relative path structure.
-- [ ] **Step 3: Generate goldens** — `go test ./pkg/doctaculous -run TestSVGResvgGolden -update`
+- [ ] **Step 3: Generate goldens** — `go test ./pkg/omnidoc -run TestSVGResvgGolden -update`
 - [ ] **Step 4: EYEBALL EVERY NEW GOLDEN.** Use the Read tool to view each new PNG and compare it against its source SVG's `<title>`/`<desc>` intent. A golden always matches itself on first generation, so passing proves nothing. PR 1's identical step found two real rendering bugs. If a golden looks wrong: (a) fix the genuine bug, (b) remove the file if it turns out to use an unsupported feature you missed and record the removal, or (c) STOP and report BLOCKED rather than committing a golden you believe is wrong. Report how many you inspected and what you observed — a bare "all looked fine" with no specifics is not an acceptable report.
 - [ ] **Step 5: Update the README** — add a `## What shipped in this tranche (PR 2)` section, extend `## Notable exclusions` with per-item reasons, and record any file removed during the eyeball pass. Keep the existing curation-rule statement intact.
 - [ ] **Step 6: Verify and commit**
 
 ```bash
-go test -count=1 ./pkg/doctaculous -run TestSVGResvgGolden    # without -update
-go test -race ./pkg/doctaculous -run TestSVGResvgGolden
+go test -count=1 ./pkg/omnidoc -run TestSVGResvgGolden    # without -update
+go test -race ./pkg/omnidoc -run TestSVGResvgGolden
 git status   # only new fixtures/goldens + README; NO pre-existing .png modified
-git add testdata/svg pkg/doctaculous && git commit -m "test(svg): resvg CSS styling tranche with goldens"
+git add testdata/svg pkg/omnidoc && git commit -m "test(svg): resvg CSS styling tranche with goldens"
 ```
 
 ---
@@ -702,7 +702,7 @@ git add testdata/svg pkg/doctaculous && git commit -m "test(svg): resvg CSS styl
 - [ ] **Step 2: Race, vet, lint, format**
 
 ```bash
-go test -race ./pkg/svg/... ./pkg/css/... ./pkg/layout/... ./pkg/doctaculous
+go test -race ./pkg/svg/... ./pkg/css/... ./pkg/layout/... ./pkg/omnidoc
 go vet ./...
 golangci-lint run
 gofmt -l . | grep -v '^pkg/pdf/filter/jbig2'   # must print nothing
@@ -710,7 +710,7 @@ gofmt -l . | grep -v '^pkg/pdf/filter/jbig2'   # must print nothing
 
 Any failure — including one that looks unrelated — gets diagnosed and fixed at the source. Do not skip, do not merely rerun, do not regenerate goldens.
 
-- [ ] **Step 3: HTML regression check.** Task 1 touched shared selector code. Confirm explicitly that the HTML golden suites are byte-identical: `go test -count=1 ./pkg/doctaculous -run 'Golden|Showcase'` and `git diff --stat -- '*.png'` showing no pre-existing golden modified. State this result in the report.
+- [ ] **Step 3: HTML regression check.** Task 1 touched shared selector code. Confirm explicitly that the HTML golden suites are byte-identical: `go test -count=1 ./pkg/omnidoc -run 'Golden|Showcase'` and `git diff --stat -- '*.png'` showing no pre-existing golden modified. State this result in the report.
 - [ ] **Step 4: CLI smoke test.** Write an SVG that styles itself through all three origins (a presentation attribute, a `<style>` rule that overrides it, and an inline `style=""` that overrides that), rasterize it, and VIEW the PNG to confirm the winning color actually renders.
 - [ ] **Step 5: FEATURES.md** — extend the existing SVG bullet: CSS styling now ships (`<style>` sheets, `style=""`, `class`, selectors with specificity and `!important`). Keep the not-yet list accurate — remove CSS from it, leave gradients/`<use>`/text/clip-mask/filters/`<image>`/inline-in-HTML. Match the file's existing voice.
 - [ ] **Step 6: Commit** — `git add FEATURES.md && git commit -m "docs: FEATURES entry for SVG CSS styling"`

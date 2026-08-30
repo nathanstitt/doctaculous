@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // docIndex is the whole-document information the scene walk needs up front:

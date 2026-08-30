@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	genheif "github.com/nathanstitt/doctaculous/testdata/gen/heif"
+	genheif "github.com/nathanstitt/omnidoc/testdata/gen/heif"
 )
 
 // singleHVC1 builds a minimal one-item file: an hvc1 primary with ispe and a

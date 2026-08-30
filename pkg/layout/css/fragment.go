@@ -5,12 +5,12 @@ import (
 	"image/color"
 	"sort"
 
-	"github.com/nathanstitt/doctaculous/pkg/filtereffects"
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/filtereffects"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/inline"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Fragment is one positioned box in page space (points, Y-down, origin at the

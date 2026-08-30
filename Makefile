@@ -1,6 +1,6 @@
 .PHONY: build test test-short lint vet fmt tidy clean bench
 
-BIN := bin/doctaculous
+BIN := bin/omnidoc
 
 # Our packages. We list these explicitly rather than using ./... so unrelated Go
 # files that may exist under the working tree (e.g. vendored skill/example assets
@@ -9,7 +9,7 @@ PKGS := ./cmd/... ./pkg/... ./testdata/gen/...
 
 build:
 	@mkdir -p bin
-	go build -o $(BIN) ./cmd/doctaculous
+	go build -o $(BIN) ./cmd/omnidoc
 
 test:
 	go test -race $(PKGS)

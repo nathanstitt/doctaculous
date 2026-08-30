@@ -3,7 +3,7 @@ package css
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // lineBoxHeight lays out two identical rows and returns the vertical distance between

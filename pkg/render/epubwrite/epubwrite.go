@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/render/imageconv"
+	"github.com/nathanstitt/omnidoc/pkg/render/imageconv"
 	"io"
 	"strings"
 	"time"
@@ -30,10 +30,10 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/htmlwrite"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/htmlwrite"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // Options configures EPUB output.
@@ -262,7 +262,7 @@ func (w *writer) assemble(title string, chapters []chapter, bodies []string) ([]
 	opf.WriteString(xmlDecl)
 	opf.WriteString(`<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">` + "\n")
 	opf.WriteString(`<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">` + "\n")
-	opf.WriteString(`<dc:identifier id="pub-id">urn:doctaculous:generated</dc:identifier>` + "\n")
+	opf.WriteString(`<dc:identifier id="pub-id">urn:omnidoc:generated</dc:identifier>` + "\n")
 	opf.WriteString(`<dc:title>` + escXML.Replace(title) + `</dc:title>` + "\n")
 	opf.WriteString(`<dc:language>en</dc:language>` + "\n")
 	opf.WriteString(`<meta property="dcterms:modified">2000-01-01T00:00:00Z</meta>` + "\n")

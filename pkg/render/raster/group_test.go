@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // TestGroupOpacityNoSeamAtOverlap is the discriminating test for this

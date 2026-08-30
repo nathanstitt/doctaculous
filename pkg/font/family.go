@@ -6,8 +6,8 @@ import (
 	"github.com/benoitkugler/textlayout/fonts"
 	"github.com/benoitkugler/textlayout/fonts/truetype"
 
-	"github.com/nathanstitt/doctaculous/pkg/font/standard"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font/standard"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Style selects a weight/slant variant of a font family. Bold and Italic combine

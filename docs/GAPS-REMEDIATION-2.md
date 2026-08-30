@@ -1,6 +1,6 @@
 # Remediation plan: second batch of Luckfox dashboard gaps
 
-Source: `upnext/luckfox/docs/doctaculous-gaps.md`, findings 2b and 7–14.
+Source: `upnext/luckfox/docs/omnidoc-gaps.md`, findings 2b and 7–14.
 
 The first batch (findings 1–7 in that document's original numbering) is covered by
 [GAPS-REMEDIATION.md](GAPS-REMEDIATION.md) and shipped as PRs #127–#134. This plan

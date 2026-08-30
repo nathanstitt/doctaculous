@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
 )
 
 // Options configures XLSX rendering.

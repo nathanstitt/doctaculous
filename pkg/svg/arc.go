@@ -3,7 +3,7 @@ package svg
 import (
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // arcSegments appends the elliptical arc from (x1,y1) to (x2,y2) as cubic

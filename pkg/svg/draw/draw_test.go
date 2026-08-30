@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/render/raster"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render/raster"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 func TestDrawVector(t *testing.T) {

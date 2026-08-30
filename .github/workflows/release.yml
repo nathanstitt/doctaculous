@@ -1,7 +1,7 @@
 name: Release
 
 # Publishing a GitHub Release from a pushed version tag. goreleaser cross-compiles
-# the doctaculous CLI for every target (see .goreleaser.yaml) and uploads the
+# the omnidoc CLI for every target (see .goreleaser.yaml) and uploads the
 # archives + checksums. The workflow must already exist on the default branch for
 # a tag push to trigger it, so this lands (and merges) before the first tag.
 on:

@@ -3,10 +3,10 @@ package draw
 import (
 	"math"
 
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
-	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/layout/inline"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 // placedGlyph is one shaped glyph with its final pen position and per-

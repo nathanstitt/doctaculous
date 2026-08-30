@@ -8,7 +8,7 @@ import (
 // TextPDF returns a single-page PDF that draws a short text string using the
 // standard Helvetica font. MediaBox is US Letter.
 func TextPDF() []byte {
-	content := []byte("BT /F1 24 Tf 72 700 Td (Hello, doctaculous!) Tj ET")
+	content := []byte("BT /F1 24 Tf 72 700 Td (Hello, omnidoc!) Tj ET")
 	return buildSinglePage(content, `<< >>`)
 }
 

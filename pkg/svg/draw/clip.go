@@ -4,8 +4,8 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 // boundsFunc reports the bounding box (in the local space a clip-path's

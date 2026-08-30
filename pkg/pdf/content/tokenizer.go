@@ -3,7 +3,7 @@ package content
 import (
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // contentTokenizer yields a stream of operands (pdf.Object) and operators. An

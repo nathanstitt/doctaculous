@@ -6,11 +6,11 @@ import (
 	"math"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
-// Test-local geometry constants (the layout package does not import doctaculous/css
+// Test-local geometry constants (the layout package does not import omnidoc/css
 // constants; these mirror them). px-as-pt at 96dpi.
 const (
 	tLetterW = 816.0

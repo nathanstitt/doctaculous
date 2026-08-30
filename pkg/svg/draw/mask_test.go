@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/render/raster"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render/raster"
 )
 
 const maskSVGHdr = `xmlns="http://www.w3.org/2000/svg"`

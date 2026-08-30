@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
 // TestUsedRadiiResolution covers percentage resolution and the §5.1 correction at

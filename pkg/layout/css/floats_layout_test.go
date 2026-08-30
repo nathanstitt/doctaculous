@@ -5,10 +5,10 @@ import (
 	"image/color"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // solidGlyph returns a fragment line with one fillable glyph (so the inline phase
@@ -534,7 +534,7 @@ func TestNestedBFCFloatRidesShift(t *testing.T) {
 // generation as a block-level float and lays out (placed out of flow), proving the
 // CSS 9.7 blockify path reaches layout.
 func TestFloatedInlineBlockifies(t *testing.T) {
-	// This exercises build.go + layout together; if a doctaculous-level helper is
+	// This exercises build.go + layout together; if a omnidoc-level helper is
 	// heavier than needed, assert via box generation directly:
 	// (kept in pkg/layout/css to use generate()/the engine without the full backend)
 	// — see build_test.go TestBlockifyFloatedInline for the box-gen half; here assert

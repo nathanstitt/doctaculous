@@ -4,8 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // TestDrawGlyphMatchesFillGlyph asserts the raster backend renders DrawGlyph by

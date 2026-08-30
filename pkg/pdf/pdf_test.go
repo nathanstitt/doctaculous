@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/testdata/gen"
+	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 
 func TestLexerBasics(t *testing.T) {
@@ -101,7 +101,7 @@ func TestParseTextPDF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(content, []byte("Hello, doctaculous!")) {
+	if !bytes.Contains(content, []byte("Hello, omnidoc!")) {
 		t.Errorf("content missing text: %q", content)
 	}
 	// Resources should expose the font.

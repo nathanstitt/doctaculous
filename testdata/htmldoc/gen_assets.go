@@ -19,7 +19,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/nathanstitt/doctaculous/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/webp"
 )
 
 func main() {

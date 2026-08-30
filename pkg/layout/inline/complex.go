@@ -21,7 +21,7 @@ package inline
 import (
 	"github.com/benoitkugler/textlayout/harfbuzz"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
 )
 
 // needsComplexShaping reports whether r belongs to a script whose glyphs depend on

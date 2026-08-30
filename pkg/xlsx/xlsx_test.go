@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
+	genxlsx "github.com/nathanstitt/omnidoc/testdata/gen/xlsx"
 )
 
 func openFixture(t *testing.T, name string) *Workbook {

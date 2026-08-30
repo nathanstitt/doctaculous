@@ -3,7 +3,7 @@ package function
 import (
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // resolve follows indirect references via doc when doc is non-nil; otherwise it

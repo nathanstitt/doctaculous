@@ -3,7 +3,7 @@ package docx
 import (
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
 )
 
 // modelSpecimenDocx builds a document through the public pkg/docx MODEL and

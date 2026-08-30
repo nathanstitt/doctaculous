@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/html"
 )
 
 func TestPropagateCanvasBackground(t *testing.T) {

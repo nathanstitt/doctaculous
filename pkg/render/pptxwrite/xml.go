@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
 )
 
 // emuPerPt converts points to EMU.

@@ -3,8 +3,8 @@ package css
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // TestLineThroughEmitsRule renders a line-through span and asserts a RuleKind item

@@ -574,7 +574,7 @@ CLI `tomd <pdf>` / `tohtml`):
   consecutive RTL words. Runs after word grouping (which splits on x-gaps and would break on reordered
   glyphs), so each word keeps the geometry table/block detection needs. No-op for Latin.
 
-**Unified conversion core** (`pkg/doctaculous/format.go`+`detect.go`+`open.go`+`convert.go`+
+**Unified conversion core** (`pkg/omnidoc/format.go`+`detect.go`+`open.go`+`convert.go`+
 `image_backend.go`, CLI `convert`):
 
 - One `Format` type + capability table (`CanConvert`, typed `ErrUnknownFormat`/
@@ -591,7 +591,7 @@ CLI `tomd <pdf>` / `tohtml`):
   case in `openDetected`/`Write` — see the sibling contract in.
 
 **Markdown + plain-text input** (`pkg/markdown` via goldmark (MIT, pure Go, zero transitive
-deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
+deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
 
 - `.md` (CommonMark + GFM: tables, strikethrough, task lists, autolinks, raw-HTML
   passthrough) and `.txt` (escaped `<pre>` + `pre-wrap`; hard line breaks preserved, long
@@ -621,7 +621,7 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   loader seam (no loader → alt text + log). Round-trip parity matrix incl. tables,
   `docxout-basic`/`docxout-htmldoc-p1` goldens + the `htmldoc.docx.md` showcase round-trip golden.
 
-**CSV/TSV input + output** (`pkg/doctaculous/csv_frontend.go`, `pkg/render/csvwrite`,
+**CSV/TSV input + output** (`pkg/omnidoc/csv_frontend.go`, `pkg/render/csvwrite`,
 `OpenCSV*`/`OpenTSV*`, `WriteCSV`/`WriteTSV`):
 
 - Input: stdlib `encoding/csv` (lazy quotes, ragged rows padded, BOM/CRLF) → an HTML table
@@ -632,7 +632,7 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   which makes **PDF → CSV table extraction** work via the existing lattice/stream recognizer
   (pinned by test). `csv-specimen` golden.
 
-**XLSX input** (`pkg/xlsx` hand-rolled reader + `pkg/doctaculous/xlsx_frontend.go`,
+**XLSX input** (`pkg/xlsx` hand-rolled reader + `pkg/omnidoc/xlsx_frontend.go`,
 `OpenXLSX*`, `testdata/gen/xlsx` fixture builder):
 
 - Read-only cached-value extraction (no formula evaluation; the dep audit that ruled out
@@ -659,7 +659,7 @@ deps), `pkg/doctaculous/markdown_frontend.go`+`text_frontend.go`):
   table-less documents write one empty sheet + a loud log. Round-trip parity via the `pkg/xlsx`
   reader; pdf→xlsx extraction pinned. v1 punts: alignment/fill write-back, typed date cells.
 
-**Stream + MIME input surface** (`pkg/doctaculous` format.go/open.go, first tinycld-adoption PR):
+**Stream + MIME input surface** (`pkg/omnidoc` format.go/open.go, first tinycld-adoption PR):
 
 - `FormatFromMIME`/`Format.MIME()` (params stripped/case-folded; explicit-Unknown pins for
   legacy binary Office — never the OOXML cousins — HEIC *sequences*, zip, octet-stream (`image/webp`
@@ -900,7 +900,7 @@ dependency is `x/image`, so no new transitive surface):
   default always won, so `--out page.jpg` wrote a **PNG under a .jpg name** with no diagnostic
   (`.webp` would have done the same). The output extension now picks the format when `--format`
   is absent; an explicit `--format` still wins. Regression test in
-  `cmd/doctaculous/rasterize_test.go`.
+  `cmd/omnidoc/rasterize_test.go`.
 
 **XLSX conditional formats + cell notes — calc-adoption PR 4/5** (`pkg/xlsx`):
 
@@ -956,7 +956,7 @@ read+write vocabulary for the tinycld text adoption path):
 - **val-less `<w:u>` fix** — a bare `<w:u w:color=../>` (Word's shorthand for single underline)
   now reads as underline-ON; it was previously read as underline-off.
 
-**Page geometry + fit-within raster sizing** (`pkg/doctaculous`, CLI `--max-width/--max-height`):
+**Page geometry + fit-within raster sizing** (`pkg/omnidoc`, CLI `--max-width/--max-height`):
 
 - `Document.PageSize(i)` (points, post-/Rotate for PDF — always the rendered aspect);
   `RasterOptions.MaxWidthPx/MaxHeightPx` fit-within-box sizing resolved per page to a concrete
@@ -1538,7 +1538,7 @@ read+write vocabulary for the tinycld text adoption path):
   covered by tests, including a control proving the suppression does not leak onto raster
   backgrounds.
 
-**EPUB cover images** (`pkg/epub` manifest, `pkg/doctaculous` frontend):
+**EPUB cover images** (`pkg/epub` manifest, `pkg/omnidoc` frontend):
 
 - **The OPF manifest's cover image is surfaced and rendered.** It was previously parsed and then
   discarded — `parseBook` read `Manifest.Items` only to build `hrefByID` for spine resolution — so a

@@ -3,7 +3,7 @@ package pptx
 import (
 	"testing"
 
-	genpptx "github.com/nathanstitt/doctaculous/testdata/gen/pptx"
+	genpptx "github.com/nathanstitt/omnidoc/testdata/gen/pptx"
 )
 
 const ns = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`

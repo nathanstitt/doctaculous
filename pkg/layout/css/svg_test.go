@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/resource"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
 )
 
 const testSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20"/></svg>`

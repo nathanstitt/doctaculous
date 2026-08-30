@@ -3,7 +3,7 @@ package inline
 import (
 	"testing"
 
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 // synth builds one glyph per rune of s, as the shaper would for a single run. No font
