@@ -58,6 +58,7 @@ func openSpecimenMD(t *testing.T) *Document {
 // through open → WriteMarkdown, and that the result is a fixed point (a second
 // round trip reproduces it byte-for-byte — the writer's canonical form).
 func TestMarkdownRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	doc := openSpecimenMD(t)
 
@@ -112,6 +113,7 @@ func TestMarkdownRoundTrip(t *testing.T) {
 // HTML produce identical Markdown output — the frontend adds nothing the HTML
 // pipeline would not.
 func TestMarkdownParityWithHTML(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	md := "# Title\n\nA paragraph with **bold** text.\n"
 	html := "<html><body><h1>Title</h1><p>A paragraph with <strong>bold</strong> text.</p></body></html>"
@@ -136,6 +138,7 @@ func TestMarkdownParityWithHTML(t *testing.T) {
 // resolves through the DirLoader rooted at the file's directory (the
 // OpenHTMLFile behavior, inherited).
 func TestMarkdownRelativeImage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// A tiny PNG the layout must fetch and decode through the DirLoader.
 	if err := os.WriteFile(filepath.Join(dir, "pic.png"), encodeTinyImage(t, FormatPNG), 0o600); err != nil {
@@ -162,6 +165,7 @@ func TestMarkdownRelativeImage(t *testing.T) {
 // TestMarkdownPagination verifies WithPageSize flows through to the generated
 // document.
 func TestMarkdownPagination(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("Paragraph of body text that occupies a line.\n\n", 200)
 	doc, err := OpenMarkdownBytes([]byte("# Long\n\n"+long), WithBundledFonts(), WithPageSize(LetterWidthPt, LetterHeightPt))
 	if err != nil {

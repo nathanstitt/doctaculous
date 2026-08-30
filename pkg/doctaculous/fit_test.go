@@ -12,6 +12,7 @@ import (
 // TestPageSize covers the geometry primitive on both backends: PDF MediaBox
 // (post-/Rotate) and reflow laid-out pages.
 func TestPageSize(t *testing.T) {
+	t.Parallel()
 	pdfDoc, err := OpenBytes(gen.TextPDF())
 	if err != nil {
 		t.Fatalf("open text pdf: %v", err)
@@ -52,6 +53,7 @@ func TestPageSize(t *testing.T) {
 // the letter fixture (612x792pt), one-axis constraints, the upscale-fill
 // default, the DPI ceiling, exact-fit float safety, and a rotated PDF page.
 func TestFitWithin(t *testing.T) {
+	t.Parallel()
 	letter := mustOpen(t, gen.TextPDF())
 	rotated := mustOpen(t, gen.RotatedPDF(90))
 
@@ -103,6 +105,7 @@ func TestFitWithin(t *testing.T) {
 // fit render is pixel-identical to rendering at the DPI fitRaster resolves —
 // the painting path is untouched, only sizing changes.
 func TestFitMatchesExplicitDPI(t *testing.T) {
+	t.Parallel()
 	doc := mustOpen(t, gen.TextPDF())
 	fitOpts := RasterOptions{MaxWidthPx: 480, MaxHeightPx: 360, BundledFonts: true}
 
@@ -137,6 +140,7 @@ func TestFitMatchesExplicitDPI(t *testing.T) {
 // TestRasterizePagesFit verifies fit sizing resolves per page inside the
 // worker fan-out.
 func TestRasterizePagesFit(t *testing.T) {
+	t.Parallel()
 	doc := mustOpen(t, gen.MultiPagePDF(3))
 	results := doc.RasterizePages(context.Background(), doc.AllPages(),
 		RasterOptions{MaxWidthPx: 200, MaxHeightPx: 200, BundledFonts: true})
@@ -154,6 +158,7 @@ func TestRasterizePagesFit(t *testing.T) {
 
 // TestWriteImageFit verifies the fit fields ride through ImageOptions.Raster.
 func TestWriteImageFit(t *testing.T) {
+	t.Parallel()
 	doc := mustOpen(t, gen.TextPDF())
 	var buf bytes.Buffer
 	err := doc.WriteImage(context.Background(), &buf, 0, ImageOptions{

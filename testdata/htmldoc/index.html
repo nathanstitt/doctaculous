@@ -1126,5 +1126,694 @@ newline is kept.</p>
       <em>min&#8209;content</em> and <em>max&#8209;content</em> account for tracking.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">29 / UNRESOLVABLE FONT FAMILIES</span>
+    <h2>Text always renders, even with no matching font</h2>
+    <p class="lede">A <code>font-family</code> naming only families the host does not
+      have used to render <em>nothing at all</em> &mdash; the run was skipped, so the
+      page came out an empty box. Every line below names at least one unavailable
+      family; all of them draw.</p>
+
+    <div class="absentbox" style="font-family:'Totally Absent Face XYZ'">
+      A family that exists nowhere.</div>
+    <p class="caption">The whole list is unresolvable, so it degrades to the bundled
+      serif and is logged once. Previously: no ink whatsoever.</p>
+
+    <div class="absentbox" style="font-family:'Totally Absent Face XYZ', sans-serif">
+      An absent family, then a generic.</div>
+    <p class="caption">The generic keyword still terminates the list the way CSS says
+      it should &mdash; this line was always fine, and is the control proving the
+      fallback above did not simply replace normal resolution.</p>
+
+    <div class="absentbox" style="font-family:'Totally Absent Face XYZ'">
+      <strong>Bold</strong> and <em>italic</em> survive the substitution.</div>
+    <p class="caption">The fallback is style&#8209;aware: the bundled bold and italic
+      faces are selected, rather than every run collapsing to one regular face. The
+      weight and slant here come from <code>&lt;strong&gt;</code> and
+      <code>&lt;em&gt;</code> via the UA stylesheet &mdash; see &sect;30.</p>
+
+    <p class="caption">A related failure sat one layer down. The OS font matcher never
+      reports a miss &mdash; asked for a family it does not have, it confidently returns
+      some other installed font. A request for <code>DejaVu&nbsp;Sans</code> came back as
+      Lucida&nbsp;Grande, and <code>Roboto</code>, <code>IBM&nbsp;Plex&nbsp;Mono</code>
+      and a deliberately nonexistent name all returned the identical Arial&nbsp;Unicode
+      bytes. Each resolved face is now checked against the family its own
+      <code>name</code> table declares, so a wrong answer becomes an honest miss and
+      falls through to the bundled face above.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">30 / INLINE EMPHASIS DEFAULTS</span>
+    <h2>Semantic emphasis tags carry their own weight and slant</h2>
+    <p class="lede">These tags need no author CSS: the user&#8209;agent stylesheet gives
+      them a weight or a slant, the way a browser does. Without those rules the markup
+      still parsed and still converted to Markdown correctly &mdash; it was only
+      <em>invisible</em> in every rasterized format.</p>
+
+    <div class="absentbox">
+      <strong>strong</strong> and <b>b</b> are bold.
+      <em>em</em>, <i>i</i>, <cite>cite</cite>, <var>var</var> and <dfn>dfn</dfn>
+      are italic. <u>u</u> and <ins>ins</ins> are underlined.</div>
+    <p class="caption">Each tag resolves to exactly the same computed style as its CSS
+      equivalent (<code>font-weight:bold</code>, <code>font-style:italic</code>,
+      <code>text-decoration:underline</code>) &mdash; the UA rules are the only
+      difference between this line and unstyled text.</p>
+
+    <div class="absentbox" style="font-weight:bold">
+      A bold line where <strong>strong</strong> is nested inside.</div>
+    <p class="caption">Nesting does not flatten: <code>&lt;strong&gt;</code> inside
+      already&#8209;bold text stays bold. The HTML spec spells these defaults
+      <code>bolder</code> and <code>smaller</code>, but this engine's
+      <code>font-weight</code> is the binary bold/normal its four&#8209;style bundled
+      families can express and its <code>font-size</code> takes a length, so neither
+      relative keyword parses &mdash; they would be dropped as invalid and the emphasis
+      would stay invisible. The sheet uses <code>bold</code>, the honest spelling of
+      what the renderer can do, and a test pins that choice.</p>
+
+    <p class="caption"><code>&lt;small&gt;</code> and <code>&lt;big&gt;</code> are
+      deliberately absent rather than given a hardcoded pixel size, which would be wrong
+      at every font&#8209;size but the default. <code>&lt;mark&gt;</code> is absent too:
+      its default is a <em>background</em>, and backgrounds do not paint on non&#8209;replaced
+      inline boxes here &mdash; an inline <code>&lt;span&gt;</code> with an explicit
+      <code>background-color</code> paints nothing, while the same span at
+      <code>display:inline-block</code> paints. A <code>&lt;mark&gt;</code> rule would
+      cascade and then do nothing, which reads as support; it belongs with the
+      inline&#8209;background work instead.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">31 / CLAMPING CONTENT</span>
+    <h2>The other three ways to clamp a box</h2>
+    <p class="lede">Only <code>height</code> plus <code>overflow:&nbsp;hidden</code> used
+      to clip. The other spellings parsed, cascaded, and then quietly did nothing, so an
+      author who reached for <code>max-height</code> got an unclipped box and no
+      diagnostic &mdash; a content overflow that reads as a layout bug.</p>
+
+    <div style="display:flex; gap:18px; flex-wrap:wrap;">
+      <div>
+        <h4><code>max-height</code> + <code>overflow:hidden</code></h4>
+        <div class="clampbox" style="max-height:80px; overflow:hidden">
+          <div class="oversized"></div></div>
+      </div>
+      <div>
+        <h4><code>height</code> + <code>overflow:clip</code></h4>
+        <div class="clampbox" style="height:80px; overflow:clip">
+          <div class="oversized"></div></div>
+      </div>
+      <div>
+        <h4><code>max-height</code> + <code>overflow-y</code></h4>
+        <div class="clampbox" style="max-height:80px; overflow-y:hidden">
+          <div class="oversized"></div></div>
+      </div>
+    </div>
+    <p class="caption">A 320&times;320 child in each. All three cut it at the padding box,
+      identically to the <code>overflow:&nbsp;hidden</code> window in &sect;7 &mdash;
+      before this, every one of them painted the full 320px.</p>
+
+    <h4>What each fix was</h4>
+    <p class="caption"><code>overflow:&nbsp;clip</code> was dropped by the value check, so
+      the property kept its <code>visible</code> initial. It clips exactly like
+      <code>hidden</code> here: the two differ only in forbidding programmatic scrolling
+      and allowing <code>overflow-clip-margin</code>, and this engine's single tall page
+      has neither. <code>overflow-x</code>/<code>overflow-y</code> and the two&#8209;value
+      shorthand now fold onto the same clip flag, with the <em>clipping</em> keyword
+      winning when the axes disagree &mdash; a deliberate over&#8209;clip on
+      <code>visible&nbsp;hidden</code>, since dropping the clip entirely is the worse
+      error.</p>
+    <p class="caption"><code>max-height</code> was only ever applied on the fixed&#8209;height
+      path, which runs when <code>height</code> is <em>not</em> auto &mdash; so
+      <code>max-height</code> alone never bounded anything. It now clamps the auto height
+      too, after float enclosure and before the clip rect is built, so the box, its clip,
+      and its parent's advance all agree. <code>min-height</code> still applies after
+      <code>max-height</code> per CSS&nbsp;10.7, so a min above the max wins.</p>
+    <p class="caption">Anonymous boxes are deliberately exempt. They carry a copy of the
+      parent's computed style so inherited text properties reach their inline content, but
+      CSS&nbsp;9.2.1.1 gives them no properties of their own &mdash; clamping them
+      truncated boxes the author never sized. A WPT reftest caught it.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">32 / INLINE BOX DECORATION</span>
+    <h2>Backgrounds and borders on inline boxes</h2>
+    <p class="lede">A background on a <code>&lt;span&gt;</code> used to paint nothing at
+      all. The property parsed and cascaded; the paint step simply had no geometry for a
+      non&#8209;replaced inline box, so the most common highlight idiom on the web was
+      dropped in silence.</p>
+
+    <p><span style="background-color:#f2d98c">Highlighted words</span> sit inside
+      ordinary prose, and the rect follows the text rather than the line box.</p>
+
+    <p><span style="background-color:#f2d98c">One span</span><span
+      style="background-color:#bcd4e6">then another</span>, adjacent and distinct.
+      <span style="background-color:#f2d98c">Same</span><span
+      style="background-color:#f2d98c">colour</span> stays two boxes too.</p>
+
+    <p style="max-width:280px"><span style="background-color:#f2d98c">A span whose text
+      is long enough to wrap paints one rect per line, which falls out of coalescing per
+      line box rather than any explicit bookkeeping.</span></p>
+
+    <p><span style="background-color:#f2d98c;padding:0 10px">Padded</span>&#8203;|&#8203;<span
+      style="background-color:#f2d98c">unpadded</span>&#8203;| &mdash; the bar after the
+      first span sits past its padding, not under it.</p>
+
+    <p><span style="border:2px solid #9b3d2e;padding:0 6px">A bordered inline</span> and
+      <span style="background-color:#f2d98c">big <span style="font-size:26px">TALL</span>
+      text</span>, whose rect grows to its tallest glyph.</p>
+
+    <p>The <code>&lt;mark&gt;</code> element finally works: <mark>marked text</mark>.</p>
+
+    <h4>Why this was not a one-liner</h4>
+    <p class="caption">An inline box has no single rectangle. It is flattened into glyph
+      runs during line breaking, so the box identity is gone by paint time &mdash; and a
+      box that wraps needs <em>one rect per line</em>. The fix carries the innermost
+      inline box's identity onto every glyph and coalesces consecutive glyphs per line,
+      the same shape <code>text-decoration</code> already uses for underlines.</p>
+    <p class="caption">Identity is a <em>pointer</em>, not a colour. Two adjacent spans
+      with the same background are still two boxes; a colour comparison would merge them
+      and a plain boolean &mdash; how underline does it &mdash; could not tell them apart
+      at all. Inkless glyphs are retained for this pass too, or the space in
+      &ldquo;two words&rdquo; would split one rect into two.</p>
+    <p class="caption">Padding is part of <em>layout</em>, not just paint. It rides on a
+      zero&#8209;ink edge glyph at each boundary, so the line breaker, intrinsic sizing,
+      and alignment all reserve the space by reading advances &mdash; none of them needs
+      to know inline boxes exist. Painting a padded rect without that would draw a
+      background wider than the layout ever agreed to.</p>
+    <p class="caption">Still absent, deliberately: background <em>images</em>, vertical
+      padding and margins (which per CSS&nbsp;10.6.1 overflow the line box instead of
+      growing it), and per&#8209;edge or rounded inline borders. Each needs layout work
+      this slice does not do, so each is omitted rather than half&#8209;applied.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">33 / COLOR-MIX()</span>
+    <h2>Mixing colours in a named interpolation space</h2>
+    <p class="lede">Every swatch below is <code>color-mix(in &lt;space&gt;, red, blue)</code>
+      &mdash; the same two colours, mixed 50/50, eleven times. The space is not a
+      formality: it decides the answer.</p>
+
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      <div style="width:88px"><div style="height:40px;background:color-mix(in srgb, red, blue)"></div>
+        <p class="caption"><code>srgb</code><br>128,0,128</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in srgb-linear, red, blue)"></div>
+        <p class="caption"><code>srgb-linear</code><br>188,0,188</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in hsl, red, blue)"></div>
+        <p class="caption"><code>hsl</code><br>255,0,255</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in hwb, red, blue)"></div>
+        <p class="caption"><code>hwb</code><br>255,0,255</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in lab, red, blue)"></div>
+        <p class="caption"><code>lab</code><br>193,0,136</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in oklab, red, blue)"></div>
+        <p class="caption"><code>oklab</code><br>140,83,162</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in lch, red, blue)"></div>
+        <p class="caption"><code>lch</code><br>245,0,134</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in oklch, red, blue)"></div>
+        <p class="caption"><code>oklch</code><br>186,0,194</p></div>
+      <div style="width:88px"><div style="height:40px;background:color-mix(in xyz, red, blue)"></div>
+        <p class="caption"><code>xyz</code><br>188,0,188</p></div>
+    </div>
+
+    <h4>Hue interpolation</h4>
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      <div style="width:120px"><div style="height:34px;background:color-mix(in hsl shorter hue, red, blue)"></div>
+        <p class="caption"><code>shorter hue</code> &mdash; via magenta</p></div>
+      <div style="width:120px"><div style="height:34px;background:color-mix(in hsl longer hue, red, blue)"></div>
+        <p class="caption"><code>longer hue</code> &mdash; the long way, via green</p></div>
+      <div style="width:120px"><div style="height:34px;background:color-mix(in oklch increasing hue, red, blue)"></div>
+        <p class="caption"><code>increasing hue</code></p></div>
+      <div style="width:120px"><div style="height:34px;background:color-mix(in oklch decreasing hue, red, blue)"></div>
+        <p class="caption"><code>decreasing hue</code></p></div>
+    </div>
+
+    <h4>Weights and alpha</h4>
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      <div style="width:120px"><div style="height:34px;background:color-mix(in srgb, red 30%, blue)"></div>
+        <p class="caption"><code>red 30%</code> &mdash; the remainder goes to blue</p></div>
+      <div style="width:120px"><div style="height:34px;background:color-mix(in srgb, red 20%, blue 20%)"></div>
+        <p class="caption">Both <code>20%</code> &mdash; weights normalize <em>and</em> the
+          alpha drops to 0.4</p></div>
+      <div style="width:120px"><div style="height:34px;background:color-mix(in srgb, rgba(255,0,0,0.5), blue)"></div>
+        <p class="caption">Premultiplied &mdash; the half&#8209;transparent red gives up
+          hue, so this is not 128,0,128</p></div>
+      <div style="width:120px"><div style="height:34px;background:color-mix(in srgb, #4a90d9 24%, white)"></div>
+        <p class="caption">A 24% wash over white</p></div>
+    </div>
+
+    <p class="caption">Every expected value was <em>captured from Chrome</em> rather than
+      derived here, and the tests pin them byte&#8209;for&#8209;byte. A transposed
+      conversion matrix or a swapped white point yields colours that look entirely
+      plausible and are quietly wrong &mdash; and a test written from the same arithmetic
+      as the implementation would happily agree with the bug.</p>
+    <p class="caption">Mixing with <code>transparent</code> is the one deliberate
+      divergence. Premultiplication weights a zero&#8209;alpha colour's channels by zero,
+      so the opaque colour's channels must survive <em>untouched</em> and only its alpha
+      scales &mdash; making <code>color-mix(in srgb, X N%, transparent)</code> exactly
+      <code>rgba(X, N/100)</code>. Chrome reports up to 2/255 off from rounding through an
+      intermediate space; the engine keeps the exact value. Nested mixes stay in float for
+      the same reason: quantizing between levels turns Chrome's 191 into 192.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">34 / INLINE SVG &amp; THE HOST CASCADE</span>
+    <h2>The page's CSS reaches inside inline <code>&lt;svg&gt;</code></h2>
+    <p class="lede">An inline <code>&lt;svg&gt;</code> is part of the host document, so a
+      rule in the page's stylesheet styles its children. It previously did not: the
+      subtree was re-serialized to markup and re-parsed as a <em>standalone</em>
+      document, so the page's CSS never reached it and every shape fell back to SVG's
+      default black fill.</p>
+
+    <div class="chart">
+      <svg width="380" height="120" viewBox="0 0 380 120">
+        <path class="area" d="M20 100 L80 62 L140 74 L200 34 L260 50 L320 22 L320 100 Z"/>
+        <path class="curve" d="M20 100 L80 62 L140 74 L200 34 L260 50 L320 22"/>
+        <path class="axis" d="M20 10 L20 100 L360 100"/>
+        <circle class="dot" cx="80" cy="62" r="4"/>
+        <circle class="dot" cx="200" cy="34" r="4"/>
+        <circle class="dot" cx="320" cy="22" r="4"/>
+      </svg>
+    </div>
+    <p class="caption">Not one <code>fill</code> or <code>stroke</code> attribute in that
+      markup &mdash; every colour comes from <code>.chart .curve</code>,
+      <code>.chart .area</code> and friends in the page stylesheet. That includes
+      <em>descendant</em> selectors rooted outside the <code>&lt;svg&gt;</code>: the
+      ancestor chain now continues past the SVG root into the host tree, so
+      <code>.chart&nbsp;.curve</code> matches. Without that, <code>.curve</code> alone
+      would work while <code>.chart&nbsp;.curve</code> silently did nothing &mdash;
+      partial support that reads as a styling bug.</p>
+
+    <h4>Same markup, different context</h4>
+    <div style="display:flex; gap:16px;">
+      <div id="tinted"><svg width="90" height="46"><rect class="swatch" x="0" y="0" width="90" height="46"/></svg></div>
+      <div id="plain"><svg width="90" height="46"><rect class="swatch" x="0" y="0" width="90" height="46"/></svg></div>
+      <div style="color:#4a7c59"><svg width="90" height="46"><rect fill="currentColor" x="0" y="0" width="90" height="46"/></svg></div>
+    </div>
+    <p class="caption">The first two are <em>byte&#8209;identical</em> SVG markup; only
+      their containing <code>#id</code> differs. The parsed-SVG cache is keyed by markup,
+      so the host context had to join that key &mdash; otherwise the second would reuse
+      the first's parse and silently paint the wrong colour. The third takes its fill
+      from <code>currentColor</code>, which resolves against the <code>color</code> the
+      <code>&lt;svg&gt;</code> box inherits from its parent.</p>
+
+    <h4>What still wins</h4>
+    <p class="caption">Host sheets cascade <em>below</em> the SVG's own
+      <code>&lt;style&gt;</code>, so an internal rule takes a specificity tie &mdash; the
+      SVG is the more specific context for its own content. A presentation attribute has
+      zero specificity and loses to any host rule; an inline <code>style=</code> still
+      beats everything. And an <code>&lt;img src="…svg"&gt;</code> is deliberately
+      untouched: a referenced SVG is a separate document, and CSS does not cascade into
+      it. Both directions are pinned by tests, because a fix that overreaches is as wrong
+      as one that under&#8209;reaches.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">35 / TRUNCATION</span>
+    <h2><code>text-overflow</code> and <code>-webkit-line-clamp</code></h2>
+    <p class="lede">Neither existed. A single line clipped mid&#8209;glyph with no
+      ellipsis, and there was no way at all to truncate to N lines &mdash; so the only
+      route was to cut the string in application code, before it ever reached the
+      engine, guessing at how much would fit.</p>
+
+    <h4>Single line</h4>
+    <div class="truncbox trunc1">A headline long enough that it cannot fit on one line of this card</div>
+    <p class="caption"><code>text-overflow:&nbsp;ellipsis</code> &mdash; whole glyphs are
+      dropped until the ellipsis fits, so the cut never lands mid&#8209;character and the
+      line never spills past the clip edge.</p>
+
+    <div class="truncbox truncclip">A headline long enough that it cannot fit on one line of this card</div>
+    <p class="caption"><code>text-overflow:&nbsp;clip</code>, the initial value &mdash; the
+      hard cut, mid&#8209;glyph, for contrast.</p>
+
+    <div class="truncbox trunc1">Short enough</div>
+    <p class="caption">Text that fits is untouched: no ellipsis appears just because the
+      property is set.</p>
+
+    <h4>Multiple lines</h4>
+    <div class="truncbox trunc2">Clamping to a fixed number of lines is what a card
+      layout actually needs, and it is the case that had no CSS answer here at all:
+      the box stops after the second line and the ellipsis marks what was cut.</div>
+    <p class="caption"><code>-webkit-line-clamp:&nbsp;2</code>. The box is genuinely
+      <em>two lines tall</em> &mdash; the clamp changes layout, not just paint, so the
+      height a browser would report is the height this engine lays out.</p>
+
+    <div class="truncbox trunc3">Clamping to a fixed number of lines is what a card
+      layout actually needs, and it is the case that had no CSS answer here at all:
+      the box stops after the second line and the ellipsis marks what was cut.</div>
+    <p class="caption">The same text at <code>-webkit-line-clamp:&nbsp;3</code>.</p>
+
+    <div class="truncbox trunc3">Two short lines.</div>
+    <p class="caption">A clamp larger than the content is inert &mdash; no height change
+      and no ellipsis, because nothing was cut. An ellipsis that appears when nothing
+      was truncated is a lie about the text.</p>
+
+    <h4>How the cut is chosen</h4>
+    <p class="caption">Truncation happens in <em>glyph</em> units, where the advances are
+      already resolved, so the fit is exact rather than a re&#8209;measure of a guessed
+      substring. Trailing whitespace is dropped before the ellipsis &mdash; &ldquo;foo
+      &hellip;&rdquo; reads as a gap &mdash; and the ellipsis inherits the styling of the
+      glyph it follows, so a line ending in a larger or differently coloured span gets a
+      matching one.</p>
+    <p class="caption">Two edge cases worth stating. An ellipsis needs something to hide
+      the truncation behind, so it applies only where the box actually clips; in an
+      <code>overflow:&nbsp;visible</code> box the text still overflows visibly, as
+      browsers do. And when even the ellipsis alone will not fit, CSS&nbsp;Overflow&nbsp;3
+      still requires it to render &mdash; so a box a few pixels wide shows part of an
+      ellipsis rather than nothing, which would erase the only sign that text was cut.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">36 / COLOUR FONTS</span>
+    <h2>Emoji, in colour</h2>
+    <p class="lede">Colour glyphs painted nothing at all. A colour font's base glyph is
+      <em>empty</em> &mdash; its ink lives in separate tables the engine did not read
+      &mdash; so an emoji rendered as a blank space, and naming an emoji family rendered
+      the whole run as nothing.</p>
+
+    <h4>Layered outlines &mdash; <code>COLR</code>/<code>CPAL</code></h4>
+    <p class="emoji-row emoji-vec" style="font-size:44px">&#128512;&#127881;&#10084;&#128077;&#127775;</p>
+    <p class="emoji-row emoji-vec" style="font-size:20px">&#128512;&#127881;&#10084;&#128077;&#127775;</p>
+    <p class="caption">Each glyph is a stack of ordinary outlines with palette colours,
+      so it is <em>vector</em> and scales like text. The grinning face carries a radial
+      gradient and the party popper a linear one, with its streamers placed by genuine
+      rotation matrices &mdash; an earlier draft modelled only offsets and mirrors, which
+      forced it to refuse that glyph entirely.</p>
+
+    <h4>Bitmap strikes &mdash; <code>CBDT</code>/<code>CBLC</code> and <code>sbix</code></h4>
+    <p class="emoji-row emoji-bmp" style="font-size:44px">&#128512;&#127881;&#10084;&#128077;&#127775;</p>
+    <p class="emoji-row emoji-bmp" style="font-size:20px">&#128512;&#127881;&#10084;&#128077;&#127775;</p>
+    <p class="caption">Other fonts &mdash; Apple Color Emoji among them, which has no
+      <code>COLR</code> table at all &mdash; ship a rendered PNG per glyph per size. The
+      strike nearest the used size is chosen, preferring a larger one so the image is
+      downscaled rather than enlarged. These do <em>not</em> scale like outlines, and
+      saying so is more honest than implying they do.</p>
+
+    <h4>In ordinary prose</h4>
+    <p class="caption">An emoji with no font named resolves through the script&#8209;fallback
+      chain. The bundled substitutes have no emoji face &mdash; a colour emoji font is
+      megabytes, well past what the toolkit embeds &mdash; so emoji route to an
+      <em>installed</em> one instead: Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji
+      and friends, in that order. On a host with none, the run degrades to the
+      missing&#8209;glyph path rather than painting a wrong character.</p>
+    <p class="caption">That path is deliberately <em>not</em> exercised on this page. The
+      goldens render hermetically, with no system fonts, so an emoji here would show a
+      missing&#8209;glyph box &mdash; which is the honest result for a host with no emoji
+      font, and a poor demonstration of a feature that works. The two rows above name a
+      font explicitly, and it ships as a fixture, so they render identically everywhere.</p>
+
+    <h4>What is deliberately absent</h4>
+    <p class="caption">A colour glyph the engine cannot express &mdash; a sweep
+      (conic) gradient, or a composite paint needing per&#8209;layer group compositing
+      &mdash; is refused as a whole and falls back to the glyph's own monochrome outline.
+      Painting it in a plausible flat colour would be harder to notice than painting it
+      in none, which is the failure this whole area was reported for.</p>
+    <p class="caption">A colour glyph keeps the <em>font's</em> colours rather than the
+      CSS <code>color</code>. A font can opt a layer into the text colour through the
+      palette's foreground sentinel; that is the font's choice to make, not the
+      document's.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">37 / LINE-HEIGHT</span>
+    <h2>The unitless multiplier</h2>
+    <p class="lede">A unitless <code>line-height</code> &mdash; the commonest spelling of
+      the property &mdash; was rejected as an invalid length, so the declaration was
+      dropped and every block used the font&#8209;metric height instead. The property
+      appeared to do nothing at all, and the slack compounded down a page.</p>
+
+    <div class="lhbox" style="line-height:1">Two lines at <code>line-height: 1</code>,
+      set tight enough that the ascenders and descenders nearly touch.</div>
+    <div class="lhbox" style="line-height:1.5">Two lines at
+      <code>line-height: 1.5</code>, the usual comfortable measure for body copy.</div>
+    <div class="lhbox" style="line-height:2.5">Two lines at
+      <code>line-height: 2.5</code>, loose enough that the leading is unmistakable.</div>
+    <p class="caption">All three are the same text at the same font size. Before this
+      they rendered identically.</p>
+
+    <h4>The units agree &mdash; except when they inherit</h4>
+    <p class="caption">At one font size, <code>2</code>, <code>2em</code>,
+      <code>200%</code> and <code>30px</code> all give the same line box on 15px text.
+      They diverge on <em>inheritance</em>, and the difference is the reason the units
+      stay distinct downstream: a <em>number</em> inherits as a number and
+      re&#8209;multiplies against each descendant's own font size, while an
+      <code>em</code> or <code>%</code> is computed against the element that declares it
+      and inherits as a fixed length (CSS&nbsp;2.1&nbsp;&sect;10.8.1).</p>
+
+    <div class="lhbox" style="font-size:10px;line-height:2">
+      <span style="font-size:26px">A 26px child inheriting <code>line-height: 2</code>
+      from a 10px parent gets a 52px line box.</span></div>
+    <div class="lhbox" style="font-size:10px;line-height:2em">
+      <span style="font-size:26px">The same child inheriting <code>2em</code> gets a
+      20px one &mdash; computed against the parent, then fixed.</span></div>
+    <p class="caption">Getting that backwards is invisible until a nested
+      font&#8209;size change appears, which is exactly when it matters, so both
+      directions are pinned by tests.</p>
+
+    <h4>What did not change</h4>
+    <p class="caption"><code>line-height: normal</code> and an absent declaration both
+      keep the font&#8209;metric height, so a document that never states the property
+      renders exactly as before. And a unitless number is still <em>not</em> a length:
+      <code>width: 5</code> remains invalid, because accepting it there would be a hole
+      in every length rather than a fix to one property.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">38 / FLEX MARGINS</span>
+    <h2>Margins on flex children</h2>
+    <p class="lede">Flex layout was margin&#8209;blind: an item's size and position came
+      from its border box, so <code>margin-top</code> on a child of a flex column did
+      nothing at all &mdash; while the identical rule on a block child worked. That reads
+      as &ldquo;the rule did not apply&rdquo;, which is the most expensive kind of
+      failure to diagnose, because the stylesheet is plainly correct.</p>
+
+    <div class="fmrow"><div class="fmitem"></div></div>
+    <p class="caption">No margin &mdash; the item sits at the container's start edge.</p>
+
+    <div class="fmrow"><div class="fmitem" style="margin-left:80px"></div></div>
+    <p class="caption"><code>margin-left: 80px</code> on the main axis.</p>
+
+    <div class="fmrow"><div class="fmitem" style="margin-left:auto"></div></div>
+    <p class="caption"><code>margin-left: auto</code> absorbs the free space and pushes
+      the item to the end &mdash; the idiomatic way to do it
+      (CSS&nbsp;Flexbox&nbsp;&sect;8.1). Auto margins take the space <em>before</em>
+      <code>justify-content</code> sees any, which is the spec's own resolution order.</p>
+
+    <div class="fmrow"><div class="fmitem" style="margin-left:auto;margin-right:auto"></div></div>
+    <p class="caption">Two auto margins centre it.</p>
+
+    <div class="fmrow" style="justify-content:flex-end"><div class="fmitem" style="margin-right:60px"></div></div>
+    <p class="caption"><code>justify-content: flex-end</code> with a trailing margin: the
+      item's <em>margin box</em> is what lands against the end edge, so the margin has to
+      be counted while free space is distributed &mdash; not applied as an offset
+      afterwards.</p>
+
+    <div class="fmrow fmcol" style="height:110px">
+      <div class="fmitem" style="margin-top:20px"></div>
+      <div class="fmitem alt" style="margin-top:20px;margin-left:40px"></div>
+    </div>
+    <p class="caption">A column: <code>margin-top</code> is the main axis and
+      <code>margin-left</code> the cross one. Both apply, and the line grows to hold the
+      item's margin box rather than letting a cross margin overflow it.</p>
+
+    <h4>The block control</h4>
+    <p class="caption">The same <code>margin-top</code> on a <em>block</em> child was
+      always correct, and still is &mdash; a test pins the two to the same position. This
+      distinction matters: the original report contrasted a flex column against a plain
+      block whose bare <code>margin-top</code> measured zero, but that is CSS margin
+      <em>collapsing</em> through the body, not a bug. Only the flex case was wrong.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">39 / BACKGROUND LAYERS</span>
+    <h2>Comma-separated <code>background</code> lists</h2>
+    <p class="lede">Layering backgrounds on one element &mdash; the normal way to put a
+      gradient over a base colour &mdash; made the whole declaration paint
+      <em>nothing</em>. Only a single value was accepted, and adding the fallback colour
+      that every browser wants was exactly what broke it. The failure was silent and
+      total, so it read as &ldquo;gradients are unsupported&rdquo; rather than
+      &ldquo;the list was rejected&rdquo;.</p>
+
+    <div style="width:320px;height:54px;background:linear-gradient(90deg,#9b3d2e,#f2d98c), #3a4a5a"></div>
+    <p class="caption">A gradient over a fallback colour. The colour is legal in the
+      <em>last</em> layer only (CSS&nbsp;Backgrounds&nbsp;&sect;3.10); one earlier is a
+      parse error, not something to quietly ignore.</p>
+
+    <div style="width:320px;height:54px;background:linear-gradient(90deg,rgba(155,61,46,0.9),rgba(155,61,46,0)), linear-gradient(#4a7c59,#4a7c59)"></div>
+    <p class="caption">Two gradients. The <em>first</em> layer paints on top, and it fades
+      to transparent on the right so the green beneath shows through &mdash; which is the
+      proof that both layers paint, rather than the first one winning.</p>
+
+    <div style="width:320px;height:54px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,0)), linear-gradient(90deg,#3a4a5a,#9b3d2e), #f2d98c"></div>
+    <p class="caption">Three layers: a fully transparent one, a gradient, and a base
+      colour. Everything composites in order.</p>
+
+    <h4>What this needed</h4>
+    <p class="caption">The layers travel from the cascade through the box tree to paint
+      as a <em>list</em>, emitted last&#8209;first so the first layer ends up on top.
+      <code>background-image</code> takes the same list.</p>
+    <p class="caption">One subtlety worth recording, because getting it wrong is silent:
+      the per&#8209;layer records carry only the <em>image</em>. An early version also
+      captured <code>background-size</code> and friends when the image list was parsed,
+      which discarded any of those declared <em>after</em> it &mdash; so
+      <code>background-image</code> then <code>background-size</code> lost the size,
+      while the reverse order worked. Those properties are single&#8209;valued here and
+      are read at layout time instead, so declaration order stops mattering. Making them
+      genuinely per&#8209;layer is a separate slice, and FEATURES.md says so.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">40 / SVG INHERITANCE</span>
+    <h2>Presentation attributes reach the children</h2>
+    <p class="lede">A paint property set on the root <code>&lt;svg&gt;</code> did not
+      reach its children. The root's attributes were resolved and then <em>discarded</em>
+      &mdash; only the font and text properties were copied back &mdash; so a path
+      relying on an inherited <code>stroke</code> painted nothing at all.</p>
+
+    <div style="display:flex; gap:24px; align-items:center;">
+      <svg width="90" height="90" stroke="#9b3d2e" stroke-width="7" fill="none"
+           stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="45" cy="45" r="18"/>
+        <path d="M45 8 v10 M45 72 v10 M8 45 h10 M72 45 h10"/>
+        <path d="M19 19 l7 7 M64 64 l7 7 M71 19 l-7 7 M26 64 l-7 7"/>
+      </svg>
+      <svg width="90" height="90" fill="#4a7c59">
+        <circle cx="30" cy="52" r="20"/>
+        <circle cx="52" cy="42" r="26"/>
+        <rect x="24" y="52" width="46" height="18"/>
+      </svg>
+      <svg width="90" height="90" stroke="#3a4a5a" stroke-width="6" fill="#f2d98c">
+        <rect x="16" y="30" width="58" height="44" rx="4"/>
+        <path d="M16 30 L45 8 L74 30" fill="none"/>
+      </svg>
+    </div>
+    <p class="caption">Not one <code>stroke</code> or <code>fill</code> on any child
+      &mdash; every colour, width, cap and join comes from the root and inherits down.
+      This is exactly how the icons that surfaced the bug were authored: the first
+      icon's rays, the third one's outline. Before this, each would have shown only its
+      filled parts, which reads as &ldquo;the icon is not rendering&rdquo; rather than
+      &ldquo;the strokes are gone&rdquo;.</p>
+
+    <h4>The construction, and why it is inverted</h4>
+    <p class="caption">The old code listed the properties that inherit, and anything
+      missing from that list was silently dropped &mdash; which is how the entire paint
+      vocabulary came to be absent. It now starts from the root's fully resolved style
+      and clears only the properties CSS marks <em>non</em>&#8209;inherited, so a
+      property added later defaults to the spec's answer rather than to
+      &ldquo;dropped&rdquo;.</p>
+    <p class="caption">The non&#8209;inherited set matters as much: <code>opacity</code>,
+      <code>clip-path</code>, <code>mask</code> and <code>filter</code> must <em>not</em>
+      reach the children, or the root's value would apply twice &mdash; once to its own
+      group and again to each child. A 50% root over a black child would composite to
+      75% rather than 50%, which a test pins.</p>
+    <p class="caption">The whole resvg conformance corpus passes unchanged, which is the
+      strongest evidence available that the inherited/non&#8209;inherited split is
+      right: those fixtures exercise inheritance directly.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">41 / ABSOLUTE POSITIONING &amp; FLEX</span>
+    <h2>Boxes that would not size or place</h2>
+    <p class="lede">Three related failures, all silent: a box given both
+      <code>top</code> and <code>bottom</code> collapsed to nothing, an absolutely
+      positioned child of a flex container ignored its offsets, and an element whose
+      height came from flex layout laid its own children out as if it had no height at
+      all.</p>
+
+    <h4><code>top</code> + <code>bottom</code> sizes a box</h4>
+    <div style="position:relative;width:320px;height:90px;background:#f7f2e4;border:1px solid #c9c2b0">
+      <div style="position:absolute;left:8px;width:60px;top:8px;bottom:8px;background:#9b3d2e"></div>
+      <div style="position:absolute;left:80px;width:60px;top:8px;height:30px;background:#3a4a5a"></div>
+      <div style="position:absolute;top:8px;bottom:8px;left:152px;right:8px;background:#4a7c59"></div>
+    </div>
+    <p class="caption">Rust: <code>top</code>&nbsp;+&nbsp;<code>bottom</code>, spanning
+      the container. Slate: an explicit <code>height</code>, for contrast. Green: both
+      pairs at once. The rust bar used to paint <em>nothing</em> &mdash; it collapsed to
+      its content height, which for an empty box is zero. The horizontal equivalent
+      (<code>left</code>&nbsp;+&nbsp;<code>right</code>) always worked, which is what
+      made the asymmetry surprising.</p>
+
+    <h4>An absolutely positioned child of a flex container</h4>
+    <div style="position:relative;display:flex;width:320px;height:60px;background:#f7f2e4;border:1px solid #c9c2b0">
+      <div style="position:absolute;left:220px;top:12px;width:70px;height:32px;background:#9b3d2e"></div>
+    </div>
+    <p class="caption">Per CSS&nbsp;Flexbox&nbsp;&sect;4.1 such a child is <em>not</em> a
+      flex item: it is out of flow and positioned against the container's padding box.
+      It was being laid out as an item instead, pinned to the container's edge with
+      <code>left</code> discarded &mdash; so this bar sat at x&nbsp;=&nbsp;0 no matter
+      what offset it was given.</p>
+
+    <h4>A flex-derived height aligns its own children</h4>
+    <div style="display:flex;align-items:stretch;height:96px;width:320px;gap:8px">
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;background:#f7f2e4;border:1px solid #c9c2b0">
+        <div style="height:20px;background:#9b3d2e"></div>
+      </div>
+      <div style="height:96px;display:flex;flex-direction:column;justify-content:center;background:#f7f2e4;border:1px solid #c9c2b0;width:150px">
+        <div style="height:20px;background:#3a4a5a"></div>
+      </div>
+    </div>
+    <p class="caption">Left: height from <code>flex:&nbsp;1</code>. Right: an explicit
+      <code>height</code>. Both centre their child. The cross size was being written
+      onto the fragment <em>after</em> its interior had already been laid out, so
+      anything inside that needs a definite height &mdash;
+      <code>justify-content</code>, a percentage height &mdash; had already resolved
+      against auto and packed to the top.</p>
+
+    <h4>One reported gap that did not reproduce</h4>
+    <p class="caption">The same report said an absolutely positioned box never
+      shrink&#8209;wraps and that <code>width</code> is ignored on one. Measured here,
+      neither holds: an <code>position:&nbsp;absolute</code> box around a 72px string
+      comes out 72px &mdash; identical to <code>display:&nbsp;inline-block</code> &mdash;
+      and an explicit <code>width:&nbsp;76px</code> is honoured exactly. Recorded as
+      not&#8209;reproducing rather than &ldquo;fixed&rdquo;, since nothing was
+      changed.</p>
+  </section>
+
+  <section class="section break">
+    <span class="kicker">42 / TRANSFORMS</span>
+    <h2><code>transform</code></h2>
+    <p class="lede">The property did nothing at all &mdash; it was not in the cascade, so
+      every declaration was silently dropped. It was reported alongside a flex&#8209;margin
+      bug, but it is not flex&#8209;specific: <code>translateX</code> on a plain block did
+      nothing either.</p>
+
+    <div>
+      <div class="tfcell"><div class="tfbox">none</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:translateX(24px)">translateX</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:scale(0.7)">scale(.7)</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:rotate(-8deg)">rotate</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:skewX(-12deg)">skewX</div></div>
+      <div class="tfcell"><div class="tfbox" style="transform:translateX(20%) rotate(6deg)">chained</div></div>
+    </div>
+    <p class="caption">The dashed outline is the space each box still occupies:
+      a transform is a <em>paint&#8209;time</em> effect and does not change layout
+      (CSS&nbsp;Transforms&nbsp;1&nbsp;&sect;3), so the boxes stay on their grid while
+      their ink moves. The default origin is the box's centre, which is why
+      <code>scale(.7)</code> shrinks inward rather than toward a corner, and why the
+      percentage in the last tile resolves against the box's own width.</p>
+
+    <h4>How it is implemented, and the trap in it</h4>
+    <p class="caption">Because it changes no layout, the transform is a matrix
+      <em>bracket</em> around the box's already&#8209;flattened items &mdash; the same
+      shape the <code>filter</code> bracket uses. That only works if the box's
+      background and its content are emitted as one contiguous run, and for a plain
+      block they are not: Appendix&nbsp;E paints child decorations and in&#8209;flow
+      content in separate phases, so a bracket would have moved the background and left
+      the text behind.</p>
+    <p class="caption">The resolution is the spec's own: a transformed element
+      establishes a <em>stacking context</em> and a containing block for its
+      descendants, and such a box already paints as a single atom. Marking it so was the
+      fix &mdash; not a workaround for the bracket.</p>
+    <p class="caption">The trap: an <em>anonymous</em> box carries a zero&#8209;value
+      style, and a zero matrix is not the identity matrix. Without a guard, every
+      anonymous box became a stacking context and a BFC, which reordered painting and
+      broke a WPT reftest. It is the second time that same zero&#8209;value distinction
+      has bitten in this codebase, so it is called out at the predicate itself.</p>
+
+    <h4>What is refused</h4>
+    <p class="caption">The 3D functions &mdash; <code>translate3d</code>,
+      <code>rotateX</code>, <code>perspective</code>, <code>matrix3d</code> &mdash; are
+      rejected rather than flattened. This engine has no 3D pipeline, and dropping the Z
+      terms would paint something confidently wrong; a refused declaration drops and the
+      previous value stands, which is at least visible. <code>transform-origin</code> is
+      not yet settable &mdash; the centre is used unconditionally.</p>
+  </section>
+
 </body>
 </html>

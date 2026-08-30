@@ -22,6 +22,7 @@ func fixtureBytes(t *testing.T, name string) []byte {
 }
 
 func TestXLSXToMarkdownTable(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenXLSXBytes(fixtureBytes(t, "values"), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenXLSXBytes: %v", err)
@@ -46,6 +47,7 @@ func TestXLSXToMarkdownTable(t *testing.T) {
 }
 
 func TestXLSXMergedCellsBecomeSpans(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenXLSXBytes(fixtureBytes(t, "merged"), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenXLSXBytes: %v", err)
@@ -64,6 +66,7 @@ func TestXLSXMergedCellsBecomeSpans(t *testing.T) {
 }
 
 func TestXLSXMultisheet(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenXLSXBytes(fixtureBytes(t, "multisheet"), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenXLSXBytes: %v", err)
@@ -102,6 +105,7 @@ func multisheetMarkdown(t *testing.T, opts ...OpenOption) string {
 // WithSheets selecting one sheet renders only that sheet, and — because it is
 // then the single rendered sheet — emits no sheet-name heading.
 func TestXLSXWithSheetsSingle(t *testing.T) {
+	t.Parallel()
 	got := multisheetMarkdown(t, WithBundledFonts(), WithSheets("Second"))
 	if !strings.Contains(got, "second sheet cell") {
 		t.Errorf("selected sheet content missing:\n%s", got)
@@ -117,6 +121,7 @@ func TestXLSXWithSheetsSingle(t *testing.T) {
 // WithSheets selecting several sheets renders exactly those, in the requested
 // order (which may differ from file order), each with its heading.
 func TestXLSXWithSheetsOrder(t *testing.T) {
+	t.Parallel()
 	got := multisheetMarkdown(t, WithBundledFonts(), WithSheets("Second", "First"))
 	first := strings.Index(got, "## Second")
 	second := strings.Index(got, "## First")
@@ -134,6 +139,7 @@ func TestXLSXWithSheetsOrder(t *testing.T) {
 // WithSheets can name a hidden sheet explicitly; unlike the default render it is
 // then included.
 func TestXLSXWithSheetsHiddenExplicit(t *testing.T) {
+	t.Parallel()
 	got := multisheetMarkdown(t, WithBundledFonts(), WithSheets("Secrets"))
 	if !strings.Contains(got, "hidden cell") {
 		t.Errorf("explicitly named hidden sheet should render:\n%s", got)
@@ -143,6 +149,7 @@ func TestXLSXWithSheetsHiddenExplicit(t *testing.T) {
 // A name no sheet carries fails with ErrSheetNotFound, naming the missing sheet;
 // no document is produced.
 func TestXLSXWithSheetsNotFound(t *testing.T) {
+	t.Parallel()
 	_, err := OpenXLSXBytes(fixtureBytes(t, "multisheet"), WithBundledFonts(), WithSheets("First", "Nope"))
 	if !errors.Is(err, ErrSheetNotFound) {
 		t.Fatalf("want ErrSheetNotFound, got %v", err)
@@ -153,6 +160,7 @@ func TestXLSXWithSheetsNotFound(t *testing.T) {
 }
 
 func TestXLSXStyledCells(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenXLSXBytes(fixtureBytes(t, "styled"), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenXLSXBytes: %v", err)
@@ -175,6 +183,7 @@ func TestXLSXStyledCells(t *testing.T) {
 // TestXLSXToCSV pins the spreadsheet-to-spreadsheet path: sheet values land as
 // CSV rows.
 func TestXLSXToCSV(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	err := Convert(context.Background(), bytes.NewReader(fixtureBytes(t, "values")), &out,
 		ConvertOptions{To: FormatCSV, BundledFonts: true}) // From auto-detected via zip magic

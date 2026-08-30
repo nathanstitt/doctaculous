@@ -9,6 +9,7 @@ import (
 	"github.com/nathanstitt/doctaculous/pkg/font"
 	"github.com/nathanstitt/doctaculous/pkg/layout"
 	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/doctaculous/pkg/layout/inline"
 	"github.com/nathanstitt/doctaculous/pkg/render"
 )
 
@@ -34,8 +35,13 @@ type Fragment struct {
 	Image      *ImageContent           // decoded replaced-element image (set for a replaced box), painted in the content box
 	Vector     *VectorContent          // parsed replaced-element SVG scene (set for an SVG replaced box), painted in the content box
 	Control    *ControlContent         // form-control widget (set for a control replaced box), painted in the content box
-	BgImage    *BackgroundImageContent // decoded CSS background image (set when the box has a decodable background-image), painted behind content
-	DebugTag   string                  // optional label for test lookup; not used in paint
+	BgImage    *BackgroundImageContent // decoded CSS background image (layer 0; see BgImages)
+	// BgImages holds EVERY background layer in paint order (last CSS layer first, so
+	// the first one ends up on top). BgImage aliases the topmost for consumers that
+	// only understand a single background; both are set together and neither is
+	// authoritative alone — the paint pass walks BgImages.
+	BgImages []*BackgroundImageContent
+	DebugTag string // optional label for test lookup; not used in paint
 
 	// Radii is the box's border-radius resolved against THIS fragment's border box
 	// and already overlap-corrected (CSS Backgrounds 3 §5.1). It is resolved at
@@ -311,6 +317,31 @@ type GlyphFragment struct {
 	// struck glyphs on a line are painted with one mid-glyph rule (see appendStrikes,
 	// called alongside appendUnderlines in appendSelfContent).
 	Strike bool
+	// Edge marks a zero-ink glyph carrying an inline box's leading/trailing padding +
+	// border as its advance. The decoration pass treats it as part of the box's extent;
+	// the paint loop skips it like any other inkless glyph.
+	Edge inline.InlineEdge
+	// InlineBox identifies the innermost non-replaced inline box this glyph belongs to,
+	// or nil when its nearest box is the block. Consecutive glyphs sharing one pointer
+	// form the box's fragment ON THIS LINE, which is what appendInlineBoxDecorations
+	// paints a background and border for. The pointer is the identity: two adjacent
+	// spans styled identically compare unequal here, so their rects stay separate.
+	InlineBox *inline.InlineBoxStyle
+	// AscentPt and DescentPt are this glyph's own font metrics in points (both
+	// positive, measured from the baseline). They give an inline box's background the
+	// CONTENT-AREA height CSS specifies — the font's ascent+descent, NOT the line
+	// height — and being per-glyph rather than per-line means a span mixing font sizes
+	// gets a rect tall enough for its largest.
+	//
+	// Only the inline-decoration path reads them; they are zero for a glyph whose
+	// producer does not set them, which simply yields no decoration rect.
+	AscentPt, DescentPt float64
+	// Blank marks a glyph that carries no ink (a space) but is retained anyway because
+	// it sits INSIDE a decorated inline box. Without it, `case g.Outline != nil` would
+	// drop the spaces in `<span>Hello world</span>` and the background would paint as
+	// two rects with a hole between them. The paint loop skips these (they have a nil
+	// Outline); only the decoration coalescing reads them, to stay continuous.
+	Blank bool
 	// BaselineShiftPt raises (positive) or lowers (negative) this glyph relative to the
 	// line baseline, in page-space points — vertical-align: super/sub. The glyph's paint
 	// Y is ln.BaselineY - BaselineShiftPt (up = smaller Y). Zero (the default) leaves the
@@ -361,6 +392,19 @@ type GlyphFragment struct {
 // list — each page flattens its own subtree through this method — so a filtered box
 // straddling a page break emits its own balanced pair on each page.
 func (f *Fragment) AppendItems(dst []layout.Item) []layout.Item {
+	// A CSS transform brackets the box's WHOLE painted subtree, outside the filter
+	// bracket: `transform` positions what `filter` produced. It is a paint-time
+	// effect, so the box's layout — and the space it reserved — is already final.
+	if m, ok := f.transformMatrix(); ok {
+		dst = append(dst, layout.Item{Kind: layout.TransformPushKind, Transform: m})
+		dst = f.appendItemsTransformed(dst)
+		return append(dst, layout.Item{Kind: layout.TransformPopKind})
+	}
+	return f.appendItemsTransformed(dst)
+}
+
+// appendItemsTransformed is AppendItems minus the transform bracket.
+func (f *Fragment) appendItemsTransformed(dst []layout.Item) []layout.Item {
 	if len(f.Filter) == 0 {
 		return f.appendItemsUnfiltered(dst)
 	}
@@ -470,6 +514,27 @@ func (f *Fragment) appendFloatLayer(dst []layout.Item) []layout.Item {
 	return dst
 }
 
+// transformMatrix returns the fragment's CSS transform as a page-space matrix, and
+// whether it does anything.
+//
+// The matrix is built about the box's TRANSFORM ORIGIN, which defaults to its centre
+// (CSS Transforms 1 §6): translate to the origin, apply, translate back. Percentage
+// translate terms resolve against the box's own border-box size, which is why they
+// travel unresolved on the style and are finished here.
+func (f *Fragment) transformMatrix() (render.Matrix, bool) {
+	if f.Box == nil || f.Box.Style.Transform.IsIdentity() {
+		return render.Identity, false
+	}
+	t := f.Box.Style.Transform
+	ox, oy := f.X+f.W/2, f.Y+f.H/2
+	m := render.Matrix{
+		A: t.A, B: t.B,
+		C: t.C, D: t.D,
+		E: t.E + t.PctX*f.W, F: t.F + t.PctY*f.H,
+	}
+	return render.Translate(-ox, -oy).Mul(m).Mul(render.Translate(ox, oy)), true
+}
+
 // appendDecorations recurses the in-flow subtree emitting only backgrounds and
 // borders: this fragment's own, then its children's (skipping floated, nested-BFC,
 // and positioned subtrees — see appendChildDecorations). It is the decoration-phase
@@ -557,7 +622,16 @@ func (f *Fragment) appendSelfDecorations(dst []layout.Item) []layout.Item {
 	}
 	// Background image paints after the background color and before the border (CSS
 	// Backgrounds 3 paint order).
-	if bg := f.BgImage; bg != nil && (bg.Img != nil || bg.Scene != nil || bg.Gradient != nil) {
+	// Every layer, in the order resolveBackgroundImages produced (last CSS layer
+	// first), so the first layer ends up painted on top.
+	bgLayers := f.BgImages
+	if len(bgLayers) == 0 && f.BgImage != nil {
+		bgLayers = []*BackgroundImageContent{f.BgImage}
+	}
+	for _, bg := range bgLayers {
+		if bg == nil || (bg.Img == nil && bg.Scene == nil && bg.Gradient == nil) {
+			continue
+		}
 		// A rounded box clips its background IMAGE to the rounded border box. Unlike
 		// the background COLOR — a single fill this engine can round directly — a
 		// background image is an arbitrary number of tiles drawn by DrawImage, which
@@ -727,6 +801,113 @@ func appendDecoRules(dst []layout.Item, ln *LineFragment, sel func(*GlyphFragmen
 	return dst
 }
 
+// glyphHasColorInk reports whether a glyph paints through a colour-font path rather
+// than an outline.
+func glyphHasColorInk(g *GlyphFragment) bool {
+	if g.Face == nil {
+		return false
+	}
+	if g.Face.HasColorBitmaps() {
+		return true
+	}
+	if g.Face.HasColorGlyphs() {
+		layers, ok := g.Face.ColorLayers(g.GID)
+		return ok && len(layers) > 0
+	}
+	return false
+}
+
+// appendInlineBoxDecorations emits the background and border of every inline box that
+// has a fragment on line ln — one rect per box PER LINE, which is what makes a <span>
+// spanning a line break paint correctly without any explicit fragmentation bookkeeping.
+//
+// Runs are detected by INLINE-BOX IDENTITY (pointer equality), not by comparing colors:
+// two adjacent spans styled identically are still two boxes, and coalescing them would
+// erase the gap their padding creates. This is the one way it differs from
+// appendDecoRules, whose bool predicate cannot make that distinction.
+//
+// The rect's height is the CONTENT AREA — the tallest ascent and deepest descent among
+// the run's glyphs — not the line height. That is what CSS specifies, and it is why the
+// metrics are carried per glyph: a span mixing font sizes gets a rect sized to its
+// largest. The horizontal extent runs from the first glyph's pen origin to the last
+// glyph's pen end — the same approximation appendDecoRules documents as adequate for
+// underlines. Inline PADDING is not applied: it would have to widen the box's advance
+// in the line breaker too, and painting it here alone would draw a rect wider than the
+// layout actually reserved. See inline.InlineBoxStyle.
+//
+// Blank (inkless) glyphs participate, which is why they are retained at emit time: a
+// background must stay continuous across the spaces inside a span.
+func appendInlineBoxDecorations(dst []layout.Item, ln *LineFragment) []layout.Item {
+	i := 0
+	for i < len(ln.Glyphs) {
+		box := ln.Glyphs[i].InlineBox
+		if !box.Paints() {
+			i++
+			continue
+		}
+		start := i
+		x0 := ln.Glyphs[i].X
+		x1 := ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
+		asc, desc := ln.Glyphs[i].AscentPt, ln.Glyphs[i].DescentPt
+		shift := ln.Glyphs[i].BaselineShiftPt
+		for i++; i < len(ln.Glyphs) && ln.Glyphs[i].InlineBox == box; i++ {
+			x1 = ln.Glyphs[i].X + ln.Glyphs[i].AdvancePt
+			if a := ln.Glyphs[i].AscentPt; a > asc {
+				asc = a
+			}
+			if d := ln.Glyphs[i].DescentPt; d > desc {
+				desc = d
+			}
+		}
+		// A run of only zero-metric glyphs has no box to paint.
+		if x1 <= x0 || asc+desc <= 0 {
+			continue
+		}
+		// Trailing spaces at a line break belong to the line's whitespace, not to the
+		// box's painted extent: a browser does not stretch a span's background to the
+		// right margin because the line wrapped after a space inside it.
+		for j := i - 1; j >= start && ln.Glyphs[j].Blank && ln.Glyphs[j].Edge == inline.EdgeNone; j-- {
+			x1 = ln.Glyphs[j].X
+		}
+		if x1 <= x0 {
+			continue
+		}
+		y := ln.BaselineY - shift - asc
+		h := asc + desc
+		if box.Background.A > 0 {
+			dst = append(dst, layout.Item{
+				Kind: layout.BackgroundKind,
+				Rule: layout.RuleItem{XPt: x0, YPt: y, WPt: x1 - x0, HPt: h, Color: box.Background},
+			})
+		}
+		if box.BorderWidthPt > 0 && box.BorderColor.A > 0 {
+			dst = appendInlineBoxBorder(dst, x0, y, x1-x0, h, box.BorderWidthPt, box.BorderColor)
+		}
+	}
+	return dst
+}
+
+// appendInlineBoxBorder emits an inline box's border as four filled edge strips around
+// the rect, drawn OUTSIDE it so the border does not eat into the box's own background.
+// Uniform width and color only; a per-edge inline border is not modeled (see
+// inlineBoxStyleFor), and rounded inline borders are not either — both would need the
+// ring machinery the block path uses.
+func appendInlineBoxBorder(dst []layout.Item, x, y, w, h, bw float64, col color.RGBA) []layout.Item {
+	edge := func(ex, ey, ew, eh float64) layout.Item {
+		return layout.Item{
+			Kind: layout.RuleKind,
+			Rule: layout.RuleItem{XPt: ex, YPt: ey, WPt: ew, HPt: eh, Color: col},
+		}
+	}
+	dst = append(dst,
+		edge(x-bw, y-bw, w+2*bw, bw), // top
+		edge(x-bw, y+h, w+2*bw, bw),  // bottom
+		edge(x-bw, y, bw, h),         // left
+		edge(x+w, y, bw, h),          // right
+	)
+	return dst
+}
+
 // appendUnderlines emits text-decoration:underline rules for one line: one thin
 // RuleKind rectangle per contiguous run of underlined glyphs, spanning the run's
 // x-extent (pen origin of the first glyph to pen-end of the last), positioned just
@@ -754,9 +935,20 @@ func appendStrikes(dst []layout.Item, ln *LineFragment) []layout.Item {
 func (f *Fragment) appendSelfContent(dst []layout.Item) []layout.Item {
 	for li := range f.Lines {
 		ln := &f.Lines[li]
+		// Inline-box backgrounds and borders paint BEHIND the line's text, so they are
+		// emitted before the glyph loop. Within the inline content layer this is the
+		// CSS-correct place: an inline box's background sits above block backgrounds
+		// and floats but below its own ink (CSS 2.1 Appendix E step 5).
+		dst = appendInlineBoxDecorations(dst, ln)
 		for gi := range ln.Glyphs {
 			g := &ln.Glyphs[gi]
-			if g.Outline == nil {
+			// A nil outline is usually whitespace or an inline-box edge — nothing to
+			// paint. A COLOUR glyph is the exception: its ink lives in COLR layers or a
+			// bitmap strike, resolved at paint time from Face+GID, so skipping on
+			// "no outline" would drop every emoji after layout had already reserved its
+			// advance (the following text sat correctly, with a gap where the glyph
+			// should have been).
+			if g.Outline == nil && !glyphHasColorInk(g) {
 				continue
 			}
 			// vertical-align: super/sub shifts the glyph off the line baseline (up = a

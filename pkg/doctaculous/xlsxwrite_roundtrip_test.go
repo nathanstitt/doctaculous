@@ -22,6 +22,7 @@ func xlsxOf(t *testing.T, doc *Document) []byte {
 // the same Markdown as converting the HTML directly — spans, header rows, and
 // values all survive the workbook.
 func TestXLSXWriteRoundTripParity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		html string
@@ -64,6 +65,7 @@ func TestXLSXWriteRoundTripParity(t *testing.T) {
 // TestXLSXWriteMultiTableSheets verifies each table becomes its own worksheet,
 // named from its caption (sanitized) or "Table N".
 func TestXLSXWriteMultiTableSheets(t *testing.T) {
+	t.Parallel()
 	src, err := OpenHTMLBytes([]byte(`<html><body>
 	<p>prose to drop</p>
 	<table><caption>Q1: Sales/Totals</caption><tr><td>alpha</td></tr></table>
@@ -93,6 +95,7 @@ func TestXLSXWriteMultiTableSheets(t *testing.T) {
 // TestCSVToXLSXAndBack pins the spreadsheet-family loop: csv → xlsx → csv is
 // byte-identical (numbers stay numbers, the header row survives).
 func TestCSVToXLSXAndBack(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	csvSrc := "Name,Qty,Price\nWidgets,5,9.99\nGadgets,12,0.5\n"
 
@@ -114,6 +117,7 @@ func TestCSVToXLSXAndBack(t *testing.T) {
 // TestPDFToXLSX proves the extraction path: a ruled table inside a PDF lands as
 // a workbook sheet.
 func TestPDFToXLSX(t *testing.T) {
+	t.Parallel()
 	const tableHTML = `<!DOCTYPE html><html><head><style>body{margin:0}
 	table{border-collapse:collapse} td,th{border:1px solid black;padding:6px}</style></head><body>
 	<table><tr><th>Item</th><th>Qty</th></tr><tr><td>Widgets</td><td>5</td></tr></table>
@@ -142,6 +146,7 @@ func TestPDFToXLSX(t *testing.T) {
 
 // TestXLSXWriteDeterministic pins byte-identical output for identical input.
 func TestXLSXWriteDeterministic(t *testing.T) {
+	t.Parallel()
 	src, err := OpenHTMLBytes([]byte(`<html><body><table><caption>C</caption>
 	<tr><th>A</th></tr><tr><td>1</td></tr></table></body></html>`), WithBundledFonts())
 	if err != nil {
@@ -155,6 +160,7 @@ func TestXLSXWriteDeterministic(t *testing.T) {
 // TestXLSXWriteTablelessDocument verifies the empty-workbook contract: one
 // empty sheet (Excel requires at least one) and a loud log.
 func TestXLSXWriteTablelessDocument(t *testing.T) {
+	t.Parallel()
 	src, err := OpenHTMLBytes([]byte(`<html><body><p>prose only</p></body></html>`), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)

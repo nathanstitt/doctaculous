@@ -33,6 +33,7 @@ func tinyPNGBytes(t *testing.T, w, h int) []byte {
 // image's pixel size, format stamped from the encoding, rendered pixels the
 // image's own.
 func TestOpenImage(t *testing.T) {
+	t.Parallel()
 	data := tinyPNGBytes(t, 40, 24)
 	doc, err := OpenImageBytes(data)
 	if err != nil {
@@ -90,6 +91,7 @@ func sameColor(a, b color.Color) bool {
 // TestImageConversions pins the any⇄any behavior images gained: image→PDF,
 // image→JPEG transcode, and the same-format refusal.
 func TestImageConversions(t *testing.T) {
+	t.Parallel()
 	data := tinyPNGBytes(t, 30, 20)
 
 	var pdf bytes.Buffer
@@ -133,6 +135,7 @@ func TestImageConversions(t *testing.T) {
 }
 
 func TestOpenImageBytesHEIC(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join("..", "heif", "testdata", "sips-quad-64x48.heic"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)

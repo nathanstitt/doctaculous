@@ -1,9 +1,12 @@
 package font
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -81,13 +84,15 @@ func TestResolveLocalViaSystemProvider(t *testing.T) {
 }
 
 func TestNewFaceCacheUnchanged(t *testing.T) {
-	// The bundled-only constructor must still resolve base-14 and miss unknowns.
+	// The bundled-only constructor must still resolve base-14, and now degrades an
+	// unknown family to the bundled serif rather than missing (see
+	// TestResolveAllUnresolvableFallsBackToBundled).
 	c := NewFaceCache()
 	if _, ok := c.Resolve("Arial", pkgfont.Style{}); !ok {
 		t.Fatal("NewFaceCache Resolve(Arial) miss, want bundled")
 	}
-	if _, ok := c.Resolve("Totally Unknown Family XYZ", pkgfont.Style{}); ok {
-		t.Fatal("NewFaceCache Resolve(unknown) hit, want miss")
+	if _, ok := c.Resolve("Totally Unknown Family XYZ", pkgfont.Style{}); !ok {
+		t.Fatal("NewFaceCache Resolve(unknown) miss, want the terminal fallback")
 	}
 }
 
@@ -201,9 +206,74 @@ func TestResolveFallbackListSkipsUnresolvable(t *testing.T) {
 	if _, ok := c.Resolve("TeX Gyre Termes, Nonesuch, serif", pkgfont.Style{}); !ok {
 		t.Fatal("Resolve(list ending in serif) miss, want the generic-keyword fallback")
 	}
-	// With no resolvable candidate at all, the whole list misses (caller skips).
-	if _, ok := c.Resolve("Nonesuch One, Nonesuch Two", pkgfont.Style{}); ok {
-		t.Fatal("Resolve(all-unresolvable list) hit, want miss")
+}
+
+// A list with NO resolvable candidate still returns a face: the terminal fallback
+// substitutes the bundled serif. Before this, Resolve reported a miss and the caller
+// skipped the run, so a page whose every font-family named an uninstalled family
+// rendered as an empty box — a font failure that looked like a layout failure.
+func TestResolveAllUnresolvableFallsBackToBundled(t *testing.T) {
+	c := NewFaceCache()
+	face, ok := c.Resolve("Nonesuch One, Nonesuch Two", pkgfont.Style{})
+	if !ok {
+		t.Fatal("Resolve(all-unresolvable list) miss, want the bundled terminal fallback")
+	}
+	if face == nil {
+		t.Fatal("Resolve reported ok with a nil face")
+	}
+	// The fallback must be a usable face, not merely non-nil: it has to draw.
+	if _, _, glyphOK := face.Glyph('A'); !glyphOK {
+		t.Fatal("terminal fallback face has no glyph for 'A'; it cannot render text")
+	}
+	// It resolves to the same FONT the "serif" generic gives, so an unresolvable list
+	// degrades to the document's own default rather than a third typeface. Compare the
+	// program bytes, not the pointer: each resolution parses its own Face.
+	want, ok := c.Resolve("serif", pkgfont.Style{})
+	if !ok {
+		t.Fatal("Resolve(serif) miss")
+	}
+	got, _ := face.ProgramBytes()
+	wantData, _ := want.ProgramBytes()
+	if !bytes.Equal(got, wantData) {
+		t.Error("terminal fallback resolved to a different font than the serif generic")
+	}
+}
+
+// The terminal fallback is logged, and — because Resolve caches by (list, style) —
+// logged ONCE however many runs share the family. A silent substitution would leave a
+// caller unable to tell a wrong typeface from an intended one.
+func TestResolveTerminalFallbackLogsOnce(t *testing.T) {
+	var lines []string
+	c := NewFaceCacheWithFonts(nil, nil, nil, func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	for i := 0; i < 3; i++ {
+		if _, ok := c.Resolve("Nonesuch One", pkgfont.Style{}); !ok {
+			t.Fatal("Resolve miss, want the terminal fallback")
+		}
+	}
+	if len(lines) != 1 {
+		t.Fatalf("logged %d times %q, want exactly 1", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "Nonesuch One") {
+		t.Errorf("log %q does not name the unresolved family", lines[0])
+	}
+}
+
+// A DIFFERENT style of the same unresolvable family is a distinct cache key, so it
+// resolves (and logs) on its own rather than reusing the regular face.
+func TestResolveTerminalFallbackIsStyleAware(t *testing.T) {
+	c := NewFaceCache()
+	reg, ok := c.Resolve("Nonesuch One", pkgfont.Style{})
+	if !ok {
+		t.Fatal("regular miss")
+	}
+	bold, ok := c.Resolve("Nonesuch One", pkgfont.Style{Bold: true})
+	if !ok {
+		t.Fatal("bold miss")
+	}
+	if reg == bold {
+		t.Error("bold terminal fallback returned the regular face; the bundled bold was not selected")
 	}
 }
 

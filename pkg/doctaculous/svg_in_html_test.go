@@ -163,6 +163,7 @@ const greenFillOp = "0 0.7529 0 rg"
 // TestHTMLImgPNGStillEmitsImageXObject is the control that keeps assertion 1
 // falsifiable.
 func TestHTMLImgSVGEmitsVectorNotImageXObject(t *testing.T) {
+	t.Parallel()
 	raw := htmlToPDF(t,
 		`<html><body><img src="probe.svg"></body></html>`,
 		WithResourceLoader(svgLoader("probe.svg", vectorProbeSVG)),
@@ -194,6 +195,7 @@ func TestHTMLImgSVGEmitsVectorNotImageXObject(t *testing.T) {
 // markup, which travels a different route into the engine (re-serialized by
 // pkg/html rather than fetched through a loader) and so needs its own proof.
 func TestHTMLInlineSVGEmitsVectorNotImageXObject(t *testing.T) {
+	t.Parallel()
 	raw := htmlToPDF(t, `<html><body>`+vectorProbeSVG+`</body></html>`)
 
 	if hasImageXObject(raw) {
@@ -210,6 +212,7 @@ func TestHTMLInlineSVGEmitsVectorNotImageXObject(t *testing.T) {
 // XObject" would be an unfalsifiable assertion — a bug that dropped every <img>
 // on the floor would make both vector tests pass.
 func TestHTMLImgPNGStillEmitsImageXObject(t *testing.T) {
+	t.Parallel()
 	png := onePixelSVGPNG(t, color.RGBA{R: 0, G: 192, B: 0, A: 255})
 	raw := htmlToPDF(t,
 		`<html><body><img src="probe.png" width="80" height="40"></body></html>`,
@@ -230,6 +233,7 @@ func TestHTMLImgPNGStillEmitsImageXObject(t *testing.T) {
 // facts; without it, `<img src="ratio.svg" width="600">` sizes 600x150 rather
 // than 600x300.
 func TestHTMLSVGIntrinsicSizing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		svg    string
@@ -289,6 +293,7 @@ func TestHTMLSVGIntrinsicSizing(t *testing.T) {
 // /ShadingType dictionary (the gradient resolved, which is only possible if
 // linearGradient was matched by name) and must carry no image XObject.
 func TestInlineSVGCamelCaseSurvivesReserialization(t *testing.T) {
+	t.Parallel()
 	// Deliberately lower-cased in the SOURCE, as an HTML author may legally write
 	// it: the HTML parser is what restores the camelCase spellings, and this test
 	// asserts they survive all the way to pkg/svg.
@@ -318,6 +323,7 @@ func TestInlineSVGCamelCaseSurvivesReserialization(t *testing.T) {
 // boxes that nonetheless consumed layout height and could push following content
 // down. The <svg> must now be a single replaced leaf.
 func TestInlineSVGGeneratesNoHTMLBoxes(t *testing.T) {
+	t.Parallel()
 	const src = `<html><body style="margin:0"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="20">` +
 		`<circle cx="10" cy="10" r="5" fill="#00c000"/>` +
 		`<path d="M20 0 L40 20" stroke="#000"/>` +
@@ -357,6 +363,7 @@ func TestInlineSVGGeneratesNoHTMLBoxes(t *testing.T) {
 // abort the document, and must leave the surrounding content intact. The box is
 // still reserved (a sized placeholder) exactly as a failed image decode is.
 func TestMalformedSVGSrcDegradesGracefully(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"truncated element":    `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect`,
 		"not xml at all":       "\x00\x01\x02 this is not markup",
@@ -392,6 +399,7 @@ func TestMalformedSVGSrcDegradesGracefully(t *testing.T) {
 // TestMalformedInlineSVGDegradesGracefully is the same contract for inline markup,
 // which does not travel through the loader and so is a separate code path.
 func TestMalformedInlineSVGDegradesGracefully(t *testing.T) {
+	t.Parallel()
 	// x/net/html recovers from any of this into SOME tree; whatever it hands back,
 	// pkg/svg must not panic on it and the document must still render.
 	for _, src := range []string{
@@ -416,6 +424,7 @@ func TestMalformedInlineSVGDegradesGracefully(t *testing.T) {
 // rectangle would occupy only the top-left quarter and the box's bottom-right
 // corner would stay background-white.
 func TestSVGImgScalesToItsCSSBox(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes(
 		[]byte(`<html><body style="margin:0"><img src="s.svg" style="width:160px;height:80px"></body></html>`),
 		WithResourceLoader(svgLoader("s.svg", vectorProbeSVG)),
@@ -447,6 +456,7 @@ func TestSVGImgScalesToItsCSSBox(t *testing.T) {
 //
 // Three block SVGs with a 6px gap must land at y = 0, 56, 142.
 func TestStackedSVGImagesEachGetTheirOwnPosition(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(
 		`<!DOCTYPE html><html><head><style>
 			body { margin: 0 }
@@ -486,6 +496,7 @@ func TestStackedSVGImagesEachGetTheirOwnPosition(t *testing.T) {
 // which block stacking (dx == 0) never reaches — so a carrier that moved
 // correctly vertically could still be pinned at x=0 in inline flow.
 func TestInlineSVGSitsOnTheLineWithText(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes(
 		[]byte(`<!DOCTYPE html><html><head><style>body{margin:0;font:16px sans-serif}</style></head>`+
 			`<body><p>text before `+vectorProbeSVG+` text after</p></body></html>`),
@@ -518,6 +529,7 @@ func TestInlineSVGSitsOnTheLineWithText(t *testing.T) {
 // arbitrary bytes would mean running an XML parser over every unrecognized binary
 // blob a document references.
 func TestSVGSrcContentTypeGatesTheVectorPath(t *testing.T) {
+	t.Parallel()
 	png := onePixelSVGPNG(t, color.RGBA{R: 0, G: 192, B: 0, A: 255})
 	raw := htmlToPDF(t,
 		`<html><body><img src="lying.svg" width="20" height="20"></body></html>`,
@@ -533,6 +545,7 @@ func TestSVGSrcContentTypeGatesTheVectorPath(t *testing.T) {
 // the loader entirely (the browser rule: an inline image must not depend on
 // fetching) and carries its own content type.
 func TestSVGDataURIImgTakesTheVectorPath(t *testing.T) {
+	t.Parallel()
 	ref := "data:image/svg+xml," + strings.NewReplacer(
 		"#", "%23", "\"", "%22", "<", "%3C", ">", "%3E", " ", "%20",
 	).Replace(vectorProbeSVG)

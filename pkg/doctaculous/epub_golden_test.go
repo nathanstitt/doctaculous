@@ -65,6 +65,7 @@ func epubSpecimen() []byte {
 // TestEPUBGolden renders the specimen's first page end to end — the EPUB
 // visual entry. Run with -update, then eyeball.
 func TestEPUBGolden(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenEPUBBytes(epubSpecimen(), WithViewportWidth(460), WithPageSize(460, 600), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenEPUBBytes: %v", err)
@@ -106,6 +107,7 @@ func TestEPUBGolden(t *testing.T) {
 // TestEPUBDetectionAndConvert pins the unified-conversion wiring, structure
 // conversion, and the DRM refusal.
 func TestEPUBDetectionAndConvert(t *testing.T) {
+	t.Parallel()
 	book := epubSpecimen()
 	doc, err := OpenBytes(book)
 	if err != nil {

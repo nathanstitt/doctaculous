@@ -19,6 +19,7 @@ import (
 // the writer's structural coverage AND that its output lays out sanely. Run
 // with -update to regenerate, then eyeball both in review.
 func TestDOCXWriteShowcase(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
 	defer srv.Close()
 

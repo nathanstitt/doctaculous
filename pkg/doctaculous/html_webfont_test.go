@@ -16,6 +16,7 @@ import (
 // without error and produce a Document. (The golden test proves the glyphs
 // visually; this is the integration smoke test that the chain is wired.)
 func TestOpenHTMLWithWebFont(t *testing.T) {
+	t.Parallel()
 	ttf, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fonts", "webfont.ttf"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -36,6 +37,7 @@ func TestOpenHTMLWithWebFont(t *testing.T) {
 
 // WithSystemFontProvider compiles and is accepted as an option.
 func TestWithSystemFontProviderOption(t *testing.T) {
+	t.Parallel()
 	html := []byte(`<!DOCTYPE html><html><body>hi</body></html>`)
 	doc, err := OpenHTMLBytes(html,
 		WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: filepath.Join("..", "..", "testdata", "fonts")}))
@@ -51,6 +53,7 @@ func TestWithSystemFontProviderOption(t *testing.T) {
 // still renders. (Text may be blank since no bundled substitute exists for the
 // made-up family — the documented graceful skip.)
 func TestWebFont404Degrades(t *testing.T) {
+	t.Parallel()
 	html := []byte(`<!DOCTYPE html><html><head><style>
 		@font-face { font-family: "Ghost"; src: url(missing.woff2) }
 		p { font-family: "Ghost" }
@@ -64,6 +67,7 @@ func TestWebFont404Degrades(t *testing.T) {
 // A corrupt font payload degrades to the bundled fallback (family is a base-14
 // alias), no panic.
 func TestWebFontCorruptDegrades(t *testing.T) {
+	t.Parallel()
 	html := []byte(`<!DOCTYPE html><html><head><style>
 		@font-face { font-family: "Arial"; src: url(bad.woff2) }
 		p { font-family: "Arial" }
@@ -76,6 +80,7 @@ func TestWebFontCorruptDegrades(t *testing.T) {
 
 // Deferred descriptors present but ignored: the font still resolves and renders.
 func TestWebFontIgnoredDescriptors(t *testing.T) {
+	t.Parallel()
 	ttf, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fonts", "webfont.ttf"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -97,6 +102,7 @@ func TestWebFontIgnoredDescriptors(t *testing.T) {
 // A failed @font-face fetch logs a degradation message (the "debug log" half of
 // the degrade-gracefully contract), not just a silent fallback.
 func TestWebFontFailureLogs(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var logged []string
 	logf := func(format string, args ...any) {
@@ -128,6 +134,7 @@ func TestWebFontFailureLogs(t *testing.T) {
 
 // A corrupt WOFF1 payload also degrades (bundled fallback, no panic).
 func TestWebFontCorruptWOFF1Degrades(t *testing.T) {
+	t.Parallel()
 	html := []byte(`<!DOCTYPE html><html><head><style>
 		@font-face { font-family: "Arial"; src: url(bad.woff) }
 		p { font-family: "Arial" }

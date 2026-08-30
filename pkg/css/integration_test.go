@@ -43,23 +43,40 @@ func TestEndToEndCascade(t *testing.T) {
 	}
 }
 
-// TestUnitlessLineHeightDeferred documents that a unitless line-height multiplier
-// (e.g. "1.5") is not yet supported: parseLength rejects non-zero unitless
-// numbers, so line-height stays at its inherited/initial value. Supporting the
-// unitless multiplier form is deferred to a later sub-project (it needs a
-// UnitNumber/multiplier concept the layout engine resolves against font size).
-func TestUnitlessLineHeightDeferred(t *testing.T) {
+// TestUnitlessLineHeight covers the unitless multiplier form — the commonest spelling
+// of the property. It used to be rejected: parseLength refuses a non-zero unitless
+// number (correctly, for a length), so the declaration was dropped and line-height
+// stayed at its inherited value, which made the property appear to do nothing at all.
+//
+// The three forms compute differently, and the difference is the point:
+//   - a NUMBER stays a number, so it re-multiplies against each descendant's own font
+//     size when it inherits;
+//   - an EM or % is computed here against this element's font size, so descendants
+//     inherit a fixed length (CSS 2.1 §10.8.1).
+func TestUnitlessLineHeight(t *testing.T) {
 	sheet := Parse(`p { line-height: 1.5; }`)
 	r := NewResolver([]OriginSheet{{Sheet: sheet, Origin: OriginAuthor}}, nil)
 	cs := r.ComputeRoot(&fakeNode{tag: "p"})
-	if cs.LineHeight.Unit != UnitAuto {
-		t.Errorf("line-height unit = %v, want UnitAuto (unitless 1.5 not yet applied)", cs.LineHeight.Unit)
+	if cs.LineHeight != (Length{1.5, UnitNumber}) {
+		t.Errorf("line-height = %v, want 1.5 as a unitless number", cs.LineHeight)
 	}
-	// But an explicit unit IS applied:
+	// An explicit unit IS applied:
 	sheet2 := Parse(`p { line-height: 20px; }`)
 	r2 := NewResolver([]OriginSheet{{Sheet: sheet2, Origin: OriginAuthor}}, nil)
 	cs2 := r2.ComputeRoot(&fakeNode{tag: "p"})
 	if cs2.LineHeight != (Length{20, UnitPx}) {
 		t.Errorf("line-height = %v, want 20px (explicit unit applied)", cs2.LineHeight)
+	}
+	// An em value is COMPUTED against the element's own font size, so what a
+	// descendant inherits is a fixed length rather than a multiplier.
+	sheet3 := Parse(`p { font-size: 10px; line-height: 2em; }`)
+	r3 := NewResolver([]OriginSheet{{Sheet: sheet3, Origin: OriginAuthor}}, nil)
+	cs3 := r3.ComputeRoot(&fakeNode{tag: "p"})
+	if cs3.LineHeight != (Length{20, UnitPt}) {
+		t.Errorf("line-height = %v, want 2em computed to 20pt", cs3.LineHeight)
+	}
+	// A unitless number must NOT be a valid length elsewhere.
+	if _, ok := parseLength(newTokenizer("1.5").next()); ok {
+		t.Error("parseLength accepted a non-zero unitless number; width:1.5 must stay invalid")
 	}
 }

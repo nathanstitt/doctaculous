@@ -23,7 +23,7 @@ var htmlDocDir = filepath.Join("..", "..", "testdata", "htmldoc")
 // asserted so an accidental reflow that adds or drops a page fails loudly (not just
 // a per-page pixel diff). Update it (and regenerate goldens) when the document
 // intentionally changes length.
-const htmlDocPages = 29
+const htmlDocPages = 43
 
 // TestHTMLDocShowcase renders the multi-file "uber" specimen document over HTTP and
 // compares every paginated page to a committed PNG (htmldoc-p<i>.png). It is the one
@@ -32,6 +32,7 @@ const htmlDocPages = 29
 // from relative refs resolved against the document URL. Run with -update to
 // regenerate, then eyeball every page PNG in review.
 func TestHTMLDocShowcase(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
 	defer srv.Close()
 
@@ -82,6 +83,7 @@ func TestHTMLDocShowcase(t *testing.T) {
 // tables, links, emphasis, images), the text-side counterpart to the raster showcase.
 // Run with -update to regenerate, then eyeball the committed .md/.txt in review.
 func TestHTMLDocMarkdown(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.FileServer(http.Dir(htmlDocDir)))
 	defer srv.Close()
 

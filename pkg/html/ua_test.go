@@ -121,3 +121,66 @@ func (f *fakeElem) Attr(k string) (string, bool) {
 	v, ok := f.attrs[k]
 	return v, ok
 }
+
+// Inline emphasis tags carry their weight/slant from the UA sheet. Without these
+// rules the tags were structurally present but visually identical to plain text —
+// emphasis survived conversion to Markdown while being invisible in every rasterized
+// format.
+func TestUAEmphasisDefaults(t *testing.T) {
+	for _, tag := range []string{"strong", "b"} {
+		cs := uaStyle(tag)
+		if !cs.Bold {
+			t.Errorf("%s should be bold by UA default", tag)
+		}
+		if cs.Italic {
+			t.Errorf("%s should not be italic", tag)
+		}
+	}
+	for _, tag := range []string{"em", "i", "cite", "var", "dfn"} {
+		cs := uaStyle(tag)
+		if !cs.Italic {
+			t.Errorf("%s should be italic by UA default", tag)
+		}
+		if cs.Bold {
+			t.Errorf("%s should not be bold", tag)
+		}
+	}
+	for _, tag := range []string{"u", "ins"} {
+		if d := uaStyle(tag).TextDecorationLine; d != "underline" {
+			t.Errorf("%s text-decoration-line = %q, want underline", tag, d)
+		}
+	}
+	// Falsifiability: a tag with no emphasis rule must stay unstyled, so the
+	// assertions above are testing the rules and not a blanket default.
+	if cs := uaStyle("span"); cs.Bold || cs.Italic {
+		t.Errorf("span should be neither bold nor italic (bold=%v italic=%v)", cs.Bold, cs.Italic)
+	}
+}
+
+// The weight/slant keywords must be ones the cascade actually parses. The HTML spec
+// says "bolder" for <strong>, but this engine's font-weight is binary and rejects the
+// relative keywords, so "bolder" would be silently dropped and the emphasis would stay
+// invisible — the exact bug these rules fix. This pins the spelling.
+func TestUAEmphasisUsesParsableKeywords(t *testing.T) {
+	if !uaStyle("strong").Bold {
+		t.Fatal("strong is not bold; the font-weight keyword in the UA sheet does not parse")
+	}
+	// Prove the guard is real: "bolder" does NOT parse, so it must not be used.
+	r := css.NewResolver([]css.OriginSheet{{Sheet: css.Parse("x { font-weight: bolder; }"), Origin: css.OriginUA}}, nil)
+	if r.ComputeRoot(&fakeElem{tag: "x"}).Bold {
+		t.Error("font-weight:bolder now parses; the UA sheet comment about it is stale")
+	}
+}
+
+// <mark> carries the HTML Standard's yellow highlight. It was held out of the UA sheet
+// until inline-box backgrounds painted: before that the rule would have cascaded
+// correctly and then drawn nothing, which reads as support without being it.
+func TestUAMarkHighlight(t *testing.T) {
+	cs := uaStyle("mark")
+	if want := cssColor(0xff, 0xff, 0x00); cs.BackgroundColor != want {
+		t.Errorf("mark background-color = %v, want %v", cs.BackgroundColor, want)
+	}
+	if want := cssColor(0, 0, 0); cs.Color != want {
+		t.Errorf("mark color = %v, want %v", cs.Color, want)
+	}
+}

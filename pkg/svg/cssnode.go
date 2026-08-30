@@ -11,6 +11,15 @@ import "github.com/nathanstitt/doctaculous/pkg/css"
 // itself.
 type cssNode struct {
 	el *element
+	// hostParent continues the ancestor chain PAST the SVG root into the host
+	// document, so a descendant selector written against the page — `#sidebar .icon`,
+	// `figure svg rect` — matches an inline <svg>'s children the way CSS says it
+	// should. Nil for a standalone SVG document, where the root has no ancestors.
+	//
+	// Without it the chain terminates at <svg> and such a selector silently never
+	// matches, which is worse than not supporting host CSS at all: `.icon` would work
+	// while `#sidebar .icon` quietly did nothing.
+	hostParent css.Node
 }
 
 var _ css.Node = (*cssNode)(nil)
@@ -41,9 +50,12 @@ func (n *cssNode) Classes() []string {
 // so a typed nil would infinite-loop instead of terminating.
 func (n *cssNode) Parent() css.Node {
 	if n.el.parent == nil {
-		return nil
+		// At the SVG root, continue into the host document's ancestors when embedded.
+		// The nil check keeps the typed-nil pitfall above at bay: hostParent is a
+		// css.Node interface that is either genuinely nil or a real host node.
+		return n.hostParent
 	}
-	return &cssNode{el: n.el.parent}
+	return &cssNode{el: n.el.parent, hostParent: n.hostParent}
 }
 
 // Attr returns an attribute value and whether it was present. SVG attribute

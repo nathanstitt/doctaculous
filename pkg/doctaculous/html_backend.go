@@ -320,6 +320,10 @@ func htmlDocument(data []byte, cfg openConfig) (*Document, error) {
 	}
 	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, sys, cfg.logf)
 	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
+	// The page's author CSS cascades into inline <svg> content. pkg/svg re-parses an
+	// inline <svg> from the markup pkg/html serialized, so it never sees the host
+	// document's sheets unless they are handed over explicitly.
+	engine.SetAuthorSheets(doc.AuthorSheets)
 	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
 		Paged:        cfg.paged,
 		FallbackW:    cfg.viewportPt,

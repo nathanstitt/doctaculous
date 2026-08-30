@@ -10,6 +10,7 @@ import (
 )
 
 func TestConvertHTMLToMarkdown(t *testing.T) {
+	t.Parallel()
 	src := `<html><body>
 		<h1>Report</h1>
 		<p>Intro with a <a href="https://x.test">link</a> and <strong>bold</strong>.</p>
@@ -38,6 +39,7 @@ func TestConvertHTMLToMarkdown(t *testing.T) {
 }
 
 func TestConvertHTMLToText(t *testing.T) {
+	t.Parallel()
 	src := `<html><body><h1>Title</h1><p>Body <strong>word</strong>.</p></body></html>`
 	var out bytes.Buffer
 	if err := convertHTMLToText(context.Background(), strings.NewReader(src), &out, MarkdownOptions{}); err != nil {
@@ -53,6 +55,7 @@ func TestConvertHTMLToText(t *testing.T) {
 }
 
 func TestWriteMarkdownRejectsPDF(t *testing.T) {
+	t.Parallel()
 	// A PDF document has no reflow tree; WriteMarkdown must error rather than panic.
 	d := &Document{r: pdfStub{}}
 	var out bytes.Buffer
@@ -66,6 +69,7 @@ func TestWriteMarkdownRejectsPDF(t *testing.T) {
 // UTF-8 (the crossing write backs up over a partial rune); a zero budget means
 // no truncation.
 func TestWriteTextMaxBytes(t *testing.T) {
+	t.Parallel()
 	// Multibyte content (em dashes, CJK) so budgets land mid-rune.
 	doc, err := OpenHTMLBytes([]byte("<html><body><h1>Title — 標題</h1><p>Body text — 本文です。More prose follows here.</p></body></html>"))
 	if err != nil {
@@ -111,6 +115,7 @@ func TestWriteTextMaxBytes(t *testing.T) {
 // TestWriteMarkdownMaxBytes verifies the cap applies to Markdown output too
 // (WriteText shares the path via Plain).
 func TestWriteMarkdownMaxBytes(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte("<html><body><h1>Heading</h1><p>Some paragraph content.</p></body></html>"))
 	if err != nil {
 		t.Fatalf("open: %v", err)

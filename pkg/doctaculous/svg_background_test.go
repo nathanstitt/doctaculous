@@ -68,6 +68,7 @@ func recordLogf() (HTMLOption, func() []string) {
 // that a dead end there is invisible (the background simply does not paint), which
 // is why the negative half of this assertion matters as much as the positive.
 func TestSVGBackgroundEmitsVectorNotImageXObject(t *testing.T) {
+	t.Parallel()
 	raw := htmlToPDF(t,
 		`<html><body><div style="width:80px;height:40px;background-image:url(probe.svg);background-repeat:no-repeat"></div></body></html>`,
 		WithResourceLoader(svgLoader("probe.svg", vectorProbeSVG)),
@@ -95,6 +96,7 @@ func TestSVGBackgroundEmitsVectorNotImageXObject(t *testing.T) {
 // a PNG background MUST still produce an image XObject, so "no image XObject" is
 // a falsifiable claim rather than one a dropped-background bug would satisfy.
 func TestRasterBackgroundStillEmitsImageXObject(t *testing.T) {
+	t.Parallel()
 	pngBytes := onePixelSVGPNG(t, greenRGBA)
 	raw := htmlToPDF(t,
 		`<html><body><div style="width:80px;height:40px;background-image:url(probe.png)"></div></body></html>`,
@@ -111,6 +113,7 @@ func TestRasterBackgroundStillEmitsImageXObject(t *testing.T) {
 // the SVG's own authored viewport (which is what lets the painter scale it into
 // the computed tile rect).
 func TestSVGBackgroundCarriesSceneNotImage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes(
 		[]byte(`<html><body style="margin:0"><div style="width:80px;height:40px;background-image:url(probe.svg);background-repeat:no-repeat"></div></body></html>`),
 		WithResourceLoader(svgLoader("probe.svg", vectorProbeSVG)),
@@ -137,6 +140,7 @@ func TestSVGBackgroundCarriesSceneNotImage(t *testing.T) {
 // only by accident. The intrinsic size the item carries is what the painter's
 // backgroundTileSize divides by, so asserting on it is asserting on the ratio.
 func TestSVGBackgroundSizeUsesIntrinsicRatio(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		svg            string
@@ -192,6 +196,7 @@ func TestSVGBackgroundSizeUsesIntrinsicRatio(t *testing.T) {
 // sizes, each derived from that ratio. Asserting only on IntrinsicW/H would pass
 // if the painter ignored them entirely.
 func TestSVGBackgroundContainVsCoverDiffer(t *testing.T) {
+	t.Parallel()
 	const wideSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100">` +
 		`<rect width="400" height="100" fill="#00c000"/></svg>`
 
@@ -222,6 +227,7 @@ func TestSVGBackgroundContainVsCoverDiffer(t *testing.T) {
 // on a vector source: an explicit length pair, and the initial `auto` (which uses
 // the intrinsic size directly).
 func TestSVGBackgroundExplicitAndAutoSize(t *testing.T) {
+	t.Parallel()
 	const src = `<html><body style="margin:0"><div style="width:200px;height:200px;` +
 		`background-image:url(bg.svg);background-repeat:no-repeat;%s"></div></body></html>`
 
@@ -261,6 +267,7 @@ func TestSVGBackgroundExplicitAndAutoSize(t *testing.T) {
 // and say so. Both halves are asserted — a silent degradation and a blank box
 // are each failures.
 func TestSVGBackgroundRepeatDegradesToOnePaintAndLogs(t *testing.T) {
+	t.Parallel()
 	logOpt, logged := recordLogf()
 	doc, err := OpenHTMLBytes(
 		[]byte(`<html><body style="margin:0"><div style="width:400px;height:200px;`+
@@ -287,6 +294,7 @@ func TestSVGBackgroundRepeatDegradesToOnePaintAndLogs(t *testing.T) {
 // tiling suppression must be specific to the vector path. A raster background
 // with the same declaration keeps its repeat flags and logs nothing.
 func TestRasterBackgroundStillTiles(t *testing.T) {
+	t.Parallel()
 	logOpt, logged := recordLogf()
 	pngBytes := onePixelSVGPNG(t, greenRGBA)
 	doc, err := OpenHTMLBytes(
@@ -310,6 +318,7 @@ func TestRasterBackgroundStillTiles(t *testing.T) {
 // boxes with the same unsupported declaration produce one line, not three. A
 // per-box log on a page full of icons would be worse than useless.
 func TestSVGBackgroundRepeatWarnsOnce(t *testing.T) {
+	t.Parallel()
 	logOpt, logged := recordLogf()
 	const box = `<div style="width:400px;height:60px;background-image:url(bg.svg);background-repeat:repeat"></div>`
 	_, err := OpenHTMLBytes(
@@ -335,6 +344,7 @@ func TestSVGBackgroundRepeatWarnsOnce(t *testing.T) {
 // not fall through to image.Decode (which would misreport it as an image
 // failure), must not panic, and must leave the box's background COLOR painting.
 func TestBrokenSVGBackgroundDegradesGracefully(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, body string }{
 		{"not xml at all", "this is not markup"},
 		{"truncated", `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect`},
@@ -402,6 +412,7 @@ var greenRGBA = color.RGBA{R: 0, G: 192, B: 0, A: 255}
 // (CLAUDE.md roadmap item 8). What must no longer happen is losing them in
 // silence.
 func TestInlineSVGUnsupportedSelectorWarns(t *testing.T) {
+	t.Parallel()
 	logOpt, logged := recordLogf()
 	const src = `<html><body><svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
 <style>
@@ -428,6 +439,7 @@ func TestInlineSVGUnsupportedSelectorWarns(t *testing.T) {
 // author wrote; if either produced a selector diagnostic, the warning would fire
 // on essentially every document and become noise nobody reads.
 func TestOrdinaryDocumentLogsNoSelectorDiagnostic(t *testing.T) {
+	t.Parallel()
 	logOpt, logged := recordLogf()
 	const src = `<html><head><style>
   body { margin: 0 }

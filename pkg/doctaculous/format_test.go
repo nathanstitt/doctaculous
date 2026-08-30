@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseFormat(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want Format
@@ -56,6 +57,7 @@ func TestParseFormat(t *testing.T) {
 }
 
 func TestFormatFromPath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		path string
 		want Format
@@ -97,6 +99,7 @@ func TestFormatFromPath(t *testing.T) {
 // capability map: when a new frontend or writer lands, flipping its bit here
 // is part of that PR.
 func TestCanConvertMatrix(t *testing.T) {
+	t.Parallel()
 	inputs := map[Format]bool{
 		FormatPDF:      true,
 		FormatDOCX:     true,
@@ -163,6 +166,7 @@ func TestCanConvertMatrix(t *testing.T) {
 }
 
 func TestFormatFromMIME(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want Format
@@ -231,6 +235,7 @@ func TestFormatFromMIME(t *testing.T) {
 // TestFormatMIMERoundTrip pins the documented invariant: every format the
 // toolkit knows has a canonical MIME type that maps back to itself.
 func TestFormatMIMERoundTrip(t *testing.T) {
+	t.Parallel()
 	for f := range formatCaps {
 		mt := f.MIME()
 		if mt == "" {
@@ -247,6 +252,7 @@ func TestFormatMIMERoundTrip(t *testing.T) {
 }
 
 func TestFormatRoles(t *testing.T) {
+	t.Parallel()
 	if !FormatPDF.ValidInput() || !FormatPDF.ValidOutput() {
 		t.Errorf("FormatPDF should be a valid input and output")
 	}

@@ -12,6 +12,7 @@ import (
 // TestConvertHTMLToPDFRoundTrips renders HTML to PDF and re-parses the output with
 // the project's own parser, asserting a valid, non-empty page count.
 func TestConvertHTMLToPDFRoundTrips(t *testing.T) {
+	t.Parallel()
 	html := `<!DOCTYPE html><html><head><style>body{margin:0}</style></head>
 <body><p>Hello PDF world</p></body></html>`
 
@@ -33,6 +34,7 @@ func TestConvertHTMLToPDFRoundTrips(t *testing.T) {
 // (a ToUnicode CMap and text-showing operators), i.e. real selectable text rather
 // than outline fills.
 func TestConvertHTMLToPDFEmbedsSearchableText(t *testing.T) {
+	t.Parallel()
 	html := `<!DOCTYPE html><html><head><style>body{margin:0}</style></head>
 <body><p>Searchable</p></body></html>`
 	var buf bytes.Buffer
@@ -50,6 +52,7 @@ func TestConvertHTMLToPDFEmbedsSearchableText(t *testing.T) {
 
 // TestWritePDFWorksForDOCX exercises the DOCX -> PDF path through the same writer.
 func TestWritePDFWorksForDOCX(t *testing.T) {
+	t.Parallel()
 	fx := gendocx.Core[0]
 	d, err := OpenDOCXBytes(fx.Bytes())
 	if err != nil {
@@ -67,6 +70,7 @@ func TestWritePDFWorksForDOCX(t *testing.T) {
 // TestWritePDFRejectsNonReflowDocument asserts WritePDF on an opened PDF (not a
 // reflow document) returns a typed error rather than panicking.
 func TestWritePDFRejectsNonReflowDocument(t *testing.T) {
+	t.Parallel()
 	// A minimal HTML->PDF, reopened as a PDF document, is not a reflow document.
 	var pdfBuf bytes.Buffer
 	if err := convertHTMLToPDF(context.Background(), bytes.NewReader([]byte("<p>x</p>")), &pdfBuf, PDFOptions{}); err != nil {
@@ -86,6 +90,7 @@ func TestWritePDFRejectsNonReflowDocument(t *testing.T) {
 // @media print rule that recolors text yields different output than the screen
 // render (the color is baked into the compressed content stream, so screen ≠ print).
 func TestConvertHTMLToPDFPrintMedia(t *testing.T) {
+	t.Parallel()
 	html := `<!DOCTYPE html><html><head><style>
 	p { color: #ff0000 }
 	@media print { p { color: #00ff00 } }
@@ -108,6 +113,7 @@ func TestConvertHTMLToPDFPrintMedia(t *testing.T) {
 // the plan: structural fidelity + searchable text, avoiding brittle pixel alignment
 // between the single-tall raster page and the Letter-sized PDF page).
 func TestHTMLToPDFFidelity(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ name, html string }{
 		{"text", `<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body><p>Hello PDF</p></body></html>`},
 		{"borders", `<!DOCTYPE html><html><head><style>body{margin:0}.b{border:4px solid #036;padding:8px}</style></head><body><div class="b">Boxed</div></body></html>`},

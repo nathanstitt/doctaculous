@@ -1,6 +1,8 @@
 package font
 
 import (
+	"strings"
+
 	"github.com/benoitkugler/textlayout/fonts"
 	"github.com/benoitkugler/textlayout/fonts/truetype"
 
@@ -64,7 +66,72 @@ type Face struct {
 
 	progData []byte      // raw program bytes for embedding (nil if not retained)
 	progKind ProgramKind // format of progData
+
+	// colr/cpal back ColorLayers: a face with colour tables paints certain glyphs as
+	// stacked coloured outlines rather than one monochrome path. Both are nil for the
+	// overwhelmingly common non-colour face, and every colour path checks colr first,
+	// so an ordinary face costs one nil check.
+	colr *colrTable
+	cpal *cpalTable
+	// sbix/cbdt back ColorBitmap: a face storing colour glyphs as PNG strikes rather
+	// than as layered outlines (Apple Color Emoji, Noto Color Emoji). Consulted only
+	// when colr is nil, since vector layers scale and bitmaps do not.
+	sbix *sbixTable
+	cbdt *cbdtTable
+	// numGlyphs is needed to index sbix's per-strike offset array.
+	numGlyphs int
 }
+
+// ColorBitmapFor returns the colour BITMAP for glyph gid at the given em size, or
+// ok=false when the face has none. sizePt selects among the font's strikes: the
+// nearest is chosen, preferring a larger one so the image is downscaled rather than
+// enlarged.
+//
+// Prefer ColorLayers: those are outlines and scale cleanly. This is the fallback for
+// fonts that ship rendered images (Apple Color Emoji has no COLR data at all), and the
+// result is an image whose fidelity is bounded by the strike it came from.
+func (f *Face) ColorBitmapFor(gid uint16, sizePt float64) (ColorBitmap, bool) {
+	if f == nil {
+		return ColorBitmap{}, false
+	}
+	if f.sbix != nil {
+		if bm, ok := f.sbix.bitmapFor(gid, f.numGlyphs, sizePt); ok {
+			return bm, true
+		}
+	}
+	if f.cbdt != nil {
+		if bm, ok := f.cbdt.bitmapFor(gid, sizePt); ok {
+			return bm, true
+		}
+	}
+	return ColorBitmap{}, false
+}
+
+// HasColorBitmaps reports whether the face carries colour bitmap strikes.
+func (f *Face) HasColorBitmaps() bool { return f != nil && (f.sbix != nil || f.cbdt != nil) }
+
+// ColorLayers returns the colour layers of glyph gid — the ordered (outline, colour)
+// pairs a colour font paints it as — or ok=false for a glyph with no colour data, or a
+// face with no usable COLR/CPAL pair.
+//
+// The caller draws each layer's GID through the normal outline path and fills it with
+// the layer's Color, bottom layer first. A layer with Foreground set takes the
+// surrounding text colour instead, which is how a colour font marks the parts meant to
+// follow the document (COLR's 0xFFFF palette sentinel).
+//
+// ok=false is the honest degradation for a paint graph this engine cannot express —
+// gradients, transforms, composites — because the caller then renders the glyph's own
+// monochrome outline rather than a flat colour that would be confidently wrong.
+func (f *Face) ColorLayers(gid uint16) ([]ColorLayer, bool) {
+	if f.colr == nil {
+		return nil, false
+	}
+	return f.colr.layersFor(gid, f.cpal)
+}
+
+// HasColorGlyphs reports whether the face carries a usable COLR/CPAL pair, so a caller
+// can skip the per-glyph colour probe entirely for an ordinary face.
+func (f *Face) HasColorGlyphs() bool { return f != nil && f.colr != nil }
 
 // LoadStandard returns a Face for a named font family, substituting a bundled
 // permissively-licensed look-alike. It resolves the standard-14 names and common
@@ -191,6 +258,36 @@ func (f *Face) OpenTypeFont() (*truetype.Font, bool) {
 		return nil, false
 	}
 	return tt.f, true
+}
+
+// FamilyName returns the family the face's own 'name' table declares, or ok=false
+// for a face with no readable name table (a classic Type1 face, or an sfnt whose
+// name table is absent or empty).
+//
+// It prefers the typographic family (name ID 16) over the legacy family (ID 1),
+// because per-weight files from some foundries put a style-qualified name in ID 1 —
+// Google's BarlowCondensed-SemiBold.ttf declares ID 1 "Barlow Condensed SemiBold"
+// but ID 16 "Barlow Condensed". ID 16 is optional and is omitted by fonts whose
+// family/style pair already fits the legacy four-style model, so ID 1 is the
+// fallback rather than the other way round.
+//
+// This exists so a caller can VERIFY that a font resolved by name is actually the
+// font it asked for: the OS matcher is fuzzy and answers even when nothing matches
+// (see pkg/layout/font.OSFontProvider), so the declared name is the only trustworthy
+// evidence of identity.
+func (f *Face) FamilyName() (string, bool) {
+	tt, ok := f.OpenTypeFont()
+	if !ok {
+		return "", false
+	}
+	for _, id := range [...]truetype.NameID{truetype.NamePreferredFamily, truetype.NameFontFamily} {
+		if e := tt.Names.SelectEntry(id); e != nil {
+			if name := strings.TrimSpace(e.String()); name != "" {
+				return name, true
+			}
+		}
+	}
+	return "", false
 }
 
 // UnitsPerEm returns the face's units-per-em (always > 0).

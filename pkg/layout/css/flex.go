@@ -18,6 +18,37 @@ type flexItemSizing struct {
 	shrink       float64 // flex-shrink
 	minMain      float64 // used minimum main size (incl. the automatic minimum)
 	maxMain      float64 // used maximum main size; <0 = none
+
+	// mainStart/mainEnd and crossStart/crossEnd are the item's resolved margins on
+	// each axis, in points. Flex sizing works on OUTER sizes — an item's margins
+	// consume main-axis space and offset its cross position — so they belong with the
+	// numeric inputs rather than being read separately at placement time, where it
+	// would be too late for free-space distribution to have accounted for them.
+	//
+	// autoMainStart/autoMainEnd record `margin: auto` on the main axis, which absorbs
+	// free space (CSS Flexbox §8.1) and is the idiomatic way to push one item to the
+	// end of a row.
+	mainStart, mainEnd   float64
+	crossStart, crossEnd float64
+	autoMainStart        bool
+	autoMainEnd          bool
+}
+
+// outerMain is the item's hypothetical size plus its main-axis margins: the space it
+// actually consumes in the line.
+func (s flexItemSizing) outerMain(used float64) float64 { return used + s.mainStart + s.mainEnd }
+
+// autoMainCount reports how many `auto` main margins the item has, for free-space
+// distribution.
+func (s flexItemSizing) autoMainCount() int {
+	n := 0
+	if s.autoMainStart {
+		n++
+	}
+	if s.autoMainEnd {
+		n++
+	}
+	return n
 }
 
 // clampF clamps v to [lo, hi]; hi < 0 means no upper bound.
@@ -247,7 +278,7 @@ func (a flexAxis) rect(originMain, originCross, mainPos, crossPos, mainSize, cro
 // interior (positioned item fragments + the content height). Signature matches
 // layoutTable. bandOriginY/fc are reserved for future float interactions (a flex
 // container establishes a BFC; floats inside items are self-contained).
-func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext) interior {
+func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, contentX, bandOriginY float64, fc *floatContext, posCtx *positionedContext, posCB posCBOwner) interior {
 	_ = bandOriginY
 	_ = fc
 	ax := axisFor(b.Style.FlexDirection, effectiveDirection(b))
@@ -257,7 +288,28 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	// cancel.
 	ax.reverseCrossLines = ax.reverseCross != (b.Style.FlexWrap == "wrap-reverse")
 
+	// An absolutely- or fixed-positioned child of a flex container is NOT a flex item
+	// (CSS Flexbox §4.1): it is out of flow and positioned against the container's
+	// padding box, exactly as in a block container. Laying it out as an item instead
+	// pinned it to the container's edge and discarded its `left`/`top` — measured, a
+	// `left: 300px` child landed at x=0 under `display:flex` and at x=300 under a plain
+	// block. Defer them to the same pass a block container uses.
 	items := flexItemBoxes(b)
+	if posCtx != nil {
+		var inflow []*cssbox.Box
+		for _, it := range items {
+			if it.Position == cssbox.PosAbsolute || it.Position == cssbox.PosFixed {
+				cb := posCB
+				if it.Position == cssbox.PosFixed {
+					cb = posCBOwner{isPage: true}
+				}
+				posCtx.deferred = append(posCtx.deferred, deferredAbs{box: it, cb: cb})
+				continue
+			}
+			inflow = append(inflow, it)
+		}
+		items = inflow
+	}
 	if len(items) == 0 {
 		return interior{contentHeight: 0}
 	}
@@ -333,8 +385,10 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 	for li := range lines {
 		ln := &lines[li]
 		for i := ln.start; i < ln.end; i++ {
-			if crossSizes[i] > ln.cross {
-				ln.cross = crossSizes[i]
+			// The line must be tall enough for the item's MARGIN box, not just its
+			// border box, or a cross margin would overflow the line it sits in.
+			if outer := crossSizes[i] + sizings[i].crossStart + sizings[i].crossEnd; outer > ln.cross {
+				ln.cross = outer
 			}
 		}
 	}
@@ -383,14 +437,36 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 		// justify-content distributes free MAIN space within each line independently
 		// (§9.5), so the leading/between offsets are computed per line.
 		consumed := mainGap * float64(ln.len()-1)
-		for i := range ln.usedMain {
-			consumed += ln.usedMain[i]
+		autoMargins := 0
+		for i := ln.start; i < ln.end; i++ {
+			consumed += sizings[i].outerMain(ln.usedMain[i-ln.start])
+			autoMargins += sizings[i].autoMainCount()
 		}
-		leading, between := justifyOffsets(b.Style.JustifyContent, lineMain[li]-consumed, ln.len())
+		free := lineMain[li] - consumed
+		// `margin: auto` on the main axis absorbs ALL free space before
+		// justify-content sees any (CSS Flexbox §8.1) — it is how an author pushes one
+		// item to the end of a row. With any auto margin present, justify-content has
+		// nothing left to distribute, which is the spec's own resolution order.
+		autoShare := 0.0
+		if autoMargins > 0 && free > 0 {
+			autoShare = free / float64(autoMargins)
+			free = 0
+		}
+		leading, between := justifyOffsets(b.Style.JustifyContent, free, ln.len())
 
 		mainPos := leading
 		for i := ln.start; i < ln.end; i++ {
 			used := ln.usedMain[i-ln.start]
+			sz := sizings[i]
+			startMargin := sz.mainStart
+			if sz.autoMainStart {
+				startMargin = autoShare
+			}
+			endMargin := sz.mainEnd
+			if sz.autoMainEnd {
+				endMargin = autoShare
+			}
+			mainPos += startMargin
 			align := resolvedAlign(b, items[i])
 			itemCross := crossSizes[i]
 
@@ -398,16 +474,20 @@ func (e *Engine) layoutFlex(ctx context.Context, b *cssbox.Box, contentW, conten
 			// contents at that cross measure (a row item's width is its main size, which
 			// is fixed; stretch grows its HEIGHT — pin the fragment height to the line).
 			if align == "stretch" && !itemHasDefiniteCross(items[i], ax) {
-				frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, used, ln.cross)
+				// Stretch fills the line LESS the item's own cross margins, so a
+				// stretched item with margins does not overflow.
+				frags[i], itemCross = e.stretchFlexItem(ctx, items[i], ax, used, ln.cross-sz.crossStart-sz.crossEnd)
 			}
 
-			cp := ln.crossPos + crossOffset(align, ln.cross, itemCross, ax)
+			// The cross offset positions the item's MARGIN box, so its own cross-start
+			// margin insets it within whatever that alignment produced.
+			cp := ln.crossPos + crossOffset(align, ln.cross, itemCross+sz.crossStart+sz.crossEnd, ax) + sz.crossStart
 			pos := mainPos
 			if ax.reverseMain {
 				pos = lineMain[li] - mainPos - used
 			}
 			placeFlexFragment(frags[i], ax, originMain, originCross, pos, cp, used, itemCross)
-			mainPos += used + mainGap + between
+			mainPos += used + endMargin + mainGap + between
 		}
 
 		// Baseline alignment post-pass, PER LINE (§9.4 baseline groups are per-line).
@@ -521,6 +601,7 @@ func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxi
 	if ax.vertical {
 		// column: relayout at width = lineCross, height pinned to usedMain.
 		pos := &positionedContext{}
+		defer withDefiniteHeight(it, usedMain)()
 		res := e.layoutBlock(ctx, it, lineCross, 0, 0, 0,
 			&floatContext{cbLeft: 0, cbRight: lineCross}, pos, posCBOwner{isPage: true})
 		frag := res.frag
@@ -533,6 +614,12 @@ func (e *Engine) stretchFlexItem(ctx context.Context, it *cssbox.Box, ax flexAxi
 	}
 	// row: width = usedMain (the main size); pin height to lineCross.
 	pos := &positionedContext{}
+	// The stretched height must be DEFINITE before the interior lays out, not pinned
+	// onto the fragment afterwards. A flex item whose height comes from stretch (or
+	// from its own flex:1) laid its children out as if it were auto-height, so
+	// justify-content had nothing to resolve against and packed them at the top —
+	// measured: children at y=0 where an explicit height centred them at y=90.
+	defer withDefiniteHeight(it, lineCross)()
 	res := e.layoutBlock(ctx, it, usedMain, 0, 0, 0,
 		&floatContext{cbLeft: 0, cbRight: usedMain}, pos, posCBOwner{isPage: true})
 	frag := res.frag
@@ -738,7 +825,9 @@ func collectLines(sizings []flexItemSizing, wrap bool, innerMain, mainGap float6
 	start := 0
 	used := 0.0
 	for i := 0; i < n; i++ {
-		h := sizings[i].hypothetical
+		// Pack by the OUTER size: an item's margins consume line space, so a line that
+		// fits ignoring them may not fit once they are counted.
+		h := sizings[i].outerMain(sizings[i].hypothetical)
 		next := used + h
 		if i > start {
 			next += mainGap
@@ -762,7 +851,7 @@ func collectLines(sizings []flexItemSizing, wrap bool, innerMain, mainGap float6
 func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, innerMain, availCross float64) flexItemSizing {
 	base := e.flexBaseSize(ctx, it, ax, innerMain, availCross)
 	minMain, maxMain := e.usedMinMaxMain(ctx, it, ax, availCross)
-	return flexItemSizing{
+	sz := flexItemSizing{
 		base:         base,
 		hypothetical: clampF(base, minMain, maxMain),
 		grow:         it.Style.FlexGrow,
@@ -770,6 +859,9 @@ func (e *Engine) itemSizing(ctx context.Context, it *cssbox.Box, ax flexAxis, in
 		minMain:      minMain,
 		maxMain:      maxMain,
 	}
+	sz.mainStart, sz.mainEnd, sz.crossStart, sz.crossEnd,
+		sz.autoMainStart, sz.autoMainEnd = flexMargins(it, ax, innerMain)
+	return sz
 }
 
 // flexBaseSize resolves flex-basis to the item's flex base size.
@@ -966,4 +1058,58 @@ func placeFlexFragment(frag *Fragment, ax flexAxis, originMain, originCross, mai
 	// a flex item is otherwise dropped at paint time (it is resolved onto the fragment's
 	// Positioned slice, which only the atomic AppendItems path emits).
 	frag.IsBFC = true
+}
+
+// flexMargins resolves an item's margins onto the flex axes, reporting which main-axis
+// margins are `auto`.
+//
+// Flex layout was previously margin-blind entirely: an item's size and position came
+// from its border box, so `margin-top` on a child of a flex column did nothing at all
+// while the identical rule on a block child worked. That reads as "the rule did not
+// apply", which is the most expensive kind of failure to diagnose.
+//
+// Percentages resolve against the container's INLINE size on both axes (CSS 2.1 §8.3),
+// which is why innerMain is only the right basis for a row container; for a column the
+// inline size is the cross measure. The caller passes the main size and this corrects
+// for the axis.
+func flexMargins(it *cssbox.Box, ax flexAxis, innerMain float64) (mainStart, mainEnd, crossStart, crossEnd float64, autoStart, autoEnd bool) {
+	fs := it.Style.FontSizePt
+	get := func(l gcss.Length) (float64, bool) {
+		if l.Unit == gcss.UnitAuto {
+			return 0, true
+		}
+		v, _ := resolveLen(l, fs, innerMain)
+		return v, false
+	}
+	top, autoTop := get(it.Style.MarginTop)
+	right, autoRight := get(it.Style.MarginRight)
+	bottom, autoBottom := get(it.Style.MarginBottom)
+	left, autoLeft := get(it.Style.MarginLeft)
+
+	if ax.vertical {
+		// Column: main is vertical.
+		return top, bottom, left, right, autoTop, autoBottom
+	}
+	return left, right, top, bottom, autoLeft, autoRight
+}
+
+// withDefiniteHeight temporarily gives a box a definite height for the duration of one
+// layout, returning a function that restores the original.
+//
+// A flex item's cross size is resolved by the flex algorithm, but its INTERIOR is laid
+// out by a nested formatting context that reads the box's own style. Writing the height
+// onto the fragment after that layout is too late: anything inside that needs a
+// definite height — justify-content, align-items, a percentage height — has already
+// resolved against auto.
+//
+// Mutating the box is safe here because layout is single-threaded and the value is
+// restored before the caller returns; the box tree is read-only across the CONCURRENT
+// render fan-out, which happens strictly after layout completes.
+func withDefiniteHeight(b *cssbox.Box, h float64) func() {
+	if b == nil || h < 0 {
+		return func() {}
+	}
+	prev := b.Style.Height
+	b.Style.Height = gcss.Length{Value: h, Unit: gcss.UnitPx}
+	return func() { b.Style.Height = prev }
 }

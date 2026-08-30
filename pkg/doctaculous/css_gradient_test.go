@@ -53,6 +53,7 @@ func wantPixel(t *testing.T, img *image.RGBA, x, y int, want color.RGBA, tol int
 // actually paints, and paints the RIGHT colours in the RIGHT places — not merely
 // that something non-white appeared.
 func TestLinearGradientPaintsKnownColours(t *testing.T) {
+	t.Parallel()
 	black := color.RGBA{0, 0, 0, 255}
 	white := color.RGBA{255, 255, 255, 255}
 	red := color.RGBA{255, 0, 0, 255}
@@ -189,6 +190,7 @@ func TestLinearGradientPaintsKnownColours(t *testing.T) {
 // top-left corner and the last exactly at the bottom-right, with the
 // perpendicular through each corner staying that colour.
 func TestLinearGradientCornerPixels(t *testing.T) {
+	t.Parallel()
 	src := `<!DOCTYPE html><html><body style="margin:0">` +
 		`<div style="width:100px;height:40px;background:linear-gradient(to bottom right, black 0, white 100%)"></div>` +
 		`</body></html>`
@@ -229,6 +231,7 @@ func TestLinearGradientCornerPixels(t *testing.T) {
 
 // TestRadialGradientPaintsKnownColours proves the radial path end to end.
 func TestRadialGradientPaintsKnownColours(t *testing.T) {
+	t.Parallel()
 	red := color.RGBA{255, 0, 0, 255}
 	blue := color.RGBA{0, 0, 255, 255}
 
@@ -287,6 +290,7 @@ func TestRadialGradientPaintsKnownColours(t *testing.T) {
 // establish no geometry. Nothing paints, the background COLOUR still shows, and
 // the engine says why rather than failing silently.
 func TestRadialGradientDegenerateRadiusDegradesHonestly(t *testing.T) {
+	t.Parallel()
 	logOpt, logged := recordLogf()
 	src := `<!DOCTYPE html><html><body style="margin:0">` +
 		`<div style="width:100px;height:100px;background-color:red;` +
@@ -324,6 +328,7 @@ func TestRadialGradientDegenerateRadiusDegradesHonestly(t *testing.T) {
 // background-size changes the gradient's BOX, so the whole ramp compresses into
 // the sized tile rather than spanning the element.
 func TestGradientRespectsBackgroundSize(t *testing.T) {
+	t.Parallel()
 	red := color.RGBA{255, 0, 0, 255}
 	blue := color.RGBA{0, 0, 255, 255}
 
@@ -349,6 +354,7 @@ func TestGradientRespectsBackgroundSize(t *testing.T) {
 // same geometry path as a bitmap background: the origin box sizes it and the
 // clip box confines it.
 func TestGradientRespectsBackgroundClipAndOrigin(t *testing.T) {
+	t.Parallel()
 	// A 20px border with background-clip:content-box means nothing paints over
 	// the border or padding area.
 	src := `<!DOCTYPE html><html><body style="margin:0">` +
@@ -382,6 +388,7 @@ func TestGradientRespectsBackgroundClipAndOrigin(t *testing.T) {
 // toward rgba(0,0,0,0) and produces a visibly GREY midpoint, which is the
 // artifact this test exists to catch.
 func TestGradientTransparentStopHasNoDarkBand(t *testing.T) {
+	t.Parallel()
 	img := renderGradientBox(t, "background:linear-gradient(to right, red, transparent)")
 
 	for _, x := range []int{10, 25, 50, 75, 90} {
@@ -416,6 +423,7 @@ func TestGradientTransparentStopHasNoDarkBand(t *testing.T) {
 // CSS gradient must reach the painter as a gradient, never pre-rasterized into a
 // bitmap, so a vector backend can emit a native shading.
 func TestGradientCarriesNoRasterImage(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenHTMLBytes([]byte(
 		`<html><body style="margin:0"><div style="width:80px;height:40px;` +
 			`background:linear-gradient(to right, red, blue)"></div></body></html>`))
@@ -445,6 +453,7 @@ func TestGradientCarriesNoRasterImage(t *testing.T) {
 // as a real /Shading dictionary rather than stamping a bitmap — the payoff for
 // routing CSS gradients through the same seam SVG paint servers use.
 func TestGradientEmitsNativePDFShading(t *testing.T) {
+	t.Parallel()
 	raw := htmlToPDF(t,
 		`<html><body><div style="width:80px;height:40px;background:linear-gradient(to right, red, blue)"></div></body></html>`)
 	if hasImageXObject(raw) {
@@ -462,6 +471,7 @@ func TestGradientEmitsNativePDFShading(t *testing.T) {
 // COLOUR painting rather than dropping the whole declaration or painting
 // something invented.
 func TestMalformedGradientDegradesToBackgroundColour(t *testing.T) {
+	t.Parallel()
 	for _, style := range []string{
 		// A colour hint, deliberately unsupported.
 		"background-color:red;background-image:linear-gradient(black, 30%, white)",

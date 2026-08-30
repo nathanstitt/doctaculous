@@ -88,6 +88,7 @@ func renderXLSXGolden(t *testing.T, name string, opts ...OpenOption) {
 // TestXLSXGolden renders the specimen workbook end to end — the XLSX visual
 // entry, mirroring TestMarkdownTextGolden. Run with -update, then eyeball.
 func TestXLSXGolden(t *testing.T) {
+	t.Parallel()
 	renderXLSXGolden(t, "xlsx-specimen", WithViewportWidth(460), WithBundledFonts())
 }
 
@@ -96,5 +97,6 @@ func TestXLSXGolden(t *testing.T) {
 // (and, being the only sheet, without a heading). Run with -update, then eyeball
 // that only the "Merges" sheet appears.
 func TestXLSXSheetSelectionGolden(t *testing.T) {
+	t.Parallel()
 	renderXLSXGolden(t, "xlsx-one-sheet", WithViewportWidth(460), WithBundledFonts(), WithSheets("Merges"))
 }

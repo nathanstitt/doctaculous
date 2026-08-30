@@ -50,6 +50,7 @@ Visit {\field{\*\fldinst HYPERLINK "https://example.com/"}{\fldrslt the example 
 // TestRTFGolden renders the specimen end to end — the RTF visual entry. Run
 // with -update, then eyeball.
 func TestRTFGolden(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenRTFBytes(rtfSpecimen(), WithViewportWidth(460), WithBundledFonts())
 	if err != nil {
 		t.Fatalf("OpenRTFBytes: %v", err)
@@ -88,6 +89,7 @@ func TestRTFGolden(t *testing.T) {
 // TestRTFDetectionAndConvert pins the unified-conversion wiring: content
 // detection by the {\rtf magic, format stamping, and a structure conversion.
 func TestRTFDetectionAndConvert(t *testing.T) {
+	t.Parallel()
 	doc, err := OpenBytes(rtfSpecimen())
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)

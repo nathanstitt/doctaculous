@@ -49,6 +49,24 @@ h5 { font-size: 13px; font-weight: bold; margin-top: 9px; margin-bottom: 9px; }
 h6 { font-size: 11px; font-weight: bold; margin-top: 7px; margin-bottom: 7px; }
 p, blockquote { margin-top: 16px; margin-bottom: 16px; }
 th { font-weight: bold; }
+
+/* Inline emphasis (HTML Standard "Rendering" §15.3.3, CSS2.1 sample UA sheet).
+   Without these, <strong>/<b> and <em>/<i> inherited the surrounding weight and slant,
+   so emphasis was structurally present — and survived conversion to Markdown — but was
+   invisible in every rasterized format.
+   The spec says "bolder"/"smaller", but this engine's font-weight is the binary
+   bold/normal its four-style bundled families can express and its font-size takes a
+   length, so neither relative keyword parses: they would be dropped as invalid values
+   and the emphasis would stay invisible. "bold" is the honest spelling of what the
+   renderer can actually do. <small>/<big> are deliberately omitted rather than given a
+   hardcoded px size, which would be wrong at every font-size but the default. */
+strong, b { font-weight: bold; }
+em, i, cite, var, dfn { font-style: italic; }
+u, ins { text-decoration: underline; }
+/* <mark>'s yellow highlight, per the HTML Standard's rendering section. It landed with
+   inline-box background painting: before that, backgrounds on non-replaced inline boxes
+   were silently dropped, so this rule would have cascaded and then done nothing. */
+mark { background-color: #ffff00; color: #000000; }
 /* Preformatted text preserves whitespace and uses a monospace family (CSS2.1 sample
    UA sheet). pre-wrap on textarea so a long line still wraps inside the field. */
 pre { white-space: pre; font-family: monospace; }

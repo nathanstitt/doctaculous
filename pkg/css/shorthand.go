@@ -519,19 +519,55 @@ func applyGridShorthand(cs *ComputedStyle, val string) {
 // background-origin and background-clip share box keywords: the first box keyword
 // sets origin (and clip, which defaults to it), a second sets clip — matching CSS.
 func applyBackground(cs *ComputedStyle, value string) {
-	parsed, ok := parseBackgroundShorthand(value)
-	if !ok {
-		return // invalid declaration: leave every longhand as the cascade left it
+	// `background` is a COMMA-SEPARATED LAYER LIST. Only the final layer may carry the
+	// background-color (CSS Backgrounds §3.10), which is exactly what made the common
+	// idiom fail: `background: linear-gradient(...), #07080d` — a gradient over a
+	// fallback colour — was unparseable as a single layer, so the whole declaration
+	// was dropped and the element painted nothing at all. That reads as "gradients are
+	// unsupported" rather than "the list was rejected".
+	parts := splitTopLevelCommas(value)
+	layers := make([]BackgroundLayer, 0, len(parts))
+	var bgColor color.RGBA
+	for i, part := range parts {
+		parsed, ok := parseBackgroundShorthand(part)
+		if !ok {
+			return // any invalid layer invalidates the whole declaration
+		}
+		// A colour is only legal in the LAST layer. One earlier is a parse error, not
+		// something to silently ignore, or `background: red, blue` would quietly paint.
+		if parsed.color != (color.RGBA{}) && i != len(parts)-1 {
+			return
+		}
+		if i == len(parts)-1 {
+			bgColor = parsed.color
+		}
+		layers = append(layers, BackgroundLayer{
+			Image:    parsed.image,
+			Gradient: parsed.gradient,
+			Repeat:   parsed.repeat,
+			Position: parsed.position,
+			Size:     parsed.size,
+			Origin:   parsed.origin,
+			Clip:     parsed.clip,
+			Attach:   parsed.attach,
+		})
 	}
-	cs.BackgroundColor = parsed.color
-	cs.BackgroundImage = parsed.image
-	cs.BackgroundGradient = parsed.gradient
-	cs.BackgroundRepeat = parsed.repeat
-	cs.BackgroundPosition = parsed.position
-	cs.BackgroundSize = parsed.size
-	cs.BackgroundOrigin = parsed.origin
-	cs.BackgroundClip = parsed.clip
-	cs.BackgroundAttach = parsed.attach
+	if len(layers) == 0 {
+		return
+	}
+	cs.BackgroundColor = bgColor
+	cs.BackgroundLayers = layers
+	// The first layer also populates the single-layer fields, so every existing
+	// consumer that reads BackgroundImage/BackgroundGradient keeps working unchanged.
+	first := layers[0]
+	cs.BackgroundImage = first.Image
+	cs.BackgroundGradient = first.Gradient
+	cs.BackgroundRepeat = first.Repeat
+	cs.BackgroundPosition = first.Position
+	cs.BackgroundSize = first.Size
+	cs.BackgroundOrigin = first.Origin
+	cs.BackgroundClip = first.Clip
+	cs.BackgroundAttach = first.Attach
 }
 
 // backgroundShorthand is one fully-parsed `background` value. Every field starts
@@ -643,6 +679,52 @@ func splitBackgroundSlash(value string) (posPart, sizePart string) {
 		}
 	}
 	return value, ""
+}
+
+// parseOverflowKeyword validates a single CSS overflow keyword. "clip" is accepted
+// alongside the scrolling keywords: it differs from "hidden" only in forbidding
+// programmatic scrolling and allowing overflow-clip-margin, neither of which exists in
+// this engine's single-tall-page model, so its USED behavior here is exactly hidden's.
+// Before it was accepted, "overflow: clip" fell through the value check and left the
+// property at its "visible" initial, so the box silently did not clip at all.
+func parseOverflowKeyword(v string) (string, bool) {
+	switch v {
+	case "visible", "hidden", "scroll", "auto", "clip":
+		return v, true
+	}
+	return "", false
+}
+
+// clipsOverflow reports whether an overflow keyword clips the box's content. Every
+// value except "visible" clips in this model (scroll/auto have no scroll affordance,
+// clip has no separate semantics — see parseOverflowKeyword).
+func clipsOverflow(v string) bool { return v != "" && v != "visible" }
+
+// parseOverflowShorthand parses the `overflow` shorthand, which takes one or two
+// keywords (`overflow: hidden auto` sets overflow-x then overflow-y). Both axes are
+// folded into the single clip flag this engine models, so when the two differ the
+// CLIPPING one wins: a box that clips on either axis clips its content here, and
+// resolving `visible auto` to "visible" would drop a clip the author asked for.
+func parseOverflowShorthand(value string) (string, bool) {
+	comps := splitComponents(value)
+	if len(comps) == 0 || len(comps) > 2 {
+		return "", false
+	}
+	first, ok := parseOverflowKeyword(comps[0])
+	if !ok {
+		return "", false
+	}
+	if len(comps) == 1 {
+		return first, true
+	}
+	second, ok := parseOverflowKeyword(comps[1])
+	if !ok {
+		return "", false // an invalid second component invalidates the whole declaration
+	}
+	if clipsOverflow(first) {
+		return first, true
+	}
+	return second, true
 }
 
 // parseObjectPosition parses a CSS object-position value into (x, y) fractions of the

@@ -100,6 +100,7 @@ var mdGoldens = []struct {
 }
 
 func TestMarkdownGolden(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata", "golden")
 	if *update {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

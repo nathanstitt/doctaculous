@@ -20,6 +20,28 @@ const inlineImportantIDs = 1 << 20
 type cascadeCtx struct {
 	idx  *docIndex
 	logf func(string, ...any)
+	// host carries a HOST document's stylesheets and inherited values when the SVG is
+	// embedded (an inline <svg> in HTML). Nil for a standalone SVG document, which is
+	// the path every existing caller takes.
+	host *HostContext
+}
+
+// hostParentNode returns the css.Node for the <svg> element's parent in the host
+// document, or nil when standalone.
+func (c *cascadeCtx) hostParentNode() css.Node {
+	if h := c.hostContext(); h != nil {
+		return h.Parent
+	}
+	return nil
+}
+
+// hostContext returns the embedding host's context, or nil when the SVG is a
+// standalone document (including a nil ctx, which resolve tolerates).
+func (c *cascadeCtx) hostContext() *HostContext {
+	if c == nil || c.host.empty() {
+		return nil
+	}
+	return c.host
 }
 
 // matchedDecl is one declaration that matched el, tagged with enough to order
@@ -66,9 +88,18 @@ func (c *cascadeCtx) resolve(el *element) func(name string) (string, bool) {
 	var normal, important []matchedDecl
 	order := 0
 
-	node := &cssNode{el: el}
-	for si := range c.idx.sheets {
-		sheet := &c.idx.sheets[si]
+	node := &cssNode{el: el, hostParent: c.hostParentNode()}
+	// Host sheets first, so they sit BELOW the SVG's own <style> rules in source
+	// order and lose a specificity tie to them: the SVG's internal rules are the more
+	// specific context for its own content. Within each group, document order holds.
+	sheets := c.idx.sheets
+	if c.host != nil && len(c.host.Sheets) > 0 {
+		sheets = make([]css.Stylesheet, 0, len(c.host.Sheets)+len(c.idx.sheets))
+		sheets = append(sheets, c.host.Sheets...)
+		sheets = append(sheets, c.idx.sheets...)
+	}
+	for si := range sheets {
+		sheet := &sheets[si]
 		for ri := range sheet.Rules {
 			rule := &sheet.Rules[ri]
 			// TODO: the media context is hardcoded to screen because SVG only

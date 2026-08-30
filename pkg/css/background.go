@@ -178,3 +178,44 @@ func normalizeBoxValue(v string) (string, bool) {
 	}
 	return "", false
 }
+
+// BackgroundLayer is one layer of a comma-separated background list. The layers paint
+// FIRST ON TOP (CSS Backgrounds §3.10), with the background-color behind all of them.
+//
+// Only the image-ish properties vary per layer; the colour does not, because CSS allows
+// it in the final layer only.
+type BackgroundLayer struct {
+	Image    string
+	Gradient *Gradient
+	Repeat   string
+	Position BackgroundPos
+	Size     BackgroundSize
+	Origin   string
+	Clip     string
+	Attach   string
+}
+
+// HasImage reports whether the layer paints anything at all.
+func (l BackgroundLayer) HasImage() bool { return l.Image != "" || l.Gradient != nil }
+
+// parseBackgroundImageList parses the `background-image` property, which is a
+// comma-separated list of <image> values. A single value yields a one-layer list, so
+// the common case is unchanged.
+//
+// Every layer must parse: one bad value invalidates the declaration per CSS error
+// handling, rather than painting a partial list the author did not write.
+func parseBackgroundImageList(value string) ([]BackgroundLayer, bool) {
+	parts := splitTopLevelCommas(value)
+	out := make([]BackgroundLayer, 0, len(parts))
+	for _, part := range parts {
+		ref, grad, ok := parseBackgroundImage(strings.TrimSpace(part))
+		if !ok {
+			return nil, false
+		}
+		// Only the image is recorded. The other background-* properties are separate
+		// longhands whose final computed values the layout side reads; see
+		// ComputedStyle.BackgroundLayers.
+		out = append(out, BackgroundLayer{Image: ref, Gradient: grad})
+	}
+	return out, true
+}
