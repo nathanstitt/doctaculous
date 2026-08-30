@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
 )
 
 func TestDirectOverridesDocDefault(t *testing.T) {

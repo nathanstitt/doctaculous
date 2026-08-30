@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/font"
 )
 
 // faceUse records the glyphs drawn from one face during device painting, plus the

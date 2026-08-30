@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
+	genxlsx "github.com/nathanstitt/omnidoc/testdata/gen/xlsx"
 )
 
 // treeEqual is the exported semantic comparison (see Equal); aliased here so

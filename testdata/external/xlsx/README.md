@@ -4,7 +4,7 @@ Real-world Excel- and LibreOffice-authored workbooks forming the **preservation
 integration corpus** for `pkg/xlsx`: each file must open through the reader,
 survive a no-op `Edit`+`Save` **part-for-part byte-identical**, and reopen after a
 real cell edit (`external_test.go` in `pkg/xlsx` pins this, plus per-file feature
-counts; `pkg/doctaculous`'s external corpus test also converts and rasterizes
+counts; `pkg/omnidoc`'s external corpus test also converts and rasterizes
 them). Producers were verified from each file's `docProps/app.xml` at download
 time.
 

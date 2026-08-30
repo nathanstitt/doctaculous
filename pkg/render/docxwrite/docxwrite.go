@@ -29,10 +29,10 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // Options configures DOCX output.

@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Style is the resolved presentation state for one element, inherited

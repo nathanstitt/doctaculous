@@ -3,7 +3,7 @@ package content
 import (
 	"image"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // withSoftMask runs paint (one or more Device paint calls) under the current

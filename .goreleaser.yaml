@@ -1,10 +1,10 @@
 # goreleaser configuration — https://goreleaser.com
-# Builds and publishes the `doctaculous` CLI on a pushed v* tag (see
+# Builds and publishes the `omnidoc` CLI on a pushed v* tag (see
 # .github/workflows/release.yml). Pure Go, so every target cross-compiles with
 # CGO disabled; the dev-only cmd/dumpfixtures tool is deliberately not shipped.
 version: 2
 
-project_name: doctaculous
+project_name: omnidoc
 
 before:
   hooks:
@@ -12,9 +12,9 @@ before:
     - go mod tidy
 
 builds:
-  - id: doctaculous
-    main: ./cmd/doctaculous
-    binary: doctaculous
+  - id: omnidoc
+    main: ./cmd/omnidoc
+    binary: omnidoc
     env:
       - CGO_ENABLED=0
     # Reproducible builds: pin the timestamp to the commit.
@@ -36,9 +36,9 @@ builds:
       - arm64
 
 archives:
-  - id: doctaculous
+  - id: omnidoc
     ids:
-      - doctaculous
+      - omnidoc
     # tar.gz everywhere except Windows, which gets a .zip.
     formats:
       - tar.gz

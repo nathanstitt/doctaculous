@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
-	"github.com/nathanstitt/doctaculous/pkg/svg"
-	svgdraw "github.com/nathanstitt/doctaculous/pkg/svg/draw"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/svg"
+	svgdraw "github.com/nathanstitt/omnidoc/pkg/svg/draw"
 )
 
 // svgContentType is the IANA media type for SVG. A resource whose loader reports

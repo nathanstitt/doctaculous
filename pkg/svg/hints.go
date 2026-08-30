@@ -1,7 +1,7 @@
 package svg
 
 import (
-	"github.com/nathanstitt/doctaculous/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/css"
 )
 
 // svgPresentationAttrs is the set of SVG presentation attributes that can

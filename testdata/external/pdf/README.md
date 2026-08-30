@@ -58,7 +58,7 @@ or transparency** (CLAUDE.md "Out of scope"), so the renderer skips that state
 and logs `content: /ExtGState (gs) not applied`. The page still rasterizes — but
 its golden image will look as if the Multiply/alpha were never there. Do **not**
 read that golden as "blending works"; it is the graceful-degradation baseline.
-`TestExternalBlendingDegradesGracefully` (in `pkg/doctaculous`) locks this in: it
+`TestExternalBlendingDegradesGracefully` (in `pkg/omnidoc`) locks this in: it
 asserts the page renders without error AND that the skip is reported via `Logf`.
 
 When transparency moves in scope, add a dedicated *generated* fixture in

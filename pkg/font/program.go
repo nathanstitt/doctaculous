@@ -9,7 +9,7 @@ import (
 	"github.com/benoitkugler/textlayout/fonts/type1"
 	type1c "github.com/benoitkugler/textlayout/fonts/type1C"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // glyphProgram is the small slice of a parsed font program the renderer needs:

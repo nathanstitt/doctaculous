@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // approxEqual reports whether a and b are within tol.

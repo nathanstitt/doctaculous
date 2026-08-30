@@ -3,7 +3,7 @@ package raster
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // TestResolveImageCSArrayMalformedNoPanic pins the adversarial-review finding that a

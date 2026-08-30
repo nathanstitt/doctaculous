@@ -5,8 +5,8 @@ import (
 
 	"github.com/benoitkugler/textlayout/fonts"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
 )
 
 // type0Font is a GlyphSource for a composite (Type0) font using Identity-H

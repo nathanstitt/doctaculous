@@ -1,6 +1,6 @@
 package css
 
-import "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+import "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 
 // floatBox is one placed float's margin-box rectangle in page space (points,
 // Y-down), tagged with its side and carrying its laid-out fragment for the float

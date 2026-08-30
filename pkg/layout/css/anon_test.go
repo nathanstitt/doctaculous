@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 func TestInlineInBlockWrapsRuns(t *testing.T) {

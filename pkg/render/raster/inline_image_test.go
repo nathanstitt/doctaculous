@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/testdata/gen"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 
 // TestInlineImageRenders renders a page whose only content is a BI...ID...EI

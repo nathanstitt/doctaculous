@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // missingRune is a code point no bundled face maps and no script fallback covers:

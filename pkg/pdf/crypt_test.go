@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/testdata/gen"
+	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 
 // catalogTitle resolves the document catalog's /Title string, exercising

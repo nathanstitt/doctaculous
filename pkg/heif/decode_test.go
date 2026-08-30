@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	genheif "github.com/nathanstitt/doctaculous/testdata/gen/heif"
+	genheif "github.com/nathanstitt/omnidoc/testdata/gen/heif"
 )
 
 // realPayload loads a committed Annex-B payload and wraps it into hvcC +

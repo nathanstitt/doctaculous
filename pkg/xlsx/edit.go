@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // Editor sentinels, for callers to branch on via errors.Is.

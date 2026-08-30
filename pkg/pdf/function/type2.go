@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // expFunc is a Type 2 (exponential interpolation) function. It has a single

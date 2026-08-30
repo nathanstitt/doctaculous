@@ -7,10 +7,10 @@
 package pageres
 
 import (
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // ResolveFont resolves res["Font"][name] to a GlyphSource via font.New.

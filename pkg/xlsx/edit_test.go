@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	genxlsx "github.com/nathanstitt/doctaculous/testdata/gen/xlsx"
+	genxlsx "github.com/nathanstitt/omnidoc/testdata/gen/xlsx"
 )
 
 // editFixture is a package with content the editor does NOT model — prefixed

@@ -1,4 +1,4 @@
-module github.com/nathanstitt/doctaculous
+module github.com/nathanstitt/omnidoc
 
 go 1.25.0
 

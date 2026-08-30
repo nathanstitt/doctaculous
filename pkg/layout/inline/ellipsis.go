@@ -1,8 +1,8 @@
 package inline
 
 import (
-	pkgfont "github.com/nathanstitt/doctaculous/pkg/font"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	pkgfont "github.com/nathanstitt/omnidoc/pkg/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 // Ellipsis truncation for text-overflow and -webkit-line-clamp.

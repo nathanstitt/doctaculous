@@ -16,9 +16,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/font/standard"
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/font/standard"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
 )
 
 // PDF FontDescriptor /Flags bits (PDF 32000-1 Table 121) used to derive a

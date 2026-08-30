@@ -3,8 +3,8 @@ package cssbox
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	lcssbox "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // findSemTag returns the first box (depth-first) whose SemTag equals tag, or nil.

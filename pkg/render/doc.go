@@ -2,7 +2,7 @@
 // interface that the content interpreter drives, along with the geometry types
 // (paths, matrices, paint) shared between the interpreter and concrete backends.
 //
-// Keeping paint operations abstract here is the seam that lets doctaculous target
+// Keeping paint operations abstract here is the seam that lets omnidoc target
 // multiple backends (a raster bitmap today; SVG or others later) from a single
 // content interpreter.
 package render

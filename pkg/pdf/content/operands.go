@@ -1,8 +1,8 @@
 package content
 
 import (
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // num returns operands[i] as a float64, or 0 if missing/non-numeric.

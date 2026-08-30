@@ -3,7 +3,7 @@ package svg
 import (
 	"strings"
 
-	svgfilter "github.com/nathanstitt/doctaculous/pkg/svg/filter"
+	svgfilter "github.com/nathanstitt/omnidoc/pkg/svg/filter"
 )
 
 // CompositeOperator selects which Porter-Duff (or arithmetic) rule an

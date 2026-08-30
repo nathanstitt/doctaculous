@@ -3,7 +3,7 @@ package raster
 import (
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // TestJBIG2ParmsDict_Array verifies that jbig2ParmsDict finds the parameter dict

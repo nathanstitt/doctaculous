@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/resource"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // TestEndToEndBoxTree exercises a realistic document through parse -> cascade ->

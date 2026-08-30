@@ -1,6 +1,6 @@
 package html
 
-import "github.com/nathanstitt/doctaculous/pkg/css"
+import "github.com/nathanstitt/omnidoc/pkg/css"
 
 // uaSource is the minimal user-agent default stylesheet. It is the lowest cascade
 // origin (OriginUA) and supplies the display defaults and a few presentational

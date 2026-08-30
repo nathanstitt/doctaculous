@@ -3,7 +3,7 @@ package css
 import (
 	"sort"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
 // splitFlexGridForPage splits a flex (column) or grid container between item ROWS at

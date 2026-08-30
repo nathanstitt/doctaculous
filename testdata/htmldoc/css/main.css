@@ -18,7 +18,7 @@
    Margin-band content composed here:
      @top-left     content: element(rhead)  — the position:running(rhead) header div
      @top-right    content: string(sect)    — the most recent <h2> (via string-set)
-     @bottom-center  "Doctaculous · N / M"  — decimal page / pages counter
+     @bottom-center  "Omnidoc · N / M"  — decimal page / pages counter
      @bottom-right   "p. <roman>"           — counter(page, lower-roman) */
 @page {
   size: letter;
@@ -36,7 +36,7 @@
     text-align: right;
   }
   @bottom-center {
-    content: "Doctaculous  ·  " counter(page) " / " counter(pages);
+    content: "Omnidoc  ·  " counter(page) " / " counter(pages);
     color: #6a6a64;
     font-size: 10px;
   }
@@ -68,7 +68,7 @@
     text-align: right;
   }
   @bottom-center {
-    content: "Doctaculous  ·  " counter(page) " / " counter(pages);
+    content: "Omnidoc  ·  " counter(page) " / " counter(pages);
     color: #6a6a64;
     font-size: 10px;
   }

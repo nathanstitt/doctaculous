@@ -3,7 +3,7 @@ package pdfwrite
 import (
 	"image/color"
 
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // pendingShading is a native /Shading dictionary referenced by a page's content

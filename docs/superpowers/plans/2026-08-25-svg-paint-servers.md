@@ -61,7 +61,7 @@ func NewRadialShader(fx, fy, fr, cx, cy, cr float64, fn function.Func, spread Sp
 - [ ] **Step 1:** Failing test — construct each shader directly and sample `ColorAt` at known points. For reflect: t beyond 1 mirrors back (t=1.25 gives the same color as t=0.75). For repeat: t=1.25 gives the same as t=0.25. For pad: t=1.25 gives the t=1 color. Model on the existing `linRamp`/`wantRGB` helpers at `shading_test.go:22,45`.
 - [ ] **Step 2:** Run — FAIL.
 - [ ] **Step 3:** Implement. Keep `ColorAt`/`atAxial`/`atRadial` structure; add the spread fold before the domain map.
-- [ ] **Step 4:** `go test ./pkg/render/...` AND `go test -count=1 ./pkg/doctaculous -run Golden` — **PDF goldens must not move** (they exercise the pad path).
+- [ ] **Step 4:** `go test ./pkg/render/...` AND `go test -count=1 ./pkg/omnidoc -run Golden` — **PDF goldens must not move** (they exercise the pad path).
 - [ ] **Step 5:** Commit `feat(raster): PDF-free shader constructors with spreadMethod`.
 
 ---
@@ -167,7 +167,7 @@ Degenerate bbox (a horizontal `<line>`, zero width or height) means the gradient
 - [ ] **Step 1:** Failing test: an SVG with a gradient converted to PDF produces a content stream containing an image XObject (today it produces nothing); a solid-fill document is byte-identical to before (no XObject introduced where none belongs).
 - [ ] **Step 2:** Run — FAIL.
 - [ ] **Step 3:** Implement.
-- [ ] **Step 4:** `go test ./pkg/render/... ./pkg/doctaculous` and ALL goldens.
+- [ ] **Step 4:** `go test ./pkg/render/... ./pkg/omnidoc` and ALL goldens.
 - [ ] **Step 5:** Commit `feat(pdfwrite): rasterize shadings into an image XObject`.
 
 ---
@@ -202,7 +202,7 @@ The upstream clone is at `<scratchpad>/resvg-suite` at the pinned commit `d8e064
 ### Task 11: Verification + docs
 
 - [ ] **Step 1:** `go test ./...` UNSANDBOXED.
-- [ ] **Step 2:** `go test -race ./pkg/svg/... ./pkg/render/... ./pkg/doctaculous`, `go vet ./...`, `golangci-lint run`, `gofmt -l . | grep -v jbig2` (must be empty).
+- [ ] **Step 2:** `go test -race ./pkg/svg/... ./pkg/render/... ./pkg/omnidoc`, `go vet ./...`, `golangci-lint run`, `gofmt -l . | grep -v jbig2` (must be empty).
 - [ ] **Step 3:** Confirm NO pre-existing golden moved (`git diff --stat <base> HEAD -- '*.png'` — every entry must be `Bin 0 -> N`). State it explicitly.
 - [ ] **Step 4:** CLI smoke: an SVG with a linear gradient, a radial gradient, and (if shipped) a pattern; rasterize to PNG and VIEW it; convert to PDF and confirm non-trivial output.
 - [ ] **Step 5:** FEATURES.md — gradients ship; update the not-yet list. Note the stroke-gradient status honestly.

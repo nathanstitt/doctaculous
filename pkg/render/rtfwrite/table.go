@@ -3,8 +3,8 @@ package rtfwrite
 import (
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/render/internal/boxwalk"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/render/internal/boxwalk"
 )
 
 // table emits a DisplayTable box as \trowd/\cellx rows. Column and row spans

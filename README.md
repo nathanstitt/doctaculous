@@ -1,7 +1,7 @@
-![doctaculous — any document to any other document, in pure Go](docs/assets/doctaculous-banner.svg)
+![omnidoc — any document to any other document, in pure Go](docs/assets/omnidoc-banner.svg)
 
-[![CI](https://github.com/nathanstitt/doctaculous/actions/workflows/ci.yml/badge.svg)](https://github.com/nathanstitt/doctaculous/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/nathanstitt/doctaculous.svg)](https://pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous)
+[![CI](https://github.com/nathanstitt/omnidoc/actions/workflows/ci.yml/badge.svg)](https://github.com/nathanstitt/omnidoc/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/nathanstitt/omnidoc.svg)](https://pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc)
 [![Go 1.26](https://img.shields.io/badge/Go-1.26-00758d?labelColor=211c17)](go.mod)
 [![CGo free](https://img.shields.io/badge/CGo-none-c8401a?labelColor=211c17)](#why)
 [![MIT](https://img.shields.io/badge/license-MIT-c8401a?labelColor=211c17)](LICENSE)
@@ -25,12 +25,12 @@ paths, shapes, transforms, solid fill/stroke — and convert to PDF as real
 vectors, not a rasterized image.
 
 ```sh
-doctaculous convert report.docx report.pdf         # typeset through the CSS engine
-doctaculous convert https://example.com page.png   # fetch, lay out, rasterize
-doctaculous convert statement.pdf tables.xlsx      # tables recovered from ruling lines & whitespace
-doctaculous convert book.epub book.docx            # ebook → Word, images and all
-doctaculous convert notes.md deck.pptx             # each heading becomes a slide
-doctaculous rasterize input.pdf --page 1 --out page1.png --dpi 150
+omnidoc convert report.docx report.pdf         # typeset through the CSS engine
+omnidoc convert https://example.com page.png   # fetch, lay out, rasterize
+omnidoc convert statement.pdf tables.xlsx      # tables recovered from ruling lines & whitespace
+omnidoc convert book.epub book.docx            # ebook → Word, images and all
+omnidoc convert notes.md deck.pptx             # each heading becomes a slide
+omnidoc rasterize input.pdf --page 1 --out page1.png --dpi 150
 ```
 
 `convert` sniffs the input format from **content first** (magic bytes, OPC/zip
@@ -48,42 +48,42 @@ square and a 720×540 fit. `--crop saliency` picks the window from image content
 **Demo:** [`testdata/htmldoc/index.html`](testdata/htmldoc/index.html) is the
 rendering specimen, one document exercising every implemented HTML/CSS/image
 slice. [`docs/assets/htmldoc-specimen.pdf`](docs/assets/htmldoc-specimen.pdf)
-is the PDF `doctaculous convert` typesets from it: 18 Letter pages with running
+is the PDF `omnidoc convert` typesets from it: 18 Letter pages with running
 headers, page counters, a WOFF2 script wordmark, floats, flexbox, grid, and
 tables, all as selectable text.
 
 ## Quick start
 
 ```sh
-go install github.com/nathanstitt/doctaculous/cmd/doctaculous@latest
+go install github.com/nathanstitt/omnidoc/cmd/omnidoc@latest
 ```
 
 Or as a library:
 
 ```go
-import "github.com/nathanstitt/doctaculous/pkg/doctaculous"
+import "github.com/nathanstitt/omnidoc/pkg/omnidoc"
 
 // Open sniffs the format from content — PDF, DOCX, XLSX, EPUB, RTF, HTML, …
-doc, err := doctaculous.Open("input.pdf")
+doc, err := omnidoc.Open("input.pdf")
 
 // Rasterize a page (RasterizePages renders many pages concurrently;
 // a parsed document is read-only and goroutine-safe).
-img, err := doc.RasterizePage(ctx, 0, doctaculous.RasterOptions{DPI: 150})
+img, err := doc.RasterizePage(ctx, 0, omnidoc.RasterOptions{DPI: 150})
 
 // Or convert in one call — any input format to any output format.
-err = doctaculous.ConvertFile(ctx, "report.docx", "report.pdf", doctaculous.ConvertOptions{})
+err = omnidoc.ConvertFile(ctx, "report.docx", "report.pdf", omnidoc.ConvertOptions{})
 
 // Streams work too, with explicit formats when there's no filename to sniff.
-err = doctaculous.Convert(ctx, in, out, doctaculous.ConvertOptions{
-    From: doctaculous.FormatPDF,
-    To:   doctaculous.FormatMarkdown,
+err = omnidoc.Convert(ctx, in, out, omnidoc.ConvertOptions{
+    From: omnidoc.FormatPDF,
+    To:   omnidoc.FormatMarkdown,
 })
 ```
 
 For hosts routing uploads: `OpenReader(ctx, r)` / `OpenReaderAs` accept plain
 `io.Reader`s, and `FormatFromMIME` maps content types onto the capability table
 (`Format.ValidInput()` is the gate). Full API reference:
-[pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous](https://pkg.go.dev/github.com/nathanstitt/doctaculous/pkg/doctaculous).
+[pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc](https://pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc).
 
 ## How it works
 
@@ -143,7 +143,7 @@ edit files rather than convert them:
 ## Why?
 
 The high-fidelity incumbents (PDFium, MuPDF, Poppler) require CGo and/or carry
-copyleft licenses. doctaculous implements the whole stack in Go: PDF
+copyleft licenses. omnidoc implements the whole stack in Go: PDF
 interpretation, font parsing, CSS layout, rasterization, OOXML. It cross-compiles
 freely, builds as a single static binary, and stays MIT. The few dependencies
 are pure-Go and permissively licensed (see `go.mod`); the one vendored decoder
@@ -190,7 +190,7 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 | Layout | `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/layout/inline` | The box model, the CSS engine, shaping & line breaking |
 | Fonts | `pkg/font`, `pkg/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled resolution, per-rune script fallback |
 | Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, and structure output |
-| API / CLI | `pkg/doctaculous`, `cmd/doctaculous` | Public entry points, format detection, the conversion matrix |
+| API / CLI | `pkg/omnidoc`, `cmd/omnidoc` | Public entry points, format detection, the conversion matrix |
 
 The `render.Device` interface is the seam. Parsing, interpretation, and layout
 never know which backend they're painting into, so new backends bolt on without

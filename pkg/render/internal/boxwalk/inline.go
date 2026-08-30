@@ -3,7 +3,7 @@ package boxwalk
 import (
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // InlineState is the inherited inline styling in force at a point in the walk.

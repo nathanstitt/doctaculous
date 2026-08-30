@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/html"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	layoutcss "github.com/nathanstitt/doctaculous/pkg/layout/css"
-	layoutfont "github.com/nathanstitt/doctaculous/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/html"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	layoutcss "github.com/nathanstitt/omnidoc/pkg/layout/css"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
 )
 
 // TestFloatsPaintInNamedPageRun pins the fix: when a document uses a named @page

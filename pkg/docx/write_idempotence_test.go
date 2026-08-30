@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	gendocx "github.com/nathanstitt/doctaculous/testdata/gen/docx"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	gendocx "github.com/nathanstitt/omnidoc/testdata/gen/docx"
 )
 
 // TestWriteIdempotenceOnParsed pins save-cycle stability over every generated

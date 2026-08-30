@@ -3,8 +3,8 @@ package css
 import (
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 // makeStringSetBlock builds a block fragment whose box sets string-set name→text and

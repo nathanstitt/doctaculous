@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // TestSerializeMinimalPDFParses builds a tiny PDF (catalog + 1 page, no content)

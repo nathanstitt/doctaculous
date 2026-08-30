@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/beevik/etree"
-	"github.com/nathanstitt/doctaculous/pkg/xlsx/internal/xmlpart"
+	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
 )
 
 // ConditionalFormatting is one <conditionalFormatting> block: the ranges it
@@ -135,7 +135,7 @@ func (s *SheetEdit) SetConditionalFormats(cfs []ConditionalFormatting) error {
 //
 // A Raw rule WITH Style set additionally mints a dxf and stamps its dxfId
 // onto the raw element — the legacy-upgrade shape: a caller re-synthesizing
-// rule XML from a pre-doctaculous representation has the rule body but no
+// rule XML from a pre-omnidoc representation has the rule body but no
 // valid dxf index to embed. A Raw rule WITHOUT Style keeps any embedded
 // dxfId verbatim (valid inductively: this editor only appends to <dxfs>,
 // never compacts it).

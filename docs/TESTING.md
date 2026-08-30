@@ -17,7 +17,7 @@ This project lives or dies on its test corpus.
   for a new core path, add it to `gen.Core`.
 - **SVG corpus (`testdata/svg/resvg`, 848 fixtures)**: curated from resvg-test-suite (MIT, pinned
   commit), one feature per file, with our own committed goldens under
-  `pkg/doctaculous/testdata/golden/svg-resvg/`. Provenance and every curation/exclusion decision live
+  `pkg/omnidoc/testdata/golden/svg-resvg/`. Provenance and every curation/exclusion decision live
   in that directory's README — read it before adding or excluding a fixture.
   - **The `.png` beside each fixture is NOT resvg's output.** The suite's README says `results.csv`
     holds "results of manual testing via `tools/vdiff`", and `vdiff` renders each SVG *live* across
@@ -34,7 +34,7 @@ This project lives or dies on its test corpus.
     (`~/code/vendor/resvg`, `cargo` works out of the box). Reading `usvg`'s resolved tree settled in
     minutes a cyclic-mask question that days of pixel archaeology could not — and revealed that one
     committed reference was simply out of step with current resvg.
-- **Golden-image tests** (`pkg/render/raster/golden_test.go`, plus the `pkg/doctaculous` `docx-*` /
+- **Golden-image tests** (`pkg/render/raster/golden_test.go`, plus the `pkg/omnidoc` `docx-*` /
   `html-*` / `htmldoc-*` goldens): render at 72 DPI, compare to committed PNGs with a per-pixel
   tolerance (±4/channel) + 0.2% differing-pixel budget. Regenerate an intentional render change with
   `go test ./pkg/render/raster -run TestGolden -update`, then **eyeball every changed PNG in the PR**

@@ -4,7 +4,7 @@ Real-world Word- and LibreOffice-authored documents forming the **save-cycle
 integration corpus** for `pkg/docx`: each file must parse, and `Parse ∘ Write`
 must be a fixed point (model-equal reparse, byte-identical second write) — the
 contract `write_idempotence_test.go` pins over this directory, exactly as it
-does over the generated corpus. `pkg/doctaculous`'s external corpus test also
+does over the generated corpus. `pkg/omnidoc`'s external corpus test also
 converts and rasterizes them. Producers were verified from each file's
 `docProps/app.xml` at download time.
 

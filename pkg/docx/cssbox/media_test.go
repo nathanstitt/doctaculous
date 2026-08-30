@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	gcss "github.com/nathanstitt/doctaculous/pkg/css"
-	"github.com/nathanstitt/doctaculous/pkg/docx"
-	lcssbox "github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
+	gcss "github.com/nathanstitt/omnidoc/pkg/css"
+	"github.com/nathanstitt/omnidoc/pkg/docx"
+	lcssbox "github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
 )
 
 func TestMediaLoaderResolvesRelIDToBytes(t *testing.T) {

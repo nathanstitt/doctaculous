@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/layout/paint"
-	"github.com/nathanstitt/doctaculous/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout/paint"
+	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Options controls PDF output geometry and concurrency.

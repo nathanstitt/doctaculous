@@ -5,7 +5,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // psFunc is a Type 4 (PostScript calculator) function. It holds a parsed program

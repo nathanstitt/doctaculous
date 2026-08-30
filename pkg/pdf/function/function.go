@@ -20,7 +20,7 @@ package function
 import (
 	"fmt"
 
-	"github.com/nathanstitt/doctaculous/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
 
 // Func evaluates a PDF function: it maps m input values to n output values.

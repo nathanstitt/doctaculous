@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
 )
 
 // markThickness is the hairline width of a printed registration mark (px-as-pt).

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout/cssbox"
-	"github.com/nathanstitt/doctaculous/pkg/pdf/content"
+	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/pdf/content"
 )
 
 // TestLowerPageKeepsAllBlocksWithTable is the regression for the "content dropped"

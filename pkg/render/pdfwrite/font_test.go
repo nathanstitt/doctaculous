@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/nathanstitt/doctaculous/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/font"
 )
 
 // serializeWithFont emits fe's face tree, keeps it reachable, and serializes.

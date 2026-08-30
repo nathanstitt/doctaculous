@@ -4,9 +4,9 @@ import (
 	"image"
 	"math"
 
-	"github.com/nathanstitt/doctaculous/pkg/layout"
-	"github.com/nathanstitt/doctaculous/pkg/render"
-	svgfilter "github.com/nathanstitt/doctaculous/pkg/svg/filter"
+	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/render"
+	svgfilter "github.com/nathanstitt/omnidoc/pkg/svg/filter"
 )
 
 // maxShadowPixels bounds how many pixels one BLURRED box-shadow may allocate
