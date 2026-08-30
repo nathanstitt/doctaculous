@@ -10,12 +10,12 @@ This file holds only how to WORK here. The technical reference lives in `docs/`:
 
 | File | What it covers |
 | --- | --- |
-| [FEATURES.md](FEATURES.md) | The inventory of everything that has SHIPPED. Keep it current — every feature that lands gets a bullet in the same PR. |
+| [FEATURES.md](FEATURES.md) | The inventory of everything that has SHIPPED. Keep it current — every feature that lands gets a bullet in the same PR. It is NOT a CHANGELOG, keep it grounded in current state, not listing the history of each feature.|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, the pipelines, and the `Device` seam. Read before adding a package or crossing a boundary. |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Pure-Go / licensing constraints and the approved dependency list. Non-negotiable. |
 | [docs/TESTING.md](docs/TESTING.md) | Corpora, golden-image rules, and the traps that have cost real time. |
 | [docs/GO-PRACTICES.md](docs/GO-PRACTICES.md) | Error handling, API shape, concurrency conventions. |
-| [docs/SCOPE.md](docs/SCOPE.md) | What is deliberately out of scope. |
+| [docs/SCOPE.md](docs/SCOPE.md) | What is deliberately in/out of scope. |
 
 Per-subsystem open work — what is NOT done, and why each item was deferred:
 

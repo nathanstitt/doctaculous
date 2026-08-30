@@ -10,22 +10,34 @@ A pure-Go document toolkit: parse, lay out, rasterize, extract, convert, and edi
 documents. It brings its own PDF interpreter and its own CSS layout engine. No
 CGo, no native bindings, no copyleft.
 
-Read and write fourteen formats, and convert between any two of them.
+Read and write fifteen formats, and convert between any two of them.
 
-## Fourteen formats, in and out
+## Fifteen formats, in and out
 
-Every supported format is both an input **and** an output. All 182 ordered pairs
+Every supported format is both an input **and** an output. All 225 ordered pairs
 convert (a format to itself is a deliberate `ErrSameFormat`):
 
-> `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg` · `webp`
+> `pdf` · `docx` · `xlsx` · `pptx` · `epub` · `rtf` · `html` · `md` · `txt` · `csv` · `tsv` · `png` · `jpeg` · `webp` · `svg`
 
-Two more formats are input-only: **`heic`** and **`svg`**. HEIF/HEIC stills decode
-through an in-tree pure-Go HEVC intra decoder — no libheif, no CGo — so an iPhone
-photo converts to any of the fourteen outputs and drops into an HTML or EPUB
-`<img>` unchanged. Standalone `.svg`/`.svgz` files open as a vector page (paths,
-shapes, transforms, solid fill/stroke) and convert to PDF as real vectors rather
-than a rasterized image. WebP reads lossy VP8, lossless VP8L, and alpha; it writes
-lossless VP8L, so it replaces PNG rather than JPEG.
+SVG is vector in **both** directions. Standalone `.svg`/`.svgz` files open as a
+vector page and convert to PDF as real path operators rather than a rasterized
+image; on output, any document — a PDF included — becomes real `<path>` geometry,
+`<clipPath>` and `<mask>`, not a bitmap wrapped in an `<image>`. Text is written
+as glyph outlines, so it renders identically everywhere but is not selectable
+(each glyph carries an `aria-label` with its source characters). Like image
+output, one SVG holds one page.
+
+Two things still embed a bitmap, and only where SVG has no faithful equivalent:
+a filter's rasterized input, and a gradient that cannot describe its own geometry
+— which includes every gradient that arrived from a PDF `/Shading`. CSS and SVG
+gradients emit native `<linearGradient>`/`<radialGradient>`. See
+[docs/SVG.md](docs/SVG.md).
+
+One format is input-only: **`heic`**. HEIF/HEIC stills decode through an in-tree
+pure-Go HEVC intra decoder — no libheif, no CGo — so an iPhone photo converts to
+any of the fifteen outputs and drops into an HTML or EPUB `<img>` unchanged. WebP
+reads lossy VP8, lossless VP8L, and alpha; it writes lossless VP8L, so it replaces
+PNG rather than JPEG.
 
 ```sh
 omnidoc convert report.docx report.pdf         # typeset through the CSS engine
@@ -34,6 +46,7 @@ omnidoc convert statement.pdf tables.xlsx      # tables recovered from ruling li
 omnidoc convert book.epub book.docx            # ebook → Word, images and all
 omnidoc convert notes.md deck.pptx             # each heading becomes a slide
 omnidoc convert photo.heic photo.webp          # iPhone photo → lossless WebP
+omnidoc convert diagram.pdf diagram.svg        # PDF → SVG paths, not a bitmap
 omnidoc rasterize input.pdf --page 1 --out page1.png --dpi 150
 ```
 
@@ -41,8 +54,8 @@ omnidoc rasterize input.pdf --page 1 --out page1.png --dpi 150
 classification, HTML sniffing), then the extension; the output format comes from
 the output extension. `--from`/`--to` override both. HTML input can also be an
 `http(s)` URL, with relative resources, `data:` URIs, and web fonts resolved.
-Image output writes one page by default, or many with `--pages all` and a `%d` in
-the output name (`page-%d.png`).
+Image and SVG output write one page by default, or many with `--pages all` and a
+`%d` in the output name (`page-%d.png`, `page-%d.svg`).
 
 Thumbnails come in two shapes. `--max-width`/`--max-height` fit within a bound
 without knowing page sizes up front. `--crop <gravity|saliency> --crop-size WxH`
@@ -197,7 +210,7 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 | Frontends | `pkg/html` + `pkg/css`, `pkg/docx`, `pkg/xlsx`, `pkg/pptx`, `pkg/epub`, `pkg/rtf`, `pkg/markdown` | Parse each format, lower to the shared box tree |
 | Layout | `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/layout/inline` | The box model, the CSS engine, shaping & line breaking |
 | Fonts | `pkg/font`, `pkg/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled resolution, per-rune script fallback |
-| Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, and structure output |
+| Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/svgwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, SVG, and structure output |
 | API / CLI | `pkg/omnidoc`, `cmd/omnidoc` | Public entry points, format detection, the conversion matrix |
 
 The `render.Device` interface is the seam. Parsing, interpretation, and layout

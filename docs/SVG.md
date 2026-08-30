@@ -1,8 +1,9 @@
 # SVG — status and open work
 
 SVG ships as an input format (8 PRs: core, styling, paint servers, groups/clip/mask,
-`use`/`symbol`/markers, text, filters, HTML/EPUB integration). The full shipped inventory is
-in [../FEATURES.md](../FEATURES.md); this file holds what is NOT done.
+`use`/`symbol`/markers, text, filters, HTML/EPUB integration) and as an **output** format
+(`pkg/render/svgwrite`). The full shipped inventory is in [../FEATURES.md](../FEATURES.md); this
+file holds what is NOT done.
 
 **Vector-native throughout.** An SVG reaching PDF via `<img>`, inline markup,
 `background-image`, or an EPUB cover emits real path operators, never a rasterized image —
@@ -10,7 +11,92 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
 `imageCache`/`ImageContent` path would silently undo that; use the
 `layout.VectorScene`/`VectorItem` seam instead.
 
-## Not implemented
+## Not implemented — the SVG WRITER (`pkg/render/svgwrite`)
+
+- **`<text>` output with embedded fonts.** Glyphs are emitted as `<path>` outlines. The pipeline
+  already carries what real text needs (`render.GlyphRef` has `Face`, `GID` and `Runes`, and the
+  concrete `*font.Face` is recoverable by type assertion, exactly as `pdfwrite/device.go` does),
+  so the blocker is purely font embedding:
+
+  - there is **no WOFF/WOFF2 encoder** in the repo — `pkg/font/woff1.go`/`woff2.go` are
+    decode-only and unexported. WOFF2 output would need a Brotli encoder.
+  - `Face.ProgramBytes()` returns nil for `ProgramKindUnknown`.
+  - decisively, the bundled substitutes are **TeX Gyre Type1 `.pfb`** (`pkg/font/standard/fonts/`),
+    which browsers cannot load through `@font-face` at all — so the default-font case, the common
+    one, cannot produce working `<text>` regardless of the other two.
+
+  Closing it means an `SVGOptions.TextMode` emitting `data:font/ttf;base64` `@font-face` for SFNT
+  faces and falling back to outlines otherwise, mirroring pdfwrite's per-glyph
+  embeddable-or-outline degradation. The registry would mirror `pkg/render/pdfwrite/font.go`
+  (a `map[*font.Face]` table with deterministic ordering), swapping `/F0` names for CSS families.
+  Note it could **never cover PDF input**: `content.drawGlyph` calls `dev.FillGlyph` with an
+  already-flattened outline and `content.Glyph` carries no `Face`/`GID`, so PDF text would need a
+  new interpreter seam. Scope it to reflow inputs.
+
+- **Glyph hoisting does not apply to PDF input.** Reflow input (HTML/DOCX/SVG) reaches the
+  Device through `DrawGlyph`, which carries `Face`+`GID`, so each outline is defined once in
+  `<defs>` and referenced with `<use>` — measured 9.2× smaller on a text page. A PDF's text
+  arrives through `FillGlyph` with an already-flattened, already-positioned outline
+  (`pkg/pdf/content/showtext.go:139-142`), so there is no identity to key a definition on and
+  every occurrence emits its own inline path. Verified on the committed `svgwrite/text.svg`
+  golden: zero `<use>` elements.
+
+  This shares a root cause with the deferred `<text>` mode above — both need `content.GlyphSource`
+  to surface `Face`/`GID` so the interpreter can populate a `GlyphRef`. Doing that once would fix
+  both, and would shrink PDF-to-SVG output on text-heavy documents by roughly the same factor.
+
+- **Native `<clipPath>` for a clip-path union.** `Device.BuildClipMask` returns
+  `GroupMask = *image.Alpha`, which collapses the `[]MaskPath` union to pixels, so a group's clip
+  is embedded as a rasterized `<mask>`. SVG can express the union natively and would stay
+  resolution-independent, but only by keeping the path list, which the return type forbids. The
+  sentinel-pointer trick in `pkg/render/pdfwrite/softmask.go` is the documented way around it —
+  note `render.Device.EndGroup`'s warning about recognizing a mask by identity before copying it.
+
+- **PDF-sourced gradients rasterize.** `DescribeShading` is gated on `alphaFromFn`
+  (`pkg/render/raster/shading.go`), so only CSS/SVG-constructed gradients describe themselves; a
+  gradient that came from a PDF `/Shading` dictionary takes the sampled-`<image>` fallback. This
+  is an upstream decision (round-tripping a parsed shading back into a description risks the
+  CMYK/component-count confusion `alphaFromFn` exists to avoid), not a writer limitation.
+  Gradients from HTML/SVG input stay native.
+
+- **Stroke width is isotropic on the PDF path.** `pkg/pdf/content/paths.go` scales line width by
+  `ctm.ScaleFactor()`, a single scalar, so a non-uniform CTM loses stroke anisotropy before the
+  Device sees it. Pre-existing and inherited, not introduced by the writer; SVG's `vector-effect`
+  cannot recover it.
+
+- **Round-trip verification is partial.** `TestSVGOutputRoundTripsThroughOwnParser` re-reads the
+  emitted SVG through `pkg/svg` and compares pixels, but skips fixtures that would measure a
+  READER gap rather than the writer. Of 35 core fixtures, 18 are pixel-compared and 17 skip:
+  10 emit `<image>` (9 `image-*` plus `inline-image`), 5 are `shading-*` (PDF shadings are not
+  self-describing upstream, so they take the sampled-`<image>` fallback and hit the same gap),
+  and 2 are `blend-*` (`mix-blend-mode` is not honored by the reader). Those paths are asserted
+  structurally instead. Implementing `<image>` in the reader would close 15 of the 17.
+
+  `TestHTMLDocSVGShowcase` runs the same loop over all 44 pages of the htmldoc specimen against
+  the committed raster goldens, and hits the same wall: 8 of its pages embed an `<image>` and are
+  bounded loosely (`svgShowcasePagesWithRasterContent`). Those 8 tighten to the normal budget the
+  day the reader grows `<image>`.
+
+- **A cross-backend antialiasing seam at gradient edges.** Measured on htmldoc page 39: the only
+  pixels differing between a direct raster and the SVG round-trip are the single antialiased rows
+  at each gradient swatch's top and bottom edge — 1920 of 907200 (0.21%), max channel delta 33,
+  with every interior pixel byte-identical. The raster path fills a rect directly; the SVG path
+  fills a `<rect>` carrying a gradient reference, and the two rasterizations disagree on edge
+  coverage by a fraction of a pixel. The showcase budget is 0.3% rather than 0.2% for this
+  reason alone; the per-channel tolerance is unchanged at ±4.
+
+## Not implemented — the SVG READER (`pkg/svg`)
+
+- **`<image>`**, which the writer now emits (for raster content, masks, and sampled shadings) and
+  the reader cannot draw. Verified by measurement: a document whose only content is a solid-blue
+  `<image>` rasterizes blank white.
+
+  This is the single highest-value gap to close. It blocks 15 of the 17 skipped round-trip
+  fixtures (see above), and it also silently breaks **masks on re-read**: `svgwrite` emits a
+  group's mask as `<mask mask-type="alpha">` wrapping an `<image>`, so on the way back in the
+  mask content renders as nothing, which SVG interprets as "masked out entirely" — a masked
+  element disappears rather than showing at partial coverage. The emitted markup is correct
+  (browsers render it), so this is a reader limitation, not a writer one.
 
 - **`<textPath>`** (44 corpus fixtures) — needs arc-length parameterization of a `render.Path`
   plus per-glyph tangent frames. `render.Vertices` (PR 5) gives tangents at *vertices*, not at an

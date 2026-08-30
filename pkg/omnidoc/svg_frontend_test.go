@@ -553,8 +553,11 @@ func TestSVGDetectAndFormat(t *testing.T) {
 	if FormatFromPath("a.svgz") != FormatSVG {
 		t.Error("svgz ext")
 	}
-	if !FormatSVG.ValidInput() || FormatSVG.ValidOutput() {
-		t.Error("caps: want input-only")
+	// SVG is valid in both roles: an input frontend (pkg/svg) and an output
+	// backend (pkg/render/svgwrite). Same-format conversion stays rejected on
+	// the generic path, which CanConvert enforces separately.
+	if !FormatSVG.ValidInput() || !FormatSVG.ValidOutput() {
+		t.Error("caps: want input and output")
 	}
 
 	// End-to-end dispatch.

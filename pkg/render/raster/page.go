@@ -108,9 +108,37 @@ func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (out *image.RGB
 
 	dev := New(img)
 	dev.SetLogf(opts.Logf)
+	if err := RunPage(ctx, pg, dev, scale, opts); err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+// RunPage interprets pg's content stream against dev, an arbitrary
+// render.Device, mapping PDF user space to device space at the given scale
+// (pixels per point) and honoring the page's /Rotate.
+//
+// This is the device-independent half of RenderPage, exported so a non-raster
+// backend (the SVG writer) can drive the PDF interpreter without duplicating
+// the page matrix and resource wiring — and, more importantly, without the two
+// drifting apart. RenderPage itself calls it, so there is one code path.
+//
+// Missing or undecodable content is not an error: a blank page is a valid
+// result, matching how the rasterizer has always treated it.
+func RunPage(ctx context.Context, pg *pdf.Page, dev render.Device, scale float64, opts Options) error {
+	if pg == nil {
+		return fmt.Errorf("raster: nil page")
+	}
+	if dev == nil {
+		return fmt.Errorf("raster: nil device")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if pg.Rotate != 0 && pg.Rotate != 90 && pg.Rotate != 180 && pg.Rotate != 270 && opts.Logf != nil {
 		opts.Logf("raster: unexpected /Rotate %d treated as 0", pg.Rotate)
 	}
+	wpt, hpt := pg.MediaBox.Width(), pg.MediaBox.Height()
 	base := pageMatrix(pg, scale, wpt, hpt)
 
 	content0, err := pg.ContentBytes()
@@ -119,7 +147,7 @@ func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (out *image.RGB
 		if opts.Logf != nil {
 			opts.Logf("raster: page content unavailable: %v", err)
 		}
-		return img, nil
+		return nil
 	}
 
 	res := &pageResources{doc: pg.Doc(), dict: pg.Resources, logf: opts.Logf, provider: opts.FontProvider}
@@ -128,9 +156,9 @@ func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (out *image.RGB
 		MaxOps: 5_000_000,
 	})
 	if err := interp.Run(content0); err != nil {
-		return nil, fmt.Errorf("raster: interpreting page: %w", err)
+		return fmt.Errorf("raster: interpreting page: %w", err)
 	}
-	return img, nil
+	return nil
 }
 
 // isFinitePositive reports whether v is a finite, strictly positive number.

@@ -675,6 +675,70 @@ bullet's design rationale is in its PR:
   resource. Fully-opaque, Normal-blend output is unchanged byte-for-byte — no resource and no `gs`
   operator are emitted.
 
+**Any → SVG writer** (`pkg/render/svgwrite`, `WriteSVG`, CLI `convert <in> <out>.svg`):
+
+- A third `render.Device` that serializes paint operations to SVG markup. It works for **every**
+  input format, PDF included, because all three frontends already paint through `render.Device` —
+  the PDF content interpreter, the reflow paint layer, and the SVG painter alike — so no
+  per-format work exists. Output is **genuinely vector**: `<path>` geometry, `<clipPath>`,
+  `<mask>`, and native `<linearGradient>`/`<radialGradient>`, not a rasterized page wrapped in an
+  `<image>`. Device space is already top-left/Y-down, matching SVG's user space, so there is no
+  page-level flip (contrast pdfwrite's `1 0 0 -1 0 H cm`).
+- Conversion goes through `vectorPages`, **not** `reflowPages`: the latter yields `*layout.Pages`,
+  which an opened PDF lacks, so a writer built on it would be reflow-only. `raster.RunPage` shares
+  the PDF page matrix/resource setup between the raster and SVG backends, so a page rendered to
+  SVG and the same page rasterized cannot drift.
+- **Text is glyph outlines, not `<text>`** — stated plainly rather than approximated. The pipeline
+  carries enough identity for real text on the reflow path (`GlyphRef` has `Face`/`GID`/`Runes`),
+  but the bundled substitutes are TeX Gyre Type1 `.pfb`, which browsers cannot load via
+  `@font-face`, and the repo has no WOFF/WOFF2 encoder — so `<text>` would render with whatever
+  the viewer happened to substitute. Outlines render identically everywhere. Each unique
+  (face, glyph) outline is defined once in `<defs>` and referenced with `<use>`, which measured
+  **9.2× smaller** output on an HTML text page (1.09 MB → 118 KB) versus inlining transformed
+  copies. Each `<use>` carries an `aria-label` with the source characters it stands for, so the
+  text stays recoverable by a screen reader or a scraper. Output is not text-selectable; that cost
+  is the trade.
+  - **The hoisting applies to reflow input only** (HTML/DOCX/SVG), not to PDF. A PDF's text
+    reaches the Device through `FillGlyph` with an already-flattened, already-positioned outline
+    (`pkg/pdf/content/showtext.go`) rather than through `DrawGlyph`, so there is no glyph identity
+    to key a definition on and PDF text emits inline paths. Closing that needs the same new
+    interpreter seam the deferred `<text>` mode would — see `docs/SVG.md`.
+- One page per document, like an image: `SVGOptions.Page` selects it on the generic `Convert`
+  path, and the CLI reuses the same `%d` fan-out, page-selection flags, and per-page error
+  handling as image output.
+- **Canvas background follows the same precedence as rasterization** — a CSS-propagated
+  root/body background (the browser's background-propagation rule) wins over
+  `SVGOptions.Background`. Only the fallback differs, deliberately: with neither set the page
+  stays **transparent**, where rasterization commits to opaque white, since a vector document
+  composited over an unknown backdrop should not carry an assumed backdrop of its own.
+- **Tested three ways.** Committed **text goldens** of the emitted markup
+  (`testdata/golden/svgwrite/`, regenerate with
+  `go test ./pkg/omnidoc -run TestSVGWriteGolden -update`) catch output that renders the same but
+  says something different — a lost `fill-rule`, a switch from `<use>` back to inline paths —
+  which a pixel check cannot see; output is asserted deterministic so they cannot flake. A
+  **round-trip** sweep over `gen.Core` writes SVG, re-reads it through `pkg/svg`, rasterizes, and
+  diffs against a direct raster. The **htmldoc showcase** (`TestHTMLDocSVGShowcase`) runs all 44
+  pages of the specimen document through that same loop against the existing `htmldoc-p*.png`
+  raster goldens — no new goldens, so any raster-vs-SVG disagreement shows against a
+  known-good reference. 35 of 44 pages match within the standard budget; the 8 pages embedding
+  an `<image>` are bounded loosely (the reader cannot draw it back), and the budget is 0.3%
+  rather than 0.2% for a measured, documented reason: a gradient swatch's single antialiased
+  edge row differs between the two rasterizations, interiors byte-identical.
+- Degradations, each logged once: a blend mode with no CSS `mix-blend-mode` equivalent paints
+  source-over; a `Shader` that cannot describe itself (mesh shadings, and **PDF-sourced shadings**,
+  which are deliberately not self-describing upstream) is sampled and embedded as an `<image>`.
+  Masks and filters likewise embed a bitmap rather than being dropped — `svgwrite` borrows
+  `pkg/render/raster`'s rasterizer for `BuildClipMask`/`BuildLuminanceMask`/`RenderOffscreen`
+  instead of taking the degradations `render.Device` permits a vector backend, so filters work on
+  SVG output where they cannot on PDF output.
+- **Masks emit `mask-type="alpha"`, with coverage in the alpha channel.** A `GroupMask` is already
+  final coverage (reduced via sRGB Rec. 709, per this engine's documented choice of sRGB over SVG
+  1.1's linearRGB — see `pkg/svg/mask.go`). Encoding it as gray under the default *luminance*
+  mask-type would make the viewer convert it a second time, in linearRGB, turning coverage 128
+  into 55 — an error of 73/255 that reads as a far-too-dark mask. `mask-type="alpha"` takes the
+  channel verbatim with no conversion in any viewer; the RGB channels are white so a viewer that
+  ignores `mask-type` degrades to a too-permissive mask rather than an invisible one.
+
 **HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `WriteMarkdown`
 + `WriteText`, CLI `tomd`):
 
@@ -717,7 +781,8 @@ CLI `tomd <pdf>` / `tohtml`):
   byte-identical and have since been removed. Same-format conversion is a deliberate
   `ErrSameFormat`, and only on the generic path. PNG/JPEG/WebP are output formats via
   `WriteImage`/`EncodeImage`: Convert-to-image writes one page, and multi-page goes through CLI `%d`
-  fan-out. The CLI is `convert <in> <out>` with `--from`/`--to`, and all subcommands share one
+  fan-out. SVG is both an input and an output format (`WriteSVG`), sharing the image path's
+  one-page-per-file shape and `%d` fan-out. The CLI is `convert <in> <out>` with `--from`/`--to`, and all subcommands share one
   detection-based opener — so rasterize no longer assumes unknown extensions are PDF, and topdf
   `--print` actually applies print media now. A new format lands by flipping its capability bit and
   adding one switch case in `openDetected`/`Write` — see the sibling contract in.
