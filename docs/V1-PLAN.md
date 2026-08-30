@@ -103,9 +103,44 @@ structurally unable to catch it:
 
 - `pkg/pdf/parser.go`, `parseArray` — recursion with no depth cap, while every
   sibling has one (`resolve.go` 32, `page.go` 64, `function.go` 32).
-- `pkg/layout/css/build.go` — ~150k nested `<div>` (1.6 MB) kills the process.
-  Frames are large because `css.ComputedStyle` passes **by value** through
-  `Compute`→`inheritFrom`.
+- ~~`pkg/layout/css/build.go`~~ — **done.** Reproduced, and worse than recorded:
+  **80,000** nested `<div>` (~880 KB, not 1.6 MB) is enough.
+  `sizeof(ComputedStyle)` is **2,144 bytes** and `generate` takes it by value, so
+  nesting depth is stack depth times a two-kilobyte frame. Bounded at
+  `maxBoxTreeDepth` (1024), degrading with a once-only log. Passing the style by
+  pointer would raise the ceiling rather than remove it, and touches far more
+  code; the bound is what makes the failure mode safe.
+
+### 0d-bis. The HTML parser is quadratic in nesting — **DONE, not in the audit**
+
+Found while reproducing 0d, upstream of it, and different in kind:
+`pkg/html.Parse` does not crash on deep nesting — it **hangs**.
+
+`golang.org/x/net/html` resolves a close tag with `indexOfElementInScope`, which
+scans the open-element stack linearly, so nesting is quadratic in open elements.
+Measured *inside* `xhtml.Parse`:
+
+| nested `<div>` | time in `xhtml.Parse` | this repo's own tree walk |
+| --- | --- | --- |
+| 30,000 | 3.7 s | ~6 ms |
+| 60,000 | 15.1 s | ~12 ms |
+| 200,000 | did not finish | — |
+
+Four times the time for twice the depth — textbook quadratic. **The cost is
+entirely in the dependency**, and it lands before this package gets control, so
+it cannot be bounded after the fact.
+
+Fixed by declining over-deep input up front: a tokenizer-only pre-pass counts
+nesting and returns `ErrTooDeeplyNested` past `maxNestingDepth` (4096). It uses
+`x/net/html`'s own tokenizer, so tag recognition matches the parser exactly
+rather than relying on a hand-rolled scan of markup, and it is linear — 11 ms for
+200,000 levels — with an early exit, so refusing costs microseconds regardless of
+file size. Void elements are excluded, since they never enter the open-element
+stack.
+
+Worth recording in `docs/DEPENDENCIES.md`: this is a performance characteristic
+of an approved dependency that we have to defend against ourselves, not a bug we
+can fix upstream.
 
 ### 0e. PDF page-tree has no visited-set — audit-reported
 
@@ -143,6 +178,39 @@ bugs were found, which is not a coincidence worth ignoring.
 
 A `FuzzOpen` per parser would have caught nearly every item in this phase. Without
 them, Phase 0 fixes the bugs we happened to find rather than the class.
+
+**`css` and `svg` landed here** (`pdf` and `xlsx` on their own branches). Four
+targets: `css.Parse` (parse + cascade), `ParseDeclarations`, `ParseColorValue`,
+and `svg.Parse` (XML + cascade + scene build, seeded from 40 real resvg
+fixtures).
+
+`pkg/css` came back **clean** — 20M, 144M and 169M executions on the three
+targets, no crashes. That is a genuine result rather than a weak target: the
+package is written defensively, `Parse` is documented as total, and the property
+parsers already reject what they cannot use.
+
+`pkg/svg` found **two defects in under four seconds each**, both escaping the
+public `Parse` on documents under 70 bytes:
+
+- **`<text x="0">0 <A>` panicked** with `index out of range [1] with length 1`.
+  `recordLists` stores a `[start,end)` span over the character slice, and
+  `dropTrailingSpace` then shrinks that slice. The parser already knew about this
+  hazard — `trimLengths` exists for exactly it, and its comment says so — but the
+  position lists were missed while the `textLength` ranges were handled.
+- **`<path d="M0 0Z0 0l 0 0">` hung forever.** A number where a command is
+  expected means "repeat the previous command", but `closepath` consumes no
+  arguments, so repeating it never advances the scanner. SVG's path grammar has
+  no implicit repetition for `closepath`, so stopping is both the correct parse
+  and the terminating one.
+
+After both fixes: 80M executions clean.
+
+Two things worth carrying to the remaining parsers. First, **a clean fuzz run is
+information, not a failed attempt** — `css` being clean at 300M+ executions is
+evidence the package is sound, and it took the same effort to establish as the
+two SVG bugs. Second, **seed from the real corpus**: the SVG target seeds from 40
+resvg fixtures, which is what gave the mutator valid structure to corrupt rather
+than making it discover SVG syntax from scratch.
 
 Also worth noting: `pkg/pdf/filter/jbig2` is excluded from golangci-lint as vendored
 code, so it receives no static analysis at all despite containing several of the

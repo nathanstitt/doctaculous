@@ -910,7 +910,18 @@ func (tb *textBuilder) resolveTextPaints() {
 func (tb *textBuilder) resolvePositions() {
 	for i := len(tb.lists) - 1; i >= 0; i-- {
 		l := tb.lists[i]
-		for j := l.start; j < l.end; j++ {
+		// A recorded range can outlive the characters it covers:
+		// dropTrailingSpace runs between recordLists and here, and strips a
+		// collapsed trailing space that a range's end already counted. Clamping
+		// is the fix rather than adjusting the ranges at strip time, because a
+		// range is a half-open span over a slice that later shrank -- there is
+		// nothing to correct, only fewer characters to apply it to.
+		//
+		// Found by fuzzing: `<svg><text x="0">0 <A>` (56 bytes) recorded a
+		// 2-character range, then had its trailing space stripped, and indexed
+		// chars[1] of a 1-element slice straight out of the public Parse.
+		end := min(l.end, len(tb.chars))
+		for j := l.start; j < end; j++ {
 			k := j - l.start
 			c := &tb.chars[j]
 			if k < len(l.x) {

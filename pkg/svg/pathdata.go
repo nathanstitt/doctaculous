@@ -135,6 +135,17 @@ func parsePathData(d string) *render.Path {
 				c = 'L'
 			case 'm':
 				c = 'l'
+			case 'Z', 'z':
+				// closepath takes no arguments, so repeating it implicitly
+				// consumes nothing and the scanner never advances -- an
+				// infinite loop appending Close() forever. SVG's path grammar
+				// has no implicit repetition for closepath either (it is
+				// followed by a moveto or the end of the data), so stopping
+				// here is both the correct parse and the terminating one.
+				//
+				// Found by fuzzing: `<path d="M0 0Z0 0l 0 0">`, 64 bytes,
+				// hung inside the public Parse.
+				return p
 			}
 		}
 		rel := c >= 'a'
