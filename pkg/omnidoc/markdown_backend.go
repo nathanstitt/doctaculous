@@ -34,14 +34,14 @@ func (o MarkdownOptions) toWriterOptions() markdown.Options {
 // HTML or DOCX reflow document, or an opened PDF (whose logical structure is recovered by
 // extraction). Set opts.Plain for plain text.
 func (d *Document) WriteMarkdown(_ context.Context, out io.Writer, opts MarkdownOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteMarkdown: document is not a reflow document")
+	root, err := structureRoot(d, "WriteMarkdown")
+	if err != nil {
+		return err
 	}
 	if opts.MaxBytes > 0 {
 		out = &truncateWriter{w: out, remaining: opts.MaxBytes}
 	}
-	if err := markdown.Write(rt.cssboxRoot(), out, opts.toWriterOptions()); err != nil {
+	if err := markdown.Write(root, out, opts.toWriterOptions()); err != nil {
 		return fmt.Errorf("omnidoc: write markdown: %w", err)
 	}
 	return nil

@@ -810,6 +810,20 @@ CLI `tomd <pdf>` / `tohtml`):
   `ErrUnsupportedFormat`/`ErrSameFormat`. `DetectFormat` is content-first — magic, then the
   extension hint, then a WHATWG HTML sniff, with no UTF-8⇒text fallback. `Open`/`OpenBytes` sniff
   any supported format and the PDF path stays byte-identical; `OpenAs`/`OpenBytesAs` skip detection.
+- **Branchable errors, not string matching**: `ErrNoStructure` (the document carries no box tree the
+  structure writers can walk — an SVG, whose renderer lays out pages but keeps no tree) and
+  `ErrPageOutOfRange`. Both are wrapped by every site that raises them, across nine writers that
+  previously returned bare `fmt.Errorf` in two different wordings. `omnidoc.ErrSheetNotFound` is now
+  an alias of `xlsx.ErrSheetNotFound` rather than a second value meaning the same thing — they were
+  distinct sentinels whose messages differed by one colon, so `errors.Is` between them was false in
+  both directions and a caller using both packages would write a check that compiled and never
+  matched. Wiring `ErrNoStructure` surfaced a live bug: `svg → md` used to write an empty file and
+  exit 0, because the nil box tree passed a type assertion that only tested the interface.
+- **`WithContext(ctx)`** bounds open-time box generation, resource loading and layout on **every**
+  `Open*` entry point. It replaces a parallel `*Context` naming family that covered HTML and URLs
+  only; the plumbing already existed but was unexported, as `OpenHTMLBytesContext`'s own doc
+  admitted. A caller's own `WithContext` outranks the one those functions prepend, and a nil ctx is
+  ignored.
   Every opener stamps `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write`
   dispatch any valid input→output pair; the legacy `ConvertXToY` wrappers were shims pinned
   byte-identical and have since been removed. Same-format conversion is a deliberate

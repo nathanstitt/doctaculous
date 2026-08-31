@@ -61,7 +61,7 @@ func (o PDFOptions) toWriterOptions() pdfwrite.Options {
 func (d *Document) WritePDF(ctx context.Context, out io.Writer, opts PDFOptions) error {
 	rp, ok := d.r.(reflowPages)
 	if !ok {
-		return fmt.Errorf("omnidoc: WritePDF: document is not a reflow document")
+		return fmt.Errorf("omnidoc: WritePDF: %w", ErrNoStructure)
 	}
 	if err := pdfwrite.WriteDocument(ctx, out, rp.layoutPages(), opts.toWriterOptions()); err != nil {
 		return fmt.Errorf("omnidoc: write pdf: %w", err)

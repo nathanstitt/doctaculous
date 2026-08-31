@@ -23,11 +23,11 @@ type XLSXOptions struct {
 // it works on any document that can produce a cssbox tree — including an
 // opened PDF, whose tables are recovered by extraction.
 func (d *Document) WriteXLSX(_ context.Context, out io.Writer, opts XLSXOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteXLSX: document has no convertible structure")
+	root, err := structureRoot(d, "WriteXLSX")
+	if err != nil {
+		return err
 	}
-	if err := xlsxwrite.Write(rt.cssboxRoot(), out, xlsxwrite.Options{Logf: opts.Logf}); err != nil {
+	if err := xlsxwrite.Write(root, out, xlsxwrite.Options{Logf: opts.Logf}); err != nil {
 		return fmt.Errorf("omnidoc: write xlsx: %w", err)
 	}
 	return nil
