@@ -113,6 +113,24 @@ func convertCmd(args []string) error {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
 
+	// SVG holds one page per document, exactly like an image, so it fans out
+	// the same way rather than streaming a single file to the writer.
+	if toFormat == omnidoc.FormatSVG {
+		if output == "-" {
+			return fmt.Errorf("svg output requires a file path (use %%d for multi-page output)")
+		}
+		if err := omnidoc.CanConvert(doc.Format(), toFormat); err != nil {
+			return err
+		}
+		indices, err := resolvePages(*pages, *page, doc.PageCount())
+		if err != nil {
+			return err
+		}
+		return writeSVGPages(doc, indices, output, omnidoc.SVGOptions{
+			BundledFonts: *bundledFonts,
+		})
+	}
+
 	// Image targets fan out to one encoded file per selected page; everything
 	// else streams one document to the writer.
 	if toFormat == omnidoc.FormatPNG || toFormat == omnidoc.FormatJPEG ||
@@ -271,6 +289,51 @@ func openInput(input string, from omnidoc.Format, pageSize string, bundledFonts,
 // and is required for a multi-page render). Failed pages are reported to
 // stderr; successful pages are still written, and the first error is returned
 // so scripts and CI detect a partial batch.
+// writeSVGPages writes one SVG file per selected page.
+//
+// It mirrors renderPages' contract rather than inventing its own: a %d
+// placeholder is required for more than one page, and a page that fails is
+// reported to stderr without abandoning the rest of the batch, so one bad page
+// cannot cost the whole conversion.
+func writeSVGPages(doc *omnidoc.Document, indices []int, outPattern string, opts omnidoc.SVGOptions) error {
+	if len(indices) > 1 && !strings.Contains(outPattern, "%d") {
+		return fmt.Errorf("writing %d pages requires a %%d placeholder in the output name (e.g. page-%%d.svg)", len(indices))
+	}
+	var firstErr error
+	written := 0
+	for _, idx := range indices {
+		path := outputPath(outPattern, idx)
+		if err := writeSVGFile(doc, idx, path, opts); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			fmt.Fprintf(os.Stderr, "omnidoc: page %d: %v\n", idx+1, err) //nolint:errcheck // stderr
+			continue
+		}
+		written++
+	}
+	if firstErr != nil {
+		return fmt.Errorf("%d of %d pages failed; first error: %w", len(indices)-written, len(indices), firstErr)
+	}
+	return nil
+}
+
+// writeSVGFile converts one page to path.
+func writeSVGFile(doc *omnidoc.Document, index int, path string, opts omnidoc.SVGOptions) (err error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Surface a close error only if the conversion itself succeeded (a
+		// flush of buffered bytes can fail on a full disk).
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	return doc.WriteSVG(context.Background(), f, index, opts)
+}
+
 func renderPages(doc *omnidoc.Document, indices []int, outPattern string, imgOpts omnidoc.ImageOptions) error {
 	if len(indices) > 1 && !strings.Contains(outPattern, "%d") {
 		ext := "png"

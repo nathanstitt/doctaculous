@@ -240,10 +240,10 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running 
 	// these). colspan/rowspan apply to a cell; <col span>/<colgroup span> reuse ColSpan.
 	switch b.Display {
 	case cssbox.DisplayTableCell:
-		b.ColSpan = attrSpan(e, "colspan")
-		b.RowSpan = attrSpan(e, "rowspan")
+		b.ColSpan = attrSpan(e, "colspan", maxColSpan)
+		b.RowSpan = attrSpan(e, "rowspan", maxRowSpan)
 	case cssbox.DisplayTableColumn, cssbox.DisplayTableColumnGroup:
-		b.ColSpan = attrSpan(e, "span")
+		b.ColSpan = attrSpan(e, "span", maxColSpan)
 	}
 
 	// <br> forces a line break. It lowers to a preserved-newline text leaf (the
@@ -334,10 +334,21 @@ func makeTextBox(data string, parent gcss.ComputedStyle) *cssbox.Box {
 	return &cssbox.Box{Kind: cssbox.BoxText, Text: data, Style: style, Display: cssbox.DisplayInline}
 }
 
+// HTML's own ceilings on the presentational span attributes (HTML §4.9.11-12:
+// colspan and <col span> clamp to 1000, rowspan to 65534). They are not
+// politeness limits: buildGrid materializes one occupancy slot per covered
+// cell, so an unbounded span is an unbounded allocation -- <td colspan="9e8">
+// grows the column vector 900 million entries and never comes back.
+const (
+	maxColSpan = 1000
+	maxRowSpan = 65534
+)
+
 // attrSpan reads an HTML span attribute (colspan/rowspan/span) as a positive
-// integer, defaulting to 1 when absent, non-numeric, or < 1 (HTML clamps these to
-// at least 1). The box stores the resolved value (never 0) on a span-bearing box.
-func attrSpan(e *html.Element, name string) int {
+// integer, defaulting to 1 when absent, non-numeric, or < 1, and clamping to max
+// (HTML clamps these at both ends). The box stores the resolved value (never 0)
+// on a span-bearing box.
+func attrSpan(e *html.Element, name string, max int) int {
 	v, ok := e.Attr(name)
 	if !ok {
 		return 1
@@ -345,6 +356,12 @@ func attrSpan(e *html.Element, name string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || n < 1 {
 		return 1
+	}
+	// Clamping rather than rejecting matches HTML: an over-large span means
+	// "span everything", and the grid extent clamp in buildGrid trims it to the
+	// real column/row count anyway.
+	if n > max {
+		return max
 	}
 	return n
 }

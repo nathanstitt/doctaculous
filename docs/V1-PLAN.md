@@ -51,7 +51,7 @@ Two of these were reproduced end to end while writing this plan; the rest come f
 the audit and are marked as such. **Reproduce before fixing** — the audit's line
 numbers predate the rename, and one of its claims (that `nan` hangs) did not hold up.
 
-### 0a. `parseRef` overflows the column index — panics
+### 0a. `parseRef` overflows the column index — panics — **DONE**
 
 `pkg/xlsx/parse.go`, `parseRef`. The `col = col*26 + …` loop is unbounded. Measured:
 
@@ -62,47 +62,117 @@ numbers predate the rename, and one of its claims (that `nan` hangs) did not hol
 | 14 letters | −6696602603409169451 | **negative** |
 
 That value reaches `make([][]Cell, maxRow+1)` and panics with `makeslice: len out of
-range`. Confirmed end to end: a 2,258-byte `.xlsx` crashes the CLI, and the panic
-escapes `OpenXLSXBytes` — so an embedding server dies too.
+range`. Confirmed end to end: the panic escapes `OpenXLSXBytes` — so an embedding
+server dies too.
 
-**The fix already exists two hundred lines away.** `parseColElement` in the same file
-clamps with `if maxCol-minCol > 16383`, and says why. `parseRef` needs the same
-bound. This is the highest value-per-line item in the entire plan.
+**Verification changed two things about this entry.**
 
-### 0b. Non-finite CSS numbers hang the layout engine
+*The row axis is the worse half, and was unrecorded.* `parseRef` bounded neither
+axis: `strconv.Atoi` accepts any row number, and `A999999999999` reaches
+`make([][]Cell, maxRow+1)` too. That is not a panic but an unbounded allocation —
+the process is killed by the OOM killer (`signal: killed`), which `recover()`
+cannot catch any more than it can catch a stack overflow. So 0a belonged with 0d
+as a defeater of the batch guarantee, not merely as a catchable panic.
+
+*The column overflow is not only the 14-letter wrap.* Any reference past the sheet
+width panics — `ZZZZZZZZZ1` (9 letters, a positive number) hits `makeslice` just as
+`XFE1` does. The negative wrap is one instance of "column exceeds the grid", not
+the bug itself.
+
+Fixed by bounding both axes in `parseRef` against named `maxSheetCols` /
+`maxSheetRows` constants, with the column check *inside* the loop so no input
+length can overflow `int`. An out-of-sheet address is rejected as malformed
+rather than clamped: clamping would silently move a cell to a different address.
+The existing `parseColElement` clamp now uses the same constants, and its start
+column is bounded too (a large `min` filled the width map with out-of-sheet keys).
+
+Covered by `pkg/xlsx/malformed_test.go` — table cases plus a `FuzzOpenBytes`
+target (16.7M executions clean), which is also the first fuzz target on this
+package, per 0h.
+
+### 0b. Non-finite CSS numbers hang the layout engine — **DONE**
 
 `pkg/css/cascade.go`, `parseNonNegNumber` rejects only `v < 0`, so `strconv.ParseFloat`
 passes `inf`, `Inf`, `+Inf`, and `nan` straight through — measured, all four return
-`ok=true`. An infinite `flex-grow` then makes the free-space loop in
-`pkg/layout/css/flex.go` never terminate.
+`ok=true`, and so does `infinity`, which the plan did not list. An infinite
+`flex-grow` then makes the free-space loop in `pkg/layout/css/flex.go` never
+terminate.
 
 Reproduced: `<div style="display:flex"><div style="flex-grow:inf">a</div></div>` — 66
-bytes — hangs until killed (exit 124 under `timeout`). There is no `ctx` check on
-that path, so a deadline does not save the caller.
+bytes — hangs until killed.
 
-Reject non-finite values in `parseNonNegNumber`. One check, and it is the whole fix
-for this class.
+**Verification changed two things here as well.**
+
+*The hang is in `OpenHTMLBytes`, not in rasterizing.* Layout runs during open, so
+it is not merely that "there is no `ctx` check on that path" — no `RasterizePage`
+deadline exists yet to be checked. The caller has no interruption point at all.
+
+*`parseNonNegNumber` was not the whole fix.* The tokenizer's own `parseFloat`
+(`pkg/css/token.go`) discarded `strconv`'s `ErrRange` and returned the `±Inf` it
+came with. `readNumeric` scans only digits, `.` and a leading `-`, so `inf` cannot
+be spelled through it — but 400 nines overflow to `+Inf` and reach the identical
+hang, through a value that looks like an ordinary number. Fixing only
+`parseNonNegNumber` would have left that door open for every consumer of
+`Token.Num`. Both are now guarded; `pkg/css/color.go` already documented this
+exact reasoning for colour components, so the convention was in place.
 
 Note the audit reported `nan` as hanging too; it does not — NaN degrades safely.
-Fix the parse anyway: accepting NaN as a valid CSS number is wrong regardless.
+Fixed anyway: accepting NaN as a valid CSS number is wrong regardless.
 
-### 0c. Unbounded counts from attributes — audit-reported, reproduce first
+Covered by `pkg/css/nonfinite_test.go` (parser level) and
+`pkg/omnidoc/malformed_input_test.go` (the 66-byte file, end to end, asserting
+termination). The formerly-infinite cases now return in ~100 ms.
 
-Each takes a small integer straight from markup with no cap:
+### 0c. Unbounded counts from attributes — **DONE**
 
-- `<td colspan="900000000">` and `rowspan` — `pkg/layout/css/table.go`. HTML itself
-  caps these at 1000 and 65534; we do not.
-- `grid-row: 1 / 500000000` — `pkg/layout/css/grid_place.go`.
-- `grid-template-columns: repeat(200000000, 1px)` — `pkg/css/grid_value.go`.
+Each took a small integer straight from markup with no cap. **All four reproduced**
+(the audit was right here), each hanging `OpenHTMLBytes` indefinitely:
 
-### 0d. Stack overflows that `recover()` cannot catch — audit-reported
+- `<td colspan="900000000">` and `rowspan` — HTML caps these at 1000 and 65534.
+- `grid-row: 1 / 500000000`.
+- `grid-template-columns: repeat(200000000, 1px)`.
+
+**Verification changed three things.**
+
+*The parse site was not where the plan said.* `colspan`/`rowspan` are read by
+`attrSpan` in `pkg/layout/css/build.go`, not `table.go`. All three attributes
+(`colspan`, `rowspan`, `<col span>`) flow through that one function, so a single
+clamp fixes them — and its doc comment already cited HTML's clamping rule while
+implementing only the lower half of it.
+
+*Clamping the attribute is not sufficient.* The ceiling bounds one cell, but the
+cost is per cell: 50 cells at the clamped maximum (1000 × 65534) still took **64
+seconds**. The reason is that `buildGrid`'s `ensure` grows the grid to whatever a
+span demands, so a `rowspan` fabricates rows the document does not have. Clipping
+`rowspan` to `len(visualRows)` — which CSS 2.1 17.5.1 requires anyway — is what
+actually bounds it. That case is now 0.01s.
+
+*Two of these terminate without the fix, and would pass a naive timeout test.*
+`repeat(200000000, 1px)` completes in 13.4s unclamped; the 50-cell table in 64s.
+Neither is a crash, both are denial of service. The regression test therefore
+asserts a **5-second budget** rather than mere termination — every bounded case
+finishes in under 0.1s, so that is ~2 orders of magnitude of headroom while still
+failing if a bound is removed. Verified by reverting each fix individually.
+
+Fixed by clamping in `attrSpan` (`maxColSpan`/`maxRowSpan`), clipping `rowspan` to
+the real row count in `buildGrid`, and bounding the expanded track count, explicit
+line numbers, and `span` counts against `maxGridTracks` in `pkg/css/grid_value.go`.
+The track bound is on the *expanded* count, not the repetition count, since
+`repeat(N, a b c)` yields N×3 tracks.
+
+Covered by `pkg/layout/css/unbounded_counts_test.go` (11 termination cases plus
+the attribute-clamp table) and `pkg/css/grid_bounds_test.go`.
+
+### 0d. Stack overflows that `recover()` cannot catch — **PDF half DONE**
 
 These raise `fatal error` via `runtime.throw`, which is **not recoverable**. This is
 the finding that undermines the batch guarantee, because the per-page `recover` is
 structurally unable to catch it:
 
-- `pkg/pdf/parser.go`, `parseArray` — recursion with no depth cap, while every
-  sibling has one (`resolve.go` 32, `page.go` 64, `function.go` 32).
+- ~~`pkg/pdf/parser.go`, `parseArray`~~ — **done.** Reproduced: ~1.2 MB of `[`
+  survives, ~1.5 MB raises `fatal error: stack overflow`. Bounded at
+  `maxObjectDepth` (256), enforced in both `parseArray` and `parseDictOrStream`
+  since they recurse through each other via `parseFromToken`.
 - ~~`pkg/layout/css/build.go`~~ — **done.** Reproduced, and worse than recorded:
   **80,000** nested `<div>` (~880 KB, not 1.6 MB) is enough.
   `sizeof(ComputedStyle)` is **2,144 bytes** and `generate` takes it by value, so
@@ -142,11 +212,57 @@ Worth recording in `docs/DEPENDENCIES.md`: this is a performance characteristic
 of an approved dependency that we have to defend against ourselves, not a bug we
 can fix upstream.
 
-### 0e. PDF page-tree has no visited-set — audit-reported
 
-`pkg/pdf/page.go`, `walkPageTree` caps depth but never marks visited nodes, so a
-cyclic tree expands exponentially: reported as 22 levels → 4.2M pages in 0.76 s. It
-runs inside `loadPages` during **open**, before any recover exists.
+### 0e. PDF page-tree has no visited-set — **DONE**
+
+`pkg/pdf/page.go`, `walkPageTree` caps depth but never marks visited nodes. It runs
+inside `loadPages` during **open**, before any recover exists.
+
+**Reproduced exactly as the audit reported** — 1,427 bytes → 4.2M pages in 0.78 s
+(the audit said 0.76 s), and 240 bytes more → 67M pages in 12.8 s.
+
+The important detail, which the "cyclic tree" framing obscures: **the depth cap of
+64 never fires.** The blow-up is the *fan-out*, not the depth — each level doubles,
+so 2^26 pages are produced at depth 26 and the walk terminates on its own, having
+allocated gigabytes. A deeper cap would not have helped; only a visited set does.
+
+Fixed by tracking visited object numbers per walk. Only a `Reference` can reach a
+node twice, so tracking object numbers catches every cycle a file can express.
+Verified against the 8 real-world corpus PDFs: page counts are byte-identical
+before and after, so legitimately-shared page objects are unaffected.
+
+### 0d/0e addendum — what fuzzing found that the audit did not
+
+Per the decision to pull **0h** forward for `pdf`, `FuzzParse` was written before
+fixing 0d/0e. That ordering paid for itself: the audit named two PDF defects, and
+the fuzzer found **two more**, both in the same unrecoverable class.
+
+- **Object-stream `/N` sizes a slice.** A 504-byte input declaring
+  `/N 40000000020` asked for a 320 GB allocation. The header loop would have
+  rejected the very first pair, but the process was already dead — an allocation
+  cannot be validated after the fact. Now bounded by what the data can hold
+  (each entry needs ≥4 bytes of header).
+- **Object streams can recurse through the `Document`.** A stream whose `/N` is an
+  indirect reference living inside *that same stream* cycles
+  `loadObjStream → GetInt → Resolve → loadObject → parseObjectFromStream →
+  loadObjStream` until the stack is gone. The parser depth cap cannot see this:
+  every level builds a fresh parser. Fixed with an in-progress set.
+
+Two more were found while chasing those, both of the shape **0f** describes but in
+files 0f does not name:
+
+- **`/Length` overflow.** `start+n <= len(src)` passes when `start+n` overflows to
+  negative, then indexes the slice out of range
+  (`index out of range [-9223372036854775764]`). Rewritten as
+  `n <= len(src)-start`, which cannot overflow.
+- **No ceiling on decoded stream size.** A 2.9 MB PDF whose content stream is a
+  flate bomb decoded to 2 GB and drove peak RSS to **4.5 GB in 1.1 s**; the ratio
+  holds for larger inputs. Bounded at `filter.MaxDecodedSize` (512 MB) *during*
+  decompression via `io.LimitReader`, so the memory is never allocated — checking
+  the length afterwards would be too late by definition.
+
+After the four fixes: **181 million executions clean**, against a crash within 78
+seconds before them.
 
 ### 0f. Overflow defeats the image-dimension guard — audit-reported
 
@@ -169,7 +285,7 @@ Same class, lower blast radius: `applyDeclaration` in `pkg/css/cascade.go` silen
 drops every malformed or unsupported property, though `Resolver` already carries a
 `logf` used elsewhere in the file.
 
-### 0h. Add fuzz targets
+### 0h. Add fuzz targets — **`xlsx`, `pdf`, `css`, `svg` done; 5 parsers remain**
 
 The audit's sharpest structural point: **there are no fuzz targets for `pdf`, `docx`,
 `pptx`, `rtf`, `epub`, `svg`, `css`, `font`, or `markdown`.** Fuzzing today covers
@@ -178,6 +294,23 @@ bugs were found, which is not a coincidence worth ignoring.
 
 A `FuzzOpen` per parser would have caught nearly every item in this phase. Without
 them, Phase 0 fixes the bugs we happened to find rather than the class.
+
+**This prediction was tested and held.** `FuzzOpenBytes` (`pkg/xlsx`) and
+`FuzzParse` (`pkg/pdf`) have landed. Writing the PDF target *before* fixing 0d/0e
+found two defects the audit missed and two more of 0f's shape in files 0f does not
+name — four in total, every one of them in the unrecoverable
+`runtime.throw` class. See the 0d/0e addendum above.
+
+The lesson for the remaining seven: **write the fuzz target first.** The audit's
+per-item findings are real but they are a sample, and reading a parser does not
+surface the shapes a mutator finds in minutes. Remaining: `docx`, `pptx`, `rtf`,
+`epub`, `svg`, `css`, `font`, `markdown`.
+
+Worth knowing for whoever picks this up: a crash found only under `-fuzz` may not
+reproduce from the persisted corpus entry, because the killing input is not always
+written before the process dies. Writing each input to a file at the top of the
+fuzz body, and removing it on success, is what actually recovered the 504-byte
+`/N` case here.
 
 **`css` and `svg` landed here** (`pdf` and `xlsx` on their own branches). Four
 targets: `css.Parse` (parse + cascade), `ParseDeclarations`, `ParseColorValue`,
@@ -218,14 +351,24 @@ reported hangs.
 
 ### Suggested order
 
-1. Clamp `parseRef` (0a) — one line, stops a live panic
-2. Reject non-finite numbers (0b) — one check, kills the hang class
-3. Cap `colspan`/`rowspan`/grid lines/`repeat()` (0c)
-4. Depth caps in `parseArray` and friends (0d)
-5. Visited-set in `walkPageTree` (0e)
-6. Overflow-safe dimension guard (0f)
+**Revised: fuzz the parser before fixing it.** The original order put 0h last. On
+the evidence above that is backwards — the PDF target found twice as many defects
+as the audit had for that package, in one afternoon, and three of the four could
+not have been caught by a `recover`. For each remaining parser, write `FuzzOpen`
+first and let it set the work list.
+
+1. ~~Clamp `parseRef` (0a)~~ — **done**
+2. ~~Reject non-finite numbers (0b)~~ — **done**
+3. ~~Cap `colspan`/`rowspan`/grid lines/`repeat()` (0c)~~ — **done**
+4. ~~Depth cap in the PDF object parser (0d)~~ — **done**; the
+   `layout/css/build.go` half remains
+5. ~~Visited-set in `walkPageTree` (0e)~~ — **done**
+6. Overflow-safe dimension guard (0f) — note two instances of this shape have
+   already been fixed in `pkg/pdf`; `render/raster`, `rtf`, and the docx/epub zip
+   ratios remain
 7. Plumb `Logf`, starting at `pdf_backend.go` (0g)
-8. `FuzzOpen` per parser, wired into CI (0h)
+8. `FuzzOpen` for the remaining parsers, wired into CI (0h) — `xlsx` and `pdf`
+   are done
 
 Then re-read the "Limitations" paragraph in `README.md` — the one beginning
 "Unsupported constructs degrade rather than crash" — and confirm it is true before

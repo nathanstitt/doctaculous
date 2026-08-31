@@ -103,7 +103,7 @@ func inferCommand(args []string) (string, error) {
 		return "tohtml", nil
 	case ".docx":
 		return "todocx", nil
-	case ".csv", ".tsv", ".xlsx":
+	case ".csv", ".tsv", ".xlsx", ".svg", ".svgz":
 		return "convert", nil
 	case ".png", ".jpg", ".jpeg", ".webp":
 		return "rasterize", nil
@@ -174,10 +174,12 @@ usage:
 "convert" detects the input format from content and extension (--from overrides)
 and takes the output format from the output extension (--to overrides). Inputs:
 pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, webp, heic, svg, http(s) URLs.
-Outputs: pdf, docx, xlsx, pptx, epub, rtf, md, txt, html, csv, tsv, png, jpg, webp (lossless).
+Outputs: pdf, docx, xlsx, pptx, epub, rtf, md, txt, html, csv, tsv, png, jpg, webp (lossless), svg.
 CSV/TSV/XLSX output carries the
-document's tables (prose is dropped). Converting a document to its own format
-is not supported.
+document's tables (prose is dropped). SVG output is vector (paths, clips,
+gradients; text as glyph outlines) and holds one page per file, so multi-page
+input needs a numbered output name, as image output does. Converting a
+document to its own format is not supported.
 
 The input may be given via --in or as a positional argument. When no subcommand is
 named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;

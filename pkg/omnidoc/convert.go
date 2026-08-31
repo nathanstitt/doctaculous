@@ -48,6 +48,9 @@ type ConvertOptions struct {
 	// Image applies when To == FormatPNG, FormatJPEG, or FormatWebP; Image.Page selects the
 	// single page an image conversion encodes (an io.Writer holds one image).
 	Image ImageOptions
+	// SVG applies when To == FormatSVG; SVG.Page selects the single page the
+	// conversion writes, since one io.Writer holds one SVG document.
+	SVG SVGOptions
 
 	// Logf receives layout/degradation diagnostics from every stage that does
 	// not set its own logger. nil -> no-op.
@@ -238,6 +241,15 @@ func (d *Document) Write(ctx context.Context, out io.Writer, to Format, opts Con
 			htmlOpts.Logf = opts.Logf
 		}
 		return d.WriteHTML(ctx, out, htmlOpts)
+	case FormatSVG:
+		svgOpts := opts.SVG
+		if svgOpts.Logf == nil {
+			svgOpts.Logf = opts.Logf
+		}
+		if opts.BundledFonts {
+			svgOpts.BundledFonts = true
+		}
+		return d.WriteSVG(ctx, out, svgOpts.Page, svgOpts)
 	case FormatPNG, FormatJPEG, FormatWebP:
 		imgOpts := opts.Image
 		imgOpts.Format = to

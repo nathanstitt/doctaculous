@@ -52,8 +52,11 @@ const (
 	// rejected. Output is always lossless VP8L — there is no pure-Go lossy VP8
 	// encoder — so WebP is a PNG-class output, not a JPEG-class one.
 	FormatWebP Format = "webp"
-	// FormatSVG is a Scalable Vector Graphics document (input only; a single
-	// page exactly the SVG's viewport), or its gzip-compressed .svgz form.
+	// FormatSVG is a Scalable Vector Graphics document, or its gzip-compressed
+	// .svgz form. As an input it is a single page exactly the SVG's viewport.
+	// As an output it is genuinely vector — paths, clips, masks and native
+	// gradients rather than a rasterized page in an <image> — and, like an
+	// image format, holds one page per document.
 	FormatSVG Format = "svg"
 )
 
@@ -92,7 +95,7 @@ var formatCaps = map[Format]struct{ input, output bool }{
 	FormatJPEG:     {input: true, output: true},
 	FormatHEIC:     {input: true, output: false},
 	FormatWebP:     {input: true, output: true},
-	FormatSVG:      {input: true, output: false},
+	FormatSVG:      {input: true, output: true},
 }
 
 // ValidInput reports whether f is a supported conversion input (a format the

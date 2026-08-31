@@ -28,6 +28,10 @@ type Document struct {
 	cacheMu        sync.Mutex
 	objCache       map[int]Object           // resolved top-level objects by number
 	objStreamCache map[int]*parsedObjStream // decoded object streams by number
+	// objStreamLoading holds the object streams currently being decoded, so a
+	// stream whose own dictionary refers back into it is refused instead of
+	// recursing until the stack is exhausted. Guarded by cacheMu.
+	objStreamLoading map[int]bool
 
 	// enc is the Standard Security Handler state, or nil for an unencrypted
 	// document. It is computed once during Parse and read-only afterwards.
