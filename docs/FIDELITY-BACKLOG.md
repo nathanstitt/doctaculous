@@ -165,7 +165,7 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
   low frequency. Documented in `replaced.go`.
 - ☑ **D4. CSS `background-image` decode** — *DONE.* `url(...)` parses, decodes through the resource
   loader, rides the fragment as `BgImage`, and paints with `background-repeat`/`-position`/`-size`/
-  `-origin`/`-clip` (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint). See FEATURES.md.
+  `-origin`/`-clip` (`pkg/internal/css/background.go`, `pkg/internal/layout/css/background.go` + paint). See FEATURES.md.
 
 ## E. HTML/CSS — general inline / flow
 
@@ -330,7 +330,7 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
 ## K. PDF — feature gaps (TODO 1–4; "unsupported" → real output)
 
 - ◐ **K1. Scan filters** — JBIG2 **DONE** (vendored pure-Go Apache-2.0 decoder in
-  `pkg/pdf/filter/jbig2/`, wired at `decodeImageXObject`). **JPX/JPEG2000 remains** and is likely
+  `pkg/internal/filter/jbig2/`, wired at `decodeImageXObject`). **JPX/JPEG2000 remains** and is likely
   permanent: no viable pure-Go decoder exists, and writing one is its own project. Today `ErrUnsupported`.
 - ☐ **K2. Tiling patterns (PatternType 1)** (today skipped+logged). *Medium.*
 - ☐ **K3. Higher-fidelity Coons/tensor patches (Types 6/7)** — bicubic boundary vs the current bilinear-corner
@@ -432,7 +432,7 @@ committed render goldens (`docx-list`, `docx-table`, `docx-table-spans`, `docx-i
   path, where pages can differ in height, is handled too.
 - ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16
   margin boxes, running headers/footers with page counters, `marks`/`bleed`, and `string-set`/`string()` are
-  all in (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and. No code change.
+  all in (`pkg/internal/css/page.go`+`pagesize.go`, `pkg/internal/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and. No code change.
 
 ---
 

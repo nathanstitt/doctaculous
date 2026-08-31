@@ -40,13 +40,13 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   `ErrEncryptedNeedsPassword`; an unsupported handler returns `ErrEncrypted`.
 - **Filters**: Flate, LZW, ASCIIHex, ASCII85, and RunLength, all with PNG/TIFF predictors, plus
   CCITTFax (Group 4 / Group 3 1D+2D) and DCTDecode (JPEG). JBIG2 runs through a vendored pure-Go
-  Apache-2.0 decoder in `pkg/pdf/filter/jbig2`, wired at `decodeImageXObject`. JPX/JPEG2000 is
+  Apache-2.0 decoder in `pkg/internal/filter/jbig2`, wired at `decodeImageXObject`. JPX/JPEG2000 is
   pending and returns `ErrUnsupported` — no viable pure-Go decoder exists.
-- **Content interpreter** (`pkg/pdf/content`): path construction and painting, graphics state,
+- **Content interpreter** (`pkg/internal/content`): path construction and painting, graphics state,
   device color, Separation/DeviceN spot color through the tint-transform `/Function`, clipping, the
   text operators including text render modes, and `Do` XObjects.
 - **Fills**: nonzero and even-odd winding. The even-odd rasterizer is hand-rolled and dep-free.
-- **Strokes** (`pkg/render/raster/stroke.go`): joins (miter/round/bevel, with limit), caps, dashes.
+- **Strokes** (`pkg/internal/raster/stroke.go`): joins (miter/round/bevel, with limit), caps, dashes.
 - **Form XObjects**: recursion with `/Matrix`, scoped `/Resources`, a depth guard, and the mandatory
   `/BBox` clip.
 - **Fonts** (`github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
@@ -57,11 +57,11 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   this package already applied to `FontHExtents`/`FontVExtents`, extended to the entry point. It
   matters because a font program is untrusted document input, embedded in a PDF or fetched as a web
   font, and the panic fires during OPEN, before any per-page recover exists; a caller now falls back
-  to a substitute face, which is what an unreadable font should do anyway. Non-embedded base-14 faces come from bundled substitutes (`pkg/font/standard`: TeX Gyre
+  to a substitute face, which is what an unreadable font should do anyway. Non-embedded base-14 faces come from bundled substitutes (`pkg/internal/font/standard`: TeX Gyre
   Heros/Termes, Inconsolata) in **regular/bold/italic/bold-italic** variants, chosen from the
   `/BaseFont` name plus descriptor `/Flags` in PDF, or from the computed `Style` in reflow.
   **Installed system fonts are the DEFAULT** source for non-embedded fonts. An `OSFontProvider`
-  (`pkg/layout/font`) resolves them via `adrg/sysfont`, live-scanning the OS font dirs including
+  (`pkg/internal/layout/font`) resolves them via `adrg/sysfont`, live-scanning the OS font dirs including
   macOS `.ttc` collections, and falls through to the bundled substitutes. Hermetic **bundled-only**
   mode is an opt-out: `--bundled-fonts` on the CLI, or `RasterOptions.BundledFonts` /
   `PDFOptions.BundledFonts` / `WithBundledFonts()` in the library. The golden tests pin it. An
@@ -76,33 +76,33 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   fonts the matcher cannot identify at all.** It identifies installed files by filename against a
   fixed registry, so an unregistered family (Roboto, Barlow, IBM Plex on many hosts) stays unfound;
   `@font-face` with `url()` is the reliable route for non-standard families.
-- **Font-family terminal fallback** (`pkg/layout/font/cache.go`): when **no** candidate in a
+- **Font-family terminal fallback** (`pkg/internal/layout/font/cache.go`): when **no** candidate in a
   `font-family` list resolves, the engine degrades to the bundled serif and logs once per
   (list, style). Previously it resolved to nothing and the caller skipped the run, which rendered a
   page whose every family was unavailable as an empty box. The fallback is style-aware — bold and
   italic select the matching bundled face. A list ending in a generic keyword is unaffected;
   showcase §29.
 - **Transparency**: ExtGState alpha `/ca`/`/CA`, plus all PDF blend modes, separable and
-  non-separable, via `/BM` (`pkg/render/raster/blend.go`).
-- **Shadings** (`pkg/render/raster/shading.go`, `render.Shader`): axial, radial and function-based
+  non-separable, via `/BM` (`pkg/internal/raster/blend.go`).
+- **Shadings** (`pkg/internal/raster/shading.go`, `render.Shader`): axial, radial and function-based
   shadings via `sh`; shading patterns (PatternType 2) via `scn`; and mesh shadings (Types 4–7,
   `shading_mesh.go`), where Coons and tensor patches are tessellated with a bilinear-corner
   approximation. Tiling patterns (PatternType 1) are pending.
-- **Images** (`pkg/render/raster/image.go`): DeviceGray/RGB/CMYK/Indexed/ICCBased at 1–16 bpc,
+- **Images** (`pkg/internal/raster/image.go`): DeviceGray/RGB/CMYK/Indexed/ICCBased at 1–16 bpc,
   baseline JPEG, `/SMask` alpha, `/ImageMask` stencils, `/Decode` arrays on both the raw and DCT
   paths, and inline images (`BI`/`ID`/`EI`).
 - **Page geometry**: `/Rotate` (0/90/180/270), MediaBox/CropBox.
 - **Concurrency**: a `GOMAXPROCS`-bounded worker pool, with a per-page recover so one bad page can't
   kill a batch. Crafted-PDF panic sites are guarded directly.
 
-**Reflow engine (HTML + DOCX)** — shared CSS layout engine (`pkg/layout/css`), covered by
+**Reflow engine (HTML + DOCX)** — shared CSS layout engine (`pkg/internal/layout/css`), covered by
 `html-*` / `docx-*` / `htmldoc-*` goldens, WPT-style reftests, and per-algorithm unit suites. Each
 bullet's design rationale is in its PR:
 
-- **CSS parse + cascade** (`pkg/css`): dependency-free tokenizer and parser, selector matching with
+- **CSS parse + cascade** (`pkg/internal/css`): dependency-free tokenizer and parser, selector matching with
   specificity, the full cascade (specificity, source order, inheritance, `!important`, inline
   `style`, origins), and shorthand expansion.
-- **Custom properties + `var()`** (CSS Variables 1; `pkg/css/customprop.go`, `varsubst.go`):
+- **Custom properties + `var()`** (CSS Variables 1; `pkg/internal/css/customprop.go`, `varsubst.go`):
   `--*` properties cascade by the normal rules and INHERIT. They are stored as raw token streams,
   the same treatment `filter` already gets, and substituted at computed-value time. Substitution
   runs between the cascade and value parsing, so `var()` works in every property, shorthands
@@ -113,24 +113,24 @@ bullet's design rationale is in its PR:
   reference is **invalid at computed-value time**, not a dropped declaration: per spec the property
   falls back to its inherited-or-initial value as though `unset` were specified, rather than leaving
   an earlier declaration showing. This is the one case where the engine must NOT treat a bad value
-  as "keep the previous one". `:root` landed here too (`pkg/css/selector.go`), since that is where a
+  as "keep the previous one". `:root` landed here too (`pkg/internal/css/selector.go`), since that is where a
   palette normally gets declared.
-- **HTML frontend — box generation** (`pkg/html`, `pkg/layout/cssbox`): owned DOM, UA stylesheet,
+- **HTML frontend — box generation** (`pkg/internal/html`, `pkg/internal/layout/cssbox`): owned DOM, UA stylesheet,
   anonymous-box fixups, whitespace collapsing, and `display:none` pruning. `<link>` resolves through
   `pkg/resource.ResourceLoader`.
-- **Block + inline normal flow** (`pkg/layout/inline`, `pkg/layout/css/block.go`+`inline.go`,
-  `pkg/layout/paint`, `OpenHTML`/`OpenHTMLBytes`): the box model — width/`auto`/%, `box-sizing`,
+- **Block + inline normal flow** (`pkg/internal/layout/inline`, `pkg/internal/layout/css/block.go`+`inline.go`,
+  `pkg/internal/layout/paint`, `OpenHTML`/`OpenHTMLBytes`): the box model — width/`auto`/%, `box-sizing`,
   min/max, margins including vertical collapsing, padding, borders, backgrounds — plus the IFC
   (shaping and breaking, `text-align`, `line-height`) and the fragment tree.
-- **Replaced content + images** (`pkg/layout/css/image.go`+`replaced.go`): `<img>` decodes through
-  the stdlib for PNG/JPEG/GIF, `pkg/heif` for HEIC, and `pkg/webp` for WebP, then goes through CSS
+- **Replaced content + images** (`pkg/internal/layout/css/image.go`+`replaced.go`): `<img>` decodes through
+  the stdlib for PNG/JPEG/GIF, `pkg/heif` for HEIC, and `pkg/internal/webp` for WebP, then goes through CSS
   replaced-sizing and paints via `DrawImage`, honoring `object-fit`/`object-position`.
-- **Floats + clear** (`pkg/layout/css/floats.go`): a per-BFC float context, narrowing and wrapping,
+- **Floats + clear** (`pkg/internal/layout/css/floats.go`): a per-BFC float context, narrowing and wrapping,
   `clear`, and a paint layer of its own.
-- **Positioning** (`pkg/layout/css/positioning.go`): relative, as a paint-time offset;
+- **Positioning** (`pkg/internal/layout/css/positioning.go`): relative, as a paint-time offset;
   absolute/fixed, out-of-flow and resolved in two passes against the containing block; and stacking
   contexts.
-- **Overflow clipping** (`pkg/css` `overflow`, `layout.ClipPush/PopKind`): clipping to the padding
+- **Overflow clipping** (`pkg/internal/css` `overflow`, `layout.ClipPush/PopKind`): clipping to the padding
   box, BFC establishment, and deferred float interactions. All four clip keywords are honored —
   `hidden`/`scroll`/`auto`/**`clip`**, where `clip` differs only in forbidding programmatic
   scrolling and allowing `overflow-clip-margin`, neither of which exists in the single-tall-page
@@ -138,19 +138,19 @@ bullet's design rationale is in its PR:
   one clip flag this engine models, with the *clipping* keyword winning when the axes disagree. That
   deliberately over-clips `visible hidden`, because dropping the clip is the worse error.
   Showcase §31.
-- **`max-height`/`min-height` on auto-height blocks** (`pkg/layout/css/block.go` `clampAutoHeight`):
+- **`max-height`/`min-height` on auto-height blocks** (`pkg/internal/layout/css/block.go` `clampAutoHeight`):
   `max-height` previously applied only on the fixed-height path, so `max-height` *without* `height`
   never bounded anything and a clip built from that height clipped nothing. It now clamps the auto
   height after float enclosure and before the clip rect, so box, clip, and parent advance agree.
   `min-height` applies after `max-height` per CSS 10.7. Anonymous boxes are exempt: they copy the
   parent's computed style for inherited text properties but have no properties of their own
   (CSS 9.2.1.1), and clamping them truncated boxes the author never sized.
-- **Full z-index stacking** (`pkg/layout/css/fragment.go`): the Appendix E bands — negative-z behind
+- **Full z-index stacking** (`pkg/internal/layout/css/fragment.go`): the Appendix E bands — negative-z behind
   in-flow, then auto/0 in doc order, then positive — plus relative clip-escape (sub-project 6b).
-- **CSS 2.1 §17 tables** (`pkg/layout/css/table.go`+`tableborder.go`+`tablefix.go`+`measure.go`):
+- **CSS 2.1 §17 tables** (`pkg/internal/layout/css/table.go`+`tableborder.go`+`tablefix.go`+`measure.go`):
   anonymous-table fixup, the grid model, fixed and auto column-width solving, colspan/rowspan,
   `vertical-align`, captions, `<col>`/`<colgroup>`, and both `border-collapse` models.
-- **Bounded span and track counts** (`pkg/layout/css/build.go`+`table.go`, `pkg/css/grid_value.go`):
+- **Bounded span and track counts** (`pkg/internal/layout/css/build.go`+`table.go`, `pkg/internal/css/grid_value.go`):
   the table grid and the grid occupancy map both materialize one entry per covered slot, so a count
   named in markup is an allocation, not a description. `colspan`/`<col span>` clamp to 1000 and
   `rowspan` to 65534 (HTML's own ceilings), a `rowspan` is additionally clipped to the rows the
@@ -158,10 +158,10 @@ bullet's design rationale is in its PR:
   100,000 tracks. Without these a `<td colspan="900000000">` or `repeat(200000000, 1px)` did not
   render slowly — it did not return. Clamping rather than rejecting matches HTML: an over-large span
   means "span everything", and the grid-extent pass trims it to the real count anyway.
-- **Web fonts** (`pkg/css/fontface.go`, `pkg/font/sfnt.go`/`woff1.go`/`woff2*.go`,
-  `pkg/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode including the glyf/loca transform,
+- **Web fonts** (`pkg/internal/css/fontface.go`, `pkg/internal/font/sfnt.go`/`woff1.go`/`woff2*.go`,
+  `pkg/internal/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode including the glyf/loca transform,
   `local()` through `DiskFontProvider`, and family-fallback-list resolution.
-- **Flexbox** (`pkg/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout, §9.7
+- **Flexbox** (`pkg/internal/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout, §9.7
   flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`, and
   **multi-line wrapping**. Wrapping covers `flex-wrap: wrap`/`wrap-reverse`, §9.3 line collection,
   `align-content` — including the flex `stretch` initial, which differs from the shared grid default
@@ -169,59 +169,59 @@ bullet's design rationale is in its PR:
   groups resolve per LINE; the §9.4 step-8 cross clamp is gated to single-line containers.
   wrap-reverse XORs with the RTL cross flip. Wrapped rows paginate between lines for free, since
   `splitFlexGridForPage` is geometry-driven.
-- **CSS Grid** (explicit grid; `pkg/layout/css/grid.go`+`grid_track.go`+`grid_place.go`+`gridfix.go`
+- **CSS Grid** (explicit grid; `pkg/internal/layout/css/grid.go`+`grid_track.go`+`grid_place.go`+`gridfix.go`
   +`baseline.go`): §11 track-sizing and §8 placement (spans, named areas, sparse and dense
   auto-placement), item and content-distribution alignment, `inline-grid`, and a cross-cutting
   baseline backport covering grid, flex, and table cells.
 - **`OpenURL` + HTTP loader** (`pkg/resource/http.go`): fetches HTML over HTTP(S) and resolves
   relative refs, handles `data:` URIs, and does URL-userinfo Basic auth, redacted from logs.
-- **Pagination** (`pkg/layout/css/paginate.go`, `WithPageSize`): fixed-height page fragmentation,
+- **Pagination** (`pkg/internal/layout/css/paginate.go`, `WithPageSize`): fixed-height page fragmentation,
   the break cascade, between-block and forced breaks, and per-page distribution of
   relative/abs/fixed/float boxes and the html/body border.
-- **Per-page bottom-anchored `position: fixed`** (`pkg/layout/css/paginate.go`): a `bottom`-anchored
+- **Per-page bottom-anchored `position: fixed`** (`pkg/internal/layout/css/paginate.go`): a `bottom`-anchored
   fixed box sits at the bottom of every page. It previously resolved against the full single-tall
   document height, which put it below every page and made it invisible. Top-anchored boxes are
   untouched, since their Y is already the page-local offset, and a percentage `bottom` is declined
   rather than mis-shifted.
-- **Repeated `<thead>` on continuation pages** (`pkg/layout/css/tablepage.go`, `table.go`): a table
+- **Repeated `<thead>` on continuation pages** (`pkg/internal/layout/css/tablepage.go`, `table.go`): a table
   split across pages repeats its header rows on every continuation, so a long table keeps its column
   headings. Grid construction flattens the head/body/footer distinction away, so the header's bottom
   Y is recorded on the table fragment as `HeaderBottom` and the cells above it are deep-cloned onto
   each tail. The tail's own `HeaderBottom` is then re-anchored to its copy, so a table spanning three
   or more pages keeps repeating.
-- **Mid-cell table splitting** (`pkg/layout/css/tablepage.go`): a table row taller than the page —
+- **Mid-cell table splitting** (`pkg/internal/layout/css/tablepage.go`): a table row taller than the page —
   including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
   A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no
   relayout. Cells fragment independently: one that cannot break rides the tail whole while its
   row-mates split. Breaking between whole rows is still preferred when a row boundary is available.
-- **Mid-block forced breaks** (`pkg/layout/css/fragmentpage.go`, `paginate.go`): a `break-before` or
+- **Mid-block forced breaks** (`pkg/internal/layout/css/fragmentpage.go`, `paginate.go`): a `break-before` or
   `break-after` on a nested block sitting at neither its ancestor's leading nor trailing edge now
   splits that ancestor at the break position, instead of being dropped with a warning. It reuses the
   recursive splitter, and the split Y comes from the author's break rather than the page boundary,
   so it applies even when the page is not full.
-- **Recursive spine splitting** (`pkg/layout/css/fragmentpage.go`): a child straddling a page boundary
+- **Recursive spine splitting** (`pkg/internal/layout/css/fragmentpage.go`): a child straddling a page boundary
   is itself split rather than riding the tail whole, so a `section > div > p` spine breaks at a line
   boundary inside the paragraph instead of leaving the head page blank below the last whole child.
   The dispatcher needed no signature change: `pageBottom` is absolute page space and the fragment
   tree shares one coordinate system, so it was already valid at any depth. `break-inside: avoid` stops
   the recursion.
-- **Page-split correctness** (`pkg/layout/css/fragmentpage.go`): a split now routes out-of-flow
+- **Page-split correctness** (`pkg/internal/layout/css/fragmentpage.go`): a split now routes out-of-flow
   children — floats and positioned boxes — to the fragment whose band contains them, instead of
   dropping them from both. It also detaches the `BgImage`/`ClipChain`/`Collapsed` state that the
   shallow clone would otherwise share between two pages, since the per-page shift mutates those in
   place and one fragment's shift moved the other's background. Finally it clamps a clipping
   fragment's `ClipRect` to its own extent. All of it hangs off the single `splitAnyBlockForPage`
   dispatch point.
-- **CSS Paged Media** (`pkg/css/page.go`+`pagesize.go`, `pkg/layout/css/pagemodel.go`+
+- **CSS Paged Media** (`pkg/internal/css/page.go`+`pagesize.go`, `pkg/internal/layout/css/pagemodel.go`+
   `fragmentpage.go`+`marginbox.go`, `WithDefaultPaged`): `@page` size, margins, named and pseudo
   pages, and the 16 margin boxes; `break-inside`; widows and orphans via mid-block line
   fragmentation; running headers and footers with page counters; `@page marks`/`bleed`;
   `string-set`/`string()`; `position: running()`/`content: element()`; and named-page multi-width
   reflow.
-- **`white-space`** (`pkg/css` + `pkg/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line, plus tab
+- **`white-space`** (`pkg/internal/css` + `pkg/internal/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line, plus tab
   stops.
-- **`overflow-wrap` / `word-break` — mid-word line breaking** (`pkg/css/cascade.go`,
-  `pkg/layout/inline/wordbreak.go` + `grapheme.go`): `overflow-wrap: normal | break-word |
+- **`overflow-wrap` / `word-break` — mid-word line breaking** (`pkg/internal/css/cascade.go`,
+  `pkg/internal/layout/inline/wordbreak.go` + `grapheme.go`): `overflow-wrap: normal | break-word |
   anywhere`, plus the legacy `word-wrap` alias that sets the same property, and `word-break:
   normal | break-all | keep-all`. Both inherit. `break-word` and `anywhere` break inside a word only
   as a LAST RESORT — a word that fits on a line of its own is moved down whole — while
@@ -233,8 +233,8 @@ bullet's design rationale is in its PR:
   read from the UCD tables already vendored with `benoitkugler/textlayout`, so no combining mark,
   jamo, or emoji is ever split. `white-space: nowrap` outranks all of it. Untouched callers — DOCX,
   SVG text, any page not setting these — keep the whitespace-only breaking path byte-identical.
-- **`letter-spacing` / `word-spacing` on the CSS text path** (`pkg/css/cascade.go`,
-  `pkg/layout/inline/shape.go`, `pkg/layout/css/inline.go`): `letter-spacing: normal | <length>` and
+- **`letter-spacing` / `word-spacing` on the CSS text path** (`pkg/internal/css/cascade.go`,
+  `pkg/internal/layout/inline/shape.go`, `pkg/internal/layout/css/inline.go`): `letter-spacing: normal | <length>` and
   `word-spacing: normal | <length>`, both inherited, both taking NEGATIVE lengths that tighten,
   in `px`/`pt`/`em`. `letter-spacing` is added after **every** typographic character unit including
   the last one on a line. That matches Chrome, Firefox and Safari rather than CSS Text 3's literal
@@ -254,13 +254,13 @@ bullet's design rationale is in its PR:
   through this engine's complex-shaping result. And these properties still do **not** inherit into
   an inline `<svg>` — nothing does, because inline SVG is replaced content re-parsed in isolation
   (see `docs/SVG.md`).
-- **List markers + CSS counters** (`pkg/css/counter_format.go`, `pkg/layout/css/counters.go`,
-  `pkg/font/bullet.go`): `list-style-*`, `counter-reset`/`-increment`/`-set`, `content: counter()`,
+- **List markers + CSS counters** (`pkg/internal/css/counter_format.go`, `pkg/internal/layout/css/counters.go`,
+  `pkg/internal/font/bullet.go`): `list-style-*`, `counter-reset`/`-increment`/`-set`, `content: counter()`,
   and synthetic bullet outlines.
-- **`background-image`** (`pkg/css/background.go`, `pkg/layout/css/background.go` + paint):
+- **`background-image`** (`pkg/internal/css/background.go`, `pkg/internal/layout/css/background.go` + paint):
   `url(..)` with `-repeat`/`-position`/`-size`/`-origin`/`-clip`.
 - **The `background` shorthand validates before it commits** (`parseBackgroundShorthand` in
-  `pkg/css/shorthand.go`): every component must classify, and if any one does not, the WHOLE
+  `pkg/internal/css/shorthand.go`): every component must classify, and if any one does not, the WHOLE
   declaration is discarded with no longhand touched. That is CSS 2.1 §4.2 and CSS Syntax 3, which
   treat an invalid declaration as never having entered the cascade. It is also what makes the
   standard fallback idiom work: `background: red` followed by `background: linear-gradient(…)`
@@ -268,8 +268,8 @@ bullet's design rationale is in its PR:
   tolerated unknown components would turn every such fallback transparent. Verified against
   Blink and Gecko, including the case where a bad component sits beside a good one
   (`notacolour url(x.png)` applies neither).
-- **CSS gradients as a background image** (`pkg/css/gradient.go`, `pkg/layout/gradient.go`,
-  `pkg/layout/paint/gradient.go`): `linear-gradient()`, `radial-gradient()` and both
+- **CSS gradients as a background image** (`pkg/internal/css/gradient.go`, `pkg/internal/layout/gradient.go`,
+  `pkg/internal/layout/paint/gradient.go`): `linear-gradient()`, `radial-gradient()` and both
   `repeating-*` forms. Linear takes an `<angle>` in any CSS unit (`deg`/`grad`/`rad`/`turn`),
   `to <side>`, or `to <corner>`. The corner case computes the spec's aspect-dependent
   gradient line, perpendicular to the box's other diagonal, and **not** 45°, which is only
@@ -297,22 +297,22 @@ bullet's design rationale is in its PR:
   shape with a zero radius, such as `closest-side` centred on a box corner, establishes no
   geometry: nothing paints, the background colour remains, and the skip is logged via
   `warnOnce`.
-- **CSS Color 4 colour values — ONE grammar for the whole engine** (`pkg/css/color.go`; `pkg/svg`
+- **CSS Color 4 colour values — ONE grammar for the whole engine** (`pkg/internal/css/color.go`; `pkg/internal/svg`
   delegates to it): the full 148-keyword named table, from `golang.org/x/image/colornames` plus
   `rebeccapurple` and `transparent`; all four hex forms (`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`); and
   `rgb()`/`rgba()`/`hsl()`/`hsla()` in both the legacy comma syntax and the modern space syntax with
   `/` alpha, taking integer or percentage channels. Alpha is LIVE end to end: parsing yields a
   `color.RGBA` that the painter hands to the device unchanged and the rasteriser composites. A pixel
   check confirmed it — `background:rgba(0,0,0,0.9)` on an 80×80 box went from 0 painted pixels
-  to 6400. Previously `pkg/css` had a hand-written parser covering only `#rgb`/`#rrggbb`/`rgb()` and
-  eight keywords while `pkg/svg` carried a complete implementation, so any alpha-bearing value
+  to 6400. Previously `pkg/internal/css` had a hand-written parser covering only `#rgb`/`#rrggbb`/`rgb()` and
+  eight keywords while `pkg/internal/svg` carried a complete implementation, so any alpha-bearing value
   failed the cascade, the declaration was dropped per CSS error handling, and the element painted
-  *nothing*. The merge went into `pkg/css` rather than the reverse because `pkg/svg` already depends
-  on it and `pkg/css` depends on no internal package. Malformed values still yield `ok=false`, so
+  *nothing*. The merge went into `pkg/internal/css` rather than the reverse because `pkg/internal/svg` already depends
+  on it and `pkg/internal/css` depends on no internal package. Malformed values still yield `ok=false`, so
   the declaration drops and the prior value stands — through the `background` shorthand as well as
   through the longhands (`background-color`, `color`, `border-*-color`).
-- **`border-radius`** (`pkg/css/borderradius.go`, `pkg/layout/borderradius.go`,
-  `usedRadii` in `pkg/layout/css/block.go` + paint): CSS Backgrounds 3 §5 in full — the shorthand
+- **`border-radius`** (`pkg/internal/css/borderradius.go`, `pkg/internal/layout/borderradius.go`,
+  `usedRadii` in `pkg/internal/layout/css/block.go` + paint): CSS Backgrounds 3 §5 in full — the shorthand
   taking 1–4 values in CORNER order (diagonal pairing, not `expandBox`'s clockwise side rule), the
   `/` form for elliptical corners, all four longhands, and percentages. A corner's two semi-axes
   resolve against DIFFERENT bases, the horizontal one against the border box's width and the
@@ -332,8 +332,8 @@ bullet's design rationale is in its PR:
   ridge/groove/inset/outset) are approximated on a rounded box. Square-cornered boxes still paint
   four fully-styled strips and are byte-identical.
 
-- **`box-shadow`, outer and `inset`** (CSS Backgrounds 3 §6 — `pkg/css/boxshadow.go`,
-  `pkg/layout/css/boxshadow.go`, `pkg/layout/paint/boxshadow.go`). The parser takes the full grammar,
+- **`box-shadow`, outer and `inset`** (CSS Backgrounds 3 §6 — `pkg/internal/css/boxshadow.go`,
+  `pkg/internal/layout/css/boxshadow.go`, `pkg/internal/layout/paint/boxshadow.go`). The parser takes the full grammar,
   `&&` combinator included: `inset`, the 2–4 lengths and the colour may appear in **any order**, so
   `inset red 2px 2px` and `2px 2px inset red` name the same shadow. Comma-separated **lists** paint
   in the spec's order, so the **first shadow is on top**. Error handling is the engine's usual — one
@@ -347,26 +347,26 @@ bullet's design rationale is in its PR:
   the band. The two also occupy **different slots of the paint order** — outer behind the background,
   inset over both backgrounds but under the border — so a list carrying both shows both.
   The blur is `sigma = radius/2`, per the spec's "the shadow's edge transitions over a distance
-  equal to the blur radius, centred on the edge". It runs through **`pkg/svg/filter`'s existing
+  equal to the blur radius, centred on the edge". It runs through **`pkg/internal/svg/filter`'s existing
   `feGaussianBlur`**: the repo keeps exactly one blur implementation, shared by SVG filters, the CSS
   `filter` shorthand and now this. Square corners only — `border-radius` is not implemented, and
   `paint.shadowOutline` documents the single integration point for it.
 - **A `box-shadow` with no blur stays fully vector, including in PDF.** It is a plain even-odd fill
   of the box's shape, so the common patterns — a hard offset, a spread ring, an `inset` colour
   spine — cost no rasterization anywhere. A **blurred** shadow needs an offscreen raster surface via
-  `render.Device.RenderOffscreen`, and `pkg/render/pdfwrite` returns nil from that by design: PDF has
+  `render.Device.RenderOffscreen`, and `pkg/internal/pdfwrite` returns nil from that by design: PDF has
   no blur operator, and a blur has no vector representation. There — and whenever the surface would
   be degenerate, off-canvas, or over the per-shadow pixel cap — the shadow **degrades to the same
   shape with a HARD edge**, at the same place and size. That follows the "a visible approximation
   beats a blank" rule the CSS `filter` path already uses, and is deliberately NOT a rasterization of
-  the page. **That degradation is currently SILENT**: `pkg/layout/paint` has no logger to report it
+  the page. **That degradation is currently SILENT**: `pkg/internal/layout/paint` has no logger to report it
   through, since `PaintPage` takes only a Device, a Page and a Matrix — exactly as the CSS-filter
   pixel-cap degradation in the same package does. **DOCX output carries no shadow at all.**
-  `pkg/render/docxwrite` consumes the `cssbox` tree directly rather than the painted item list, so
+  `pkg/internal/docxwrite` consumes the `cssbox` tree directly rather than the painted item list, so
   it never sees a shadow item, and it has no `box-shadow` analogue to map one onto.
-- **Link pseudo-classes + `text-decoration: underline`** (`pkg/css/selector.go`, `pkg/html/ua.go`):
+- **Link pseudo-classes + `text-decoration: underline`** (`pkg/internal/css/selector.go`, `pkg/internal/html/ua.go`):
   `:link`/`:visited` plus general pseudo-class parsing.
-- **Inline emphasis UA defaults** (`pkg/html/ua.go`): `strong`/`b` bold, `em`/`i`/`cite`/`var`/`dfn`
+- **Inline emphasis UA defaults** (`pkg/internal/html/ua.go`): `strong`/`b` bold, `em`/`i`/`cite`/`var`/`dfn`
   italic, `u`/`ins` underlined. Each resolves to the same computed style as its CSS equivalent, and
   they nest without flattening. These tags used to be structurally present — they even survived
   conversion to Markdown — yet looked identical to plain text in every rasterized format. The sheet
@@ -376,7 +376,7 @@ bullet's design rationale is in its PR:
   `<small>`/`<big>` are omitted rather than given a hardcoded px size. `<mark>` carries the standard
   yellow highlight — it landed with inline-box backgrounds below, and before that the rule would
   have cascaded and painted nothing. Showcase §30.
-- **`transform`** (`pkg/css/transform.go`, `pkg/layout/css/fragment.go`): the 2D functions, composed
+- **`transform`** (`pkg/internal/css/transform.go`, `pkg/internal/layout/css/fragment.go`): the 2D functions, composed
   left to right — `translate`/`translateX`/`translateY` taking lengths and percentages of the box's
   own size, `scale`/`scaleX`/`scaleY`, `rotate`, `skew`/`skewX`/`skewY`, and `matrix()`. It is a
   PAINT-time effect and changes no layout (CSS Transforms 1 §3): the box keeps the space it
@@ -386,7 +386,7 @@ bullet's design rationale is in its PR:
   modeled: the 3D functions (`translate3d`, `rotateX`, `perspective`, `matrix3d`), refused rather
   than flattened since the engine has no 3D pipeline; and `transform-origin`, which is always the
   box centre. Showcase §42.
-- **Absolute positioning in flex containers, and flex-derived heights** (`pkg/layout/css/flex.go`,
+- **Absolute positioning in flex containers, and flex-derived heights** (`pkg/internal/layout/css/flex.go`,
   `block.go`): an abs/fixed child of a flex container is out of flow and honours its offsets (CSS
   Flexbox §4.1) instead of being laid out as a flex item pinned to the edge. `top`+`bottom` with
   `height: auto` sizes the box to the space between them (CSS 10.6.4), matching what `left`+`right`
@@ -394,7 +394,7 @@ bullet's design rationale is in its PR:
   own `flex: 1` — resolves `justify-content` for its own children, because the cross size is now
   definite BEFORE its interior lays out rather than written onto the fragment afterwards.
   Showcase §41.
-- **SVG presentation attributes inherit from the root** (`pkg/svg/svg.go` `rootStyle`): `fill`,
+- **SVG presentation attributes inherit from the root** (`pkg/internal/svg/svg.go` `rootStyle`): `fill`,
   `stroke`, `stroke-width`, caps/joins/dashes and the rest of the inherited vocabulary set on the
   root `<svg>` now reach its children, as CSS inheritance requires. Only the font and text
   properties used to carry across; the root's paint properties were resolved and then discarded. An
@@ -403,8 +403,8 @@ bullet's design rationale is in its PR:
   only what CSS marks non-inherited (`opacity`, `clip-path`, `mask`, `filter`, `mask-type`,
   `overflow`, `display`), so a property added later defaults to inheriting rather than to being
   dropped. Showcase §40.
-- **Comma-separated `background` / `background-image` layer lists** (`pkg/css/shorthand.go`,
-  `pkg/layout/css/background.go`): multiple layers paint, first layer on top, with the
+- **Comma-separated `background` / `background-image` layer lists** (`pkg/internal/css/shorthand.go`,
+  `pkg/internal/layout/css/background.go`): multiple layers paint, first layer on top, with the
   background-color behind them. So `background: <gradient>, <color>` — the ordinary way to give a
   gradient a fallback — works. It used to make the whole declaration unparseable, so the element
   painted NOTHING and it read as "gradients are unsupported". A colour is accepted in the final
@@ -412,7 +412,7 @@ bullet's design rationale is in its PR:
   unparseable layer. Known limit: `background-size`/`-repeat`/`-position`/`-origin`/`-clip` are
   single-valued and apply to every layer. Genuinely per-layer values are a separate slice.
   Showcase §39.
-- **Margins on flex children** (`pkg/layout/css/flex.go`): honoured on both axes, `margin: auto`
+- **Margins on flex children** (`pkg/internal/layout/css/flex.go`): honoured on both axes, `margin: auto`
   absorbing free space included (CSS Flexbox §8.1). Flex layout used to be margin-blind, taking an
   item's size and position from its border box, so a margin on a flex child did nothing while the
   identical rule on a block child worked. Margins now count where they must: line packing uses the
@@ -420,7 +420,7 @@ bullet's design rationale is in its PR:
   to hold a cross margin, and `stretch` fills the line less the item's cross margins. An auto-height
   container's own content extent also encloses its children's margin boxes, so a trailing margin
   does not overflow the container that should have grown for it. Showcase §38.
-- **`line-height`, all forms** (`pkg/css/value.go` `UnitNumber`, `pkg/layout/css/inline.go`): `em`,
+- **`line-height`, all forms** (`pkg/internal/css/value.go` `UnitNumber`, `pkg/internal/layout/css/inline.go`): `em`,
   `%`, lengths, `normal`, and the commonest spelling of all, the **unitless multiplier**
   (`line-height: 1.5`). The unitless form used to be rejected as an invalid length and the
   declaration dropped, so every block used the font-metric height and the property looked inert.
@@ -428,8 +428,8 @@ bullet's design rationale is in its PR:
   descendant's own font size, while `em`/`%` compute against the declaring element and inherit as a
   fixed length (CSS 2.1 §10.8.1). A unitless number is still not a valid length elsewhere —
   `width: 5` remains invalid. Showcase §37.
-- **Colour fonts / emoji** (`pkg/font/colr.go`, `colrv1.go`, `bitmap.go`,
-  `pkg/layout/paint/colrgradient.go`): colour glyphs paint in colour, through both families of
+- **Colour fonts / emoji** (`pkg/internal/font/colr.go`, `colrv1.go`, `bitmap.go`,
+  `pkg/internal/layout/paint/colrgradient.go`): colour glyphs paint in colour, through both families of
   table. **`COLR`/`CPAL`** (v0 and v1) decode to layered outlines. Those are vector, so they scale
   like text, and they carry per-layer **full affine transforms** (translation, mirror, rotation,
   scale) and **linear/radial gradients** with pad/repeat/reflect spreads. **`sbix`** (Apple) and
@@ -443,8 +443,8 @@ bullet's design rationale is in its PR:
   Showcase §36. Not modeled: **sweep (conic) gradients** and **composite paints**, refused as a
   whole so the glyph falls back to its monochrome outline rather than a plausible wrong colour;
   CPAL light/dark palette variants (the first palette is used); and non-PNG strike payloads.
-- **`text-overflow: ellipsis` and `-webkit-line-clamp`** (`pkg/layout/inline/ellipsis.go`,
-  `pkg/layout/css/inline.go`): single-line ellipsis truncation and N-line clamping, the two ways CSS
+- **`text-overflow: ellipsis` and `-webkit-line-clamp`** (`pkg/internal/layout/inline/ellipsis.go`,
+  `pkg/internal/layout/css/inline.go`): single-line ellipsis truncation and N-line clamping, the two ways CSS
   truncates text. Truncation runs in GLYPH units, dropping whole glyphs until the ellipsis fits, so
   a cut never lands mid-character and the line never spills past the clip edge. Trailing whitespace
   is dropped before the ellipsis, and the ellipsis inherits the styling of the glyph it follows.
@@ -455,8 +455,8 @@ bullet's design rationale is in its PR:
   alone does not fit it is still rendered (CSS Overflow 3 §5). `text-overflow: clip` (the initial)
   and an over-large clamp are both inert. Showcase §35. Not modeled: `text-overflow`'s custom
   `<string>` and two-value forms, and per-axis clamping.
-- **Host CSS cascades into inline `<svg>`** (`pkg/svg` `HostContext`/`ParseWithHost`,
-  `pkg/layout/css/replaced.go`): a page author sheet styles inline SVG children, so
+- **Host CSS cascades into inline `<svg>`** (`pkg/internal/svg` `HostContext`/`ParseWithHost`,
+  `pkg/internal/layout/css/replaced.go`): a page author sheet styles inline SVG children, so
   `.icon { fill: blue }` works the way CSS says it should. Class, element, id, grouped, and
   **descendant selectors rooted outside the `<svg>`** all match, because the ancestor chain
   continues past the SVG root into the host tree — `#sidebar .icon` matches rather than silently
@@ -467,7 +467,7 @@ bullet's design rationale is in its PR:
   context**, so two byte-identical subtrees under different rules, colors, or ancestors do not
   collide. An `<img src="*.svg">` is deliberately NOT reached: a referenced SVG is a separate
   document that CSS does not cascade into, and a test pins that direction too. Showcase §34.
-- **`color-mix()`** (`pkg/css/colormix.go`, `pkg/css/colorspace.go`): CSS Color 5 §3, in every
+- **`color-mix()`** (`pkg/internal/css/colormix.go`, `pkg/internal/css/colorspace.go`): CSS Color 5 §3, in every
   interpolation space — `srgb`, `srgb-linear`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `xyz`,
   `xyz-d50`, `xyz-d65` — plus all four hue-interpolation modes (`shorter`/`longer`/`increasing`/
   `decreasing hue`) for the polar spaces. Percentages may precede or follow either colour; omitted
@@ -482,8 +482,8 @@ bullet's design rationale is in its PR:
   mixes stay unquantized between levels. An unknown space or a malformed component drops the
   declaration per CSS error handling. Showcase §33. Gamut mapping is not modeled — out-of-gamut
   results clamp.
-- **Inline-box backgrounds and borders** (`pkg/layout/inline` `InlineBoxStyle`,
-  `pkg/layout/css/fragment.go` `appendInlineBoxDecorations`): `background-color`, a uniform solid
+- **Inline-box backgrounds and borders** (`pkg/internal/layout/inline` `InlineBoxStyle`,
+  `pkg/internal/layout/css/fragment.go` `appendInlineBoxDecorations`): `background-color`, a uniform solid
   `border`, and horizontal `padding` on a non-replaced inline box (`<span>`, `<em>`, `<a>`…). Line
   breaking flattens inline boxes into glyph runs, so every glyph carries the box's identity and
   consecutive glyphs coalesce **per line box** — a span that wraps paints one rect per line, the
@@ -495,19 +495,19 @@ bullet's design rationale is in its PR:
   span mixing font sizes is sized to its largest. Not modeled: background images, vertical
   padding/margins (which per CSS 10.6.1 overflow the line box rather than growing it), and per-edge
   or rounded inline borders. Showcase §32.
-- **Legacy presentational-attribute hints** (`pkg/css/hints.go`): `bgcolor`/`align`/`valign`/
+- **Legacy presentational-attribute hints** (`pkg/internal/css/hints.go`): `bgcolor`/`align`/`valign`/
   `width`/`cellspacing`/`cellpadding`/`border`/`<font>`/`<ol type/start>`/`<body link>`/`dir`… map to
   CSS below author rules, so HN renders with its bgcolor.
-- **Direction-relative alignment + bidi plumbing** (`pkg/css/cascade.go`, `pkg/css/hints.go`,
-  `pkg/layout/css/inline.go`) — RTL slice 1 of 5. `text-align: start|end|match-parent`, whose
+- **Direction-relative alignment + bidi plumbing** (`pkg/internal/css/cascade.go`, `pkg/internal/css/hints.go`,
+  `pkg/internal/layout/css/inline.go`) — RTL slice 1 of 5. `text-align: start|end|match-parent`, whose
   initial value is now `start` — byte-identical for LTR, since every consumer defaults to left.
   `unicode-bidi` parsed and stored, but not inherited. The global `dir` attribute as a hint: the
   selector engine has no attribute selectors, so the spec's `[dir=rtl]` UA rules are not
   expressible, and hint rank is equivalent. `bdi`/`bdo` isolation. `effectiveDirection` — an
   anonymous box's Style is zero-valued, so `Direction` is `""` not `"ltr"`; never read the field
   directly. And the RTL text-indent edge. `dir=auto` degrades + logs.
-- **`writing-mode`: vertical text, single line** (`pkg/css/cascade.go`,
-  `pkg/layout/css/inline.go`, `pkg/layout/css/fragment.go`): `horizontal-tb` (the initial value) is
+- **`writing-mode`: vertical text, single line** (`pkg/internal/css/cascade.go`,
+  `pkg/internal/layout/css/inline.go`, `pkg/internal/layout/css/fragment.go`): `horizontal-tb` (the initial value) is
   honoured; `vertical-rl` **lays out** — the baseline runs down the page, every glyph on a line
   shares one X, and the pen advances along Y by the font's vertical metric. An auto-sized box grows
   along the text's own axis, so a vertical label sizes itself instead of overflowing. The deprecated
@@ -533,8 +533,8 @@ bullet's design rationale is in its PR:
   text (transposing that means turning the intrinsic-measure seam table/grid/flex sizing all share);
   and text-decoration and inline-box backgrounds, skipped because every span the painter computes is
   an X range and drawing them would rule a line across the page instead of beside the text.
-- **`text-orientation`** (`pkg/css/cascade.go`, `pkg/layout/css/inline.go`,
-  `pkg/layout/paint/paint.go`): `mixed` (the initial value) | `upright` | `sideways`, plus the CSS
+- **`text-orientation`** (`pkg/internal/css/cascade.go`, `pkg/internal/layout/css/inline.go`,
+  `pkg/internal/layout/paint/paint.go`): `mixed` (the initial value) | `upright` | `sideways`, plus the CSS
   Writing Modes 3 alias `sideways-right`. Decides, per glyph, whether it stands upright in a vertical
   line or lies on its side. Inherited (§5.1) and a no-op in a horizontal writing mode, per spec — but
   parsed and carried there anyway, since a value set on a horizontal ancestor must still reach a
@@ -563,7 +563,7 @@ bullet's design rationale is in its PR:
   of scope. The `mixed` upright case **cannot be shown in the visual showcase**: no bundled face
   covers CJK, so it would render as empty boxes; the showcase says so and the case is covered by unit
   tests against the classifier instead.
-- **Vertical `<text>` in SVG** (`pkg/svg/style.go`, `pkg/svg/draw/text.go`): `writing-mode` and
+- **Vertical `<text>` in SVG** (`pkg/internal/svg/style.go`, `pkg/internal/svg/draw/text.go`): `writing-mode` and
   `text-orientation` are honoured on the SVG path, which places `<text>` through its own layout
   rather than the CSS inline layer. The pen walks down the page by the font's vertical advance, and
   `text-anchor`, text decoration, bidi reordering and the chunk model all follow the run's own inline
@@ -573,7 +573,7 @@ bullet's design rationale is in its PR:
   §43 alongside the CSS demos.
 
   **The orientation classifier and the vertical advance are shared with the CSS path**
-  (`inline.GlyphRotation` / `inline.VerticalAdvancePt`, moved to `pkg/layout/inline` for this), so
+  (`inline.GlyphRotation` / `inline.VerticalAdvancePt`, moved to `pkg/internal/layout/inline` for this), so
   the two agree by construction rather than by two implementations happening to match — which
   matters most for the UAX #50 approximation, where a drift between them would be invisible.
 
@@ -600,7 +600,7 @@ bullet's design rationale is in its PR:
   identically to `vertical-rl`); the deprecated `glyph-orientation-vertical`/`-horizontal`;
   letter/word-spacing on an *upright* vertical run, whose advance comes from the font's vertical
   metric rather than the spacing-adjusted horizontal one (a *sideways* run honours them).
-- **Box-level RTL — tables, flex, grid** (`pkg/layout/css` table/tableborder/flex/grid) — RTL
+- **Box-level RTL — tables, flex, grid** (`pkg/internal/layout/css` table/tableborder/flex/grid) — RTL
   slice 2 of 5, retiring **all three** "laying out LTR" logs. Tables mirror their solved column
   x-offsets, and `buildCollapsedBorders` flips its index→physical-side mapping — without that flip,
   collapsed borders resolve against the wrong neighbor with no log. Flex resolves direction in
@@ -610,7 +610,7 @@ bullet's design rationale is in its PR:
   independently by mutation. This also fixes `crossOffset` ignoring the Box Alignment `start`/`end`
   spellings. Showcase §15 + 4 WPT reftests. (Text WITHIN a line is reordered by the next slice; at
   this point it still rendered in logical order.).
-- **Arabic contextual shaping** (`pkg/layout/inline/complex.go`) — RTL slice 4 of 5. A run of
+- **Arabic contextual shaping** (`pkg/internal/layout/inline/complex.go`) — RTL slice 4 of 5. A run of
   joining script — Arabic, Syriac, Thaana — is shaped as a whole segment through harfbuzz, which
   resolves the font's GSUB tables so letters take their initial/medial/final/isolated forms and
   ligatures fuse. Hebrew is non-joining and stays on the cheap per-rune path. `Face.OpenTypeFont`
@@ -618,15 +618,15 @@ bullet's design rationale is in its PR:
   LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder; harfbuzz would otherwise
   emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly once, so
   `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
-- **Bundled RTL faces + per-rune script fallback** (`pkg/font/standard`, `pkg/layout/font/cache.go`,
-  `pkg/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
+- **Bundled RTL faces + per-rune script fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
+  `pkg/internal/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
   Font Name) ship alongside the Latin substitutes. Each bundled face covers exactly ONE script — the
   Latin faces have no Hebrew or Arabic, the Noto faces have no Latin — so the covering face resolves
   per **rune**, not per run. A Hebrew or Arabic phrase inside an otherwise-Latin paragraph now shapes
   instead of being silently dropped. Results cache per (script, style), and the fallback consults
   bundled faces only. A fallback glyph carries the face it resolved from, since a GID is only
   meaningful against its own face.
-- **Vertical font metrics** (`pkg/font/program.go`, `family.go`): `Face.GlyphVAdvance` and
+- **Vertical font metrics** (`pkg/internal/font/program.go`, `family.go`): `Face.GlyphVAdvance` and
   `Face.VMetrics` expose `vmtx`/`vhea` alongside the horizontal `GlyphAdvance`/`Metrics`, for
   vertical writing modes. **The advance is normalized to a POSITIVE downward distance in em units**
   — the underlying library returns a negative one (it negates for a Y-down convention, so a
@@ -643,8 +643,8 @@ bullet's design rationale is in its PR:
   synthesized metric is never presented as authored. Covered across bundled faces (Inconsolata
   `.ttf`, TeX Gyre Heros `.pfb`) and asserted for every generic family. `FontVExtents` panics on
   inconsistent tables exactly as `FontHExtents` does, so it carries the same `recover`. This retires
-  the "needs `vhea`/`vmtx` reading `pkg/font` does not have" blocker long cited for vertical text.
-- **`.notdef` for unmappable runes** (`pkg/font/notdef.go`, `pkg/layout/inline/shape.go`): a rune that
+  the "needs `vhea`/`vmtx` reading `pkg/internal/font` does not have" blocker long cited for vertical text.
+- **`.notdef` for unmappable runes** (`pkg/internal/font/notdef.go`, `pkg/internal/layout/inline/shape.go`): a rune that
   neither the run's family nor any script fallback can map now draws the tofu box instead of rendering
   as NOTHING. `Face.NotdefGlyph` follows the browser order. It takes the font's own glyph 0 when that
   has geometry — DejaVu draws a hollow box, Noto a box of hex digits — and otherwise synthesizes a
@@ -667,7 +667,7 @@ bullet's design rationale is in its PR:
   invent a mark the author never wrote. This repo's own showcase carries a U+202F that regressed exactly
   that way before the exclusion existed. It applies to the shared CSS/SVG text path; DOCX/PDF and any
   page whose glyphs all resolve stay byte-identical. Showcase §19.
-- **Inline bidi reordering** (`pkg/layout/inline/bidi.go`) — RTL slice 3 of 5. Shaping and breaking stay
+- **Inline bidi reordering** (`pkg/internal/layout/inline/bidi.go`) — RTL slice 3 of 5. Shaping and breaking stay
   in LOGICAL order; once the break is chosen, `MakeVisualLine` applies UAX#9 rule L2 per line plus rule
   L4 bracket mirroring. `Glyph.Runes` keeps the ORIGINAL character, so `/ToUnicode` recovers the authored
   text. `golang.org/x/text` was promoted indirect→direct for UAX#9 — no new module. Line metrics are
@@ -675,25 +675,25 @@ bullet's design rationale is in its PR:
   START. Bidi control characters now survive shaping as zero-width glyphs; they were being dropped,
   silently discarding directional intent. (Arabic reordered correctly at this point but still rendered
   as isolated forms; the cluster model arrives in slice 4, below.).
-- **Column flex vertical content sizing** (`pkg/layout/css/flex.go`): a column container's main axis is
+- **Column flex vertical content sizing** (`pkg/internal/layout/css/flex.go`): a column container's main axis is
   vertical, so `flex-basis: auto`/`content` and the `min:auto` automatic minimum now resolve to the
   item's content HEIGHT rather than a max-content WIDTH compared against a vertical budget. The height
   is measured by laying the item out at its cross width and reading the fragment height back
   (`measureColumnMainContent`), the same two-phase pattern grid uses for row tracks. An auto-width
   column item's cross width is also clamped to the container, fixing a ~2.5x overflow for prose.
   Backlog H4.
-- **Static form controls** (`pkg/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
+- **Static form controls** (`pkg/internal/layout/css/control.go`): `<input>`/`<button>`/`<textarea>`/
   `<select>` render as static native widgets — classic chrome, non-interactive.
 - **End-to-end "specimen" showcase** (`testdata/htmldoc/`, `htmldoc-*` goldens): one multi-file doc
   exercising every HTML/CSS/image slice, served over loopback HTTP via `OpenURL` + `WithPageSize`.
 
 **DOCX frontend** (`OpenDOCX`/`OpenDOCXBytes`, `docx-*` goldens):
 
-- **Parse + cascade** (`pkg/docx`, `pkg/docx/style`): the ZIP/OPC container, `document.xml`
+- **Parse + cascade** (`pkg/docx`, `pkg/internal/style`): the ZIP/OPC container, `document.xml`
   (paragraphs, runs, `w:t`/`w:br`/`w:tab`), run and paragraph properties, section geometry
   (`w:sectPr`), and the full `docDefaults → basedOn → direct` cascade.
 - **Zip bombs are bounded in aggregate, not just per part** (`maxTotalPartBytes`, 512 MiB; the same
-  budget in `pkg/epub`): both readers already capped each part at 256 MiB, but both do bulk reads —
+  budget in `pkg/internal/epub`): both readers already capped each part at 256 MiB, but both do bulk reads —
   `word/media/*` for DOCX, every container entry for EPUB — so N parts each just under the per-part
   cap multiplied. Measured, a 4 MB `.docx` holding 20 compressible media parts decompressed to
   **4.2 GB** and drove peak RSS to 6 GB, with every individual part inside its limit the whole way.
@@ -701,18 +701,18 @@ bullet's design rationale is in its PR:
   taking the process down; DOCX takes parts in sorted order so the truncation is deterministic
   rather than following map iteration. PPTX and XLSX need no such budget — they fetch one part at a
   time and never accumulate.
-- **CSS-engine convergence** (`pkg/docx/cssbox`): DOCX lowers straight to `cssbox` +
+- **CSS-engine convergence** (`pkg/internal/cssbox`): DOCX lowers straight to `cssbox` +
   `ComputedStyle` and runs through the shared CSS engine, with page geometry supplied as a
   synthesized `@page` stylesheet. The old flat model and engine are deleted.
 - **DOCX fidelity**: lists/numbering, tables, images, headers/footers, and multi-section documents.
   Lowering lets most of these reuse the CSS engine's existing vocabulary.
 
-**HTML/DOCX → PDF writer** (`pkg/render/pdfwrite`, `WritePDF`):
+**HTML/DOCX → PDF writer** (`pkg/internal/pdfwrite`, `WritePDF`):
 
 - A second `render.Device` that emits a real PDF with **selectable/searchable text**. TrueType goes
   out as Type0/Identity-H CIDFontType2 with a glyf-subsetted `/FontFile2`; the bundled substitutes
   go out as simple `/Type1` with `/FontFile`. Every face carries `/ToUnicode`. Bands assemble
-  concurrently, output is deterministic, and `@media print` is captured (`pkg/css/media.go`). The
+  concurrently, output is deterministic, and `@media print` is captured (`pkg/internal/css/media.go`). The
   raster corpus stays byte-identical, since the new `DrawGlyph` seam rasterizes via the outline.
 - **`/ExtGState` resource emission**: a partially-transparent fill, stroke, glyph, or image now
   survives into PDF output as `/ca` (non-stroking) or `/CA` (stroking) alpha, and a non-Normal blend
@@ -721,7 +721,7 @@ bullet's design rationale is in its PR:
   resource. Fully-opaque, Normal-blend output is unchanged byte-for-byte — no resource and no `gs`
   operator are emitted.
 
-**Any → SVG writer** (`pkg/render/svgwrite`, `WriteSVG`, CLI `convert <in> <out>.svg`):
+**Any → SVG writer** (`pkg/internal/svgwrite`, `WriteSVG`, CLI `convert <in> <out>.svg`):
 
 - A third `render.Device` that serializes paint operations to SVG markup. It works for **every**
   input format, PDF included, because all three frontends already paint through `render.Device` —
@@ -746,7 +746,7 @@ bullet's design rationale is in its PR:
   is the trade.
   - **The hoisting applies to reflow input only** (HTML/DOCX/SVG), not to PDF. A PDF's text
     reaches the Device through `FillGlyph` with an already-flattened, already-positioned outline
-    (`pkg/pdf/content/showtext.go`) rather than through `DrawGlyph`, so there is no glyph identity
+    (`pkg/internal/content/showtext.go`) rather than through `DrawGlyph`, so there is no glyph identity
     to key a definition on and PDF text emits inline paths. Closing that needs the same new
     interpreter seam the deferred `<text>` mode would — see `docs/SVG.md`.
 - One page per document, like an image: `SVGOptions.Page` selects it on the generic `Convert`
@@ -762,7 +762,7 @@ bullet's design rationale is in its PR:
   `go test ./pkg/omnidoc -run TestSVGWriteGolden -update`) catch output that renders the same but
   says something different — a lost `fill-rule`, a switch from `<use>` back to inline paths —
   which a pixel check cannot see; output is asserted deterministic so they cannot flake. A
-  **round-trip** sweep over `gen.Core` writes SVG, re-reads it through `pkg/svg`, rasterizes, and
+  **round-trip** sweep over `gen.Core` writes SVG, re-reads it through `pkg/internal/svg`, rasterizes, and
   diffs against a direct raster. The **htmldoc showcase** (`TestHTMLDocSVGShowcase`) runs all 44
   pages of the specimen document through that same loop against the existing `htmldoc-p*.png`
   raster goldens — no new goldens, so any raster-vs-SVG disagreement shows against a
@@ -774,18 +774,18 @@ bullet's design rationale is in its PR:
   source-over; a `Shader` that cannot describe itself (mesh shadings, and **PDF-sourced shadings**,
   which are deliberately not self-describing upstream) is sampled and embedded as an `<image>`.
   Masks and filters likewise embed a bitmap rather than being dropped — `svgwrite` borrows
-  `pkg/render/raster`'s rasterizer for `BuildClipMask`/`BuildLuminanceMask`/`RenderOffscreen`
+  `pkg/internal/raster`'s rasterizer for `BuildClipMask`/`BuildLuminanceMask`/`RenderOffscreen`
   instead of taking the degradations `render.Device` permits a vector backend, so filters work on
   SVG output where they cannot on PDF output.
 - **Masks emit `mask-type="alpha"`, with coverage in the alpha channel.** A `GroupMask` is already
   final coverage (reduced via sRGB Rec. 709, per this engine's documented choice of sRGB over SVG
-  1.1's linearRGB — see `pkg/svg/mask.go`). Encoding it as gray under the default *luminance*
+  1.1's linearRGB — see `pkg/internal/svg/mask.go`). Encoding it as gray under the default *luminance*
   mask-type would make the viewer convert it a second time, in linearRGB, turning coverage 128
   into 55 — an error of 73/255 that reads as a far-too-dark mask. `mask-type="alpha"` takes the
   channel verbatim with no conversion in any viewer; the RGB channels are white so a viewer that
   ignores `mask-type` degrades to a too-permissive mask rather than an invisible one.
 
-**HTML/DOCX → Markdown & plain text** (`pkg/render/markdown`, `WriteMarkdown`
+**HTML/DOCX → Markdown & plain text** (`pkg/internal/markdownwrite`, `WriteMarkdown`
 + `WriteText`, CLI `tomd`):
 
 - A conversion backend that walks the shared `cssbox` tree rather than the paint seam, because it
@@ -797,18 +797,18 @@ bullet's design rationale is in its PR:
   thematic breaks, and **high-fidelity pipe tables** with alignment, captions, and colspan/rowspan
   expanded by content duplication.
 
-**PDF → Markdown & HTML** (`pkg/pdf/extract`, `pkg/render/htmlwrite`, `WriteHTML`,
+**PDF → Markdown & HTML** (`pkg/internal/extract`, `pkg/internal/htmlwrite`, `WriteHTML`,
 CLI `tomd <pdf>` / `tohtml`):
 
 - Structure recovery from a PDF's positioned glyphs and vector paths. The content interpreter gains
   optional, paint-neutral capture sinks — `content.Options.TextSink`/`GraphicsSink`, where nil keeps
-  output byte-identical. `pkg/pdf/extract` reconstructs words→lines→**XY-cut** reading-order blocks,
+  output byte-identical. `pkg/internal/extract` reconstructs words→lines→**XY-cut** reading-order blocks,
   handling columns, and does **automatic table recognition**: lattice from ruling lines, stream from
   whitespace, auto-selected between them. It all lowers to a synthetic `cssbox` tree the Markdown
-  writer reuses. A new `pkg/render/htmlwrite` serializes `cssbox`→HTML with native
+  writer reuses. A new `pkg/internal/htmlwrite` serializes `cssbox`→HTML with native
   `colspan`/`rowspan`. PDF `Document` satisfies `reflowTree` via lazy extraction. ToUnicode CMaps
   (Type0/CID text), font weight/slant, and scanned-PDF OCR are follow-ups.
-- **Right-to-left text extracts in LOGICAL order** (`pkg/pdf/extract/bidi.go`). A PDF stores glyphs
+- **Right-to-left text extracts in LOGICAL order** (`pkg/internal/extract/bidi.go`). A PDF stores glyphs
   by POSITION, so sorting a line left-to-right yielded RTL script reversed. Each maximal RTL run is
   reversed back at BOTH levels the PDF mirrors: the characters within a word, and the order of
   consecutive RTL words. This runs after word grouping, which splits on x-gaps and would break on
@@ -847,7 +847,7 @@ CLI `tomd <pdf>` / `tohtml`):
   `--print` actually applies print media now. A new format lands by flipping its capability bit and
   adding one switch case in `openDetected`/`Write` — see the sibling contract in.
 
-**Markdown + plain-text input** (`pkg/markdown` via goldmark (MIT, pure Go, zero transitive
+**Markdown + plain-text input** (`pkg/internal/markdown` via goldmark (MIT, pure Go, zero transitive
 deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
 
 - Both `.md` (CommonMark + GFM: tables, strikethrough, task lists, autolinks, raw-HTML
@@ -857,7 +857,7 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   fixed point. Detection is extension-only, with no content magic — the hint step outranks
   HTML sniffing by design. Landed with a cross-cutting inline-core fix: empty forced lines
   (blank lines in pre/pre-wrap/pre-line) now get a CSS strut height instead of collapsing
-  (`pkg/layout/inline` shape/break). All prior goldens stayed byte-identical.
+  (`pkg/internal/layout/inline` shape/break). All prior goldens stayed byte-identical.
 - **Bounded block nesting** (`maxBlockNesting`, 1024 markers per line; `ErrTooDeeplyNested`):
   goldmark's block parser is quadratic in the containers opened on ONE line — 50,000 `- ` markers
   take 10.8s, and 200,000 (a 400 KB file) never finish. It is DEPTH that costs, not size: the same
@@ -867,7 +867,7 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   README showing example Markdown inside ``` opens no containers, and costs 238µs rather than
   seconds.
 
-**DOCX writer** (`pkg/render/docxwrite`, `WriteDOCX`, CLI `todocx` +
+**DOCX writer** (`pkg/internal/docxwrite`, `WriteDOCX`, CLI `todocx` +
 `convert.. out.docx`):
 
 - Everything →.docx: HTML, Markdown, text, and PDF via extraction. It is a cssbox STRUCTURE
@@ -888,7 +888,7 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   `docxout-basic`/`docxout-htmldoc-p1` goldens, and the `htmldoc.docx.md` showcase round-trip
   golden.
 
-**CSV/TSV input + output** (`pkg/omnidoc/csv_frontend.go`, `pkg/render/csvwrite`,
+**CSV/TSV input + output** (`pkg/omnidoc/csv_frontend.go`, `pkg/internal/csvwrite`,
 `OpenCSV*`/`OpenTSV*`, `WriteCSV`/`WriteTSV`):
 
 - Input: stdlib `encoding/csv` (lazy quotes, ragged rows padded, BOM/CRLF) becomes an HTML table
@@ -918,7 +918,7 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   universal `OpenOption` and stays inert for non-XLSX inputs; the option type is now `OpenOption`,
   with `HTMLOption` kept as a back-compat alias.
 
-**XLSX output** (`pkg/render/xlsxwrite`, `WriteXLSX`, `convert.. out.xlsx`):
+**XLSX output** (`pkg/internal/xlsxwrite`, `WriteXLSX`, `convert.. out.xlsx`):
 
 - A tables-only writer sharing `boxwalk.CollectTables`/`CellPlainText` with csvwrite. It emits one
   worksheet per table with caption-derived names (sanitized, unique, 31 characters), native
@@ -1021,7 +1021,7 @@ document model consumed externally by tinycld/text):
   whole-style `SetCellStyle`, row-style variants, and memoized `CellStyle` reads. A per-leaf canary
   audit covers both the editor read AND save/reopen, mirroring calc's style_attribute_registry.
 
-**RTF input** (`pkg/rtf`, `OpenRTF*`, `convert in.rtf..`):
+**RTF input** (`pkg/internal/rtf`, `OpenRTF*`, `convert in.rtf..`):
 
 - A dependency-free tokenizer and converter producing HTML through the reflow pipeline. It handles
   paragraph and character formatting with 0-toggles, font and color tables, alignment and indents,
@@ -1037,7 +1037,7 @@ document model consumed externally by tinycld/text):
   document with `\ilvl2000000000` never finished, and `\ilvl100000` turned 30 bytes into 1.4 MB of
   markup. RTF allows levels 0–8 and Word exposes nine, so the clamp cannot reach a real document.
 
-**RTF output** (`pkg/render/rtfwrite`, `WriteRTF`, `convert.. out.rtf`):
+**RTF output** (`pkg/internal/rtfwrite`, `WriteRTF`, `convert.. out.rtf`):
 
 - Everything →.rtf, through a cssbox STRUCTURE writer that is boxwalk-based in the Markdown/DOCX
   shape, with mappings chosen so our own reader round-trips them. Block semantics ride on
@@ -1052,7 +1052,7 @@ document model consumed externally by tinycld/text):
   pairs. Output is deterministic. Pinned by a 17-case html→rtf→md ≡ html→md parity matrix, md/pdf
   loops, and the `rtfout-basic` golden; RTF is in the convert matrix as input AND output.
 
-**PPTX output** (`pkg/render/pptxwrite`, `WritePPTX`, `convert.. out.pptx`):
+**PPTX output** (`pkg/internal/pptxwrite`, `WritePPTX`, `convert.. out.pptx`):
 
 - Everything →.pptx, through a cssbox STRUCTURE writer. Every `<h1>`/`<h2>` starts a new slide with
   that heading as the title placeholder, and the following blocks become the body: text box
@@ -1060,12 +1060,12 @@ document model consumed externally by tinycld/text):
   `hMerge`/`vMerge` continuations, and `p:pic` media parts with loaderless data:-URI embedding.
   Logged degrades: h3–h6 become bold paragraphs, quote and code flatten, links drop their targets,
   and hr is skipped. OPC output is deterministic, in the gen-fixture package shape. Pinned by
-  reopen-verified per-construct round trips through pkg/pptx, a slide-count pin, and the
+  reopen-verified per-construct round trips through pkg/internal/pptx, a slide-count pin, and the
   `pptxout-basic` golden; PPTX joins the convert matrix as input AND output. Landed with a D1
   frontend fix the round trip exposed: a nested-list `<ul>` now opens INSIDE its parent `<li>`,
   which structure writers previously dropped nested items over.
 
-**EPUB output** (`pkg/render/epubwrite`, `WriteEPUB`, `convert.. out.epub`)
+**EPUB output** (`pkg/internal/epubwrite`, `WriteEPUB`, `convert.. out.epub`)
 — **completes the any⇄any table: all 13 formats are both inputs AND outputs**:
 
 - Deterministic EPUB 3 built ON htmlwrite, since content documents ARE XHTML: a new
@@ -1079,7 +1079,7 @@ document model consumed externally by tinycld/text):
   md→epub→md loop, and the `epubout-basic` golden; EPUB joins the convert matrix as input AND
   output.
 
-**DOCX writer unification** (`pkg/render/docxwrite` → `docx.Write`) — the public-model
+**DOCX writer unification** (`pkg/internal/docxwrite` → `docx.Write`) — the public-model
 PR 3/3:
 
 - docxwrite's cssbox walk now BUILDS a `*docx.Document` — DefaultStyles/AddImage plus model
@@ -1093,7 +1093,7 @@ PR 3/3:
   goldens are byte-identical. One improvement: a linked image now survives the round trip BESIDE
   its link group, where the reader used to drop drawings inside w:hyperlink; pinned by test.
 
-**PPTX input** (`pkg/pptx`, `OpenPPTX*`, `convert deck.pptx..`):
+**PPTX input** (`pkg/internal/pptx`, `OpenPPTX*`, `convert deck.pptx..`):
 
 - A hand-rolled PresentationML reader covering visible slides' shape trees: text frames with
   level, bullet, and alignment plus run b/i/sz/color, pictures, and spanned tables. Frames resolve
@@ -1105,7 +1105,7 @@ PR 3/3:
   the presentationml MIME row is flipped; and the input capability bit is set (output = D2).
   `pptx-specimen` golden.
 
-**EPUB input** (`pkg/epub`, `OpenEPUB*`, `convert book.epub..` — reverses the old
+**EPUB input** (`pkg/internal/epub`, `OpenEPUB*`, `convert book.epub..` — reverses the old
 out-of-scope note):
 
 - A container reader: container.xml leads to the OPF for title, manifest, and spine, skipping
@@ -1127,7 +1127,7 @@ out-of-scope note):
   outputs are empty by design. png→png stays ErrSameFormat. Input capability bits flipped;
   conversion matrix extended.
 
-**HEIF/HEIC input — pure-Go HEVC intra decoder** (`pkg/heif`, `pkg/heif/hevc`):
+**HEIF/HEIC input — pure-Go HEVC intra decoder** (`pkg/heif`, `pkg/internal/hevc`):
 
 - A from-scratch, in-tree HEVC intra-only decoder sitting beneath a HEIF container layer. The
   decoder covers CABAC, all 35 intra modes, residual coding with sign hiding, deblocking, SAO, and
@@ -1136,22 +1136,22 @@ out-of-scope note):
   colour. It is bit-exact against reference decodes on a 42-fixture corpus, and WPP rows and tiles
   decode in parallel with byte-identical output. Registered with `image.RegisterFormat`, `.heic`
   lights up as a document input, works inside HTML/EPUB `<img>`, and transcodes to PNG inside
-  DOCX/PPTX/RTF/EPUB outputs (`pkg/render/imageconv`). Image *sequences* (msf1) and AVIF stay
+  DOCX/PPTX/RTF/EPUB outputs (`pkg/internal/imageconv`). Image *sequences* (msf1) and AVIF stay
   refused.
 
-**WebP input + output** (`pkg/webp`, over `golang.org/x/image/webp` for decode — BSD, already an
+**WebP input + output** (`pkg/internal/webp`, over `golang.org/x/image/webp` for decode — BSD, already an
 approved dep — and `github.com/HugoSmits86/nativewebp` for encode — MIT, pure Go, whose only
 dependency is `x/image`, so no new transitive surface):
 
 - Still WebP decodes everywhere the other raster formats do. `.webp` is a document input
   (`FormatWebP`, MIME `image/webp`), content-first `DetectFormat` recognizes it by magic — the RIFF
   `WEBP` form type, so WAV/AVI stay unknown — it works inside HTML/EPUB `<img>` by content type or
-  by sniffing, and it transcodes to PNG inside DOCX/PPTX/RTF/EPUB outputs (`pkg/render/imageconv`).
+  by sniffing, and it transcodes to PNG inside DOCX/PPTX/RTF/EPUB outputs (`pkg/internal/imageconv`).
   Lossy VP8, lossless VP8L, and the extended VP8X container with an alpha plane are all covered.
 - **Animated WebP returns a typed `ErrAnimated`.** `x/image/webp` handles stills only, and its
   failure mode is misleading: `DecodeConfig` parses VP8X, ignores the animation flag, and returns
   the canvas size with NO error, while `Decode` then fails with a bare `webp: invalid format` —
-  the same error corrupt bytes produce. `pkg/webp` reads the flag upstream skips and returns
+  the same error corrupt bytes produce. `pkg/internal/webp` reads the flag upstream skips and returns
   `ErrAnimated` from both entry points, and `OpenImageBytes` and `TranscodeToPNG` check it, so a
   valid animation is reported as unsupported instead of broken.
 - The `image.Decode` **sniffing** path cannot carry that check. `image.sniff` returns the first
@@ -1272,7 +1272,7 @@ read+write vocabulary for the tinycld text adoption path):
 - Golden crop rectangles over a committed CC0 photograph back the synthetic direction tests, which
   cannot catch a quality regression on real image statistics.
 
-**SVG input — core scene graph** (`pkg/svg` parse, `pkg/svg/draw` scene → `render.Device`;
+**SVG input — core scene graph** (`pkg/internal/svg` parse, `pkg/internal/svg/draw` scene → `render.Device`;
 `OpenSVG*`, `convert in.svg..`):
 
 - Standalone `.svg` and gzipped `.svgz` documents open as a single vector page. Detection also fixes
@@ -1327,7 +1327,7 @@ read+write vocabulary for the tinycld text adoption path):
   one, rather than an inert no-op.
 - `mask`/`<mask>`: the LUMINANCE of the mask's rendered content becomes per-pixel alpha, not its
   geometry. A new `render.Device.BuildLuminanceMask(size, alphaOnly, paint func(dev Device)) GroupMask`
-  primitive carries this: the backend hands back a scratch surface, `pkg/svg/draw` paints the mask's
+  primitive carries this: the backend hands back a scratch surface, `pkg/internal/svg/draw` paints the mask's
   subtree into it through the ordinary `Device` seam without ever importing a concrete backend, and
   the backend converts the result to a mask. Luminance defaults to sRGB
   (`0.2126R+0.7152G+0.0722B`, times the pixel's own alpha) rather than SVG 1.1's linearRGB, matching
@@ -1349,7 +1349,7 @@ read+write vocabulary for the tinycld text adoption path):
   (`/Group << /S /Transparency /CS /DeviceGray >>`) and wires it into the group's own ExtGState as
   `/SMask << /S /Luminosity /G <form> /BC [0] >>` — a real PDF luminosity soft mask, not an
   approximation. The black backdrop `/BC [0]` is mandatory: without it, the area outside the mask
-  form's own content is undefined where SVG requires fully transparent. `pkg/pdf/content`, the PDF
+  form's own content is undefined where SVG requires fully transparent. `pkg/internal/content`, the PDF
   *reader*, was taught `/SMask` too. An ExtGState soft mask now renders through
   `Device.BuildLuminanceMask` exactly as the writer produces it, scoped per paint operator: fills,
   strokes, `sh`, image and inline-image `Do`, and a form XObject's entire nested content. Text glyph
@@ -1363,19 +1363,19 @@ read+write vocabulary for the tinycld text adoption path):
   output rather than its true shape. Only the PDF writer degrades, because it has no offscreen
   surface to rasterize a pixel-exact union into; raster stays pixel-exact through the per-child
   rasterize + max-union primitive. **Glyph fill/stroke is not soft-mask-wrapped** —
-  `pkg/pdf/content`'s ExtGState soft-mask support scopes to fills, strokes, `sh`, images, and nested
+  `pkg/internal/content`'s ExtGState soft-mask support scopes to fills, strokes, `sh`, images, and nested
   form XObjects, but not per-glyph text painting, which would reintroduce the per-child compositing
   seam this feature exists to eliminate. **`reflect`/`repeat` gradient spreads still rasterize** in
   PDF output; see the alpha-gradient shading lift above, where only `pad` gets a native
   `/Shading`/`/Extend`. **`objectBoundingBox` clip-path/mask units on a `<g>` target degrade to
   `userSpaceOnUse`** with an Identity mapping. A `<g>` has no single `Path` to measure a bounding box
-  from the way a `Shape` does, so `pkg/svg/draw` passes a nil `boundsFunc` for a Group target and
+  from the way a `Shape` does, so `pkg/internal/svg/draw` passes a nil `boundsFunc` for a Group target and
   `clipUnitsMatrix`/mask region resolution falls back to Identity instead of resolving the group's
   real post-layout bbox. Verified against the resvg corpus's `mask/on-group-with-transform.svg` and
   `mask/half-width-region-with-rotation.svg`: both render blank under this engine — a graceful
   degradation, not a crash — where resvg produces a correctly bbox-relative result.
-- **SVG `<filter>` — the primitives real documents use.** `pkg/svg/filter.go` resolves the graph,
-  `pkg/svg/filter` holds the pixel math, and `pkg/svg/draw/filter.go` drives it. The `filter`
+- **SVG `<filter>` — the primitives real documents use.** `pkg/internal/svg/filter.go` resolves the graph,
+  `pkg/internal/svg/filter` holds the pixel math, and `pkg/internal/svg/draw/filter.go` drives it. The `filter`
   property runs through the same presentation-attribute and cascade path as `clip-path`/`mask`, and
   the `<filter>` element resolves at PARSE time, since the document index is gone once `Parse`
   returns. That resolution covers `filterUnits`/`primitiveUnits` with their opposite defaults of
@@ -1440,7 +1440,7 @@ read+write vocabulary for the tinycld text adoption path):
 - **The CSS `filter:` shorthand** — `blur()`, `drop-shadow()`, `brightness()`, `contrast()`,
   `grayscale()`, `sepia()`, `saturate()`, `hue-rotate()`, `invert()`, `opacity()`, and `url()`, in
   any combination, composing in sequence. Each lowers to its spec-defined primitive chain rather
-  than to separate pixel code. The parser lives in **`pkg/filtereffects`, deliberately shared**:
+  than to separate pixel code. The parser lives in **`pkg/internal/filtereffects`, deliberately shared**:
   `filter` is one property with one grammar, so the HTML/CSS side consumes this parser instead of
   growing a second one. Error handling is CSS's, and the corpus tests it hard. **One invalid
   function invalidates the WHOLE declaration** — the element renders completely unfiltered, not with
@@ -1467,12 +1467,12 @@ read+write vocabulary for the tinycld text adoption path):
   with SVG filters, but it is a real trade-off rather than a free lunch. The seam is
   `render.Device.RenderOffscreen`, a third member of the `BuildClipMask`/`BuildLuminanceMask` family.
   It hands back a group's rasterized PIXELS (`*image.RGBA`) instead of a coverage mask, which keeps
-  rasterization in the backend and `pkg/svg/draw` backend-agnostic. `pkg/render/pdfwrite` returns nil
+  rasterization in the backend and `pkg/internal/svg/draw` backend-agnostic. `pkg/internal/pdfwrite` returns nil
   from it — the documented "cannot rasterize offscreen" degradation — and the caller then paints the
   element unfiltered. PDF output keeps the content visible and correctly placed, minus the filter's
   visual effect.
 - **A filter on `<text>` uses REAL placed-glyph bounds** — `textUserBounds`, computed from the shaped
-  glyphs — never `pkg/svg`'s build-time `textBBox` estimate. That estimate assumes a half em per
+  glyphs — never `pkg/internal/svg`'s build-time `textBBox` estimate. That estimate assumes a half em per
   character and measures 0.53x–2.25x off. An `objectBoundingBox` filter region built on it would
   visibly clip the filtered result, not merely shift a gradient.
 - **Filters are bounded against a build-time DoS.** The region is intersected with the part of the
@@ -1525,7 +1525,7 @@ read+write vocabulary for the tinycld text adoption path):
   document are capped at `maxUseNodes` (100,000)**, logged once via `WithLogf` when exhausted. That
   cap is a build-time DoS bound: `maxUseDepth` limits recursion depth but not breadth, and a graph
   where each level references the previous level twice expands ~4× per level entirely inside `Parse`,
-  where `pkg/svg/draw`'s draw-time `maxDrawCalls` can never fire. The budget is a monotonic
+  where `pkg/internal/svg/draw`'s draw-time `maxDrawCalls` can never fire. The budget is a monotonic
   whole-document total, because a per-subtree counter would reset on every sibling and let such a
   graph through. It sits about an order of magnitude above the largest realistic icon sprite sheet,
   so legitimate documents are never truncated.
@@ -1559,14 +1559,14 @@ read+write vocabulary for the tinycld text adoption path):
   chunk's true box needs shaping, which happens a layer away from where paint servers resolve;
   `userSpaceOnUse` is exact. A `<tspan>` nesting cap and a whole-document character budget
   (`maxTextChars`, 200,000) bound text against hostile input, both logged once.
-- **Fuzzed against hostile input** (`FuzzParse` in `pkg/svg`, `pkg/css`, seeded from the resvg
+- **Fuzzed against hostile input** (`FuzzParse` in `pkg/internal/svg`, `pkg/internal/css`, seeded from the resvg
   corpus): `svg.Parse` survives arbitrary bytes through XML parsing, the cascade, and scene
   building. Two defects it found and that are now fixed: a `<text>` position list whose recorded
   character range outlived the characters after a trailing space was stripped (an index panic out of
   the public `Parse`), and a `closepath` followed by numbers, which the implicit-repetition rule
-  repeated forever without consuming input (a hang). `pkg/css` fuzzes `Parse` + cascade,
+  repeated forever without consuming input (a hang). `pkg/internal/css` fuzzes `Parse` + cascade,
   `ParseDeclarations`, and `ParseColorValue`, and came back clean.
-- **Bounded HTML nesting** (`pkg/html`, `maxNestingDepth` 4096): `golang.org/x/net/html` resolves
+- **Bounded HTML nesting** (`pkg/internal/html`, `maxNestingDepth` 4096): `golang.org/x/net/html` resolves
   close tags with a linear scan of the open-element stack, so deep nesting is quadratic — 60,000
   nested `<div>` take 15s inside the dependency and 200,000 do not finish. Since the cost lands
   before this package gets control, `Parse` counts nesting with a linear tokenizer pre-pass (11 ms
@@ -1582,7 +1582,7 @@ read+write vocabulary for the tinycld text adoption path):
   rule rather than SVG 1.1's literal wording, and it matches resvg, whose
   `letter-spacing/filter-bbox.svg` asserts the flush trailing edge with a filter region and states
   the rule in its own `<desc>`. `word-spacing` adds at each space character. **Deliberate asymmetry:
-  neither property exists anywhere else in this engine — not in `pkg/css`, not in `pkg/layout/css` —
+  neither property exists anywhere else in this engine — not in `pkg/internal/css`, not in `pkg/internal/layout/css` —
   so both work in SVG and are inert in HTML/DOCX.** Wiring them into CSS reflow means threading them
   through line-breaking and justification, a materially larger job. The asymmetry is recorded on the
   `Style` fields so it does not read as a bug.
@@ -1606,7 +1606,7 @@ read+write vocabulary for the tinycld text adoption path):
   above it, while `alignment-baseline` is non-inherited with an explicit `inherit` that reaches back
   for the parent's value. `ideographic`, `mathematical`, `use-script`, `no-change`, and `reset-size`
   **degrade to the alphabetic baseline with a warn-once**, since they need OS/2 and BASE table
-  metrics `pkg/font` does not parse. `middle` uses the conventional 0.5 em x-height substitute for
+  metrics `pkg/internal/font` does not parse. `middle` uses the conventional 0.5 em x-height substitute for
   the same reason — there is no OS/2 `sxHeight`.
 - **`baseline-shift`** — `sub`, `super`, lengths, and percentages against the element's own
   `font-size`, CUMULATIVE through nested `<tspan>`s per SVG2 §11.10.2, with the `baseline` keyword
@@ -1626,7 +1626,7 @@ read+write vocabulary for the tinycld text adoption path):
   declaration, crossing `<tspan>` boundaries, and is emitted once per baseline FRAME rather than once
   per run. It therefore staircases with a `dy`/`y` list and tilts per glyph with a `rotate` list,
   matching the references. Underline and overline paint under the glyphs, line-through over them.
-  Position and thickness use conventional em fractions, because `pkg/font` parses no `post` table and
+  Position and thickness use conventional em fractions, because `pkg/internal/font` parses no `post` table and
   a face's own `underlinePosition`/`underlineThickness` are unavailable.
 - **The `font` shorthand** — expands to `font-style`, `font-weight`, `font-size`, and `font-family`,
   discarding an optional `/line-height` since SVG text does not wrap. Per CSS Cascade §3 it **RESETS
@@ -1640,7 +1640,7 @@ read+write vocabulary for the tinycld text adoption path):
   (`caption`, `icon`, …) name platform UI fonts this engine cannot resolve, so they are logged and
   ignored.
 - **`font-stretch`, `font-variant`, `kerning`, and `font-kerning` ship as honest no-ops**, each
-  logged once. Stated plainly rather than approximated: the bundled families in `pkg/font/standard`
+  logged once. Stated plainly rather than approximated: the bundled families in `pkg/internal/font/standard`
   have no condensed, expanded, or small-caps variant, no synthetic stretching or obliquing exists
   anywhere in the engine, OpenType feature settings are not plumbed through the shaper, and no GPOS
   kerning-pair pass runs for simple scripts. There is therefore no kerning to disable and no length
@@ -1661,7 +1661,7 @@ read+write vocabulary for the tinycld text adoption path):
   `clip-path`/`mask` ignored on a `<tspan>`; bidi reordered before the pen walk, so an absolute `x`
   landed on the wrong glyph; `text-anchor` not direction-relative; `unicode-bidi: bidi-override`
   doing nothing to Latin; and source indentation stealing the following `<tspan>`'s `x`. It found two
-  more outside `pkg/svg`: `pkg/font` glyph outlines carried a leading drawing op before any move-to,
+  more outside `pkg/internal/svg`: `pkg/internal/font` glyph outlines carried a leading drawing op before any move-to,
   so every glyph's `Bounds` stretched back to the origin, and `inline.Reorder` emitted a multi-rune
   cluster glyph once per RUNE, returning more glyphs than it was given.
 - 98 further `text/**` fixtures land with the spacing, length, baseline, and decoration properties
@@ -1692,9 +1692,9 @@ read+write vocabulary for the tinycld text adoption path):
   multiplication, and a clipPath child's own nested `clip-path` resolving in the wrong coordinate
   space when the child carried its own transform.
 
-**SVG input — CSS styling** (`pkg/svg`, `pkg/css`):
+**SVG input — CSS styling** (`pkg/internal/svg`, `pkg/internal/css`):
 
-- An SVG-local cascade in `pkg/svg/cascade.go` mirrors `pkg/css/cascade.go`'s ladder minus the UA
+- An SVG-local cascade in `pkg/internal/svg/cascade.go` mirrors `pkg/internal/css/cascade.go`'s ladder minus the UA
   origin. Its rungs are `<style>` sheets — including CDATA-wrapped rule bodies, with a non-CSS
   `type=` correctly skipped — the `style=""` inline attribute, `class`, and presentation attributes
   folded in as the lowest-priority cascade origin. The supported selectors are type, class, id,
@@ -1710,16 +1710,16 @@ read+write vocabulary for the tinycld text adoption path):
 - Known gaps that fail safe rather than mismatch. Attribute selectors (`[foo]`) and the
   combinators (`>`, `+`, `~`) parse without erroring but never match, because the selector engine
   handles neither and they parse into an inert simple selector. `@import` is recognized and skipped
-  with a debug log rather than fetched. The selector gaps are shared with HTML (`pkg/css`) and
+  with a debug log rather than fetched. The selector gaps are shared with HTML (`pkg/internal/css`) and
   tracked as planned work — see [docs/CSS-LAYOUT.md](docs/CSS-LAYOUT.md), "Selectors".
-- Two shared `pkg/css` fixes landed here that also apply to HTML: `!important` is now recognized with
+- Two shared `pkg/internal/css` fixes landed here that also apply to HTML: `!important` is now recognized with
   no preceding whitespace (`red!important`), and `/* */` comments inside a `style=""` attribute value
   are stripped before parsing, matching what a `<style>` sheet's rule body already did.
 - 13 curated fixtures from the same resvg test suite covering selector kinds, specificity,
   `!important`, cascade order, and CDATA — with committed goldens.
 
-**SVG input — paint servers** (`pkg/svg` gradient/pattern resolution, `pkg/svg/draw` fill dispatch,
-`pkg/render/raster` shading, `pkg/render/pdfwrite` native `/Shading` emission):
+**SVG input — paint servers** (`pkg/internal/svg` gradient/pattern resolution, `pkg/internal/svg/draw` fill dispatch,
+`pkg/internal/raster` shading, `pkg/internal/pdfwrite` native `/Shading` emission):
 
 - `<linearGradient>` and `<radialGradient>`, with both `gradientUnits` values — `objectBoundingBox`
   by default and `userSpaceOnUse`, percentages allowed in either — plus `gradientTransform` and all
@@ -1747,8 +1747,8 @@ read+write vocabulary for the tinycld text adoption path):
   value in place.
 - PDF output emits a native `/Shading` dictionary for an axial or radial gradient whose stops are all
   fully opaque and whose `spreadMethod` is `pad`. The seam is `render.ShadingDescriber`, a
-  Shader-optional companion interface that `pkg/render/raster`'s SVG-built shadings implement and
-  `pkg/svg/draw`'s `alphaShader` delegates through. The dictionary carries `/ShadingType 2`/`3`,
+  Shader-optional companion interface that `pkg/internal/raster`'s SVG-built shadings implement and
+  `pkg/internal/svg/draw`'s `alphaShader` delegates through. The dictionary carries `/ShadingType 2`/`3`,
   `/Coords`, `/ColorSpace /DeviceRGB`, `/Extend [true true]`, and a `/Function`: a single
   `FunctionType 2` (exponential, linear) for two stops, or a `FunctionType 3` stitching function over
   one `FunctionType 2` per segment for more. It paints with `sh` under the shape's existing clip.
@@ -1767,25 +1767,25 @@ read+write vocabulary for the tinycld text adoption path):
 - Known gaps, each verified by rendering rather than merely inferred, and excluded from the golden
   corpus rather than locked in as correct. **Gradient/pattern strokes** (`stroke="url(#g)")`) degrade
   to the paint's fallback color, or to no stroke, with a one-per-document warn-once log:
-  `pkg/render/raster/stroke.go` has no stroke-to-outline conversion to clip a shading or tile
+  `pkg/internal/raster/stroke.go` has no stroke-to-outline conversion to clip a shading or tile
   against. **SVG2 `fr`**, the radial focal radius, is not read at all. A radial gradient's focal
   point is not projected onto the `r` circle boundary when `fx`/`fy` lies outside it, as the spec
   requires. A radial gradient with `r="0"` does not yet paint the spec-required solid fill of the
   last stop's color. `<pattern overflow="visible">` is not honored, so every tile clips to its own
   cell. And a `<stop>`'s `currentColor`/`inherit` only ever resolves against the stop's own
   attributes, never a real ancestor's `color`/`stop-color`, because `resolveStopColor` in
-  `pkg/svg/stops.go` has no inherited-style walk from a stop up through its parent gradient or an
+  `pkg/internal/svg/stops.go` has no inherited-style walk from a stop up through its parent gradient or an
   enclosing `<g>`.
 - 110 curated fixtures from the same resvg test suite covering both gradient types, patterns, stop
   parsing, and the reference-chain/cycle machinery above — with committed goldens.
 
-**SVG in HTML** (`pkg/html` foreign-content capture, `pkg/layout/css` vector carrier,
-`pkg/svg` intrinsic sizing):
+**SVG in HTML** (`pkg/internal/html` foreign-content capture, `pkg/internal/layout/css` vector carrier,
+`pkg/internal/svg` intrinsic sizing):
 
 - **`<img src="*.svg">` and inline `<svg>` render as VECTORS end to end — never rasterized.** Both
   route through the pre-existing `layout.VectorItem` / `layout.VectorScene` seam
-  (`pkg/layout/page.go`), and `paint.paintVector` hands the scene straight to the `render.Device`.
-  On `pkg/render/pdfwrite` that emits real path operators, so a PDF built from an HTML page with an
+  (`pkg/internal/layout/page.go`), and `paint.paintVector` hands the scene straight to the `render.Device`.
+  On `pkg/internal/pdfwrite` that emits real path operators, so a PDF built from an HTML page with an
   SVG image contains **no image XObject at all**. The test asserts that structurally on the emitted
   PDF bytes: a golden alone would still pass if the SVG round-tripped through a bitmap. The path
   deliberately avoids `imageCache`/`decodeImageBytes`/`ImageContent`, since all three carry an
@@ -1805,20 +1805,20 @@ read+write vocabulary for the tinycld text adoption path):
 - **Inline `<svg>` re-serializes rather than bridging DOM to DOM.** `x/net/html` fully implements
   HTML5 foreign content: the subtree arrives with `Namespace: "svg"` and its camelCase names already
   REPAIRED by `svgTagNameAdjustments` (`clippath`→`clipPath`, `lineargradient`→`linearGradient`,
-  `gradientunits`→`gradientUnits`, …). `pkg/html` captures that subtree as markup
-  (`Element.ForeignSource`) and `pkg/svg` re-parses it, which keeps the SVG parser as the single
-  source of truth. An `x/net/html.Node` → `pkg/svg` AST bridge would instead duplicate that
+  `gradientunits`→`gradientUnits`, …). `pkg/internal/html` captures that subtree as markup
+  (`Element.ForeignSource`) and `pkg/internal/svg` re-parses it, which keeps the SVG parser as the single
+  source of truth. An `x/net/html.Node` → `pkg/internal/svg` AST bridge would instead duplicate that
   package's whole element/attribute construction against a second node type, and every future parser
   fix would have to land twice. The camelCase round trip is load-bearing — losing it silently kills
   every gradient and clip — so a test pins it. The serializer reinstates the `xmlns` declaration
   inline SVG is allowed to omit, plus `xmlns:xlink` when the subtree actually uses the legacy prefix.
-  Without either, `pkg/svg`'s XML parser rejects the markup outright.
+  Without either, `pkg/internal/svg`'s XML parser rejects the markup outright.
 - **`<svg>` is replaced content**, so box generation stops there. `<circle>`/`<path>` no longer
   generate meaningless HTML block boxes, and an SVG-internal `<style>` no longer leaks into the HOST
-  document's cascade — its rules stay scoped to the SVG, where `pkg/svg` runs its own cascade. An
+  document's cascade — its rules stay scoped to the SVG, where `pkg/internal/svg` runs its own cascade. An
   `<svg>` behaves as a normal atomic inline: it sits on a line with text, stacks in block flow, and
   carries backgrounds/borders/margins like any replaced element.
-- **Untrusted-input bounds.** An SVG reached from an `<img>` is untrusted, and `pkg/svg`'s own
+- **Untrusted-input bounds.** An SVG reached from an `<img>` is untrusted, and `pkg/internal/svg`'s own
   budgets — the `<use>` instantiation budget and the `<text>` character budget — bound EXPANSION,
   not the size of the source document. A 32 MB source cap therefore applies before parsing, and logs
   when it fires. Every degradation path reserves the box and paints nothing rather than panicking:
@@ -1849,7 +1849,7 @@ read+write vocabulary for the tinycld text adoption path):
   cover both halves, including a control proving the suppression does not leak onto raster
   backgrounds.
 
-**EPUB cover images** (`pkg/epub` manifest, `pkg/omnidoc` frontend):
+**EPUB cover images** (`pkg/internal/epub` manifest, `pkg/omnidoc` frontend):
 
 - **The OPF manifest's cover image is surfaced and rendered.** The parser previously read it and
   threw it away: `parseBook` touched `Manifest.Items` only to build `hrefByID` for spine resolution.
@@ -1875,9 +1875,9 @@ read+write vocabulary for the tinycld text adoption path):
   section, and no `break-before` on the first chapter, so it gains no leading blank page. Covered by
   a test.
 
-**Unsupported-selector diagnostic** (`pkg/css`, shared by HTML/DOCX/SVG):
+**Unsupported-selector diagnostic** (`pkg/internal/css`, shared by HTML/DOCX/SVG):
 
-- **A selector dropped for an unimplemented construct now says so, once.** `pkg/css` supports type,
+- **A selector dropped for an unimplemented construct now says so, once.** `pkg/internal/css` supports type,
   class, id, universal, descendant, grouping and the structural pseudo-classes. It has no child
   (`>`), sibling (`+`, `~`), attribute, or namespace selectors. Those already failed SAFE — the rule
   goes inert and never mis-matches — but they failed SILENTLY. Design-tool SVG exports lean on
@@ -1888,7 +1888,7 @@ read+write vocabulary for the tinycld text adoption path):
 - `Parse` cannot log. `html.UAStylesheet` is a package-level var initialized by `Parse`, so no
   caller exists at that point to hold a logger. The records instead ride on `Stylesheet.Unsupported`
   as data, deduplicated and capped, and the two places that already hold both a logger and every
-  sheet drain them: `NewResolver` for HTML/DOCX, and `pkg/svg`'s index for SVG-internal `<style>`.
+  sheet drain them: `NewResolver` for HTML/DOCX, and `pkg/internal/svg`'s index for SVG-internal `<style>`.
 - **Warn-once per CONSTRUCT, not per selector**, and never for a UA sheet. A framework stylesheet
   can hold hundreds of `>` rules, and blaming the author for the engine's own UA sheet would fire on
   every document ever rendered. The negative half is tested as hard as the positive: every supported
@@ -1902,8 +1902,8 @@ read+write vocabulary for the tinycld text adoption path):
   only the diagnostic. (CSS `filter:` on HTML boxes was listed here as deferred; it has since
   shipped — see below.)
 
-**CSS `filter:` on HTML boxes** (`pkg/css` cascade, `pkg/layout/css` bracket emission,
-`pkg/layout/paint` the pixel chain; showcase section 18, `htmldoc-p18.png`):
+**CSS `filter:` on HTML boxes** (`pkg/internal/css` cascade, `pkg/internal/layout/css` bracket emission,
+`pkg/internal/layout/paint` the pixel chain; showcase section 18, `htmldoc-p18.png`):
 
 - **All ten shorthand functions render**: `blur()`, `drop-shadow()`, `grayscale()`, `sepia()`,
   `saturate()`, `hue-rotate()`, `invert()`, `brightness()`, `contrast()`, `opacity()`. A list
@@ -1912,10 +1912,10 @@ read+write vocabulary for the tinycld text adoption path):
   is the one structural difference from the clip bracket, whose pair deliberately excludes the box's
   own border box.
 - **No new pixel math.** Every function lowers to the Filter Effects specification's own equivalent
-  primitive and runs through **`pkg/svg/filter`**, the same corpus-tested code the `<filter>` element
+  primitive and runs through **`pkg/internal/svg/filter`**, the same corpus-tested code the `<filter>` element
   uses. The blur premultiplication, the colour-matrix arithmetic and the colour-space handling are
   therefore inherited rather than reimplemented, and the two spellings of `filter: invert(1)` cannot
-  drift apart. The parser is the already-shared `pkg/filtereffects`.
+  drift apart. The parser is the already-shared `pkg/internal/filtereffects`.
 - The spec expresses four of them — `invert`/`brightness`/`contrast`/`opacity` — as an
   **`feComponentTransfer` with LINEAR transfer functions**, a primitive the SVG series deliberately
   deferred. Rather than revive it, each is written as the equivalent affine per-channel map and
@@ -1943,11 +1943,11 @@ read+write vocabulary for the tinycld text adoption path):
   ENTIRELY rather than applying the entries that did parse.
 
 Honest degradations. Every one of them logs on the raster path, and the one place a
-cap stays silent is named explicitly below rather than glossed. `pkg/layout/paint`
+cap stays silent is named explicitly below rather than glossed. `pkg/internal/layout/paint`
 carries the same optional `Logf` the rest of the engine uses — see the painter's
 own entry further down:
 
-- **PDF output paints filtered content UNFILTERED.** `pkg/render/pdfwrite`'s `RenderOffscreen`
+- **PDF output paints filtered content UNFILTERED.** `pkg/internal/pdfwrite`'s `RenderOffscreen`
   declines by design, since PDF has no filter operator and a blur has no vector representation. The
   bracket degrades to a plain transparency group: the content is present, correctly placed, and
   still **vector**, with no image XObject emitted — asserted directly on the operators. Rasterizing

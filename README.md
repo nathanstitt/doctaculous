@@ -119,17 +119,17 @@ tree and one backend-agnostic paint interface.
 ```text
  DOCX · HTML · Markdown · text          ┌────────────────────────┐      render.Device
  CSV/TSV · XLSX · RTF · PPTX     ─────▶ │  one CSS layout engine │ ───▶  ├─ raster    → PNG · JPEG
- EPUB · PNG/JPEG/HEIC · http(s) URLs    │  (pkg/layout/css)      │       └─ pdfwrite  → PDF
+ EPUB · PNG/JPEG/HEIC · http(s) URLs    │  (pkg/internal/layout/css)      │       └─ pdfwrite  → PDF
    frontends lower to a shared          │  blocks · inlines ·    │          (selectable text)
-   box tree (pkg/layout/cssbox)         │  floats · tables ·     │
+   box tree (pkg/internal/layout/cssbox)         │  floats · tables ·     │
         │                               │  flex · grid ·         │
         │                               │  paged media           │
         │                               └────────────────────────┘
         └───▶ structure writers walk the box tree, not pixels:
               Markdown · text · HTML · DOCX · RTF · PPTX · EPUB · CSV/TSV · XLSX
 
- PDF ──▶ parse (pkg/pdf) ──▶ filters ──▶ interpret (pkg/pdf/content) ──▶ render.Device
-              └───▶ extraction (pkg/pdf/extract): positioned glyphs + ruling lines
+ PDF ──▶ parse (pkg/pdf) ──▶ filters ──▶ interpret (pkg/internal/content) ──▶ render.Device
+              └───▶ extraction (pkg/internal/extract): positioned glyphs + ruling lines
                     → reading order (XY-cut) + table recognition → the same box tree
 ```
 
@@ -214,16 +214,34 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 
 | Area | Packages | Responsibility |
 |------|----------|----------------|
-| PDF | `pkg/pdf`, `pkg/pdf/filter`, `pkg/pdf/content`, `pkg/pdf/extract` | Parse, decode streams, interpret content, recover structure |
-| Frontends | `pkg/html` + `pkg/css`, `pkg/docx`, `pkg/xlsx`, `pkg/pptx`, `pkg/epub`, `pkg/rtf`, `pkg/markdown` | Parse each format, lower to the shared box tree |
-| Layout | `pkg/layout/cssbox`, `pkg/layout/css`, `pkg/layout/inline` | The box model, the CSS engine, shaping & line breaking |
-| Fonts | `pkg/font`, `pkg/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled resolution, per-rune script fallback |
-| Backends | `pkg/render/raster`, `pkg/render/pdfwrite`, `pkg/render/svgwrite`, `pkg/render/{markdown,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, SVG, and structure output |
+| PDF | `pkg/pdf`, `pkg/internal/filter`, `pkg/internal/content`, `pkg/internal/extract` | Parse, decode streams, interpret content, recover structure |
+| Frontends | `pkg/internal/html` + `pkg/internal/css`, `pkg/docx`, `pkg/xlsx`, `pkg/internal/pptx`, `pkg/internal/epub`, `pkg/internal/rtf`, `pkg/internal/markdown` | Parse each format, lower to the shared box tree |
+| Layout | `pkg/internal/layout/cssbox`, `pkg/internal/layout/css`, `pkg/internal/layout/inline` | The box model, the CSS engine, shaping & line breaking |
+| Fonts | `pkg/internal/font`, `pkg/internal/layout/font` | SFNT/WOFF/WOFF2 parsing, system + bundled resolution, per-rune script fallback |
+| Backends | `pkg/internal/{raster,pdfwrite,svgwrite}`, `pkg/internal/{markdownwrite,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, SVG, and structure output |
 | API / CLI | `pkg/omnidoc`, `cmd/omnidoc` | Public entry points, format detection, the conversion matrix |
 
+**Only eight packages are importable**: `pkg/omnidoc`, `pkg/docx`, `pkg/xlsx`,
+`pkg/pdf`, `pkg/render`, `pkg/crop`, `pkg/heif`, `pkg/resource`. Everything under
+`pkg/internal/` is engine detail — the table describes how the work is laid out,
+not an API surface.
+
+That split is deliberate and predates the tag, because a tag freezes every
+exported package under semver. The CSS engine's `ComputedStyle` is the clearest
+case: its own doc says the typed property set is "deliberately minimal" and that
+properties outside it "do not yet populate a typed computed field", which is a
+written promise that the type will change. Anything here can be promoted to
+public later, additively; nothing can be withdrawn.
+
 The `render.Device` interface is the seam. Parsing, interpretation, and layout
-never know which backend they're painting into, so new backends bolt on without
+never know which backend they're painting into, so a new backend bolts on without
 touching them.
+
+That is a statement about the internal architecture, not an extension point yet:
+every implementer lives in this repo, and nothing public accepts a caller-supplied
+`Device`. Whether it becomes one — and on what terms, given a 15-method interface
+that has already changed shape twice — is an open question, not a promise this
+README is making.
 
 ## Testing
 
@@ -259,11 +277,11 @@ built from it. All are permissively licensed and may be redistributed:
 - Inconsolata, Noto Sans Hebrew, and Noto Naskh Arabic — SIL Open Font License
   1.1. None declares a Reserved Font Name, so they ship under their original
   names. See the `LICENSE-*.txt` files in
-  [`pkg/font/standard/fonts/`](pkg/font/standard/fonts/).
+  [`pkg/internal/font/standard/fonts/`](pkg/internal/font/standard/fonts/).
 
 Two further carve-outs, both isolated and NOT shipped with the library:
 
-- [`pkg/pdf/filter/jbig2/`](pkg/pdf/filter/jbig2/) vendors
+- [`pkg/internal/filter/jbig2/`](pkg/internal/filter/jbig2/) vendors
   [xiaoqidun/jbig2](https://github.com/xiaoqidun/jbig2) (pure-Go JBIG2 decoding,
   **Apache-2.0**, MIT-compatible) with its upstream `LICENSE` and `NOTICE`.
 - [`testdata/external/`](testdata/external/) holds third-party **test inputs

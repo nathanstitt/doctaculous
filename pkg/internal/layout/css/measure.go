@@ -1,0 +1,188 @@
+package css
+
+import (
+	"context"
+
+	gcss "github.com/nathanstitt/omnidoc/pkg/internal/css"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout/inline"
+)
+
+// measureMaxContent returns box's max-content width: the width it occupies with no
+// line wrapping (used by auto table layout, CSS 17.5.2.2). For an inline-formatting
+// box it is the width of the single unbroken line of all its inline content; for a
+// block container it is the widest child's max-content; a specified width pins it.
+// The box's own horizontal padding+border is NOT added here — the caller adds edges
+// where it needs the border-box contribution.
+func (e *Engine) measureMaxContent(ctx context.Context, b *cssbox.Box) float64 {
+	return e.measureContent(ctx, b, true)
+}
+
+// measureMinContent returns box's min-content width: the narrowest width without
+// overflow — the widest single unbreakable unit (longest word / atomic inline /
+// replaced intrinsic width). Computed by breaking the shaped glyphs at width 0 and
+// taking the widest resulting line.
+func (e *Engine) measureMinContent(ctx context.Context, b *cssbox.Box) float64 {
+	return e.measureContent(ctx, b, false)
+}
+
+// measureContent is the shared core; wantMax selects max-content (no wrap) vs
+// min-content (everything wraps to its smallest unit). It memoizes per box (see
+// Engine.measures): the result is a pure function of the box subtree and the fixed face
+// cache, so a cached value equals a fresh computation (byte-identical), and the cache
+// collapses the repeated min+max measurement of every table cell / grid item / flex item.
+func (e *Engine) measureContent(ctx context.Context, b *cssbox.Box, wantMax bool) float64 {
+	mm := e.measures[b]
+	if mm == nil {
+		mm = &minMaxContent{}
+		e.measures[b] = mm
+	}
+	if wantMax && mm.maxSet {
+		return mm.max
+	}
+	if !wantMax && mm.minSet {
+		return mm.min
+	}
+	w := e.measureContentUncached(ctx, b, wantMax)
+	if wantMax {
+		mm.max, mm.maxSet = w, true
+	} else {
+		mm.min, mm.minSet = w, true
+	}
+	return w
+}
+
+// measureContentUncached computes the intrinsic width without consulting the cache. It
+// honors a specified, fixed (non-auto, non-percentage) width on the box (which pins the
+// contribution), and recurses block children (a block container's contribution is its
+// widest child's, plus that child's own horizontal border+padding). The child recursion
+// goes back through measureContent, so descendants are memoized too. Allocates no
+// committed layout.
+func (e *Engine) measureContentUncached(ctx context.Context, b *cssbox.Box, wantMax bool) float64 {
+	if w, ok := specifiedFixedWidth(b); ok {
+		return w
+	}
+	// A replaced box (an <img> or a form control) has no child/inline content to
+	// measure; its intrinsic contribution is its used replaced width (which already
+	// honors a CSS width override, the intrinsic image/control size, and min/max).
+	// Without this a width:auto replaced box measures 0, collapsing a flex/grid
+	// container that holds it (its flex base size / grid track would be zero).
+	if b.Kind == cssbox.BoxReplaced {
+		w, _ := e.replacedUsedSize(ctx, b, 0)
+		return w
+	}
+	if b.Formatting == cssbox.InlineFC {
+		return e.measureInline(ctx, b, wantMax)
+	}
+	inner := 0.0
+	for _, c := range b.Children {
+		cw := e.measureContent(ctx, c, wantMax) + horizontalEdges(c)
+		if cw > inner {
+			inner = cw
+		}
+	}
+	return inner
+}
+
+// measureInline gathers b's inline runs, shapes them once, and returns either the
+// unbroken width (max-content) or the widest zero-width-break line (min-content).
+func (e *Engine) measureInline(ctx context.Context, b *cssbox.Box, wantMax bool) float64 {
+	var runs []inline.Run
+	var atomics []*Fragment // gatherInlineRuns fully lays out inline-block atoms; their fragments are unused in measure mode, but that layout cost is real
+	e.gatherInlineRuns(ctx, b, 1e9, &runs, &atomics)
+	if len(runs) == 0 {
+		return 0
+	}
+	// Intrinsic measurement shapes the whole subtree's text, so it is as long a
+	// stretch as layout proper and needs the same bound.
+	glyphs := inline.ShapeContext(ctx, e.faces, runs, e.logf)
+	if wantMax {
+		return inline.VisibleWidth(glyphs)
+	}
+	// min-content breaks at width 0, so every available opportunity is taken and the
+	// result is the widest indivisible unit. Which units are indivisible is exactly what
+	// overflow-wrap/word-break change — and only for `anywhere` and `break-all`.
+	//
+	// CSS Text 3 §5.5 is explicit that `overflow-wrap: break-word` does NOT affect
+	// intrinsic sizing while `anywhere` does; that asymmetry is the entire practical
+	// difference between the two values. Honoring it means stripping the mode from the
+	// measured copy when it must not count, so the measurement sees the same
+	// opportunities the zero-width break would have had WITHOUT the property.
+	glyphs = stripNonMinContentBreaks(glyphs)
+	widest := 0.0
+	rest := glyphs
+	for len(rest) > 0 {
+		var line []inline.Glyph
+		line, rest = inline.BreakNext(rest, 0)
+		if len(line) == 0 {
+			// BreakNext could not place even one unit at width 0 — force one glyph to
+			// avoid a spin (the unit is wider than 0; take its visible width).
+			line, rest = rest[:1], rest[1:]
+		}
+		w := inline.VisibleWidth(line)
+		if w > widest {
+			widest = w
+		}
+	}
+	return widest
+}
+
+// stripNonMinContentBreaks returns glyphs with any mid-word break mode that must not
+// influence intrinsic sizing cleared to WordBreakNormal. Today that is exactly
+// `overflow-wrap: break-word`, which breaks lines but leaves min-content at the widest
+// word (CSS Text 3 §5.5); `anywhere` and `break-all` pass through and do shrink it.
+//
+// It returns the input slice unchanged — no allocation, no copy — when nothing needs
+// clearing, which is every box that does not use these properties. That keeps the
+// measurement path byte-identical for the overwhelmingly common case; only a box that
+// actually sets break-word pays for the copy. The copy is required because the glyph
+// slice is the shared shaping result, and mutating it in place would leak a
+// measurement-only change into the real line breaking that follows.
+func stripNonMinContentBreaks(glyphs []inline.Glyph) []inline.Glyph {
+	needs := false
+	for i := range glyphs {
+		if m := glyphs[i].WordBreak; m != inline.WordBreakNormal && !m.AffectsMinContent() {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return glyphs
+	}
+	out := make([]inline.Glyph, len(glyphs))
+	copy(out, glyphs)
+	for i := range out {
+		if m := out[i].WordBreak; !m.AffectsMinContent() {
+			out[i].WordBreak = inline.WordBreakNormal
+		}
+	}
+	return out
+}
+
+// specifiedFixedWidth returns the box's content-box width when it has a fixed
+// (px/pt/em, non-auto, non-percentage) width, accounting for box-sizing. ok is false
+// for auto/percentage widths (which do not pin intrinsic sizing).
+func specifiedFixedWidth(b *cssbox.Box) (float64, bool) {
+	u := b.Style.Width.Unit
+	if u == gcss.UnitAuto || u == gcss.UnitPercent {
+		return 0, false
+	}
+	val, isAuto := resolveLen(b.Style.Width, b.Style.FontSizePt, 0)
+	if isAuto { // defensive: UnitAuto already excluded above, so this cannot fire today
+		return 0, false
+	}
+	if b.Style.BoxSizing == "border-box" {
+		val -= horizontalEdges(b)
+		if val < 0 {
+			val = 0
+		}
+	}
+	return val, true
+}
+
+// horizontalEdges is the box's left+right padding + border width in points
+// (percentage padding is treated as 0 for measurement — a documented approximation).
+func horizontalEdges(b *cssbox.Box) float64 {
+	ed := usedEdges(b, 0)
+	return ed.pL + ed.pR + ed.bL + ed.bR
+}

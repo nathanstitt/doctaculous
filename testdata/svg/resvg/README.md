@@ -129,7 +129,7 @@ Two real rendering bugs surfaced this way, both fixed in this PR rather than
 worked around:
 
 1. **Unclosed fill paths rendered as their bounding box, not their actual
-   shape.** `pkg/render/raster/geom.go`'s `replay()` (the nonzero-winding
+   shape.** `pkg/internal/raster/geom.go`'s `replay()` (the nonzero-winding
    fill path, used by every `Fill` call) never closed a subpath unless the
    source path data contained an explicit `Z`/`Close`. Per SVG's painting
    model, fill always implicitly closes every subpath — `<polygon>` does
@@ -151,19 +151,19 @@ worked around:
 2. **`<ellipse>` did not implement SVG 2's single-radius auto-defaulting.**
    `shapes/ellipse/missing-rx-attribute.svg` and `missing-ry-attribute.svg`
    (both explicitly titled "(SVG 2)": "Error in SVG 1, but not in SVG 2")
-   rendered as fully blank instead of a circle. `pkg/svg/shapes.go`'s
+   rendered as fully blank instead of a circle. `pkg/internal/svg/shapes.go`'s
    `rectPath` already implements "when exactly one of rx/ry is present, the
    other defaults to it" for `<rect>`, but the `ellipse` case in
    `shapePath` required both `rx` and `ry` to independently be present and
    positive. Fixed by adding `ellipseRadii()`, mirroring `rectPath`'s
    presence-based (not resolved-value-based) substitution rule, with a new
-   unit test (`TestShapePathEllipseAutoRadius` in `pkg/svg/shapes_test.go`).
+   unit test (`TestShapePathEllipseAutoRadius` in `pkg/internal/svg/shapes_test.go`).
 
 Two group-opacity fixtures (`painting/opacity/group-opacity.svg` and
 `mixed-group-opacity.svg`) were removed from the corpus after the eyeball
 pass: they render fully opaque, with no transparency effect, because `<g
 opacity>` compositing is a documented, intentional PR-1 limitation (see
-`groupOpacityWarnKey` in `pkg/svg/svg.go`) — not a bug, but also not a
+`groupOpacityWarnKey` in `pkg/internal/svg/svg.go`) — not a bug, but also not a
 feature this tranche ships, so locking a golden of the ignored-opacity
 render would assert the wrong thing.
 
@@ -192,13 +192,13 @@ render would assert the wrong thing.
 
 ## Notable exclusions (this tranche)
 
-- **`@import`** (`external-CSS.svg`) — no loader; per pkg/svg's
+- **`@import`** (`external-CSS.svg`) — no loader; per pkg/internal/svg's
   `indexStyleSheet`, an `@import` inside a `<style>` sheet is warned and
   skipped, the rest of the sheet still parses, but this fixture's whole
   point is the imported rule's effect, so excluding it is correct rather
   than a workaround.
 - **Attribute selectors** (`attribute-selector.svg`, `[x] { fill: green }`)
-  — `pkg/css/selector.go`'s `parseSimple` has no `[` handling; `[x]` parses
+  — `pkg/internal/css/selector.go`'s `parseSimple` has no `[` handling; `[x]` parses
   as a literal type selector (tag `"[x]"`) that can never match a real
   element name, so the rule is silently inert. Including this fixture would
   lock in a blank/default-black golden as if it were the intended green —
@@ -210,9 +210,9 @@ render would assert the wrong thing.
 - **CSS `transform` property**, both as a sheet rule
   (`structure/style/transform.svg`, `#rect1 { transform:scale(2) }`) and as
   an inline `style` (`structure/style-attribute/transform.svg`,
-  `style="transform:scale(2)"`) — `pkg/svg/svg.go`'s `elementTransform`
+  `style="transform:scale(2)"`) — `pkg/internal/svg/svg.go`'s `elementTransform`
   reads the `transform` XML *attribute* directly and never consults the
-  cascade; `pkg/svg/style.go`'s `Style.apply` has no transform property at
+  cascade; `pkg/internal/svg/style.go`'s `Style.apply` has no transform property at
   all. Verified: rendering either fixture produces the unscaled 80×80
   square, not the intended scaled-up green fill. Excluded rather than
   locking in a golden of a property this engine doesn't apply.
@@ -253,7 +253,7 @@ eyeball pass did prompt.
 
 `structure/style-attribute/comments.svg` (`style="/*text*/fill:green/*text*/"`)
 initially rendered with the rect's default black fill instead of green:
-`pkg/css/parse.go`'s `ParseDeclarations` — the function backing both the
+`pkg/internal/css/parse.go`'s `ParseDeclarations` — the function backing both the
 SVG and HTML `style=""` inline-attribute cascades — never stripped `/* */`
 comments before splitting on `;` and `:`, so the whole declaration parsed
 as property `/*text*/fill`, which matches nothing. A `<style>` *sheet*
@@ -263,7 +263,7 @@ attribute path — an inconsistency between the two callers of the same
 function, not an unimplemented feature. Fixed by stripping comments inside
 `ParseDeclarations` itself (a new `stripComments` helper) so both callers
 get identical, correct behavior; covered by rerunning the existing
-`pkg/css` test suite (all passing) plus this golden.
+`pkg/internal/css` test suite (all passing) plus this golden.
 
 ## What shipped in this tranche (PR 3)
 
@@ -347,7 +347,7 @@ covering gradient and pattern paint servers end to end:
   fixtures (the second of which uses the same zero-radius case on a
   *stroke*, doubly out of scope with the stroke-gradient deferral below).
 - **Gradient/pattern `stroke="url(...)"`** — a known PR-scope deferral (see
-  `pkg/render/raster/stroke.go`'s doc comment): no stroke-to-outline
+  `pkg/internal/raster/stroke.go`'s doc comment): no stroke-to-outline
   conversion exists to clip a shading or tile against, so a gradient/
   pattern stroke degrades to the fallback color (or no stroke, absent a
   fallback) with a one-per-document warn-once log. Grepped every candidate
@@ -358,7 +358,7 @@ covering gradient and pattern paint servers end to end:
   golden actually locks in, and dropped otherwise (see the zero-r bullet
   above for the third).
 - **`currentColor`/`inherit` on a `<stop>`'s `stop-color`, when the value
-  lives on a real DOM ancestor** — `resolveStopColor` (`pkg/svg/stops.go`)
+  lives on a real DOM ancestor** — `resolveStopColor` (`pkg/internal/svg/stops.go`)
   only ever resolves `color`/`stop-color` against the `<stop>` element's
   *own* attributes/cascade; there is no inherited-style walk from a stop up
   through its parent gradient or an ancestor `<g>`, so `stop-color="green"`
@@ -438,7 +438,7 @@ were fixed (see the git history for the fix commit): `resolveGradient`'s
 `(w,h)` too. For any shape not anchored at the document origin, this sent
 the gradient's local space to a device-space location far outside the
 visible page, so the shape painted as a flat block of the gradient's first
-stop color instead of a ramp. `pkg/render/pdfwrite`'s `FillShading` had the
+stop color instead of a ramp. `pkg/internal/pdfwrite`'s `FillShading` had the
 identical mistake placing its rasterized shading image. Both needed
 `Scale(...).Mul(Translate(...))` instead. Neither bug was caught by the
 pre-existing unit tests because every one of them used a shape/clip
@@ -446,7 +446,7 @@ anchored at `(0,0)`, where `Translate(0,0)` is inert regardless of
 composition order — this tranche's off-origin fixtures (nearly all of
 them; the corpus's shapes sit at `x="20" y="20"`) surfaced it immediately.
 Fixed at the source, with new regression tests using an off-origin
-rect/clip in both `pkg/svg/draw` and `pkg/render/pdfwrite`.
+rect/clip in both `pkg/internal/svg/draw` and `pkg/internal/pdfwrite`.
 
 A third composition-order bug of the same shape was found in final review
 and fixed afterward: `resolveGradient`'s `gradientTransform` handling
@@ -478,9 +478,9 @@ suite's terms:
 - `nested-distinct-patterns.svg` — a 3-level chain of DISTINCT patterns
   (`patt1`'s tile fills with `patt2`, whose tile fills with `patt3`), which
   is not a cycle and so is not caught by `sceneBuilder.buildingPattern` (see
-  that field's doc comment in `pkg/svg/pattern.go`): each level multiplies
+  that field's doc comment in `pkg/internal/svg/pattern.go`): each level multiplies
   draw calls by its own cell count, and nothing at scene-build time bounds
-  the chain's depth. The only bound on it is `pkg/svg/draw`'s per-`DrawVector`
+  the chain's depth. The only bound on it is `pkg/internal/svg/draw`'s per-`DrawVector`
   nesting-depth guard (`maxPatternNestingDepth`). This fixture is shallow
   enough to render normally and lock in correct output; the guard's actual
   trip point is covered by a Go benchmark/timing test rather than a golden,
@@ -523,7 +523,7 @@ diff heatmap that lights up only the shape outlines, never interior fills.
   `clipPath/clipping-with-complex-text-and-clip-rule.svg`, and
   `clipPath/clip-path-with-transform-on-text.svg` (a `<text>` clip *target*,
   not a `<text>` clipPath *child* — found during inspection: `<text>` is not
-  implemented at all — see `pkg/svg/clippath.go`'s `clipPathChildKinds`
+  implemented at all — see `pkg/internal/svg/clippath.go`'s `clipPathChildKinds`
   comment — so any fixture involving `<text>` in either role is excluded).
 - **Marker-dependent** (1): `clipPath/with-marker-on-clip.svg`.
 - **The deprecated SVG 1.1 `clip` property, and a duplicate** (2):
@@ -541,7 +541,7 @@ diff heatmap that lights up only the shape outlines, never interior fills.
   target element. Verified against source:
   `sceneBuilder.resolveClipPathRef` only recognizes a `url(...)` prefix and
   treats anything else as unresolvable/no-clip; `circle()`/`inset()`/
-  `polygon()` parsing does not exist anywhere in `pkg/svg`. Excluded as an
+  `polygon()` parsing does not exist anywhere in `pkg/internal/svg`. Excluded as an
   unshipped feature, not merely an unshipped fixture.
 - **`clip-path`/`opacity`/`display` on the root `<svg>` element itself** (2,
   found during the golden-eyeball comparison against resvg's reference, not
@@ -573,7 +573,7 @@ deliberate scope boundary rather than a defect:
 - **`mask/on-group-with-transform.svg`, `mask/half-width-region-with-
   rotation.svg`** — both apply a default-`objectBoundingBox`-units mask to
   a `<g>` target. A `<g>` has no single `Path` to measure a bounding box
-  from (unlike a `Shape`), so `pkg/svg/draw`'s mask/clip-path builders pass
+  from (unlike a `Shape`), so `pkg/internal/svg/draw`'s mask/clip-path builders pass
   a nil `boundsFunc` for a Group target, which `clipUnitsMatrix` degrades to
   Identity (i.e. `userSpaceOnUse`) rather than resolving a real bbox — a
   documented, narrow approximation (see `draw.go`'s "Same nil-target
@@ -597,7 +597,7 @@ deliberate scope boundary rather than a defect:
   - The engine used to resolve one level THROUGH the cycle and keep the
     result as an extra attenuation, making the output the product of both
     gradients: symmetric in x and y, and ~4x too faint. Dropping the cyclic
-    reference entirely (see `maskRefCycles` in `pkg/svg/mask.go`) matches
+    reference entirely (see `maskRefCycles` in `pkg/internal/svg/mask.go`) matches
     resvg, whose parser rewrites a cyclic `mask` attribute to `none` before
     rendering (`usvg/src/parser/svgtree/parse.rs`, `fix_recursive_links`).
 
@@ -616,7 +616,7 @@ against resvg's reference PNGs (not just eyeballing intent) — the sharpest
 argument yet for vendoring a corpus with reference renders:
 
 1. **`visibility:hidden` on a `<clipPath>` child was incorrectly kept in
-   the union.** `pkg/svg/clippath.go`'s `buildClipChild` had an explicit
+   the union.** `pkg/internal/svg/clippath.go`'s `buildClipChild` had an explicit
    comment asserting "per SVG a visibility:hidden clipPath child STILL
    contributes to the union (only display:none removes it)" — this is
    wrong. Per SVG 1.1 §14.3.5 and SVG2's clipPath model, and confirmed
@@ -627,7 +627,7 @@ argument yet for vendoring a corpus with reference renders:
    (renamed `TestClipPathVisibilityHiddenChildDropped`) had encoded the
    same wrong assumption and was corrected alongside the fix.
 2. **Nested/self-referencing masks composed via `min` instead of
-   multiplication.** `pkg/svg/draw/mask.go`'s `buildMask` intersected a
+   multiplication.** `pkg/internal/svg/draw/mask.go`'s `buildMask` intersected a
    mask's own `Self` reference (`mask="url(#...)"` on a `<mask>` element)
    using the same `intersectMasks` (per-pixel `min`) that `clip-path`
    correctly uses for its boolean-AND region semantics. A mask stacking on
@@ -643,7 +643,7 @@ argument yet for vendoring a corpus with reference renders:
    and re-verified against resvg's reference at multiple sample points
    (post-fix values matched to within 1/255).
 3. **A clipPath child's own nested `clip-path` was resolved in the wrong
-   coordinate space.** `pkg/svg/draw/clip.go`'s `buildClipMask`, when a
+   coordinate space.** `pkg/internal/svg/draw/clip.go`'s `buildClipMask`, when a
    `<clipPath>` child itself carries `clip-path="url(#...)"`, resolved that
    nested reference against `cpM` (the parent clipPath's own units/
    transform matrix) — omitting the child's OWN transform (`kid.M`), even
@@ -752,8 +752,8 @@ The comparison against resvg's references paid for itself five times over:
    `x="40"`. `tspan/pseudo-multi-line.svg` staggered its three lines instead
    of left-aligning them.
 
-Two bugs OUTSIDE `pkg/svg` were found the same way and fixed at the source:
-`pkg/font`'s glyph outlines carried a leading drawing op before any move-to,
+Two bugs OUTSIDE `pkg/internal/svg` were found the same way and fixed at the source:
+`pkg/internal/font`'s glyph outlines carried a leading drawing op before any move-to,
 so every glyph's `Bounds` stretched back to the origin; and
 `inline.Reorder` emitted a multi-rune cluster glyph once per RUNE, so
 reordering Arabic returned more glyphs than it was given.
@@ -797,7 +797,7 @@ baseline, and decoration properties:
   substitution artifact.
 - **`dominant-baseline/ideographic`, `mathematical`, `use-script`,
   `reset-size`, and `alignment-baseline/ideographic`, `mathematical`** —
-  these need OS/2 and BASE table metrics `pkg/font` does not parse. resvg
+  these need OS/2 and BASE table metrics `pkg/internal/font` does not parse. resvg
   shifts the text; this engine degrades to the alphabetic baseline with a
   warn-once. Committing a golden here would lock in the degradation as if it
   were correct.
@@ -911,7 +911,7 @@ OPPOSITE of the obvious guess:
 ### Known tolerance gaps
 
 `filter/on-a-thin-rect` renders at **2.78% differing pixels** (worst channel
-delta 75). Root cause: `filterSpace` (`pkg/svg/draw/filter.go`) derives a
+delta 75). Root cause: `filterSpace` (`pkg/internal/svg/draw/filter.go`) derives a
 SINGLE uniform scale from the element matrix, so a non-uniform transform
 rasterizes the filter region at the wrong aspect — see the KNOWN
 APPROXIMATION comment at that line. A real fix needs a per-axis filter space
@@ -976,7 +976,7 @@ two rules pull in opposite directions.
 ### Known gap surfaced here (not fixed)
 
 Rendering the four held-back fixtures produced full columns of `.notdef` with
-**zero diagnostics**. `pkg/layout/inline`'s `warnMissingGlyph` fires on the CSS
+**zero diagnostics**. `pkg/internal/layout/inline`'s `warnMissingGlyph` fires on the CSS
 path, but the logger is evidently not threaded through SVG's text path, so
 missing glyphs there are silent. Recorded in `docs/SVG.md`; it is its own bug
 and out of scope for the writing-mode work.

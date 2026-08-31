@@ -9,7 +9,7 @@ import (
 	"io"
 
 	"github.com/nathanstitt/omnidoc/pkg/crop"
-	"github.com/nathanstitt/omnidoc/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/internal/webp"
 )
 
 // ImageOptions controls image-encoded output (WriteImage, and Convert to

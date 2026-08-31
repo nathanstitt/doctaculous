@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

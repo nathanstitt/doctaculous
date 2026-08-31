@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/xlsxwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/xlsxwrite"
 )
 
 // XLSXOptions controls conversion to XLSX.

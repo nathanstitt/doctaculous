@@ -7,7 +7,7 @@ skip into real output.
 
 ## Parsing and decoding
 
-- **Remaining scan filter** — JPX/JPEG2000 only (`pkg/pdf/filter/filter.go`, `ErrUnsupported`); no
+- **Remaining scan filter** — JPX/JPEG2000 only (`pkg/internal/filter/filter.go`, `ErrUnsupported`); no
   viable pure-Go decoder exists (JBIG2 shipped via a vendored Apache-2.0 decoder — see FEATURES.md).
 
 - **Encryption follow-ups** — non-empty user/owner passwords (no password API today), per-stream
@@ -29,11 +29,11 @@ skip into real output.
 ## Writing
 
 - **Fuller paged-media in the PDF-writer path** — carry the CSS Paged Media features into
-  `pkg/render/pdfwrite`.
+  `pkg/internal/pdfwrite`.
 
 ## Extraction
 
-- **PDF-extraction quality** — the PDF → Markdown/HTML path ships (`pkg/pdf/extract`); the top lifts
+- **PDF-extraction quality** — the PDF → Markdown/HTML path ships (`pkg/internal/extract`); the top lifts
   are **ToUnicode CMap parsing** (Type0/CID text — CJK / subsetted fonts currently yield `Rune==0`),
   font weight/slant through `GlyphSource` (emphasis + weight-based heading detection), and
   scanned-PDF OCR.

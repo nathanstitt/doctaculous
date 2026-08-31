@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nathanstitt/omnidoc/pkg/rtf"
+	"github.com/nathanstitt/omnidoc/pkg/internal/rtf"
 )
 
 // OpenRTF reads and renders a Rich Text Format document at path, laid out at

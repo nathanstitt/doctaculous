@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/docxwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/docxwrite"
 )
 
 // DOCXOptions controls conversion to DOCX.

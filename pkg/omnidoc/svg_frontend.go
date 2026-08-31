@@ -7,9 +7,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/nathanstitt/omnidoc/pkg/layout"
-	"github.com/nathanstitt/omnidoc/pkg/svg"
-	svgdraw "github.com/nathanstitt/omnidoc/pkg/svg/draw"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
+	svgdraw "github.com/nathanstitt/omnidoc/pkg/internal/svg/draw"
 )
 
 // OpenSVG reads a standalone SVG (or gzip-compressed .svgz) as a single-page

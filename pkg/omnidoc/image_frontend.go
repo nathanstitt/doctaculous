@@ -8,7 +8,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/nathanstitt/omnidoc/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/internal/webp"
 )
 
 // OpenImage reads a PNG or JPEG image as a single-page document: the page is

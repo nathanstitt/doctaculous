@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 )
 
 // TestShowcaseFloatVerticalPositionOracle is a RELIABLE oracle over the ACTUAL htmldoc

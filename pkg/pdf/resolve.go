@@ -3,7 +3,7 @@ package pdf
 import (
 	"fmt"
 
-	"github.com/nathanstitt/omnidoc/pkg/pdf/filter"
+	"github.com/nathanstitt/omnidoc/pkg/internal/filter"
 )
 
 // Resolve follows indirect references until it reaches a direct object. Direct

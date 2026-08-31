@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/epub"
-	"github.com/nathanstitt/omnidoc/pkg/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/epub"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	genepub "github.com/nathanstitt/omnidoc/testdata/gen/epub"
 )
 

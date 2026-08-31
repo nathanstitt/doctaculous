@@ -3,7 +3,7 @@ package heif
 import (
 	"fmt"
 
-	"github.com/nathanstitt/omnidoc/pkg/heif/hevc"
+	"github.com/nathanstitt/omnidoc/pkg/internal/hevc"
 )
 
 // hvcC — the HEVCDecoderConfigurationRecord (ISO/IEC 14496-15 §8.3.3.1) —

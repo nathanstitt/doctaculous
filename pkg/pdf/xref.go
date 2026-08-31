@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/nathanstitt/omnidoc/pkg/pdf/filter"
+	"github.com/nathanstitt/omnidoc/pkg/internal/filter"
 )
 
 // readXref locates the last startxref and reads the cross-reference chain

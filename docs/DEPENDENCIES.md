@@ -18,11 +18,11 @@ These are non-negotiable. A change that violates one is wrong regardless of what
   `x/image/webp`; this is used purely for the VP8L encoder Go otherwise lacks. It encodes lossless
   VP8L only — there is no pure-Go lossy VP8 encoder — which is why WebP output is a PNG-class
   target, not a JPEG-class one. Adopted rather than vendored because it is small, MIT, and
-  dependency-clean; `pkg/webp.Encode` wraps it to check the writes it does not check itself, and
+  dependency-clean; `pkg/internal/webp.Encode` wraps it to check the writes it does not check itself, and
   the round-trip is verified pixel-exact against `x/image`'s independent decoder).
   Add new deps only if pure-Go + permissive; record the reason in the PR.
 - Vendored (copied into the tree, not a `go get` dep): `github.com/xiaoqidun/jbig2` (Apache-2.0, pure
-  Go — JBIG2 image decode) in `pkg/pdf/filter/jbig2/`, vendored because it is new/solo-authored (see
+  Go — JBIG2 image decode) in `pkg/internal/filter/jbig2/`, vendored because it is new/solo-authored (see
   that dir's README + NOTICE); its only dep is `golang.org/x/image` (already used). Excluded from
   golangci-lint via `.golangci.yml` as an unmodified third-party copy.
 - **Concurrency-first.** Multi-page work fans out across goroutines (bounded worker pool sized to
