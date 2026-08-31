@@ -837,6 +837,7 @@ func (e *Engine) layoutBlockChildren(ctx context.Context, b *cssbox.Box, content
 				borderTop = startY // clearance pushed it down past the collapsed margin
 			}
 		}
+		e.warnCollapseThrough(child, res)
 		// The child currently sits with its border top at res.marginTop (margin edge
 		// was 0); shift it so its border top lands at borderTop.
 		shiftFragment(res.frag, borderTop-res.marginTop)

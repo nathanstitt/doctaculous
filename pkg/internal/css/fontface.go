@@ -19,10 +19,27 @@ type FontSource struct {
 	Format string // format(...) hint, lowercased and unquoted; "" if absent
 }
 
+// Descriptors this parser recognizes but does not implement. They are reported
+// rather than dropped in silence, because both change what an author sees.
+const (
+	unsupportedUnicodeRange = "@font-face unicode-range"
+	unsupportedFontDisplay  = "@font-face font-display"
+)
+
 // parseFontFace maps an @font-face block's declarations to a FontFace. ok is false
 // when the rule lacks a font-family or has no usable src (the caller drops it).
-func parseFontFace(decls []Declaration) (FontFace, bool) {
-	var ff FontFace
+//
+// diag records descriptors that were dropped and would change rendering if they
+// were honored, through the same carried-as-data channel as UnsupportedSelector
+// (see Stylesheet.Unsupported for why Parse cannot take a logger).
+//
+// unicode-range is the one that matters: it selects WHICH runes a face covers, so
+// ignoring it means the whole face is used for every rune — a document that splits
+// a family across subsetted faces then renders from the wrong file, with no
+// indication why. font-display only affects load-time swap behaviour, which does
+// not apply to a batch renderer, but it is reported too so an author is not left
+// guessing which of the two descriptors was honored.
+func parseFontFace(decls []Declaration) (ff FontFace, diag []UnsupportedSelector, ok bool) {
 	for _, d := range decls {
 		switch strings.ToLower(d.Property) {
 		case "font-family":
@@ -33,12 +50,18 @@ func parseFontFace(decls []Declaration) (FontFace, bool) {
 			ff.Weight = strings.ToLower(strings.TrimSpace(d.Value))
 		case "font-style":
 			ff.Style = strings.ToLower(strings.TrimSpace(d.Value))
+		case "unicode-range":
+			diag = append(diag, UnsupportedSelector{
+				Construct: unsupportedUnicodeRange, Selector: strings.TrimSpace(d.Value), Descriptor: true})
+		case "font-display":
+			diag = append(diag, UnsupportedSelector{
+				Construct: unsupportedFontDisplay, Selector: strings.TrimSpace(d.Value), Descriptor: true})
 		}
 	}
 	if ff.Family == "" || len(ff.Sources) == 0 {
-		return FontFace{}, false
+		return FontFace{}, nil, false
 	}
-	return ff, true
+	return ff, diag, true
 }
 
 // parseSrcList parses an @font-face src descriptor value into ordered sources.

@@ -1,8 +1,8 @@
 # CSS and layout — status and open work
 
-Shipped features are inventoried in [../FEATURES.md](../FEATURES.md); the detailed
-per-item working checklist with the rationale for each deferral is in
-[FIDELITY-BACKLOG.md](FIDELITY-BACKLOG.md). This file holds what is NOT done.
+Shipped features are inventoried in [../FEATURES.md](../FEATURES.md); the per-item
+working checklist with the rationale for each deferral is in
+[BACKLOG.md](BACKLOG.md). This file holds what is NOT done.
 
 The engine renders every path below — these are the known approximations, each degrading
 gracefully.

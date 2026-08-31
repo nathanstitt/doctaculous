@@ -121,7 +121,11 @@ bullet's design rationale is in its PR:
 - **Block + inline normal flow** (`pkg/internal/layout/inline`, `pkg/internal/layout/css/block.go`+`inline.go`,
   `pkg/internal/layout/paint`, `OpenHTML`/`OpenHTMLBytes`): the box model — width/`auto`/%, `box-sizing`,
   min/max, margins including vertical collapsing, padding, borders, backgrounds — plus the IFC
-  (shaping and breaking, `text-align`, `line-height`) and the fragment tree.
+  (shaping and breaking, `text-align`, `line-height`) and the fragment tree. **Margin collapsing
+  degrades honestly:** collapsing is pairwise between adjacent siblings and through parent/first-
+  and last-child, but an EMPTY block's own top and bottom margins do not collapse THROUGH it
+  (CSS 2.1 §8.3.1), so an empty `<div style="margin:40px 0">` between two paragraphs opens a gap up
+  to twice a browser's. That now logs once per layout rather than diverging silently.
 - **Replaced content + images** (`pkg/internal/layout/css/image.go`+`replaced.go`): `<img>` decodes through
   the stdlib for PNG/JPEG/GIF, `pkg/heif` for HEIC, and `pkg/internal/webp` for WebP, then goes through CSS
   replaced-sizing and paints via `DrawImage`, honoring `object-fit`/`object-position`.
@@ -129,7 +133,10 @@ bullet's design rationale is in its PR:
   `clear`, and a paint layer of its own.
 - **Positioning** (`pkg/internal/layout/css/positioning.go`): relative, as a paint-time offset;
   absolute/fixed, out-of-flow and resolved in two passes against the containing block; and stacking
-  contexts.
+  contexts. **Degrades honestly:** `position: relative` on a NON-REPLACED INLINE box moves nothing —
+  an inline generates no fragment, so there is nothing to carry the offset — and a non-zero offset
+  now logs once per layout instead of vanishing silently. A zero/absent offset stays quiet, since
+  that is the establish-a-containing-block idiom and it works. Block-level relative is exact.
 - **Overflow clipping** (`pkg/internal/css` `overflow`, `layout.ClipPush/PopKind`): clipping to the padding
   box, BFC establishment, and deferred float interactions. All four clip keywords are honored —
   `hidden`/`scroll`/`auto`/**`clip`**, where `clip` differs only in forbidding programmatic
@@ -161,6 +168,12 @@ bullet's design rationale is in its PR:
 - **Web fonts** (`pkg/internal/css/fontface.go`, `pkg/internal/font/sfnt.go`/`woff1.go`/`woff2*.go`,
   `pkg/internal/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode including the glyf/loca transform,
   `local()` through `DiskFontProvider`, and family-fallback-list resolution.
+  **Degrades honestly:** two `@font-face` descriptors are recognized but not implemented —
+  `unicode-range` (so a family split across subsetted faces uses the WHOLE face for every rune) and
+  `font-display` (no async loading exists in synchronous layout). Both are now reported through
+  `Stylesheet.Unsupported` and logged once by a caller that has a logger; before, they were dropped
+  by the descriptor switch with no record at all. The face itself still loads either way — unlike a
+  dropped SELECTOR, a dropped descriptor does not disable its rule, and the diagnostic says so.
 - **Flexbox** (`pkg/internal/layout/css/flex.go`+`flexfix.go`): axis-abstracted layout, §9.7
   flexible-length resolution, `justify-content`/`align-items`/`align-self`, `inline-flex`, and
   **multi-line wrapping**. Wrapping covers `flex-wrap: wrap`/`wrap-reverse`, §9.3 line collection,

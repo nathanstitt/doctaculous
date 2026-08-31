@@ -56,3 +56,24 @@ This project lives or dies on its test corpus.
 - New feature ⇒ new fixture + test + showcase entry in the same PR. Unsupported features must
   degrade gracefully (skip + debug log / typed error), and that behavior must be covered by a test.
 
+## Two lessons that cost real time
+
+Both come from audit rounds whose full write-ups are in git history (the `GAPS-REMEDIATION*.md`
+files, removed once their findings shipped). They are here because they apply to the NEXT test,
+not to any finished work.
+
+- **Assert on a specific colour, not on "something was painted."** A family of bugs — an
+  unresolvable `font-family` deleting text, `sysfont` substituting the wrong face, emphasis
+  elements rendering unstyled — all shared one failure mode: *the engine treated "cannot resolve"
+  as "draw nothing", and treated a wrong answer as a right one.* Every one of them survived a
+  full test suite, because an assertion that some ink landed passes just as happily on the wrong
+  ink. Sample the expected colour, or count non-greyscale pixels; do not assert on coverage.
+
+- **A sound measurement can carry an unsound inference.** In one nine-finding report, three
+  diagnoses pointed at the wrong mechanism (`line-height` was broken only in its *unitless* form;
+  `margin` was dropped only on *flex children*; the "never shrink-wraps" box was a shrink-to-fit
+  question, not a `width` one) and two did not reproduce at all. The pixel measurements were
+  correct in every case; what failed was the leap from them to a cause. A probe that isolates one
+  variable — a `line-height: 40px` control beside the unitless case, a block-vs-flex margin pair —
+  catches this before it becomes an afternoon of work on the wrong code.
+

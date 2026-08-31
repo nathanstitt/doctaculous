@@ -78,7 +78,12 @@ func TestWebFontCorruptDegrades(t *testing.T) {
 	}
 }
 
-// Deferred descriptors present but ignored: the font still resolves and renders.
+// Deferred descriptors present but ignored: the font still resolves and renders, AND
+// the two the parser recognizes but does not implement are reported.
+//
+// This test used to assert only "no error", which it would have passed whether or not
+// the descriptors were handled at all — it read as coverage while exercising nothing.
+// The log assertions are the part that actually pins behaviour.
 func TestWebFontIgnoredDescriptors(t *testing.T) {
 	t.Parallel()
 	ttf, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fonts", "webfont.ttf"))
@@ -94,8 +99,22 @@ func TestWebFontIgnoredDescriptors(t *testing.T) {
 		p { font-family: "Web Face"; font-size: 30px }
 	</style></head><body><p>AaGg</p></body></html>`)
 	loader := resource.MapLoader{"web.ttf": {Data: ttf}}
-	if _, err := OpenHTMLBytes(html, WithResourceLoader(loader)); err != nil {
+
+	var log strings.Builder
+	logf := func(f string, a ...any) { log.WriteString(fmt.Sprintf(f, a...) + "\n") }
+	if _, err := OpenHTMLBytes(html, WithResourceLoader(loader), WithLogf(logf)); err != nil {
 		t.Fatalf("ignored descriptors caused an error: %v", err)
+	}
+
+	for _, want := range []string{"unicode-range", "font-display"} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("%s was dropped without a diagnostic; log was:\n%s", want, log.String())
+		}
+	}
+	// The face still LOADS — a dropped descriptor is not a dropped rule, and the
+	// message must not claim otherwise.
+	if strings.Contains(log.String(), "rules using it are ignored") {
+		t.Errorf("descriptor diagnostic used the dropped-SELECTOR wording; log was:\n%s", log.String())
 	}
 }
 
