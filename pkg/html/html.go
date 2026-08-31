@@ -8,6 +8,8 @@ package html
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"strings"
 
 	xhtml "golang.org/x/net/html"
@@ -34,11 +36,39 @@ type Document struct {
 	AuthorSheets []css.Stylesheet
 }
 
+// maxNestingDepth bounds how deeply tags may nest before Parse refuses the
+// document.
+//
+// The bound exists because the cost is in the dependency, not here.
+// x/net/html resolves a close tag with indexOfElementInScope, which scans the
+// open-element stack linearly, making deep nesting quadratic in the number of
+// open elements. Measured inside xhtml.Parse: 30,000 nested <div> take 3.7s and
+// 60,000 take 15.1s (4x the time for 2x the depth), against ~10ms for this
+// package's own walk of the resulting tree. At 200,000 it does not finish.
+//
+// That is a denial of service reachable from a ~1 MB file, and it happens before
+// this package gets control, so it cannot be bounded after the fact -- only by
+// declining the input. ErrTooDeeplyNested is returned so a caller can tell this
+// apart from unparseable bytes.
+//
+// 4096 is far past real documents (even machine-generated HTML runs to tens of
+// levels) while keeping the parse in the low milliseconds.
+const maxNestingDepth = 4096
+
+// ErrTooDeeplyNested is returned by Parse when a document's tag nesting exceeds
+// [maxNestingDepth]. It is a distinct sentinel because the document is
+// well-formed -- it is refused for cost, not for being unreadable.
+var ErrTooDeeplyNested = errors.New("html: tag nesting too deep")
+
 // Parse parses HTML bytes into an owned DOM Document. It is total on the kinds of
 // malformed input x/net/html recovers from (unclosed tags, stray text): such
 // input yields a valid-but-quirky tree, never a panic. An error is returned only
-// for input the underlying parser cannot read at all.
+// for input the underlying parser cannot read at all, or whose nesting exceeds
+// [maxNestingDepth] (wrapping [ErrTooDeeplyNested]).
 func Parse(data []byte) (*Document, error) {
+	if depth, ok := nestingWithinLimit(data); !ok {
+		return nil, fmt.Errorf("%w: %d levels exceeds the %d limit", ErrTooDeeplyNested, depth, maxNestingDepth)
+	}
 	root, err := xhtml.Parse(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -52,6 +82,59 @@ func Parse(data []byte) (*Document, error) {
 	}
 	doc.Root = buildElement(htmlNode, nil, doc)
 	return doc, nil
+}
+
+// nestingWithinLimit reports the deepest tag nesting in data and whether it is
+// within maxNestingDepth. It runs the same tokenizer the parser uses, so tag
+// recognition (comments, CDATA, script/style content, malformed markup) matches
+// exactly what xhtml.Parse would see; only the tree building is skipped.
+//
+// The pass is linear and cheap -- ~11ms for 200,000 levels, against a parse that
+// does not finish -- so it is affordable on every document, not just suspicious
+// ones.
+//
+// The count deliberately ignores the parser's implicit-close rules (a <p> closed
+// by a following <p>, say): those can only make the REAL open-element stack
+// shallower than this estimate, never deeper. Over-counting risks refusing a
+// document the parser would have handled cheaply, which is why the limit is set
+// far above real markup rather than tightly.
+func nestingWithinLimit(data []byte) (int, bool) {
+	z := xhtml.NewTokenizer(bytes.NewReader(data))
+	depth, deepest := 0, 0
+	for {
+		switch z.Next() {
+		case xhtml.ErrorToken:
+			// Includes io.EOF and malformed markup: either way there is no more
+			// to count, and a document that fails to tokenize will fail (or
+			// recover) identically in the parse below.
+			return deepest, deepest <= maxNestingDepth
+		case xhtml.StartTagToken:
+			name, _ := z.TagName()
+			if voidElements[string(name)] {
+				continue // never pushed onto the open-element stack
+			}
+			depth++
+			if depth > deepest {
+				deepest = depth
+				if deepest > maxNestingDepth {
+					return deepest, false // no reason to scan the rest
+				}
+			}
+		case xhtml.EndTagToken:
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+}
+
+// voidElements are the HTML elements that never have content and so are never
+// pushed onto the open-element stack (HTML §12.1.2). Counting them as nesting
+// would make a long run of <br> look like deep nesting.
+var voidElements = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true, "embed": true,
+	"hr": true, "img": true, "input": true, "link": true, "meta": true,
+	"param": true, "source": true, "track": true, "wbr": true,
 }
 
 // buildElement converts an x/net/html element node (and its subtree) into an

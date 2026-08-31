@@ -12,6 +12,17 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
 
 - **Parsing**: classic xref tables, xref streams (`/Type /XRef`), and object streams (`/ObjStm`).
   A broken `startxref` falls back to an object-scan rebuild.
+- **Bounded against hostile input** (`FuzzParse` in `pkg/pdf`): object nesting is capped at 256
+  (both `parseArray` and `parseDictOrStream`, which recurse through each other); the page-tree walk
+  marks visited object numbers, so a node whose `Kids` point back at an earlier node cannot fan out
+  — that is exponential *below* the depth cap, and produced 67 million pages from a 1.7 KB file;
+  an object stream's `/N` is checked against what its data can hold before sizing a slice, and a
+  stream whose `/N` refers back into itself is refused rather than recursing through `Document`;
+  a stream `/Length` is bounds-checked without integer overflow; and a decoded stream is capped at
+  `filter.MaxDecodedSize` (512 MB) *during* decompression, so a flate bomb never allocates its
+  output. These matter beyond fidelity: a stack overflow and an OOM are raised through
+  `runtime.throw`, which `recover()` cannot catch, so the per-page recover guarantee depends on
+  them. Every one was found by fuzzing, not by reading the code.
 - **Every raster allocation is bounded** (`maxPixels`, ~134M px): the page canvas and every image
   decoded onto it both take their dimensions from the file, so both are capped. The page path can
   compare in `float64` (which cannot wrap); the image path compares by **division**, because its
@@ -805,6 +816,20 @@ CLI `tomd <pdf>` / `tohtml`):
   `ErrUnsupportedFormat`/`ErrSameFormat`. `DetectFormat` is content-first — magic, then the
   extension hint, then a WHATWG HTML sniff, with no UTF-8⇒text fallback. `Open`/`OpenBytes` sniff
   any supported format and the PDF path stays byte-identical; `OpenAs`/`OpenBytesAs` skip detection.
+- **Branchable errors, not string matching**: `ErrNoStructure` (the document carries no box tree the
+  structure writers can walk — an SVG, whose renderer lays out pages but keeps no tree) and
+  `ErrPageOutOfRange`. Both are wrapped by every site that raises them, across nine writers that
+  previously returned bare `fmt.Errorf` in two different wordings. `omnidoc.ErrSheetNotFound` is now
+  an alias of `xlsx.ErrSheetNotFound` rather than a second value meaning the same thing — they were
+  distinct sentinels whose messages differed by one colon, so `errors.Is` between them was false in
+  both directions and a caller using both packages would write a check that compiled and never
+  matched. Wiring `ErrNoStructure` surfaced a live bug: `svg → md` used to write an empty file and
+  exit 0, because the nil box tree passed a type assertion that only tested the interface.
+- **`WithContext(ctx)`** bounds open-time box generation, resource loading and layout on **every**
+  `Open*` entry point. It replaces a parallel `*Context` naming family that covered HTML and URLs
+  only; the plumbing already existed but was unexported, as `OpenHTMLBytesContext`'s own doc
+  admitted. A caller's own `WithContext` outranks the one those functions prepend, and a nil ctx is
+  ignored.
   Every opener stamps `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write`
   dispatch any valid input→output pair; the legacy `ConvertXToY` wrappers were shims pinned
   byte-identical and have since been removed. Same-format conversion is a deliberate
@@ -1528,6 +1553,21 @@ read+write vocabulary for the tinycld text adoption path):
   chunk's true box needs shaping, which happens a layer away from where paint servers resolve;
   `userSpaceOnUse` is exact. A `<tspan>` nesting cap and a whole-document character budget
   (`maxTextChars`, 200,000) bound text against hostile input, both logged once.
+- **Fuzzed against hostile input** (`FuzzParse` in `pkg/svg`, `pkg/css`, seeded from the resvg
+  corpus): `svg.Parse` survives arbitrary bytes through XML parsing, the cascade, and scene
+  building. Two defects it found and that are now fixed: a `<text>` position list whose recorded
+  character range outlived the characters after a trailing space was stripped (an index panic out of
+  the public `Parse`), and a `closepath` followed by numbers, which the implicit-repetition rule
+  repeated forever without consuming input (a hang). `pkg/css` fuzzes `Parse` + cascade,
+  `ParseDeclarations`, and `ParseColorValue`, and came back clean.
+- **Bounded HTML nesting** (`pkg/html`, `maxNestingDepth` 4096): `golang.org/x/net/html` resolves
+  close tags with a linear scan of the open-element stack, so deep nesting is quadratic — 60,000
+  nested `<div>` take 15s inside the dependency and 200,000 do not finish. Since the cost lands
+  before this package gets control, `Parse` counts nesting with a linear tokenizer pre-pass (11 ms
+  at 200,000 levels, early-exit) and returns `ErrTooDeeplyNested` rather than handing the document
+  over. Box generation applies its own `maxBoxTreeDepth` (1024) for the same reason: `generate`
+  recurses per element carrying a 2,144-byte `ComputedStyle` by value, so ~80,000 levels exhausted
+  the goroutine stack — a `fatal error` no `recover` can catch.
 - **`letter-spacing` and `word-spacing` on SVG text** — applied as a post-shaping advance adjustment
   on the flat glyph slice, resolved per SOURCE CHARACTER, so a `<tspan letter-spacing="10">` inside a
   `<text letter-spacing="3">` widens only its own gaps. Values may be a bare number, any absolute

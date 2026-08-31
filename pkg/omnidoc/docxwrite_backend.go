@@ -36,9 +36,9 @@ func (o DOCXOptions) toWriterOptions() docxwrite.Options {
 // writes structure (headings, paragraphs, emphasis, links, lists, quotes, code
 // blocks), not layout geometry.
 func (d *Document) WriteDOCX(ctx context.Context, out io.Writer, opts DOCXOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteDOCX: document has no convertible structure")
+	root, err := structureRoot(d, "WriteDOCX")
+	if err != nil {
+		return err
 	}
 	wopts := opts.toWriterOptions()
 	// Embed images through the source's own resource loader when the backend
@@ -47,7 +47,7 @@ func (d *Document) WriteDOCX(ctx context.Context, out io.Writer, opts DOCXOption
 	if rr, ok := d.r.(reflowResources); ok {
 		wopts.Loader = rr.resourceLoader()
 	}
-	if err := docxwrite.Write(ctx, rt.cssboxRoot(), out, wopts); err != nil {
+	if err := docxwrite.Write(ctx, root, out, wopts); err != nil {
 		return fmt.Errorf("omnidoc: write docx: %w", err)
 	}
 	return nil

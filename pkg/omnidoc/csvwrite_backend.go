@@ -32,11 +32,11 @@ func (d *Document) WriteTSV(ctx context.Context, out io.Writer, opts CSVOptions)
 }
 
 func (d *Document) writeSeparated(_ context.Context, out io.Writer, comma rune, opts CSVOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteCSV: document has no convertible structure")
+	root, err := structureRoot(d, "WriteCSV")
+	if err != nil {
+		return err
 	}
-	if err := csvwrite.Write(rt.cssboxRoot(), out, csvwrite.Options{Comma: comma, Logf: opts.Logf}); err != nil {
+	if err := csvwrite.Write(root, out, csvwrite.Options{Comma: comma, Logf: opts.Logf}); err != nil {
 		return fmt.Errorf("omnidoc: write csv: %w", err)
 	}
 	return nil

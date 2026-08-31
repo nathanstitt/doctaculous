@@ -36,9 +36,9 @@ func (o RTFOptions) toWriterOptions() rtfwrite.Options {
 // it writes structure (headings, paragraphs, emphasis, links, lists, quotes,
 // code blocks, tables, pictures), not layout geometry.
 func (d *Document) WriteRTF(ctx context.Context, out io.Writer, opts RTFOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteRTF: document has no convertible structure")
+	root, err := structureRoot(d, "WriteRTF")
+	if err != nil {
+		return err
 	}
 	wopts := opts.toWriterOptions()
 	// Embed images through the source's own resource loader when the backend
@@ -47,7 +47,7 @@ func (d *Document) WriteRTF(ctx context.Context, out io.Writer, opts RTFOptions)
 	if rr, ok := d.r.(reflowResources); ok {
 		wopts.Loader = rr.resourceLoader()
 	}
-	if err := rtfwrite.Write(ctx, rt.cssboxRoot(), out, wopts); err != nil {
+	if err := rtfwrite.Write(ctx, root, out, wopts); err != nil {
 		return fmt.Errorf("omnidoc: write rtf: %w", err)
 	}
 	return nil

@@ -31,9 +31,9 @@ func (o PPTXOptions) toWriterOptions() pptxwrite.Options {
 // starts a new slide with that heading as the title, and the blocks that
 // follow become the slide's body (text, lists, native tables, pictures).
 func (d *Document) WritePPTX(ctx context.Context, out io.Writer, opts PPTXOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WritePPTX: document has no convertible structure")
+	root, err := structureRoot(d, "WritePPTX")
+	if err != nil {
+		return err
 	}
 	wopts := opts.toWriterOptions()
 	// Embed images through the source's own resource loader when the backend
@@ -42,7 +42,7 @@ func (d *Document) WritePPTX(ctx context.Context, out io.Writer, opts PPTXOption
 	if rr, ok := d.r.(reflowResources); ok {
 		wopts.Loader = rr.resourceLoader()
 	}
-	if err := pptxwrite.Write(ctx, rt.cssboxRoot(), out, wopts); err != nil {
+	if err := pptxwrite.Write(ctx, root, out, wopts); err != nil {
 		return fmt.Errorf("omnidoc: write pptx: %w", err)
 	}
 	return nil
