@@ -6,8 +6,8 @@ import (
 
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/inline"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // placedGlyph is one shaped glyph with its final pen position and per-

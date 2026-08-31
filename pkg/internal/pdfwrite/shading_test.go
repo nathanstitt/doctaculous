@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // opaqueStops is a 2-stop opaque red->blue ramp, the simplest describable,

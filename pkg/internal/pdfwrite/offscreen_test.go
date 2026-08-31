@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // TestRenderOffscreenDeclinesAndDoesNotPaint pins this writer's documented

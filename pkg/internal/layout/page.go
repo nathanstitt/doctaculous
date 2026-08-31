@@ -7,7 +7,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/filtereffects"
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // Pages is the engine's output: a document laid out into discrete pages of

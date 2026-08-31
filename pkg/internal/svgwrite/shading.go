@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // FillShading fills the active clip by evaluating shader.

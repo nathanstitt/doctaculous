@@ -4,7 +4,7 @@ import (
 	"math"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // maxBackgroundTiles caps the number of tiles a single background image may paint, a

@@ -12,7 +12,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/filtereffects"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/paint"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // filteredRectPage is a layout page holding one filled rectangle wrapped in a CSS

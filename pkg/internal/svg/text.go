@@ -3,7 +3,7 @@ package svg
 import (
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // maxTspanDepth bounds <tspan> nesting inside one <text>. SVG text nests a

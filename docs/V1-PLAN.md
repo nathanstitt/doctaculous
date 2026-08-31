@@ -14,7 +14,9 @@ toolkit's whole job is eating files it did not author.
 
 **The API surface is accidental.** Tagging would freeze 50 packages when about six
 are public API, including a `render.Device` whose own doc comment records a prior
-breaking signature change.
+breaking signature change. — **Resolved:** the surface is now **seven packages**
+(`omnidoc`, `docx`, `xlsx`, `pdf`, `crop`, `heif`, `resource`); everything else,
+`render` included, is under `pkg/internal/`. See items 1 and 2.
 
 Neither is a rendering bug. Both are worse than one, because a rendering bug can be
 fixed in 1.0.1 without breaking anyone.
@@ -523,7 +525,7 @@ These four are the ones we would regret.
 ### 1. Move the engine packages under `internal/` — **DONE**
 
 **50 packages were exported. Eight are public API.** There were only two
-`internal/` directories, both deep (`pkg/xlsx/internal`, `pkg/render/internal`);
+`internal/` directories, both deep (`pkg/xlsx/internal`, `pkg/internal/render/internal`);
 everything else would have frozen on the tag.
 
 `pkg/css` alone would have frozen **371 exported symbols** — the plan estimated
@@ -581,9 +583,9 @@ Verified from outside the module: a separate module can import all eight public
 packages, and importing `pkg/internal/css` fails with *"use of internal package …
 not allowed"*.
 
-### 2. Decide `render.Device`'s fate
+### 2. Decide `render.Device`'s fate — **DONE: the whole package is internal**
 
-A 15-method interface with no embedding escape hatch. The README calls it "the
+A 15-method interface with no embedding escape hatch. The README called it "the
 seam… new backends bolt on without touching them", which invites external
 implementations — and adding a 16th method after v1 breaks every one of them.
 
@@ -592,18 +594,32 @@ This interface has demonstrably grown: `BuildClipMask`, `BuildLuminanceMask`, an
 signature change in so many words — "Pre-combining them into a single opaque
 GroupMask value, *as an earlier revision of this interface did*, silently breaks any
 backend…". An interface that already changed shape twice is the worst possible
-freeze candidate.
+freeze candidate. Confirmed against `git log -S`: both additions and the `EndGroup`
+break are real commits.
 
-All four implementers are in-repo (`render/raster`, `render/pdfwrite`,
-`pdf/extract.nullDevice`, `svg/draw.transformDevice`).
+The plan counted four in-repo implementers; there are **five** — `svgwrite` was
+added by the SVG output work while this plan was being executed. An interface
+still gaining implementers is not one to freeze.
 
-Two viable options, pick one:
+**Item 1 changed the decision.** Once the engine packages moved, a fact emerged
+that neither of the plan's two options anticipated: **no public package exposes
+`render` in any exported signature.** `pkg/omnidoc`'s uses are all on unexported
+functions and an unexported interface (`vectorPages`), and all five implementers
+are internal. `pkg/render` was public only because it had not been moved.
 
-- **Internal.** Move the interface behind `internal/` and export only a registration
-  function. Cheapest, and reversible later in the additive direction.
-- **Core + capabilities.** A small required interface plus optional capability
-  interfaces discovered by type assertion (`interface{ RenderOffscreen(...) }`).
-  More work now; grows forever without breaking.
+So the choice was not "how do we shape a public `Device`" but "is `render` public
+at all", and the answer is no. The whole package moved to `pkg/internal/render` —
+**69 exported symbols across 25 types** (`Device`, `Shader`, `Path`, `Matrix`,
+`FillPaint`, …), none of them frozen now.
+
+121 files needed the import rewrite; it built first try, which is itself the
+evidence that nothing public depended on it. Public API is now **seven packages**.
+
+The "core + capabilities" option was rejected as speculative: it is real design
+work plus a type-assertion fallback at every call site, to build an extension
+point no caller has asked for. Opening the interface later is additive and always
+possible; withdrawing it after a tag is not. The README now says so plainly
+rather than describing a seam that reads as an invitation.
 
 ### 3. Export `WithContext(ctx)` as an `OpenOption` — **DONE**
 

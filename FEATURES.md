@@ -1421,7 +1421,7 @@ read+write vocabulary for the tinycld text adoption path):
 - **`feBlend`** — `normal` plus the fifteen CSS/PDF blend modes: `multiply`, `screen`, `overlay`,
   `darken`, `lighten`, `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`,
   `exclusion`, and the four non-separable `hue`/`saturation`/`color`/`luminosity`. The blend
-  FUNCTIONS moved to `pkg/render/blend.go` and are now **shared with the raster backend's PDF `/BM`
+  FUNCTIONS moved to `pkg/internal/render/blend.go` and are now **shared with the raster backend's PDF `/BM`
   compositing** rather than reimplemented — one `colorBurn`, two consumers. Compositing follows the
   full CSS formula, so a source over a TRANSPARENT backdrop comes through unblended instead of
   multiplied against the backdrop's meaningless colour.
@@ -1974,7 +1974,7 @@ own entry further down:
 - Filters nested more than 4 deep degrade to unfiltered, **logged once per page**, matching the SVG
   side's nesting bound. Each live level holds its own offscreen surface, so depth bounds concurrent
   memory rather than just CPU.
-- **Still silent, deliberately:** the two caps above do NOT log on the **PDF** path. `pkg/render/
+- **Still silent, deliberately:** the two caps above do NOT log on the **PDF** path. `pkg/internal/render/
   pdfwrite` calls plain `PaintPage`, because its `RenderOffscreen` always declines and it already
   reports once per document that every filter in the file paints unfiltered. A second, narrower
   reason for a subset of brackets would annotate an outcome already stated for all of them, and it

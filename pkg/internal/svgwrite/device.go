@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // Device implements render.Device by appending SVG markup for a single page.

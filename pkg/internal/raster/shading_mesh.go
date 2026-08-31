@@ -6,8 +6,8 @@ import (
 	"math"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/function"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Mesh shadings (ISO 32000-1 §8.7.4.5.5–.8, ShadingType 4–7) describe a surface

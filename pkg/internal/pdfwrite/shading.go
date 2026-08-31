@@ -3,7 +3,7 @@ package pdfwrite
 import (
 	"image/color"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // pendingShading is a native /Shading dictionary referenced by a page's content

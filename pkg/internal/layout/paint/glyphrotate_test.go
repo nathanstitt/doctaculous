@@ -6,7 +6,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // matCaptureDev records the transform each glyph is drawn with, so a test can assert on

@@ -5,8 +5,8 @@ import (
 	"math"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	svgfilter "github.com/nathanstitt/omnidoc/pkg/internal/svg/filter"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // maxShadowPixels bounds how many pixels one BLURRED box-shadow may allocate

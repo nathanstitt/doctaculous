@@ -14,8 +14,8 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/function"
 	"github.com/nathanstitt/omnidoc/pkg/internal/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Options configures page rendering.

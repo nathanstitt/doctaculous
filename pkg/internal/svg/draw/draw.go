@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // Renderer draws one svg.Document. It is stateless and safe for concurrent

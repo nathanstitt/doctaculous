@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // tinyOutline returns a minimal non-nil path so a glyph is treated as drawable. The

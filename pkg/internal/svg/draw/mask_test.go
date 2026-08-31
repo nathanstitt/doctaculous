@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 const maskSVGHdr = `xmlns="http://www.w3.org/2000/svg"`

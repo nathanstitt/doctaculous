@@ -7,8 +7,8 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/function"
 	"github.com/nathanstitt/omnidoc/pkg/internal/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // FillShading paints the active clip region (or the whole image if unclipped) by

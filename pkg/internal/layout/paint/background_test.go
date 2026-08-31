@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // bgItem builds a BackgroundImageItem with a 10×10 intrinsic image and the origin and

@@ -3,7 +3,7 @@ package filter
 import (
 	"image"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // blendModePDFName maps an SVG feBlend `mode` value onto the PDF /BM name

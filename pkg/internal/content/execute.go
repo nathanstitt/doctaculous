@@ -1,8 +1,8 @@
 package content
 
 import (
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // execute dispatches a single operator with its operands.

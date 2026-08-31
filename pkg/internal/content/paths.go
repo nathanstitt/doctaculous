@@ -1,8 +1,8 @@
 package content
 
 import (
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // The path operators build it.path in device space by transforming each user-

@@ -8,8 +8,8 @@ import (
 
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/inline"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // parseSVG parses src, failing the test on error, and returns the document

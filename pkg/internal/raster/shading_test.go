@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // constShaderRGBA paints one solid color everywhere, for FillShading tests.

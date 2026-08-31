@@ -8,8 +8,8 @@ import (
 	"github.com/benoitkugler/textlayout/fonts"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/content"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 

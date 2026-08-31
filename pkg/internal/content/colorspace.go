@@ -3,7 +3,7 @@ package content
 import (
 	"image/color"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // colorSpace is a simplified color-space model sufficient for v1: the device

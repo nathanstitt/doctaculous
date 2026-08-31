@@ -1,6 +1,6 @@
 package svg
 
-import "github.com/nathanstitt/omnidoc/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/internal/render"
 
 // pathScanner reads numbers and flags from SVG path data, where separators are
 // optional wherever the grammar is unambiguous ("M.5.5", "1-2", "01" after a

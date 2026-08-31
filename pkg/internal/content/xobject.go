@@ -3,8 +3,8 @@ package content
 import (
 	"image/color"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // colorSpaceByName resolves a "cs"/"CS" operand to a simplified colorSpace. It

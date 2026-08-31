@@ -8,7 +8,7 @@ import (
 	gcss "github.com/nathanstitt/omnidoc/pkg/internal/css"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // solidGlyph returns a fragment line with one fillable glyph (so the inline phase

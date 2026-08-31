@@ -11,7 +11,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/filtereffects"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // captureLogf returns a Logf that appends each formatted line to lines, so a

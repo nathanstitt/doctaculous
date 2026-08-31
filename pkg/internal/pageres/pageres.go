@@ -9,8 +9,8 @@ package pageres
 import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/content"
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // ResolveFont resolves res["Font"][name] to a GlyphSource via font.New.

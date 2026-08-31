@@ -1,6 +1,6 @@
 package font
 
-import "github.com/nathanstitt/omnidoc/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/internal/render"
 
 // Marker bullet geometry, in em units (Y up, baseline at 0) — chosen to sit like a
 // browser's list bullet: a small mark vertically centered a little above the

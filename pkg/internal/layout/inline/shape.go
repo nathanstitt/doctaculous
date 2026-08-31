@@ -19,7 +19,7 @@ import (
 
 	pkgfont "github.com/nathanstitt/omnidoc/pkg/internal/font"
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // Run is the neutral styled run: the shaper's single input, which both the flat

@@ -7,7 +7,7 @@ import (
 
 	pkgfont "github.com/nathanstitt/omnidoc/pkg/internal/font"
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // missingRune is a code point no bundled face maps and no script fallback covers:

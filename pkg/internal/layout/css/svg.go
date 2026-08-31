@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
 	svgdraw "github.com/nathanstitt/omnidoc/pkg/internal/svg/draw"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

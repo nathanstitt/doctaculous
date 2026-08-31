@@ -30,8 +30,8 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/content"
 	"github.com/nathanstitt/omnidoc/pkg/internal/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // errNilDocument is returned by Collect/Lower for a nil *pdf.Document.
