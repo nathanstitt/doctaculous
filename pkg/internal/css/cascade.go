@@ -465,6 +465,16 @@ func reportUnsupportedSelectors(sheets []OriginSheet, logf func(string, ...any))
 				continue
 			}
 			seen[u.Construct] = true
+			// A dropped SELECTOR takes its whole rule with it; a dropped
+			// DESCRIPTOR does not — the @font-face still loads, just without
+			// that descriptor's effect. Saying "rules using it are ignored"
+			// for the latter would overstate the damage and send an author
+			// hunting for a rule that is in fact applying.
+			if u.Descriptor {
+				logf("css: %s is not supported; the face still loads, but the descriptor has no effect (first: %q)",
+					u.Construct, u.Selector)
+				continue
+			}
 			logf("css: %s is not supported; rules using it are ignored (first: %q)", u.Construct, u.Selector)
 		}
 	}

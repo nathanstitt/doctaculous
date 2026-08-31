@@ -12,7 +12,7 @@ removed, so the detailed rationale for each is in the commit and PR history.
 
 Status legend: ☐ open · ◐ in progress · ☑ done (move the prose to CLAUDE.md "Done" when ☑).
 
-## Where it stands (2026-07-29)
+## Where it stands (counts verified 2026-08-30)
 
 **48 done · 2 in progress · 30 open.** The engine is feature-complete across its stated scope; what
 remains is a long tail of approximations, each degrading gracefully.
@@ -146,6 +146,9 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
   (`BoxInline`) elements generate no fragment (their glyphs flatten into the parent's lines), so there is
   nothing to carry a `RelOffset`. Needs inline-box fragments or a per-run offset on `LineFragment`. A no-op
   today (block-level relative is exact; atomic inline-block/replaced relative is a separate known no-op).
+  It is no longer a SILENT no-op: a non-zero offset warns once per layout
+  (`warnRelativeInline`, `positioning.go`). A zero/absent offset stays quiet — that is the
+  establish-a-containing-block idiom, which works.
 
 ## D. HTML/CSS — replaced content
 
@@ -173,6 +176,11 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
   `middle`/`bottom`/`text-top`/`text-bottom`/`%`/length). *Medium–large.* (Overlaps B2.)
 - ☐ **E2. `margin:auto` horizontal centering** (block-level). *Small–medium.*
 - ☐ **E3. Margin-collapse edge cases** — empty-block collapse-through, clearance, `min-height` interaction. *Medium.*
+  Empty-block collapse-through now WARNS instead of diverging silently (`warnCollapseThrough`,
+  `positioning.go`; sibling collapse is pairwise, so an empty `<div style="margin:40px 0">` between two
+  paragraphs yields an 80pt gap where a browser gives 40pt — measured, and pinned by a test that fails if
+  the gap is ever fixed). Clearance and the `min-height` interaction are still silent; both need
+  collapse state carried across the split point, which is the same plumbing this entry is about.
 - ☑ **E4. inline-block (auto width) shrink-to-fit** — *DONE.* `inlineBlockCBWidth` computes the CSS 10.3.9
   shrink-to-fit width (`min(max(min-content, available), max-content)`, via the memoized measure helpers) and
   the inline-block atom is laid out against it, so an `width:auto` inline-block wraps its content instead of
@@ -235,8 +243,14 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
 
 - ☐ **G1. synthetic bold/oblique** for a `@font-face` family supplying one variant (note: bundled substitutes
   ship regular-only — see PDF item J4). *Medium.*
-- ☐ **G2. `unicode-range` subsetting** (captured-but-ignored; whole face used for every rune). *Medium.*
-- ☐ **G3. `font-display`** (ignored). *Small* (no async in synchronous layout; likely a documented no-op kept).
+- ☐ **G2. `unicode-range` subsetting** (whole face used for every rune). *Medium.* NOT captured — an
+  earlier revision of this entry said "captured-but-ignored", which overstated it: `parseFontFace`
+  handled four descriptors and dropped this one on the floor. It is now REPORTED (a
+  `Stylesheet.Unsupported` record, logged once by a caller with a logger) so the silent wrong-face
+  case is at least explicable; honouring it is still open.
+- ☐ **G3. `font-display`** (ignored). *Small* (no async in synchronous layout; likely a documented no-op
+  kept). Reported alongside G2, so an author can tell which of the two descriptors was honoured —
+  neither is, and now it says so.
 - ☐ **G4. variable-font axes** (`font-variation-settings` → default instance). *Large.*
 - ☐ **G5. `local()` beyond `DiskFontProvider`** (no OS font-store enumeration). *Medium* (platform-specific).
 - ☐ **G6. content-addressed fetch cache** (FaceCache keyed `(family,style)`; one file fetched per style). *Small (perf).*
@@ -289,6 +303,12 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
 - ☐ **I2. flow-axis-locked auto-placement** (definite flow-axis line + auto cross axis honors span, ignores
   start line). *Deferred (Small)* — a documented, non-overlapping simplification (`grid_place.go` scans the
   locked line from 0 rather than continuing the sparse cursor); niche, intentional.
+  **Deliberately NOT logged.** Unlike the other degradations here, this one always produces a
+  valid, non-overlapping placement — it differs from a browser only in WHICH free slot a sparse
+  locked item lands in. There is no runtime test for "this diverged" short of also running the
+  browser algorithm, which is the fix; a log would fire on every sparse locked item and tell the
+  author nothing they could act on. The `dense` case resets to the origin anyway, which is
+  spec-correct, so only sparse diverges at all.
 - ☑ **I3. RTL/`direction`** — *DONE via A1.2* (track mirroring + logical `justify-items`/`justify-self`).
 - ☑ **I4. row-track content-height width-proxy** — *ALREADY CORRECT (entry was stale).* Verified while fixing
   H4: `contributions` (`grid.go`) is COLUMN-only and correctly uses min/max-content WIDTHS; row tracks size
@@ -332,7 +352,10 @@ entry, so nobody revisits the original. Grep the code for the claimed symptom fi
 - ◐ **K1. Scan filters** — JBIG2 **DONE** (vendored pure-Go Apache-2.0 decoder in
   `pkg/internal/filter/jbig2/`, wired at `decodeImageXObject`). **JPX/JPEG2000 remains** and is likely
   permanent: no viable pure-Go decoder exists, and writing one is its own project. Today `ErrUnsupported`.
-- ☐ **K2. Tiling patterns (PatternType 1)** (today skipped+logged). *Medium.*
+- ☐ **K2. Tiling patterns (PatternType 1)** (today skipped+logged). *Medium.* The log is real and was
+  re-verified: `pkg/internal/raster/page.go` ("unsupported /PatternType %d (only shading patterns)") plus
+  `pkg/internal/content/shading.go`. Cited because an audit once doubted this entry after looking at the
+  interface doc comment in `interp.go`, which is not the implementation.
 - ☐ **K3. Higher-fidelity Coons/tensor patches (Types 6/7)** — bicubic boundary vs the current bilinear-corner
   approximation. *Medium.*
 - ☐ **K4. Luminosity soft masks (`/SMask` in ExtGState) + transparency groups.** *Large.*
@@ -432,7 +455,8 @@ committed render goldens (`docx-list`, `docx-table`, `docx-table-spans`, `docx-i
   path, where pages can differ in height, is handled too.
 - ☑ **N6. CSS paged media** — *ALREADY SHIPPED (entry was stale).* `@page` size/margins/named/pseudo, the 16
   margin boxes, running headers/footers with page counters, `marks`/`bleed`, and `string-set`/`string()` are
-  all in (`pkg/internal/css/page.go`+`pagesize.go`, `pkg/internal/layout/css/pagemodel.go`+`marginbox.go`); see FEATURES.md and. No code change.
+  all in (`pkg/internal/css/page.go`+`pagesize.go`, `pkg/internal/layout/css/pagemodel.go`+`marginbox.go`);
+  see the "CSS Paged Media" entry in FEATURES.md for the full list and its stated limits. No code change.
 
 ---
 
@@ -450,7 +474,12 @@ committed render goldens (`docx-list`, `docx-table`, `docx-table-spans`, `docx-i
 9. **Perf:** F7 (done in step 3), G6, L1, L2.
 10. **DOCX features (if in scope):** M1–M5.
 
-Open scope questions for the user:
-- **DOCX feature-completeness (M1–M5):** part of "ALL fidelity," or a separate track?
-- **RTL/bidi (A1) timing:** before the per-mode RTL items (makes them free) or after the cheap fixes?
-- **Batch size / PR cadence:** one big branch with many commits, or a stream of small stacked PRs?
+Scope questions that were open when this was written — all three are now settled by what
+happened, and are recorded here so the answers are not re-litigated:
+
+- **DOCX feature-completeness (M1–M5):** part of "ALL fidelity." M1–M4 landed with goldens;
+  only M5 (embedded font de-obfuscation) is still open.
+- **RTL/bidi (A1) timing:** done FIRST, which is what made the per-mode RTL items free. See
+  the A1 entry — all five slices are ☑.
+- **Batch size / PR cadence:** a stream of small stacked PRs, one sub-project per branch.
+  That is now the standing rule in CLAUDE.md.

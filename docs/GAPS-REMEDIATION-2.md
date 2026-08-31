@@ -161,7 +161,8 @@ control proving collapsing behaviour is unchanged.
 
 **STATUS: DONE.** Showcase §38. `margin: auto` landed in the same pass rather than as a
 follow-up — the plumbing was the same once margins reached free-space distribution.
-`transform` remains split out and unimplemented.
+`transform` was split out into its own item (6 in the table below) and has since landed —
+see FEATURES.md and showcase §42.
 
 ---
 
@@ -366,7 +367,7 @@ those fixtures exercise inheritance directly.
 
 ---
 
-## 14. `writing-mode` is ignored
+## 14. `writing-mode` is ignored (as of this audit — it has since shipped; see the status below)
 
 ### Measured
 
@@ -385,13 +386,17 @@ touch the whole inline layer: the block/inline axes swap, so line breaking, alig
 "inline is horizontal" are involved. It is a sub-project comparable to the RTL work
 already in the tree, not a fix.
 
-**DECIDED: deferred, and recorded rather than silently absent.** It goes in
-`docs/SCOPE.md` as a known gap with its cost stated, so the next reader finds an answer
-instead of silence. Nothing about the current behaviour changes except that it becomes
-documented — the property is unimplemented and the docs will say so.
+**DECIDED at the time: deferred, and recorded in `docs/SCOPE.md` rather than silently
+absent.** The reporter's workaround — one `<span>` per letter, each a fixed-height block —
+was noted beside the gap as a stopgap.
 
-The reporter's workaround — one `<span>` per letter, each a fixed-height block — is a
-reasonable stopgap and is noted beside the gap.
+**SUPERSEDED — it was built instead.** Vertical text ships: `writing-mode` and
+`text-orientation` on the HTML path, and on the SVG path for `<text>` (FEATURES.md).
+The measurement above records the behaviour BEFORE that work and no longer holds. What
+remains is ordinary outstanding work — chiefly the UAX #50 `Vertical_Orientation` table
+for `text-orientation: mixed` — tracked in `docs/CSS-LAYOUT.md`, not a scope exclusion.
+`docs/SCOPE.md` now says exactly this; the only genuinely excluded piece is
+vertical GLYPH FORMS, which needs GSUB feature application this engine does not do.
 
 ---
 
@@ -422,8 +427,8 @@ Ordered by (silent × common) first, since a silent failure costs the most.
 | 3 | `feat/background-layer-list` | 13 | **DONE** — maximal (all layers painted). Showcase §39. |
 | 4 | `fix/svg-presentation-inheritance` | 2b | **DONE** — showcase §40, zero golden movement. |
 | 5 | `fix/abs-position-in-flex` | 10, 10b, 11 | **DONE** — showcase §41. 12 needed no work. |
-| 6 | `feat/css-transform` | (from 8) | Its own property; currently silent. |
-| — | (docs only) | 14 | **Deferred by decision.** Recorded in SCOPE.md; no implementation planned. |
+| 6 | `feat/css-transform` | (from 8) | **DONE** — showcase §42. 2D functions only; no 3D, no `transform-origin`. |
+| — | (docs only) | 14 | **Superseded** — deferred here, then built. Vertical text ships; the rest is in CSS-LAYOUT.md. |
 
 Docs alongside: FEATURES.md gets an entry per landed item, including the honest limits
 (one gradient layer vs many; `transform` absent; `writing-mode` absent). Each branch

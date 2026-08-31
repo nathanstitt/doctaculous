@@ -54,6 +54,12 @@ type Stylesheet struct {
 type UnsupportedSelector struct {
 	Construct string
 	Selector  string
+	// Descriptor marks a record that describes a dropped DESCRIPTOR rather than
+	// a dropped selector — an @font-face descriptor this parser does not
+	// implement. The distinction matters to the diagnostic: a dropped selector
+	// silently disables its whole rule, while a dropped descriptor leaves the
+	// rule working and only removes that descriptor's effect.
+	Descriptor bool
 }
 
 // Parse parses a CSS stylesheet. It is total: malformed rules and unsupported
@@ -74,8 +80,9 @@ func Parse(src string) Stylesheet {
 		}
 		if strings.HasPrefix(prelude, "@") {
 			if strings.EqualFold(strings.TrimSpace(prelude), "@font-face") {
-				if ff, ok := parseFontFace(ParseDeclarations(body)); ok {
+				if ff, diag, ok := parseFontFace(ParseDeclarations(body)); ok {
 					sheet.FontFaces = append(sheet.FontFaces, ff)
+					sheet.addUnsupported(diag)
 				}
 			} else if rest, ok := atKeyword(prelude, "@page"); ok {
 				if pr, ok := parsePageRule(rest, body, len(sheet.Pages)); ok {

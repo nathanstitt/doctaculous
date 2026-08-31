@@ -569,6 +569,7 @@ func (e *Engine) gatherInlineRunsIn(ctx context.Context, b *cssbox.Box, contentW
 			if d := inlineBoxStyleFor(child); d != nil {
 				inner = d
 			}
+			e.warnRelativeInline(child, contentW)
 			// A box with its own decoration brackets its content with edge runs, which
 			// is what reserves its horizontal padding+border in the line. A box that
 			// merely inherits the ancestor's identity (an undecorated <em> inside a

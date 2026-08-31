@@ -691,23 +691,32 @@ unmatchable forever, so callers written against v1.0 keep string-matching.
 
 All cheap. All currently wrong.
 
-### 5. The backlog says shipped features are missing
+### 5. The backlog says shipped features are missing — **DONE**
 
 - **`transform` shipped** (PR #140, `FEATURES.md:336`) but `docs/GAPS-REMEDIATION-2.md`
   still says it "remains split out and unimplemented" at `:148`, `:164`, and calls it
-  "currently silent" at `:421`/`:426`.
-- **`writing-mode` never reached `SCOPE.md`.** The decision record says it "goes in
-  `docs/SCOPE.md` as a known gap with its cost stated"; grepping `SCOPE.md` for it
-  returns zero hits. The SVG path logs honestly; the HTML/CSS path has no
-  `WritingMode` handling anywhere, so for HTML it is silent *and* undocumented —
-  precisely the state the decision was meant to avoid.
+  "currently silent" at `:421`/`:426`. **Fixed** — both sites now point at FEATURES.md
+  and showcase §42.
+- **`writing-mode` never reached `SCOPE.md`.** ~~grepping `SCOPE.md` returns zero hits~~
+  — **this claim was stale when written.** `SCOPE.md` DOES carry the entry, and it says
+  the gap is moot because vertical text shipped. Verified in code: `WritingMode` is a
+  real `ComputedStyle` field, inherited per CSS Writing Modes 4, with a `cascade.go`
+  case; `text-orientation` ships too, on both the HTML and SVG paths. What remains is
+  ordinary outstanding work (chiefly the UAX #50 table) in `docs/CSS-LAYOUT.md`. The
+  stale record was in GAPS-REMEDIATION-2's item 14, which still described the property
+  as deferred-and-unimplemented; **that** is what was corrected.
 - **The status header is stale.** `FIDELITY-BACKLOG.md:15` claims "48 done · 2 in
-  progress · 30 open" as of 2026-07-29, predating PRs #127–#140.
-- **A dangling sentence** at `FIDELITY-BACKLOG.md:435`: "see FEATURES.md and."
+  progress · 30 open" as of 2026-07-29. **The COUNTS are correct** — recounted against
+  the actual ☑/◐/☐ markers (the naive grep over-counts by two: the legend line and one
+  prose mention). Only the date was stale, and it now reads "counts verified".
+- **A dangling sentence** at `FIDELITY-BACKLOG.md:435`: "see FEATURES.md and." **Fixed** —
+  it now names the "CSS Paged Media" entry it was reaching for.
 - **Three questions addressed to the maintainer** sitting in a shipped doc at
-  `FIDELITY-BACKLOG.md:453-456`. Two are already answered by history.
+  `FIDELITY-BACKLOG.md:453-456`. **Fixed** — all three are answered by history
+  (DOCX in scope, M1–M4 landed and M5 open; A1 sequenced first; small stacked PRs), and
+  the answers are recorded in place so they are not re-litigated.
 
-### 6. Two silent degradations, and a backlog entry that understates them
+### 6. Two silent degradations, and a backlog entry that understates them — **DONE**
 
 `unicode-range` and `font-display` are **not parsed at all**. `parseFontFace`
 (`pkg/internal/css/fontface.go:26-36`) switches on `font-family`, `src`, `font-weight`, and
@@ -719,20 +728,45 @@ face used for every rune". That is wrong — it is not captured. Note
 `pkg/omnidoc/html_webfont_test.go:91` feeds both descriptors into a test, which reads
 as coverage but exercises neither.
 
-Fix: add the warn-once log, correct both entries. Actually implementing
-`unicode-range` subsetting is a 1.1 item.
+Fix: add the warn-once log, correct both entries. **Done** — G2/G3 in
+`FIDELITY-BACKLOG.md` now state that the descriptors were not captured at all and are
+reported rather than dropped. Actually implementing `unicode-range` subsetting stays a
+1.1 item.
 
-Three more silent paths worth a log while in here:
+Both descriptors now report through `Stylesheet.Unsupported` — the same carried-as-data
+channel the dropped-selector diagnostics use, because `Parse` has no logger and cannot
+gain one (`html.UAStylesheet` is a package-level var it initializes, so there is no
+caller to hold one). `UnsupportedSelector` gained a `Descriptor` flag: the inherited
+message "rules using it are ignored" is WRONG for a descriptor, since the face still
+loads and only that descriptor is dropped.
 
-- `position: relative` on a text-only inline box — a no-op with no log
-  (`FIDELITY-BACKLOG.md:145`).
-- Grid flow-axis-locked placement — documented in a code comment at
-  `pkg/internal/layout/css/grid_place.go:335`, not at runtime.
-- Margin-collapse edge cases — same, `pkg/internal/layout/css/block.go:345`.
+`pkg/omnidoc/html_webfont_test.go` asserted only "no error" and would have passed
+whether or not the descriptors were handled. It now asserts the diagnostics.
 
-And verify one claim before repeating it: `FIDELITY-BACKLOG.md:335` says PDF tiling
-patterns are "skipped + logged"; the log was not found at
-`pkg/internal/content/interp.go:47`.
+Three more silent paths worth a log while in here — **two logged, one deliberately not:**
+
+- `position: relative` on a text-only inline box — **now logged.** Confirmed silent
+  first: a `<span style="position:relative;left:40px;top:15px">` produced a
+  byte-identical PDF to the same span without it. Warns once per layout on a non-zero
+  offset; a zero/absent offset stays quiet, since that is the
+  establish-a-containing-block idiom and it works.
+- Margin-collapse edge cases — **now logged** for the empty-block collapse-through case.
+  Measured: an empty `<div style="margin:40px 0">` between two paragraphs opens an 80pt
+  gap where a browser gives 40pt. Clearance and the `min-height` interaction stay silent;
+  both need the same across-a-split-point collapse state that item E3 is about.
+- Grid flow-axis-locked placement — **deliberately NOT logged.** Unlike the other two,
+  this always yields a valid, non-overlapping placement and differs from a browser only
+  in WHICH free slot a sparse locked item lands in. There is no runtime test for "this
+  diverged" short of also running the browser algorithm — which is the fix — so a log
+  would fire on every sparse locked item and tell the author nothing actionable. The
+  reasoning is recorded on the I2 backlog entry.
+
+And one claim verified before repeating it: `FIDELITY-BACKLOG.md:335` says PDF tiling
+patterns are "skipped + logged". **The backlog is right and this plan's doubt was
+wrong.** The log exists at `pkg/internal/raster/page.go` ("unsupported /PatternType %d
+(only shading patterns)") and `pkg/internal/content/shading.go`. The audit had looked at
+`interp.go:47`, which is an interface doc comment, not the implementation. The entry now
+cites the real sites so this is not re-doubted.
 
 ### 7. Move shipped work out of the backlog docs
 

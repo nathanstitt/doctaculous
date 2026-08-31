@@ -25,6 +25,75 @@ func relativeOffset(b *cssbox.Box, cbW, cbH float64) (dx, dy float64) {
 	return dx, dy
 }
 
+// warnCollapseThrough reports, once, that an EMPTY block's own top and bottom margins
+// did not collapse through it.
+//
+// This is backlog item E3's first sub-case. CSS 2.1 §8.3.1 says a box with no line
+// boxes, no in-flow content, no border/padding, and auto height collapses its own top
+// and bottom margins together and then through to its siblings — so an empty
+// `<div style="margin:40px 0">` between two paragraphs contributes ONE 40pt gap. This
+// engine collapses adjacent siblings pairwise instead, so the empty box's top margin
+// collapses with the preceding sibling and its bottom margin with the following one,
+// and the gap comes out DOUBLED. Measured before this warning landed: 80pt where a
+// browser gives 40pt, with nothing in the log.
+//
+// The condition is exact rather than heuristic (zero-height fragment, no children,
+// margins on both sides), so this cannot fire on a box whose margins the engine did
+// collapse correctly. A zero-margin spacer stays quiet — with nothing to collapse there
+// is no divergence to report.
+func (e *Engine) warnCollapseThrough(b *cssbox.Box, res blockResult) {
+	if res.frag == nil || res.frag.H != 0 || len(res.frag.Children) > 0 {
+		return
+	}
+	if res.marginTop == 0 || res.marginBottom == 0 {
+		return
+	}
+	// A box establishing a new BFC does not collapse through — its margins are solid by
+	// design, so the current behaviour is already correct for it.
+	if establishesNewBFC(b) {
+		return
+	}
+	e.warnOnce("margin-collapse-through",
+		"css layout: an empty block's top and bottom margins do not collapse through it "+
+			"(CSS 2.1 8.3.1); the %gpt/%gpt margins each collapse with a sibling instead, "+
+			"so the gap is up to twice what a browser gives", res.marginTop, res.marginBottom)
+}
+
+// warnRelativeInline reports, once, that `position: relative` with a non-zero offset
+// on a NON-REPLACED INLINE box does not move anything.
+//
+// This is backlog item C6 and is structural, not an oversight: an inline element box
+// generates no fragment — its glyphs flatten into the parent's line boxes — so there is
+// nothing to hang a RelOffset on. Honouring it needs either inline-box fragments or a
+// per-run offset on LineFragment. Until then the declaration is a complete no-op, and
+// before this warning it was a SILENT one: the PDF for `left:40px;top:15px` on a
+// <span> was byte-identical to the PDF without it, with nothing in the log to say so.
+//
+// Deliberately quiet in two cases that are not authoring mistakes:
+//   - a zero/absent offset, which is the common `position: relative` used only to
+//     establish a containing block for an absolutely-positioned descendant — that DOES
+//     work here, so warning would be wrong;
+//   - atomic inlines (inline-block, replaced), which take the block path above and get
+//     a real fragment and a real offset.
+//
+// cbW is the containing block width, used so a percentage offset is judged by its used
+// value rather than assumed non-zero.
+func (e *Engine) warnRelativeInline(b *cssbox.Box, cbW float64) {
+	if b.Position != cssbox.PosRelative {
+		return
+	}
+	// Percentages of the block axis resolve against the containing block HEIGHT, which
+	// is not known here; pass 0 so a percentage top/bottom contributes 0. That can only
+	// under-report (a percentage-only offset stays quiet), never warn spuriously.
+	dx, dy := relativeOffset(b, cbW, 0)
+	if dx == 0 && dy == 0 {
+		return
+	}
+	e.warnOnce("rel-inline-box",
+		"css layout: position:relative on a non-replaced inline box is not supported; "+
+			"the box keeps its in-flow position (offset %gpt,%gpt ignored)", dx, dy)
+}
+
 // axisRelative resolves one axis of a relative offset: the start offset (left/top)
 // wins; if it is auto, the negated end offset (right/bottom) applies; if both are
 // auto, 0.
