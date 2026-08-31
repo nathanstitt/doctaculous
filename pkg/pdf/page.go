@@ -189,9 +189,24 @@ func (d *Document) rectangle(o Object) *Rectangle {
 
 // ContentBytes returns the concatenated, fully decoded content streams of the
 // page. Multiple content streams are joined with a single space, per the spec.
+//
+// A page with NO /Contents entry is a blank page: no bytes, no error. That is
+// legal and common (a deliberately empty page in a batch). A page whose
+// /Contents is PRESENT but does not resolve to a stream is a different thing
+// entirely -- the document says there is content and we cannot read it -- and
+// returns an error.
+//
+// The distinction matters because these two cases were previously
+// indistinguishable to a caller: a dangling /Contents reference fell through the
+// type switch to an empty result with a nil error, which is how a broken PDF
+// converted to an empty output file and exit code 0.
 func (p *Page) ContentBytes() ([]byte, error) {
 	d := p.doc
-	contents := d.Resolve(p.dict["Contents"])
+	raw, hasContents := p.dict["Contents"]
+	if !hasContents {
+		return nil, nil // genuinely blank page
+	}
+	contents := d.Resolve(raw)
 	var streams []*Stream
 	switch v := contents.(type) {
 	case *Stream:
@@ -202,6 +217,15 @@ func (p *Page) ContentBytes() ([]byte, error) {
 				streams = append(streams, s)
 			}
 		}
+		// References that resolve to nothing are as broken as a missing stream.
+		// An EMPTY array, though, is a legal blank page.
+		if len(streams) == 0 && len(v) > 0 {
+			return nil, fmt.Errorf("pdf: page /Contents array holds no readable streams")
+		}
+	case nil:
+		return nil, fmt.Errorf("pdf: page /Contents does not resolve (dangling reference)")
+	default:
+		return nil, fmt.Errorf("pdf: page /Contents is %T, not a stream or array", contents)
 	}
 	var buf bytes.Buffer
 	for i, s := range streams {

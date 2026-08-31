@@ -29,6 +29,12 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   row arithmetic (`w*nComps*bpc`, `rowBytes*h`) is integer and a large `/Height` wraps the product
   negative — sliding past a naive size check and panicking inside `image.NewRGBA`. A refused image
   is logged and skipped; the rest of the page still renders.
+- **A blank page and an unreadable one are different values** (`Page.ContentBytes`): a page with no
+  `/Contents` (or an empty array) is a blank page — no bytes, no error, which is legal and common.
+  A `/Contents` that is *present but does not resolve to a stream* is an error. They used to be the
+  same `(nil, nil)`, which is how a broken PDF converted to a zero-byte file with a nil error and no
+  diagnostic. Structure-extraction failures now reach the caller's `WithLogf` too — the PDF frontend
+  previously discarded the open options, so the logger it was handed was never read.
 - **Encryption** (`pkg/pdf/crypt.go`): Standard Security Handler with an empty user password, over
   RC4 (V1/V2), AES-128 (V4/AESV2), and AES-256 (V5/R6/AESV3). A doc with a real password returns
   `ErrEncryptedNeedsPassword`; an unsupported handler returns `ErrEncrypted`.

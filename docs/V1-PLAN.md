@@ -316,16 +316,66 @@ test-overridable so proving them costs kilobytes rather than half a gigabyte —
 allocating the real ceiling under `-race` is how a CI runner gets OOM-killed
 (see item 13).
 
-### 0g. Silent wrong output on the PDF path
+### 0g. Silent wrong output on the PDF path — **DONE (PDF half)**
 
 `pkg/omnidoc/pdf_backend.go` returns bare on error with no log. Every
 PDF→anything conversion routes through it, so a failure produces an **empty output
 file and exit code 0** — the worst failure mode available, because it looks like
 success. A logger is reachable.
 
+**Reproduced exactly**, at both the library and the CLI: a 4-line PDF whose
+`/Contents` points at a missing object converts to a zero-byte `.md` with
+`err == nil` and **not one diagnostic**, even with `WithLogf` supplied.
+
+**Verification found the real root two layers below the plan's.** The bare return
+in `cssboxRoot` is real and is fixed, but it is not what made this input silent:
+
+1. `cssboxRoot` passed **`nil`** as `extract.Lower`'s logger, so even `Lower`'s
+   own per-page messages were discarded before reaching anyone.
+2. The logger never arrived anyway: `openDetected`'s PDF branch dropped `opts`
+   entirely — `&pdfRenderer{doc: d}`, no config applied. "A logger is reachable"
+   was true in principle and false in practice.
+3. **`pdf.Page.ContentBytes` returned `(nil, nil)`** for a `/Contents` that is
+   present but unresolvable. Its type switch had no default, so a dangling
+   reference fell through to an empty result.
+
+(3) is the actual origin, and it is a correctness bug in a public API rather than
+a logging gap: a blank page and a lost page were the same value. `ContentBytes`
+now separates them — *no* `/Contents` (or an empty array) is a blank page with no
+error; a present-but-unreadable one is an error. Verified against every
+checked-in PDF fixture: page counts and content sizes unchanged.
+
+**CLI.** `cmd/omnidoc` wired no logger at all, so the library could degrade as
+honestly as it liked and nothing would surface. `convert` now takes **`-v`**,
+which installs the degradation logger onto stderr; default-off keeps ordinary
+runs quiet and scripts unaffected.
+
+**What was deliberately NOT done, and why.** An earlier attempt made the CLI exit
+non-zero when a conversion wrote zero bytes. Measurement killed it: an empty HTML
+document converting to Markdown legitimately produces a zero-byte file, so the
+check rejected a correct conversion. Narrowing it to formats that are never empty
+(PDF, DOCX, …) removed the false positive but also removed all the value — those
+targets emit structure regardless, so it could never fire on the case 0g is about.
+**No byte-count signal separates "lost the content" from "there was no content"**,
+and `PageCount` does not either (an empty HTML document still lays out one page).
+Doing this properly needs the caller to be able to ask *"did structure extraction
+fail?"* — which is Phase 1 item 4's `ErrNoStructure`. Left for that item rather
+than guessed at here.
+
+### 0g-bis. `applyDeclaration` drops properties silently — still open
+
 Same class, lower blast radius: `applyDeclaration` in `pkg/css/cascade.go` silently
 drops every malformed or unsupported property, though `Resolver` already carries a
 `logf` used elsewhere in the file.
+
+Scoped while doing 0g and deferred deliberately. `applyDeclaration` is a free
+function with **nine call sites**, several inside shorthand expansion — so a
+logger threaded through it would also report properties the author never wrote (a
+`font:` shorthand fans out into `font-weight`, `font-style`, `line-height`, and
+the ones that do not apply are not authoring errors). Doing it right means
+distinguishing author-written declarations from synthesized ones, which is a real
+design question rather than a plumbing job. It is a missing diagnostic, not wrong
+output, so it does not block the tag on 0g's own argument.
 
 ### 0h. Add fuzz targets — **DONE, all nine parsers**
 
