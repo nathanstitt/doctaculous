@@ -768,7 +768,7 @@ wrong.** The log exists at `pkg/internal/raster/page.go` ("unsupported /PatternT
 `interp.go:47`, which is an interface doc comment, not the implementation. The entry now
 cites the real sites so this is not re-doubted.
 
-### 7. Move shipped work out of the backlog docs
+### 7. Move shipped work out of the backlog docs — **DONE**
 
 `CLAUDE.md` is explicit that these files hold only outstanding work. They are in
 gross violation:
@@ -785,6 +785,21 @@ remains into one `docs/BACKLOG.md` holding only the ~25 genuinely open items.
 Worth noting: `FIDELITY-BACKLOG.md:37-39` already warns that its own checkboxes are
 untrustworthy and names five stale entries. This audit found two more (`unicode-range`,
 and `transform` in GAPS-2), so the warning is still under-counting.
+
+**Outcome.** All three files were deleted and replaced by a single `docs/BACKLOG.md`
+holding the 30 open + 2 in-progress items. The done-work prose was NOT extracted — it
+lives in git history (`git log --diff-filter=D --name-only`), which the new file explains
+how to read. Two things were promoted rather than dropped, because they are reusable
+guidance rather than records of finished work, and `TESTING.md` had neither: "assert on a
+specific colour, not on *something was painted*" and "a sound measurement can carry an
+unsound inference". Both are now in `docs/TESTING.md`.
+
+Every carried-over entry was re-verified against the code, which is how the stale-entry
+count went from seven to eight: **E1 claimed the full `vertical-align` keyword set had
+landed, and only `super`/`sub` are implemented** — the first stale entry found running in
+the *overstating* direction rather than the understating one. I1 was also imprecise (a
+`LineName` kind does exist, for grid-area names; the missing piece is track-list storage
+and resolution, not the tokenizer). Both corrections are recorded in `BACKLOG.md`.
 
 ---
 

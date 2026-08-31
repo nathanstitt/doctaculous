@@ -20,8 +20,8 @@ This file holds only how to WORK here. The technical reference lives in `docs/`:
 Per-subsystem open work — what is NOT done, and why each item was deferred:
 
 [docs/PDF.md](docs/PDF.md) · [docs/DOCX.md](docs/DOCX.md) · [docs/CSS-LAYOUT.md](docs/CSS-LAYOUT.md) ·
-[docs/SVG.md](docs/SVG.md) · [docs/FIDELITY-BACKLOG.md](docs/FIDELITY-BACKLOG.md) (the detailed
-per-item checklist behind the CSS/layout entries).
+[docs/SVG.md](docs/SVG.md) · [docs/BACKLOG.md](docs/BACKLOG.md) (the single per-item checklist,
+across every subsystem, with the rationale for each deferral).
 
 Those files hold **only outstanding work**. Shipped features belong in FEATURES.md — if you find a
 "DONE" entry in a subsystem doc, move it.
