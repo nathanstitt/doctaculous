@@ -71,6 +71,10 @@ Three of the defects were in dependencies rather than in this code.
   already found by fuzzing and worked around with its own depth limit. Upstream has now
   fixed it with a limit of the same shape, so the local guard was re-matched to
   upstream's (4096 → 510) rather than left as unreachable dead code.
+- CI was building and testing on **go1.25.0** — `setup-go` treats `go.mod`'s `go`
+  directive as an exact pin rather than a minimum — leaving it fourteen patch releases
+  behind with 8 known standard-library vulnerabilities. CI now tracks the latest 1.25
+  patch; `go.mod` still states the real minimum.
 
 ### Fixed — portability
 

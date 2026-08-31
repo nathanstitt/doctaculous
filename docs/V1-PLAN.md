@@ -953,9 +953,19 @@ upstream's — 4096 → 510 — rather than left as unreachable dead code. A new
 two limits together empirically, so a future upstream change fails loudly instead of
 silently making the local check dead again.
 
-The remaining 8 findings are standard library, fixed by the Go toolchain rather than by
-this repo; `go.mod`'s `go` directive is a minimum, so `setup-go` installs a patch that
-resolves them.
+It also found a second, unrelated problem — one nothing else would have surfaced.
+`setup-go` treats `go.mod`'s `go` directive as an EXACT PIN, not a minimum, so
+`go-version-file: go.mod` had CI building and testing every run on **go1.25.0**:
+fourteen patch releases behind, carrying 8 known standard-library vulnerabilities in
+`net/url`, `crypto/tls`, `encoding/xml`, `encoding/asn1`, `net/textproto`, `crypto/x509`
+and `net/http`. The repo had no work to do; the runner's toolchain did. Switched to
+`go-version: "1.25.x"` with `check-latest`, which keeps `go.mod` stating the true floor
+while CI exercises what someone building from source today actually gets. CI now runs
+go1.25.14 and reports **"affected by 0 vulnerabilities."**
+
+Worth noting for the SBOM decision above: this is the class of finding an SBOM does not
+produce. An SBOM would have faithfully recorded "built with go1.25.0" without any
+indication that the figure was a problem.
 
 Two things confirmed **fine**, so nobody re-investigates them:
 
