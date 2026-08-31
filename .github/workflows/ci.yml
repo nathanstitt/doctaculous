@@ -52,6 +52,27 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: go vet ./...
 
+      # Reachability-aware vulnerability scanning: govulncheck reports a CVE only
+      # when a path in this module actually calls the vulnerable symbol, so it does
+      # not fail on advisories against code that is merely linked. That makes it
+      # safe to have it gate the build rather than just report.
+      #
+      # It scans the standard library too, against the toolchain in use. go.mod's
+      # `go` directive is a MINIMUM, so setup-go installs the latest patch of that
+      # line and stdlib advisories fixed in a newer patch resolve on their own.
+      # A failure here that names only stdlib packages usually means the runner's
+      # Go is behind, not that this repo has work to do.
+      #
+      # Linux-only for the same reason as vet: the answer does not vary by OS.
+      #
+      # Pinned rather than @latest. The vulnerability DATABASE is fetched at run
+      # time, so a pin does not stale the findings — it only fixes the scanner
+      # binary, which is a tool this workflow executes and should therefore be a
+      # reviewed dependency like any other.
+      - name: govulncheck
+        if: matrix.os == 'ubuntu-latest'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
       - name: Build
         run: go build ./...
 

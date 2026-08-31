@@ -59,6 +59,19 @@ Three of the defects were in dependencies rather than in this code.
   non-replaced inline box, and empty-block margin collapse-through.
 - Flex content height with margins; overflow clipping with `max-height`.
 
+### Security
+
+- CI now runs `govulncheck` on every push and PR. It is reachability-aware, so it
+  reports an advisory only when a path in this module actually calls the vulnerable
+  symbol.
+- Its first run found **9 reachable vulnerabilities in dependencies**, now fixed by
+  upgrading `golang.org/x/net` v0.43.0 → v0.55.0 (8, all in the HTML parser this
+  project's core path calls) and `golang.org/x/image` v0.43.0 → v0.45.0 (1).
+- One of those, GO-2026-4440, is the quadratic HTML-nesting blowup this project had
+  already found by fuzzing and worked around with its own depth limit. Upstream has now
+  fixed it with a limit of the same shape, so the local guard was re-matched to
+  upstream's (4096 → 510) rather than left as unreachable dead code.
+
 ### Fixed — portability
 
 - CI now runs the suite on Linux, macOS, and Windows; previously only Linux. The first

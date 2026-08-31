@@ -64,7 +64,14 @@ gofmt -l .
 go vet ./...
 go test ./...
 golangci-lint run ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 ```
+
+`govulncheck` gates CI. It is reachability-aware, so it fails only when something in
+this module actually calls a vulnerable symbol. If it reports findings only in
+`Standard library` packages, your local Go is probably behind — `go.mod`'s `go`
+directive is a minimum, and stdlib advisories are fixed by the toolchain rather than by
+anything in this repo.
 
 CI runs the suite with `-race` on Linux, and without it on macOS and Windows. It also
 caps `go test -p 2`: the race suite peaks around 9 GB on a standard runner, and the

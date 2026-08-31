@@ -55,6 +55,12 @@ Three of the defects that pass found were in **dependencies**, not in this code.
 find one there, report it here as well as upstream; a fix in this repo may have to be a
 bound rather than a patch.
 
+CI additionally runs [`govulncheck`](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)
+on every push and pull request, and it gates the build. It is reachability-aware — an
+advisory fails CI only when a path in this module actually calls the vulnerable symbol,
+not merely because a vulnerable version is linked. Known-vulnerable dependencies
+therefore cannot accumulate silently between releases.
+
 ## Supported versions
 
 Pre-1.0, only the latest release gets fixes. That changes at v1.0.0.

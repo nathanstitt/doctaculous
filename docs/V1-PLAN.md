@@ -928,6 +928,35 @@ to 7. Entries before v0.1.1 point at git history rather than being reconstructed
 
 Still open: SBOM and artifact signing — both increasingly expected at 1.0.
 
+**`govulncheck` was added to CI ahead of both**, because it is the item that produces
+security value rather than a compliance artifact: it is reachability-aware, so it flags
+an advisory only when a path in this module actually CALLS the vulnerable symbol. An
+SBOM tells a consumer what is inside the binary; `govulncheck` tells us what is
+exploitable through it. (Go binaries already carry their module graph — `go version -m`
+— so an SBOM is largely a re-publication of that in a scanner-readable format. Its real
+value here is procurement, plus the vendored JBIG2 decoder, which is NOT a Go module and
+so is invisible to `go version -m`.)
+
+Its first run found **9 reachable vulnerabilities in dependencies**: 8 in
+`golang.org/x/net` (all in the HTML parser this project's core path calls) and 1 in
+`golang.org/x/image`. Both were already-approved dependencies, so the fix was a version
+bump, not a policy question — `x/net` v0.43.0 → v0.55.0 and `x/image` v0.43.0 → v0.45.0,
+with no golden movement.
+
+**This is a direct answer to a gap Phase 0 recorded.** That phase noted three of its
+defects were in dependencies, and that `docs/DEPENDENCIES.md` vets licensing and purity
+but not hostile-input behaviour. `govulncheck` closes exactly that gap, and its first
+finding proves the point: GO-2026-4440 IS the quadratic HTML-nesting blowup Phase 0
+found by fuzzing and worked around with its own bound. Upstream has since fixed it with
+a limit of the same shape (512 open elements), so the local guard was re-matched to
+upstream's — 4096 → 510 — rather than left as unreachable dead code. A new test pins the
+two limits together empirically, so a future upstream change fails loudly instead of
+silently making the local check dead again.
+
+The remaining 8 findings are standard library, fixed by the Go toolchain rather than by
+this repo; `go.mod`'s `go` directive is a minimum, so `setup-go` installs a patch that
+resolves them.
+
 Two things confirmed **fine**, so nobody re-investigates them:
 
 - **Version wiring is correct.** `.goreleaser.yaml:27-29` injects

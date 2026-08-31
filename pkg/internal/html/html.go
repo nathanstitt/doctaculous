@@ -39,21 +39,41 @@ type Document struct {
 // maxNestingDepth bounds how deeply tags may nest before Parse refuses the
 // document.
 //
-// The bound exists because the cost is in the dependency, not here.
-// x/net/html resolves a close tag with indexOfElementInScope, which scans the
+// The bound originally existed because the cost was in the dependency, not here.
+// x/net/html resolved a close tag with indexOfElementInScope, which scans the
 // open-element stack linearly, making deep nesting quadratic in the number of
-// open elements. Measured inside xhtml.Parse: 30,000 nested <div> take 3.7s and
-// 60,000 take 15.1s (4x the time for 2x the depth), against ~10ms for this
-// package's own walk of the resulting tree. At 200,000 it does not finish.
+// open elements. Measured inside xhtml.Parse at the time: 30,000 nested <div>
+// took 3.7s and 60,000 took 15.1s (4x the time for 2x the depth), against ~10ms
+// for this package's own walk of the resulting tree. At 200,000 it did not
+// finish. That was a denial of service reachable from a ~1 MB file, and it
+// happened before this package got control, so it could not be bounded after the
+// fact -- only by declining the input.
 //
-// That is a denial of service reachable from a ~1 MB file, and it happens before
-// this package gets control, so it cannot be bounded after the fact -- only by
-// declining the input. ErrTooDeeplyNested is returned so a caller can tell this
-// apart from unparseable bytes.
+// UPSTREAM HAS SINCE FIXED IT. The quadratic blowup is GO-2026-4440, fixed in
+// x/net v0.45.0, and the fix has the same shape as this one: parse.go's
+// insertOpenElement panics past 512 open elements, which xhtml.Parse recovers
+// into an error. The DoS this guard was built for is gone.
 //
-// 4096 is far past real documents (even machine-generated HTML runs to tens of
-// levels) while keeping the parse in the low milliseconds.
-const maxNestingDepth = 4096
+// The guard stays, matched to upstream's 512, for two reasons. It keeps
+// ErrTooDeeplyNested as the answer a caller gets, rather than an opaque string
+// from a dependency that a future version may reword. And it keeps the rejection
+// cheap: nestingWithinLimit is a byte scan over the source, so an abusive
+// document is turned away before the tokenizer allocates a tree for it.
+//
+// Keeping the old 4096 would have made this check dead code -- upstream's limit
+// fires first, so nothing between it and 4096 could ever reach this one.
+//
+// The value is 510, not 512, and the difference is not arbitrary: upstream
+// counts OPEN ELEMENTS, and the tokenizer synthesizes <html> and <body> around
+// the document, so those two occupy stack slots before any authored tag does.
+// This constant counts authored nesting in the source bytes. Measured against
+// x/net v0.55.0: 510 nested <div> parse, 511 do not.
+// TestNestingLimitMatchesUpstream pins that empirically, so a version bump that
+// moves upstream's cap fails loudly rather than silently making this dead code.
+//
+// Either way it is far past real documents; even machine-generated HTML runs to
+// tens of levels.
+const maxNestingDepth = 510
 
 // ErrTooDeeplyNested is returned by Parse when a document's tag nesting exceeds
 // [maxNestingDepth]. It is a distinct sentinel because the document is

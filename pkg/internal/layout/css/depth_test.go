@@ -50,10 +50,17 @@ func TestBoxTreeDepthBounded(t *testing.T) {
 // TestBoxTreeDepthCapApplies drives generate at a depth pkg/html permits, and
 // checks the resulting tree is bounded and the truncation is reported.
 func TestBoxTreeDepthCapApplies(t *testing.T) {
-	// Just inside what pkg/html accepts, so the box tree is what does the
-	// truncating. Its limit is lower than maxBoxTreeDepth, so a normal document
-	// can never reach the box cap -- assert the tree simply survives intact.
-	const depth = 1000
+	// Just inside what pkg/html accepts, so the parser is not what refuses this
+	// document. pkg/html's limit is well below maxBoxTreeDepth, so anything that
+	// parses can never reach the box cap -- assert the tree survives intact.
+	//
+	// This tracks pkg/html's maxNestingDepth, which is itself matched to
+	// x/net/html's open-element cap. That cap moved from 4096 to 510 when
+	// upstream fixed GO-2026-4440, which is what made the previous literal here
+	// (1000) stale: the parser started rejecting the fixture before generate ever
+	// ran. If pkg/html's limit moves again, this fails on html.Parse with a clear
+	// "nesting too deep" error naming both numbers.
+	const depth = 500
 	src := strings.Repeat("<div>", depth) + "x" + strings.Repeat("</div>", depth)
 	doc, err := html.Parse([]byte(src))
 	if err != nil {
