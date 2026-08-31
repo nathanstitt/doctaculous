@@ -3,7 +3,7 @@ package svg
 import (
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // maxMarkerChainDepth bounds a chain of marker="url(#...)" references (a

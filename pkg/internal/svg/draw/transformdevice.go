@@ -3,7 +3,7 @@ package draw
 import (
 	"image"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // transformDevice wraps a render.Device to pre-multiply every piece of

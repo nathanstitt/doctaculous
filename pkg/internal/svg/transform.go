@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // parseTransform parses an SVG transform list. Per SVG error handling a single

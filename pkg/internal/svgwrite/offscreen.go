@@ -4,7 +4,7 @@ import (
 	"image"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // These three Device methods all answer the same question — "what pixels does

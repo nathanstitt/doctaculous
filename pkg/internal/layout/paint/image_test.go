@@ -7,7 +7,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // imageRecordDevice records the DrawImage ctm and whether a clip was pushed, so

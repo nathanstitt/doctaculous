@@ -6,7 +6,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // pendingForm is a named Form XObject referenced by a page's content stream

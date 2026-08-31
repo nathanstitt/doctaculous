@@ -8,7 +8,7 @@ import (
 	"math"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // pageDevice implements render.Device by appending PDF content-stream operators to a

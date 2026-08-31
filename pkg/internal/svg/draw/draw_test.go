@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 func TestDrawVector(t *testing.T) {

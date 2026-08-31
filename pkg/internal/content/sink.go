@@ -1,6 +1,6 @@
 package content
 
-import "github.com/nathanstitt/omnidoc/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/internal/render"
 
 // This file defines the optional capture sinks the interpreter emits to alongside
 // painting, for structure-recovery backends (PDF → text / Markdown / HTML extraction).

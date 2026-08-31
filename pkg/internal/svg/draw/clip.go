@@ -4,8 +4,8 @@ import (
 	"image"
 	"image/color"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // boundsFunc reports the bounding box (in the local space a clip-path's

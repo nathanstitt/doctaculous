@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // drawSVGCollectingLogs parses src and DRAWS it, returning everything the

@@ -4,9 +4,9 @@ import (
 	"image"
 	"math"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
 	svgfilter "github.com/nathanstitt/omnidoc/pkg/internal/svg/filter"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // maxFilterPixels bounds how many pixels one filter region may allocate.

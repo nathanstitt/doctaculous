@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // black — the colour every shadow below paints in, so a pixel assertion reads as

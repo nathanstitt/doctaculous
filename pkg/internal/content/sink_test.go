@@ -3,7 +3,7 @@ package content
 import (
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // TestGraphicsSinkReceivesFill asserts a filled rectangle is reported to the graphics

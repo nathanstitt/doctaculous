@@ -12,8 +12,8 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // pdfRenderer renders a parsed PDF document. The *pdf.Document is read-only after

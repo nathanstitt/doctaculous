@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // paintServer is a fully-resolved gradient, ready to paint: a render.Shader

@@ -3,7 +3,7 @@
 Layers — keep them separate and independently testable. No cyclic deps between them.
 
 `pkg/pdf` parse · `pkg/internal/filter` stream decode · `pkg/internal/content` content-stream interpreter ·
-`pkg/render` device-independent paint ops (`Device` interface) · `pkg/internal/raster` bitmap
+`pkg/internal/render` device-independent paint ops (`Device` interface) · `pkg/internal/raster` bitmap
 backend · `pkg/internal/pdfwrite` PDF-writer backend · `pkg/internal/svgwrite` SVG-writer
 backend · `pkg/omnidoc` public API ·
 `cmd/omnidoc` thin CLI.

@@ -18,8 +18,8 @@ import (
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/paint"
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/style"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

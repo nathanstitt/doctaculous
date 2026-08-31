@@ -9,7 +9,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // TestDeviceEmitsFillAndGlyphOps feeds a fill and a glyph, then asserts the content

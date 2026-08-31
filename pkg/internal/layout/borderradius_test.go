@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // uniform builds radii with the same circular radius on every corner.

@@ -12,7 +12,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/paint"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // Options controls PDF output geometry and concurrency.

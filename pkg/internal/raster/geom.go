@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/image/vector"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // replay feeds a device-space path into a vector.Rasterizer for FILLING,

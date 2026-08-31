@@ -5,7 +5,7 @@ import (
 	"image/color"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/css"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // defaultWidth and defaultHeight are the CSS replaced-element default size

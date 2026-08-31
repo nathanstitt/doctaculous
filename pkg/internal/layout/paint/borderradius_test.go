@@ -9,7 +9,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // black is the fill every shape test below paints with, so a sampled pixel is

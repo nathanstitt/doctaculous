@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // circlePath returns a closed circular path approximated by cubic Beziers

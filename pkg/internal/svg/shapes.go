@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // shapePath converts an SVG basic-shape element (rect, circle, ellipse, line,

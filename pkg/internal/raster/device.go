@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/image/vector"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // Device renders into an *image.RGBA, implementing render.Device. Paths arrive

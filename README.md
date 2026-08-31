@@ -221,8 +221,8 @@ The complete feature inventory lives in [FEATURES.md](FEATURES.md).
 | Backends | `pkg/internal/{raster,pdfwrite,svgwrite}`, `pkg/internal/{markdownwrite,htmlwrite,docxwrite,rtfwrite,pptxwrite,epubwrite,csvwrite,xlsxwrite}` | Pixels, PDFs, SVG, and structure output |
 | API / CLI | `pkg/omnidoc`, `cmd/omnidoc` | Public entry points, format detection, the conversion matrix |
 
-**Only eight packages are importable**: `pkg/omnidoc`, `pkg/docx`, `pkg/xlsx`,
-`pkg/pdf`, `pkg/render`, `pkg/crop`, `pkg/heif`, `pkg/resource`. Everything under
+**Only seven packages are importable**: `pkg/omnidoc`, `pkg/docx`, `pkg/xlsx`,
+`pkg/pdf`, `pkg/crop`, `pkg/heif`, `pkg/resource`. Everything under
 `pkg/internal/` is engine detail — the table describes how the work is laid out,
 not an API surface.
 
@@ -237,11 +237,17 @@ The `render.Device` interface is the seam. Parsing, interpretation, and layout
 never know which backend they're painting into, so a new backend bolts on without
 touching them.
 
-That is a statement about the internal architecture, not an extension point yet:
-every implementer lives in this repo, and nothing public accepts a caller-supplied
-`Device`. Whether it becomes one — and on what terms, given a 15-method interface
-that has already changed shape twice — is an open question, not a promise this
-README is making.
+That describes the internal architecture; it is **not** an extension point, and
+`pkg/internal/render` is deliberately not importable. Every implementer lives in
+this repo, and no public function accepts a caller-supplied `Device` — so making
+the interface public would freeze 69 symbols, including a 15-method interface
+that has already changed shape twice (`EndGroup`'s own doc records one such
+break, and `RenderOffscreen` and `BuildLuminanceMask` were added later). A 16th
+method after v1 would mean v2.
+
+Opening it later is additive and always possible; withdrawing it after a tag is
+not. If you want to write a backend, say so — the constraint is a choice about
+what to promise, not a technical one.
 
 ## Testing
 

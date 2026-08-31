@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // stop is one resolved gradient stop: a position in [0,1] and a straight

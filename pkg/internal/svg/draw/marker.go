@@ -3,8 +3,8 @@ package draw
 import (
 	"math"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // paintMarkers paints s's marker-start/-mid/-end at every vertex of s.Path,

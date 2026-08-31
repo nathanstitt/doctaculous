@@ -5,7 +5,7 @@ import (
 	"math"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // colrGradientShader evaluates a COLR v1 gradient for the shading pipeline.

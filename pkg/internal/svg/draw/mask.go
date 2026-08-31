@@ -3,8 +3,8 @@ package draw
 import (
 	"image"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // buildMask resolves msk (already known non-nil by the caller) into a

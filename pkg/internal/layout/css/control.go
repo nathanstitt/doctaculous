@@ -10,7 +10,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/html"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // classifyControl maps an element (its lowercased tag + attributes) to the form

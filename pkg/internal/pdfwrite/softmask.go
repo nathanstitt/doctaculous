@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // opaqueAlpha is full coverage (255), used by BuildClipMask's rectangular

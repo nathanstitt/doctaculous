@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // TestDrawGlyphMatchesFillGlyph asserts the raster backend renders DrawGlyph by

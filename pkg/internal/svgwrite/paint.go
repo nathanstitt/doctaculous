@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // colorAttr renders c's RGB as a hex color, and reports its alpha in [0,1]

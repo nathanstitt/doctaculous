@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 const clipHdr = `xmlns="http://www.w3.org/2000/svg"`

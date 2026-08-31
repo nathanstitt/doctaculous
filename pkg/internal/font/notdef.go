@@ -1,6 +1,6 @@
 package font
 
-import "github.com/nathanstitt/omnidoc/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/internal/render"
 
 // Synthesized .notdef ("tofu") box geometry, in em units (Y up, baseline at 0).
 // The proportions follow what browsers draw when a font's own .notdef is blank:

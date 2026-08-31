@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svg"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // textExtent returns the placed run's total advance (last pen edge minus first

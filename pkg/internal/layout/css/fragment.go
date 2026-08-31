@@ -10,7 +10,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout/inline"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // Fragment is one positioned box in page space (points, Y-down, origin at the

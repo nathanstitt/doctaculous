@@ -5,7 +5,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // glyphRouteDev embeds render.Device (so it satisfies the full interface) and

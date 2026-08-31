@@ -3,8 +3,8 @@ package pageres
 import (
 	"testing"
 
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/render"
 )
 
 // TestFormMatrix pins the all-or-nothing /Matrix parse: a well-formed 6-number

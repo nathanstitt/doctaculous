@@ -1,6 +1,6 @@
 package content
 
-import "github.com/nathanstitt/omnidoc/pkg/render"
+import "github.com/nathanstitt/omnidoc/pkg/internal/render"
 
 // textState holds the PDF text-related parameters set between BT/ET and by the
 // text-state operators (Tc, Tw, Tz, TL, Tf, Tr, Ts).

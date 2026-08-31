@@ -9,7 +9,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
-	"github.com/nathanstitt/omnidoc/pkg/render"
+	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 )
 
 // imageDest is a destination rectangle in page space (points, Y-down) into which a
