@@ -254,6 +254,54 @@ bugs were found, which is not a coincidence worth ignoring.
 A `FuzzOpen` per parser would have caught nearly every item in this phase. Without
 them, Phase 0 fixes the bugs we happened to find rather than the class.
 
+**All nine parsers now have targets.** `xlsx` and `pdf` landed on their own
+branches, `css` and `svg` on another; this change adds the last six — `docx`,
+`pptx`, `rtf`, `epub`, `font`, and `markdown`.
+
+Results, and what they found:
+
+| target | executions | outcome |
+| --- | --- | --- |
+| `rtf` | 54.5M | clean (the `\ilvl` bound from 0f holds) |
+| `docx` | 16.5M | clean |
+| `font` | — | **panic in a dependency**, fixed |
+| `markdown` | — | **quadratic hang in a dependency**, fixed |
+
+**Two of the six found defects, and both are in approved dependencies.** That is
+now the recurring shape of this work — `x/net/html` in 0d-bis, and these two:
+
+- **`pkg/font`: a panic inside `textlayout`.** `parseCmapFormat4` computes a
+  slice bound from a subtable's own length fields and slices at a **negative**
+  index when they disagree — `slice bounds out of range [-390:]`. It matters
+  because a font program is untrusted document input (embedded in a PDF, or
+  fetched as a web font) and the panic is raised during **open**, before any
+  per-page recover exists. Fixed by recovering at the parse boundary, which is
+  the guard this package already applies to `FontHExtents`/`FontVExtents` for
+  exactly the same reason — the parse entry point simply lacked it.
+
+- **`pkg/markdown`: goldmark is quadratic in per-line block nesting.** A line of
+  N `- ` markers costs 0.49s at N=12,500, 2.6s at 25,000, 10.8s at 50,000 (four
+  times the work for twice the input), and 200,000 markers — a **400 KB file,
+  smaller than many READMEs** — does not finish in a minute.
+
+  The measurement that shaped the fix: it is **depth**, not size. 50,000 list
+  items over 50,000 lines parse in 79ms; the same 50,000 markers on ONE line take
+  8.6s — a hundred times slower for half the bytes. So the bound is per line
+  (`maxBlockNesting`, 1024) rather than a document-size cap, which would have
+  rejected large legitimate documents while still admitting the small hostile one.
+
+  Fenced code blocks are skipped by the scanner. That was not foresight — the
+  over-reach test caught it: a README showing example Markdown inside ``` was
+  refused, and measured, 50,000 markers inside a fence cost 238µs against 10.8s
+  outside one. Counting them would have rejected a document that is both
+  legitimate and cheap.
+
+**The pattern is worth stating plainly for `docs/DEPENDENCIES.md`:** three of the
+defects this phase found are performance or safety characteristics of approved
+dependencies that we cannot fix upstream and must defend against at our own
+boundary. The approved-dependency list vets licensing and purity; it does not vet
+behaviour on hostile input, and nothing else in the repo does either.
+
 Also worth noting: `pkg/pdf/filter/jbig2` is excluded from golangci-lint as vendored
 code, so it receives no static analysis at all despite containing several of the
 reported hangs.

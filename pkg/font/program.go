@@ -322,7 +322,24 @@ func isTrueTypeCollection(data []byte) bool {
 // TrueType Collection (.ttc/.otc) by returning its first face. truetype.Parse cannot read
 // a collection wrapper, so a collection is loaded via truetype.Load (which the upstream
 // package documents as collection-aware) and the first *truetype.Font is used.
-func parseTrueTypeOrCollection(data []byte) (*truetype.Font, error) {
+//
+// The parse is recovered for the same reason FontHExtents and FontVExtents are
+// (see ttProgram.hExtents): the upstream parser indexes its tables without
+// checking, so a malformed one panics rather than returning an error. Found by
+// fuzzing -- a crafted cmap subtable reaches parseCmapFormat4 with a length that
+// makes it slice at a NEGATIVE bound, out of textlayout's own table_cmap.go.
+//
+// A font program is untrusted document input: it arrives embedded in a PDF or
+// fetched as a web font, so a panic here is a panic on a document, and this one
+// is raised during OPEN -- before any per-page recover exists. Reporting a parse
+// failure lets the caller fall back to a substitute face, which is what an
+// unreadable font should do anyway.
+func parseTrueTypeOrCollection(data []byte) (f *truetype.Font, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			f, err = nil, fmt.Errorf("truetype: malformed font program: %v", r)
+		}
+	}()
 	if !isTrueTypeCollection(data) {
 		return truetype.Parse(bytes.NewReader(data))
 	}
