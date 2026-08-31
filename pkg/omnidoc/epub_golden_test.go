@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/epub"
+	"github.com/nathanstitt/omnidoc/pkg/internal/epub"
 	genepub "github.com/nathanstitt/omnidoc/testdata/gen/epub"
 )
 

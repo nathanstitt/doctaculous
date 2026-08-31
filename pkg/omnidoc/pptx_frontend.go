@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/pptx"
+	"github.com/nathanstitt/omnidoc/pkg/internal/pptx"
 )
 
 // OpenPPTX reads and renders a PresentationML (.pptx) deck: each visible

@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
-	mdfront "github.com/nathanstitt/omnidoc/pkg/markdown"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
+	mdfront "github.com/nathanstitt/omnidoc/pkg/internal/markdown"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

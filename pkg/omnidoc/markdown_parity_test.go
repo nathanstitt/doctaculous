@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/docx"
-	docxcssbox "github.com/nathanstitt/omnidoc/pkg/docx/cssbox"
-	"github.com/nathanstitt/omnidoc/pkg/docx/style"
-	"github.com/nathanstitt/omnidoc/pkg/render/markdown"
+	docxcssbox "github.com/nathanstitt/omnidoc/pkg/internal/cssbox"
+	markdownwrite "github.com/nathanstitt/omnidoc/pkg/internal/markdownwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/style"
 )
 
 // letterSection is a US-Letter DOCX section, matching the other DOCX tests.
@@ -24,8 +24,8 @@ func markdownOfDOCX(t *testing.T, d *docx.Document) string {
 	t.Helper()
 	root := docxcssbox.Lower(d, style.NewResolver(d, nil))
 	var sb strings.Builder
-	if err := markdown.Write(root, &sb, markdown.Options{}); err != nil {
-		t.Fatalf("markdown.Write: %v", err)
+	if err := markdownwrite.Write(root, &sb, markdownwrite.Options{}); err != nil {
+		t.Fatalf("markdownwrite.Write: %v", err)
 	}
 	return sb.String()
 }

@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 )
 
 // Document is an opened document ready for rendering. It is read-only after Open

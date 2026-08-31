@@ -12,9 +12,12 @@ import (
 	"testing"
 
 	// Registered decoders so image.DecodeConfig can sniff what the CLI wrote.
+	// x/image/webp is imported directly rather than this module's wrapper: the
+	// wrapper is internal now, and only its RegisterFormat side effect matters.
 	_ "image/jpeg"
 
-	_ "github.com/nathanstitt/omnidoc/pkg/webp"
+	_ "golang.org/x/image/webp"
+
 	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 

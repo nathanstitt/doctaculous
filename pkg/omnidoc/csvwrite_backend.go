@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/csvwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/csvwrite"
 )
 
 // CSVOptions controls conversion to CSV/TSV.

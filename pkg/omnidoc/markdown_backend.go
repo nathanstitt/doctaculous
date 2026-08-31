@@ -6,7 +6,7 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/markdown"
+	markdownwrite "github.com/nathanstitt/omnidoc/pkg/internal/markdownwrite"
 )
 
 // MarkdownOptions controls HTML/DOCX -> Markdown (or plain-text) conversion.
@@ -25,8 +25,8 @@ type MarkdownOptions struct {
 	Logf func(string, ...any)
 }
 
-func (o MarkdownOptions) toWriterOptions() markdown.Options {
-	return markdown.Options{Plain: o.Plain, Logf: o.Logf}
+func (o MarkdownOptions) toWriterOptions() markdownwrite.Options {
+	return markdownwrite.Options{Plain: o.Plain, Logf: o.Logf}
 }
 
 // WriteMarkdown writes an opened reflow document (HTML or DOCX) to out as GitHub-
@@ -41,7 +41,7 @@ func (d *Document) WriteMarkdown(_ context.Context, out io.Writer, opts Markdown
 	if opts.MaxBytes > 0 {
 		out = &truncateWriter{w: out, remaining: opts.MaxBytes}
 	}
-	if err := markdown.Write(root, out, opts.toWriterOptions()); err != nil {
+	if err := markdownwrite.Write(root, out, opts.toWriterOptions()); err != nil {
 		return fmt.Errorf("omnidoc: write markdown: %w", err)
 	}
 	return nil

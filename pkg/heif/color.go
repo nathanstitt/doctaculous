@@ -3,7 +3,7 @@ package heif
 import (
 	"image"
 
-	"github.com/nathanstitt/omnidoc/pkg/heif/hevc"
+	"github.com/nathanstitt/omnidoc/pkg/internal/hevc"
 )
 
 // Colour conversion (CICP nclx signaling) and orientation transforms.

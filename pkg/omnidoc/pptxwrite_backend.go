@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/pptxwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/pptxwrite"
 )
 
 // PPTXOptions controls conversion to PPTX.

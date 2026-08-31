@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nathanstitt/omnidoc/pkg/css"
-	"github.com/nathanstitt/omnidoc/pkg/html"
-	layoutcss "github.com/nathanstitt/omnidoc/pkg/layout/css"
-	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/css"
+	"github.com/nathanstitt/omnidoc/pkg/internal/html"
+	layoutcss "github.com/nathanstitt/omnidoc/pkg/internal/layout/css"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

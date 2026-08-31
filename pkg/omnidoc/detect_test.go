@@ -213,7 +213,7 @@ func TestDetectISOBMFF(t *testing.T) {
 func TestDetectFormatWebP(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"still-lossy.webp", "still-lossless.webp", "still-lossy-alpha.webp", "animated.webp"} {
-		data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", name))
+		data, err := os.ReadFile(filepath.Join("..", "internal", "webp", "testdata", name))
 		if err != nil {
 			t.Fatalf("read fixture %s: %v", name, err)
 		}
@@ -245,7 +245,7 @@ func TestDetectFormatWebP(t *testing.T) {
 // one-page document through content detection alone.
 func TestOpenBytesWebP(t *testing.T) {
 	t.Parallel()
-	data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", "still-lossless.webp"))
+	data, err := os.ReadFile(filepath.Join("..", "internal", "webp", "testdata", "still-lossless.webp"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}

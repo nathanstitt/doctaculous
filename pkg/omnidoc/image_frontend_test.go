@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nathanstitt/omnidoc/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/internal/webp"
 )
 
 // tinyPNGBytes encodes a small solid-color PNG.
@@ -143,7 +143,7 @@ func TestOpenImageBytesWebP(t *testing.T) {
 		"still-lossless.webp", // VP8L
 		"still-lossy-alpha.webp",
 	} {
-		data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", name))
+		data, err := os.ReadFile(filepath.Join("..", "internal", "webp", "testdata", name))
 		if err != nil {
 			t.Fatalf("read fixture %s: %v", name, err)
 		}
@@ -167,7 +167,7 @@ func TestOpenImageBytesWebP(t *testing.T) {
 // surfacing a generic "invalid format".
 func TestOpenImageBytesWebPAnimated(t *testing.T) {
 	t.Parallel()
-	data, err := os.ReadFile(filepath.Join("..", "webp", "testdata", "animated.webp"))
+	data, err := os.ReadFile(filepath.Join("..", "internal", "webp", "testdata", "animated.webp"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}

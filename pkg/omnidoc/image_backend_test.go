@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/pkg/crop"
-	"github.com/nathanstitt/omnidoc/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/internal/webp"
 	"github.com/nathanstitt/omnidoc/testdata/gen"
 )
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/pdfwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/pdfwrite"
 )
 
 // PDFOptions controls HTML/DOCX -> PDF conversion.

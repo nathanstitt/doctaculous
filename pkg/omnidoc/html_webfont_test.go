@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

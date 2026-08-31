@@ -34,10 +34,10 @@ This project lives or dies on its test corpus.
     (`~/code/vendor/resvg`, `cargo` works out of the box). Reading `usvg`'s resolved tree settled in
     minutes a cyclic-mask question that days of pixel archaeology could not — and revealed that one
     committed reference was simply out of step with current resvg.
-- **Golden-image tests** (`pkg/render/raster/golden_test.go`, plus the `pkg/omnidoc` `docx-*` /
+- **Golden-image tests** (`pkg/internal/raster/golden_test.go`, plus the `pkg/omnidoc` `docx-*` /
   `html-*` / `htmldoc-*` goldens): render at 72 DPI, compare to committed PNGs with a per-pixel
   tolerance (±4/channel) + 0.2% differing-pixel budget. Regenerate an intentional render change with
-  `go test ./pkg/render/raster -run TestGolden -update`, then **eyeball every changed PNG in the PR**
+  `go test ./pkg/internal/raster -run TestGolden -update`, then **eyeball every changed PNG in the PR**
   — an unexplained golden diff is a regression. Goldens are committed; the fixtures that produce them
   are generated, so the chain stays hermetic. HTML/DOCX also carry WPT-style reftests.
   - **`-update` rewriting a golden does NOT mean it was stale.** A handful of goldens

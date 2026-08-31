@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/epub"
+	"github.com/nathanstitt/omnidoc/pkg/internal/epub"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 

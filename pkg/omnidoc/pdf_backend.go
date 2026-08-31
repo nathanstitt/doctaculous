@@ -7,13 +7,13 @@ import (
 	"math"
 	"sync"
 
-	"github.com/nathanstitt/omnidoc/pkg/font"
-	"github.com/nathanstitt/omnidoc/pkg/layout/cssbox"
-	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/extract"
+	"github.com/nathanstitt/omnidoc/pkg/internal/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
-	"github.com/nathanstitt/omnidoc/pkg/pdf/extract"
 	"github.com/nathanstitt/omnidoc/pkg/render"
-	"github.com/nathanstitt/omnidoc/pkg/render/raster"
 )
 
 // pdfRenderer renders a parsed PDF document. The *pdf.Document is read-only after

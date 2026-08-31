@@ -9,15 +9,15 @@ gracefully.
 
 ## Selectors
 
-8. **CSS selector coverage** (`pkg/css/selector.go`) — the engine supports type, class, id,
+8. **CSS selector coverage** (`pkg/internal/css/selector.go`) — the engine supports type, class, id,
   universal, descendant, grouping, and the structural pseudo-classes, but has NO child (`>`),
   adjacent-sibling (`+`), general-sibling (`~`), attribute (`[foo]`, `[foo=bar]`), `:not()`/`:is()`/
   `:where()`, or namespace (`svg|rect`) selectors. `parseOneSelector` splits on whitespace
   (`strings.Fields`), so `>` and `[attr]` cannot be represented. These **fail safe** (a rule with an
   unsupported selector is dropped, never mis-matched). The **silent** half is now CLOSED: a dropped
   selector is recorded on `Stylesheet.Unsupported` and reported warn-once per construct by
-  `NewResolver` (HTML/DOCX) and `pkg/svg`'s index (SVG-internal `<style>`) — see FEATURES.md. This
-  affects **HTML as much as SVG**, since `pkg/css` is shared. Two resvg fixtures are excluded from
+  `NewResolver` (HTML/DOCX) and `pkg/internal/svg`'s index (SVG-internal `<style>`) — see FEATURES.md. This
+  affects **HTML as much as SVG**, since `pkg/internal/css` is shared. Two resvg fixtures are excluded from
   the SVG corpus for this reason (see `testdata/svg/resvg/README.md`). Still wanted, roughly in
   value order: `>` (common in hand-authored SVG and real stylesheets), attribute selectors, then the
   sibling combinators. Related and unfixed: `parseOneSelector`'s whitespace split also drops the
@@ -99,7 +99,7 @@ gracefully.
 
 ## Units
 
-- **`rem` resolves against the element's font size, not the root** — `pkg/css/value.go` folds `rem`
+- **`rem` resolves against the element's font size, not the root** — `pkg/internal/css/value.go` folds `rem`
   into `UnitEm` at parse time. The CSS `filter` property resolves it correctly (its lengths resolve
   at paint time, where the root is reachable), so `rem` is currently right for `filter` and wrong for
   every other property. Modelling it properly needs a distinct `UnitRem` carried to where the root
@@ -113,8 +113,8 @@ gracefully.
   vector rather than rasterizing a page region). The over-cap/off-device region and the 4-deep
   nesting cap now report through `PaintPageWithOptions`'s `Options.Logf` — see FEATURES.md.
   Still open: the surface caps stay UNREPORTED on the PDF path, deliberately, because
-  `pkg/render/pdfwrite` already says once per document that every filter paints unfiltered there.
+  `pkg/internal/pdfwrite` already says once per document that every filter paints unfiltered there.
   Also: the five colour-matrix helpers are DUPLICATED between
-  `pkg/layout/paint/cssfilter.go` and `pkg/svg/filterfunc.go` — they agree today (verified
+  `pkg/internal/layout/paint/cssfilter.go` and `pkg/internal/svg/filterfunc.go` — they agree today (verified
   byte-identical across all ten functions) by being kept in step, not by construction; moving them to
   a shared package would make that structural.

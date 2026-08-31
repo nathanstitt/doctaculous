@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/epubwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/epubwrite"
 )
 
 // EPUBOptions controls conversion to EPUB.

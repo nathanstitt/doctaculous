@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nathanstitt/omnidoc/pkg/pdf/filter"
+	"github.com/nathanstitt/omnidoc/pkg/internal/filter"
 )
 
 // The four defects below were all found by FuzzParse rather than by reading the

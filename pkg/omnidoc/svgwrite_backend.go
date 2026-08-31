@@ -7,9 +7,9 @@ import (
 	"io"
 	"math"
 
-	"github.com/nathanstitt/omnidoc/pkg/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/font"
+	"github.com/nathanstitt/omnidoc/pkg/internal/svgwrite"
 	"github.com/nathanstitt/omnidoc/pkg/render"
-	"github.com/nathanstitt/omnidoc/pkg/render/svgwrite"
 )
 
 // SVGOptions controls SVG output.

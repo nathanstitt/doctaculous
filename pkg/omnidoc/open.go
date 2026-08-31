@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/nathanstitt/omnidoc/pkg/docx"
-	layoutfont "github.com/nathanstitt/omnidoc/pkg/layout/font"
+	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )

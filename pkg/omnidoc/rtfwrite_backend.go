@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/rtfwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/rtfwrite"
 )
 
 // RTFOptions controls conversion to RTF.

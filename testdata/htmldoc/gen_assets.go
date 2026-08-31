@@ -19,7 +19,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/nathanstitt/omnidoc/pkg/webp"
+	"github.com/nathanstitt/omnidoc/pkg/internal/webp"
 )
 
 func main() {

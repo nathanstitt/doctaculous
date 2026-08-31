@@ -1,6 +1,6 @@
 # Standalone font fixtures
 
-Raw font programs for unit-testing the font parser (`pkg/font`) directly, outside
+Raw font programs for unit-testing the font parser (`pkg/internal/font`) directly, outside
 of any PDF. These are the *font program* formats PDFs embed via the
 FontDescriptor's `/FontFile`, `/FontFile2`, and `/FontFile3` streams.
 
@@ -20,12 +20,12 @@ PDFs use "Type1" loosely for two unrelated things; only the **classic** one is h
 
 - **Classic Type 1** — PostScript font program, Type 1 charstrings, eexec-encrypted
   private dict, distributed as `.pfb`/`.pfa`, embedded via `/FontFile`. **These
-  files.** `pkg/font` parses these via `github.com/benoitkugler/textlayout`
+  files.** `pkg/internal/font` parses these via `github.com/benoitkugler/textlayout`
   (`fonts/type1`); `TeXGyreTermes-Regular.pfb` backs the generated `embedded-type1`
   fixture (`gen.EmbeddedType1PDF`).
 - **"Type1C" / CFF** — a bare CFF table (Type 2 charstrings) embedded via
   `/FontFile3 /Subtype Type1C`. Despite the name this is **not** a classic Type 1
-  program; `pkg/font` parses it via the same library (`fonts/type1C`). Use an
+  program; `pkg/internal/font` parses it via the same library (`fonts/type1C`). Use an
   OTF/CFF font (e.g. an OpenType-CFF `.otf`) to exercise that path, not a `.pfb`.
 
 ### Verified

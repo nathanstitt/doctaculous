@@ -92,10 +92,10 @@ package, per 0h.
 
 ### 0b. Non-finite CSS numbers hang the layout engine — **DONE**
 
-`pkg/css/cascade.go`, `parseNonNegNumber` rejects only `v < 0`, so `strconv.ParseFloat`
+`pkg/internal/css/cascade.go`, `parseNonNegNumber` rejects only `v < 0`, so `strconv.ParseFloat`
 passes `inf`, `Inf`, `+Inf`, and `nan` straight through — measured, all four return
 `ok=true`, and so does `infinity`, which the plan did not list. An infinite
-`flex-grow` then makes the free-space loop in `pkg/layout/css/flex.go` never
+`flex-grow` then makes the free-space loop in `pkg/internal/layout/css/flex.go` never
 terminate.
 
 Reproduced: `<div style="display:flex"><div style="flex-grow:inf">a</div></div>` — 66
@@ -108,18 +108,18 @@ it is not merely that "there is no `ctx` check on that path" — no `RasterizePa
 deadline exists yet to be checked. The caller has no interruption point at all.
 
 *`parseNonNegNumber` was not the whole fix.* The tokenizer's own `parseFloat`
-(`pkg/css/token.go`) discarded `strconv`'s `ErrRange` and returned the `±Inf` it
+(`pkg/internal/css/token.go`) discarded `strconv`'s `ErrRange` and returned the `±Inf` it
 came with. `readNumeric` scans only digits, `.` and a leading `-`, so `inf` cannot
 be spelled through it — but 400 nines overflow to `+Inf` and reach the identical
 hang, through a value that looks like an ordinary number. Fixing only
 `parseNonNegNumber` would have left that door open for every consumer of
-`Token.Num`. Both are now guarded; `pkg/css/color.go` already documented this
+`Token.Num`. Both are now guarded; `pkg/internal/css/color.go` already documented this
 exact reasoning for colour components, so the convention was in place.
 
 Note the audit reported `nan` as hanging too; it does not — NaN degrades safely.
 Fixed anyway: accepting NaN as a valid CSS number is wrong regardless.
 
-Covered by `pkg/css/nonfinite_test.go` (parser level) and
+Covered by `pkg/internal/css/nonfinite_test.go` (parser level) and
 `pkg/omnidoc/malformed_input_test.go` (the 66-byte file, end to end, asserting
 termination). The formerly-infinite cases now return in ~100 ms.
 
@@ -135,7 +135,7 @@ Each took a small integer straight from markup with no cap. **All four reproduce
 **Verification changed three things.**
 
 *The parse site was not where the plan said.* `colspan`/`rowspan` are read by
-`attrSpan` in `pkg/layout/css/build.go`, not `table.go`. All three attributes
+`attrSpan` in `pkg/internal/layout/css/build.go`, not `table.go`. All three attributes
 (`colspan`, `rowspan`, `<col span>`) flow through that one function, so a single
 clamp fixes them — and its doc comment already cited HTML's clamping rule while
 implementing only the lower half of it.
@@ -156,12 +156,12 @@ failing if a bound is removed. Verified by reverting each fix individually.
 
 Fixed by clamping in `attrSpan` (`maxColSpan`/`maxRowSpan`), clipping `rowspan` to
 the real row count in `buildGrid`, and bounding the expanded track count, explicit
-line numbers, and `span` counts against `maxGridTracks` in `pkg/css/grid_value.go`.
+line numbers, and `span` counts against `maxGridTracks` in `pkg/internal/css/grid_value.go`.
 The track bound is on the *expanded* count, not the repetition count, since
 `repeat(N, a b c)` yields N×3 tracks.
 
-Covered by `pkg/layout/css/unbounded_counts_test.go` (11 termination cases plus
-the attribute-clamp table) and `pkg/css/grid_bounds_test.go`.
+Covered by `pkg/internal/layout/css/unbounded_counts_test.go` (11 termination cases plus
+the attribute-clamp table) and `pkg/internal/css/grid_bounds_test.go`.
 
 ### 0d. Stack overflows that `recover()` cannot catch — **PDF half DONE**
 
@@ -173,7 +173,7 @@ structurally unable to catch it:
   survives, ~1.5 MB raises `fatal error: stack overflow`. Bounded at
   `maxObjectDepth` (256), enforced in both `parseArray` and `parseDictOrStream`
   since they recurse through each other via `parseFromToken`.
-- ~~`pkg/layout/css/build.go`~~ — **done.** Reproduced, and worse than recorded:
+- ~~`pkg/internal/layout/css/build.go`~~ — **done.** Reproduced, and worse than recorded:
   **80,000** nested `<div>` (~880 KB, not 1.6 MB) is enough.
   `sizeof(ComputedStyle)` is **2,144 bytes** and `generate` takes it by value, so
   nesting depth is stack depth times a two-kilobyte frame. Bounded at
@@ -184,7 +184,7 @@ structurally unable to catch it:
 ### 0d-bis. The HTML parser is quadratic in nesting — **DONE, not in the audit**
 
 Found while reproducing 0d, upstream of it, and different in kind:
-`pkg/html.Parse` does not crash on deep nesting — it **hangs**.
+`pkg/internal/html.Parse` does not crash on deep nesting — it **hangs**.
 
 `golang.org/x/net/html` resolves a close tag with `indexOfElementInScope`, which
 scans the open-element stack linearly, so nesting is quadratic in open elements.
@@ -267,7 +267,7 @@ seconds before them.
 ### 0f. Overflow defeats the image-dimension guard — **DONE**
 
 **The headline claim does not reproduce, and this is the first audit item that is
-simply wrong.** `pkg/render/raster/page.go` does not multiply in integer
+simply wrong.** `pkg/internal/raster/page.go` does not multiply in integer
 arithmetic — it computes `fW*fH` in **float64**, which cannot wrap, and its
 comment already says why: *"Compute dimensions in float64, then validate before
 casting to int, so an attacker-controlled MediaBox or DPI cannot overflow int."*
@@ -281,7 +281,7 @@ Measured, every case the audit named is correctly refused:
 | 2³⁴ × 2³⁴ | refused |
 | 2⁴⁰ × 2⁴⁰ | refused |
 
-**The bug is real, but in a different file.** `pkg/render/raster/image.go`,
+**The bug is real, but in a different file.** `pkg/internal/raster/image.go`,
 `decodeRawImage`, takes an image's `/Width` and `/Height` with only a `> 0` check
 and then does the integer arithmetic the audit described: `w*nComps*bpc` for the
 row stride and `rowBytes*h` for the short-data guard. At h = 2⁶⁰ that product goes
@@ -310,8 +310,8 @@ iteration.
 **The pptx/xlsx immunity claim holds.** Checked: `rawPart` and its siblings fetch
 one part at a time and never accumulate, so the per-part cap is sufficient there.
 
-Covered by `pkg/render/raster/image_bounds_test.go`, `pkg/rtf/ilvl_test.go`,
-`pkg/docx/zipbomb_test.go`, and `pkg/epub/zipbomb_test.go`. The zip budgets are
+Covered by `pkg/internal/raster/image_bounds_test.go`, `pkg/internal/rtf/ilvl_test.go`,
+`pkg/docx/zipbomb_test.go`, and `pkg/internal/epub/zipbomb_test.go`. The zip budgets are
 test-overridable so proving them costs kilobytes rather than half a gigabyte —
 allocating the real ceiling under `-race` is how a CI runner gets OOM-killed
 (see item 13).
@@ -364,7 +364,7 @@ than guessed at here.
 
 ### 0g-bis. `applyDeclaration` drops properties silently — still open
 
-Same class, lower blast radius: `applyDeclaration` in `pkg/css/cascade.go` silently
+Same class, lower blast radius: `applyDeclaration` in `pkg/internal/css/cascade.go` silently
 drops every malformed or unsupported property, though `Resolver` already carries a
 `logf` used elsewhere in the file.
 
@@ -408,12 +408,12 @@ targets: `css.Parse` (parse + cascade), `ParseDeclarations`, `ParseColorValue`,
 and `svg.Parse` (XML + cascade + scene build, seeded from 40 real resvg
 fixtures).
 
-`pkg/css` came back **clean** — 20M, 144M and 169M executions on the three
+`pkg/internal/css` came back **clean** — 20M, 144M and 169M executions on the three
 targets, no crashes. That is a genuine result rather than a weak target: the
 package is written defensively, `Parse` is documented as total, and the property
 parsers already reject what they cannot use.
 
-`pkg/svg` found **two defects in under four seconds each**, both escaping the
+`pkg/internal/svg` found **two defects in under four seconds each**, both escaping the
 public `Parse` on documents under 70 bytes:
 
 - **`<text x="0">0 <A>` panicked** with `index out of range [1] with length 1`.
@@ -451,7 +451,7 @@ Results for those six:
 **Two of the six found defects, and both are in approved dependencies.** That is
 now the recurring shape of this work — `x/net/html` in 0d-bis, and these two:
 
-- **`pkg/font`: a panic inside `textlayout`.** `parseCmapFormat4` computes a
+- **`pkg/internal/font`: a panic inside `textlayout`.** `parseCmapFormat4` computes a
   slice bound from a subtable's own length fields and slices at a **negative**
   index when they disagree — `slice bounds out of range [-390:]`. It matters
   because a font program is untrusted document input (embedded in a PDF, or
@@ -460,7 +460,7 @@ now the recurring shape of this work — `x/net/html` in 0d-bis, and these two:
   the guard this package already applies to `FontHExtents`/`FontVExtents` for
   exactly the same reason — the parse entry point simply lacked it.
 
-- **`pkg/markdown`: goldmark is quadratic in per-line block nesting.** A line of
+- **`pkg/internal/markdown`: goldmark is quadratic in per-line block nesting.** A line of
   N `- ` markers costs 0.49s at N=12,500, 2.6s at 25,000, 10.8s at 50,000 (four
   times the work for twice the input), and 200,000 markers — a **400 KB file,
   smaller than many READMEs** — does not finish in a minute.
@@ -483,7 +483,7 @@ dependencies that we cannot fix upstream and must defend against at our own
 boundary. The approved-dependency list vets licensing and purity; it does not vet
 behaviour on hostile input, and nothing else in the repo does either.
 
-Also worth noting: `pkg/pdf/filter/jbig2` is excluded from golangci-lint as vendored
+Also worth noting: `pkg/internal/filter/jbig2` is excluded from golangci-lint as vendored
 code, so it receives no static analysis at all despite containing several of the
 reported hangs.
 
@@ -520,33 +520,66 @@ shipping the promise while knowing it is false is the one option that is not ope
 After the tag, exported API is frozen under semver: a breaking change means `v2`.
 These four are the ones we would regret.
 
-### 1. Move the engine packages under `internal/`
+### 1. Move the engine packages under `internal/` — **DONE**
 
-**50 packages are exported. About six are public API.** There are only two
-`internal/` directories today, both deep (`pkg/xlsx/internal`, `pkg/render/internal`).
-Everything else freezes on the tag.
+**50 packages were exported. Eight are public API.** There were only two
+`internal/` directories, both deep (`pkg/xlsx/internal`, `pkg/render/internal`);
+everything else would have frozen on the tag.
 
-The decisive evidence is our own CLI: `cmd/omnidoc` imports exactly three packages —
-`pkg/omnidoc`, `pkg/crop`, `pkg/pdf`. Every engine package is imported only from
-inside this repo.
+`pkg/css` alone would have frozen **371 exported symbols** — the plan estimated
+87, an undercount — including `ComputedStyle`, whose own doc comment says the
+typed property set is *"deliberately minimal"* and that properties outside it
+*"do not yet populate a typed computed field. That is expected, not a gap."* That
+is a written promise that the type will change, on a type v1 would freeze.
 
-`pkg/css` alone would freeze 87 symbols including `ComputedStyle`, whose own doc
-comment says the typed property set is *"deliberately minimal"* and that properties
-outside it *"do not yet populate a typed computed field. That is expected, not a
-gap."* That is a written promise that the type will change, on a type v1 would
-freeze.
+**Result: 50 exported packages → 8.** Public: `omnidoc`, `docx`, `xlsx`, `pdf`,
+`render`, `crop`, `heif`, `resource`. The other 40 moved to a single flat
+`pkg/internal/`.
 
-Move under `internal/`: `css`, `layout`, `layout/css`, `layout/cssbox`,
-`layout/inline`, `layout/paint`, `filtereffects`, `pdf/content`, `pdf/pageres`,
-`svg/draw`, `render/imageconv`, and the `render/*write` backends.
+**Verification changed the plan's lists in three ways.**
 
-Keep public: `omnidoc`, `docx`, `xlsx`, `crop`, `heif`, `resource`, `render`, `pdf`,
-`svg`, `font`.
+*The move-list and keep-list were mutually inconsistent.* Three "keep public"
+packages exposed "move to internal" types in exported signatures: `font.New`
+returns `content.GlyphSource`, and `svg.HostContext` has `css.Stylesheet` and
+`css.Node` fields. An external caller could not have named those types — the
+packages would have compiled but been unusable. Resolved by moving `font` and
+`svg` internal too; both leaks were only exercised from packages that were
+themselves moving, so nothing was lost.
 
-Scale: `layout/cssbox` is referenced by 104 files, `css` by 78, `layout` by 66. It is
-a large mechanical diff and a compiler-checked one — nothing outside the repo can
-break, because nothing outside the repo can import these yet. That is exactly why it
-has to happen before the tag and not after.
+*The plan classified 30 of 50 packages and was silent on 20* — including `html`,
+`pptx`, `epub`, `rtf`, `markdown`, `pdf/extract`, `render/raster` and `webp`.
+Checked individually: every one is imported only from inside this repo, so all
+moved.
+
+*Per-parent `internal/` directories do not work here.* The first attempt put each
+under its public ancestor (`pdf/internal/content`, `render/internal/raster`), and
+the compiler rejected it: Go scopes `internal` to the parent of the `internal`
+element, so `render/internal/raster` cannot import `pdf/internal/content`. A
+single top-level `pkg/internal/` is the only arrangement that lets the engine
+packages keep importing each other.
+
+Scale, as predicted: 263 files needed import rewrites (`layout/cssbox` was
+referenced by 104, `css` by 78, `layout` by 66). The diff is mechanical and
+compiler-checked, and the full suite — including every golden image — passes
+unchanged, which is the property that matters for a pure move.
+
+**What the compiler could not check.** Three classes of stale reference survived
+the build and had to be found by hand:
+
+- `.golangci.yml` excluded the vendored jbig2 decoder by its old path, so 14 lint
+  findings appeared in code we deliberately do not lint.
+- Relative `testdata` paths in tests broke wherever a package changed depth
+  (`filepath.Join("..", "..", ...)`), including cross-package ones where the
+  sibling also moved — and one, `imageconv` → `heif`, where the sibling stayed
+  public and the other did not.
+- 35 non-Go files referenced old paths. The docs are updated; `testdata/htmldoc/`
+  and the goldens are deliberately **not**, because that showcase's text is
+  rendered into golden output, so a prose fix there would force a golden
+  regeneration and bury the real diff.
+
+Verified from outside the module: a separate module can import all eight public
+packages, and importing `pkg/internal/css` fails with *"use of internal package …
+not allowed"*.
 
 ### 2. Decide `render.Device`'s fate
 
@@ -661,7 +694,7 @@ All cheap. All currently wrong.
 ### 6. Two silent degradations, and a backlog entry that understates them
 
 `unicode-range` and `font-display` are **not parsed at all**. `parseFontFace`
-(`pkg/css/fontface.go:26-36`) switches on `font-family`, `src`, `font-weight`, and
+(`pkg/internal/css/fontface.go:26-36`) switches on `font-family`, `src`, `font-weight`, and
 `font-style`; everything else is discarded with no log, and `FontFace` has no field
 for them. Grep finds them nowhere in non-test source.
 
@@ -678,12 +711,12 @@ Three more silent paths worth a log while in here:
 - `position: relative` on a text-only inline box — a no-op with no log
   (`FIDELITY-BACKLOG.md:145`).
 - Grid flow-axis-locked placement — documented in a code comment at
-  `pkg/layout/css/grid_place.go:335`, not at runtime.
-- Margin-collapse edge cases — same, `pkg/layout/css/block.go:345`.
+  `pkg/internal/layout/css/grid_place.go:335`, not at runtime.
+- Margin-collapse edge cases — same, `pkg/internal/layout/css/block.go:345`.
 
 And verify one claim before repeating it: `FIDELITY-BACKLOG.md:335` says PDF tiling
 patterns are "skipped + logged"; the log was not found at
-`pkg/pdf/content/interp.go:47`.
+`pkg/internal/content/interp.go:47`.
 
 ### 7. Move shipped work out of the backlog docs
 
@@ -710,7 +743,7 @@ and `transform` in GAPS-2), so the warning is still under-counting.
 **Verified by rendering, not by reading the comment.** A 200px box with
 `margin: 0 auto` in a 600px viewport renders hard against the left edge.
 
-`pkg/layout/css/block.go:1131` — `usedEdges` resolves auto margins to 0, and says so:
+`pkg/internal/layout/css/block.go:1131` — `usedEdges` resolves auto margins to 0, and says so:
 *"Auto margins compute to 0 in this PR (horizontal margin:auto centering is
 deferred)."*
 
@@ -724,7 +757,7 @@ Needs a showcase section and regenerated goldens per the project rule.
 
 ## Phase 4 — Release surface
 
-9. **`pkg/layout` has no package doc comment** — the only one of 50 missing it. It
+9. **`pkg/internal/layout` has no package doc comment** — the only one of 50 missing it. It
    renders blank on pkg.go.dev, which the README badge links to directly.
 10. **Zero `Example` functions in the repo.** With ~70 exported functions, pkg.go.dev
     will show no runnable examples at all. The highest-leverage doc fix available;
@@ -755,7 +788,7 @@ Two things confirmed **fine**, so nobody re-investigates them:
 - **Coverage is strong** — 87.9% on `pkg/omnidoc`, 86.3% `docx`, 84.3% `xlsx`. The
   apparent 0% packages are a measurement artifact; re-measured with `-coverpkg` they
   are 73–92%. One genuine gap: `TranscodeToPNG`
-  (`pkg/render/imageconv/imageconv.go:25`) is 0% even cross-package, and it is the
+  (`pkg/internal/imageconv/imageconv.go:25`) is 0% even cross-package, and it is the
   sole path stopping HEIC images from degrading to alt text in DOCX/EPUB/RTF/PPTX.
 
   Read that number with Phase 0 in mind, though. `pkg/xlsx` sits at 84.3% and still

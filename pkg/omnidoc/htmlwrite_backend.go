@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nathanstitt/omnidoc/pkg/render/htmlwrite"
+	"github.com/nathanstitt/omnidoc/pkg/internal/htmlwrite"
 )
 
 // HTMLWriteOptions controls conversion to HTML (PDF/DOCX/HTML -> HTML).
