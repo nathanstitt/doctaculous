@@ -1,3 +1,22 @@
+// Package layout holds the engine's device-independent display list: the laid-out
+// result every frontend produces and every backend consumes.
+//
+// A Pages is a sequence of Page, and a Page is a flat, ordered slice of Item — one
+// variant per thing that can be drawn (glyph runs, rules, borders, images, gradients,
+// shadows, filter and clip brackets). Geometry is already resolved to points in a
+// Y-down page space whose origin is the page's top-left corner, so nothing downstream
+// re-runs layout; the paint stage maps page space to device pixels with a single
+// matrix. Items are consumed in slice order, which is paint order.
+//
+// This is the seam described in docs/ARCHITECTURE.md. Layout happens ONCE, above this
+// package; rasterization, PDF writing, and the reflow writers all read the same Item
+// slice through render.Device, which is what keeps a page identical across backends
+// and lets a new backend be added without touching layout.
+//
+// The sibling packages do the work that produces these types: layout/cssbox is the
+// format-neutral box model, layout/css the CSS layout engine, layout/inline the
+// shaping and line-breaking core, and layout/paint turns laid-out fragments into the
+// Items defined here.
 package layout
 
 import (
