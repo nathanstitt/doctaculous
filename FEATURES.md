@@ -23,6 +23,12 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   output. These matter beyond fidelity: a stack overflow and an OOM are raised through
   `runtime.throw`, which `recover()` cannot catch, so the per-page recover guarantee depends on
   them. Every one was found by fuzzing, not by reading the code.
+- **Every raster allocation is bounded** (`maxPixels`, ~134M px): the page canvas and every image
+  decoded onto it both take their dimensions from the file, so both are capped. The page path can
+  compare in `float64` (which cannot wrap); the image path compares by **division**, because its
+  row arithmetic (`w*nComps*bpc`, `rowBytes*h`) is integer and a large `/Height` wraps the product
+  negative — sliding past a naive size check and panicking inside `image.NewRGBA`. A refused image
+  is logged and skipped; the rest of the page still renders.
 - **A blank page and an unreadable one are different values** (`Page.ContentBytes`): a page with no
   `/Contents` (or an empty array) is a blank page — no bytes, no error, which is legal and common.
   A `/Contents` that is *present but does not resolve to a stream* is an error. They used to be the
@@ -680,6 +686,15 @@ bullet's design rationale is in its PR:
 - **Parse + cascade** (`pkg/docx`, `pkg/docx/style`): the ZIP/OPC container, `document.xml`
   (paragraphs, runs, `w:t`/`w:br`/`w:tab`), run and paragraph properties, section geometry
   (`w:sectPr`), and the full `docDefaults → basedOn → direct` cascade.
+- **Zip bombs are bounded in aggregate, not just per part** (`maxTotalPartBytes`, 512 MiB; the same
+  budget in `pkg/epub`): both readers already capped each part at 256 MiB, but both do bulk reads —
+  `word/media/*` for DOCX, every container entry for EPUB — so N parts each just under the per-part
+  cap multiplied. Measured, a 4 MB `.docx` holding 20 compressible media parts decompressed to
+  **4.2 GB** and drove peak RSS to 6 GB, with every individual part inside its limit the whole way.
+  Over-budget parts are dropped, so a hostile document degrades to missing images rather than
+  taking the process down; DOCX takes parts in sorted order so the truncation is deterministic
+  rather than following map iteration. PPTX and XLSX need no such budget — they fetch one part at a
+  time and never accumulate.
 - **CSS-engine convergence** (`pkg/docx/cssbox`): DOCX lowers straight to `cssbox` +
   `ComputedStyle` and runs through the shared CSS engine, with page geometry supplied as a
   synthesized `@page` stylesheet. The old flat model and engine are deleted.
@@ -801,6 +816,20 @@ CLI `tomd <pdf>` / `tohtml`):
   `ErrUnsupportedFormat`/`ErrSameFormat`. `DetectFormat` is content-first — magic, then the
   extension hint, then a WHATWG HTML sniff, with no UTF-8⇒text fallback. `Open`/`OpenBytes` sniff
   any supported format and the PDF path stays byte-identical; `OpenAs`/`OpenBytesAs` skip detection.
+- **Branchable errors, not string matching**: `ErrNoStructure` (the document carries no box tree the
+  structure writers can walk — an SVG, whose renderer lays out pages but keeps no tree) and
+  `ErrPageOutOfRange`. Both are wrapped by every site that raises them, across nine writers that
+  previously returned bare `fmt.Errorf` in two different wordings. `omnidoc.ErrSheetNotFound` is now
+  an alias of `xlsx.ErrSheetNotFound` rather than a second value meaning the same thing — they were
+  distinct sentinels whose messages differed by one colon, so `errors.Is` between them was false in
+  both directions and a caller using both packages would write a check that compiled and never
+  matched. Wiring `ErrNoStructure` surfaced a live bug: `svg → md` used to write an empty file and
+  exit 0, because the nil box tree passed a type assertion that only tested the interface.
+- **`WithContext(ctx)`** bounds open-time box generation, resource loading and layout on **every**
+  `Open*` entry point. It replaces a parallel `*Context` naming family that covered HTML and URLs
+  only; the plumbing already existed but was unexported, as `OpenHTMLBytesContext`'s own doc
+  admitted. A caller's own `WithContext` outranks the one those functions prepend, and a nil ctx is
+  ignored.
   Every opener stamps `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write`
   dispatch any valid input→output pair; the legacy `ConvertXToY` wrappers were shims pinned
   byte-identical and have since been removed. Same-format conversion is a deliberate
@@ -989,6 +1018,10 @@ document model consumed externally by tinycld/text):
   flipped, and the input capability bit. Landed with a cross-cutting engine fix — **data: image
   URIs decode without a resource loader**, because `resource.LoadDataURL` short-circuits the image
   cache, which is the browser rule. `rtf-specimen` golden.
+- **Bounded list nesting** (`maxListLevel`, 64): the HTML emitter opens one `<ul>`/`<ol>` per
+  `\ilvl` level, so an unbounded value is an unbounded write rather than a deep list — a 34-byte
+  document with `\ilvl2000000000` never finished, and `\ilvl100000` turned 30 bytes into 1.4 MB of
+  markup. RTF allows levels 0–8 and Word exposes nine, so the clamp cannot reach a real document.
 
 **RTF output** (`pkg/render/rtfwrite`, `WriteRTF`, `convert.. out.rtf`):
 
@@ -1512,6 +1545,21 @@ read+write vocabulary for the tinycld text adoption path):
   chunk's true box needs shaping, which happens a layer away from where paint servers resolve;
   `userSpaceOnUse` is exact. A `<tspan>` nesting cap and a whole-document character budget
   (`maxTextChars`, 200,000) bound text against hostile input, both logged once.
+- **Fuzzed against hostile input** (`FuzzParse` in `pkg/svg`, `pkg/css`, seeded from the resvg
+  corpus): `svg.Parse` survives arbitrary bytes through XML parsing, the cascade, and scene
+  building. Two defects it found and that are now fixed: a `<text>` position list whose recorded
+  character range outlived the characters after a trailing space was stripped (an index panic out of
+  the public `Parse`), and a `closepath` followed by numbers, which the implicit-repetition rule
+  repeated forever without consuming input (a hang). `pkg/css` fuzzes `Parse` + cascade,
+  `ParseDeclarations`, and `ParseColorValue`, and came back clean.
+- **Bounded HTML nesting** (`pkg/html`, `maxNestingDepth` 4096): `golang.org/x/net/html` resolves
+  close tags with a linear scan of the open-element stack, so deep nesting is quadratic — 60,000
+  nested `<div>` take 15s inside the dependency and 200,000 do not finish. Since the cost lands
+  before this package gets control, `Parse` counts nesting with a linear tokenizer pre-pass (11 ms
+  at 200,000 levels, early-exit) and returns `ErrTooDeeplyNested` rather than handing the document
+  over. Box generation applies its own `maxBoxTreeDepth` (1024) for the same reason: `generate`
+  recurses per element carrying a 2,144-byte `ComputedStyle` by value, so ~80,000 levels exhausted
+  the goroutine stack — a `fatal error` no `recover` can catch.
 - **`letter-spacing` and `word-spacing` on SVG text** — applied as a post-shaping advance adjustment
   on the flat glyph slice, resolved per SOURCE CHARACTER, so a `<tspan letter-spacing="10">` inside a
   `<text letter-spacing="3">` widens only its own gaps. Values may be a bare number, any absolute

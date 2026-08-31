@@ -164,6 +164,27 @@ type reflowTree interface{ cssboxRoot() *cssbox.Box }
 // cssboxRoot exposes the finalized box tree for the conversion backends (WriteMarkdown).
 func (r *reflowRenderer) cssboxRoot() *cssbox.Box { return r.root }
 
+// structureRoot returns the document's box tree for a structure writer, or an
+// error wrapping [ErrNoStructure] naming the caller.
+//
+// It checks the ROOT, not just the interface. Satisfying reflowTree is not the
+// same as having a tree: an SVG document is a reflowRenderer built with pages but
+// no root, so the assertion succeeds and cssboxRoot returns nil. The writers then
+// walked a nil tree, wrote nothing, and returned nil -- an empty output file
+// reported as success, which is the failure mode Phase 0 item 0g was about, in a
+// path 0g did not reach.
+func structureRoot(d *Document, writer string) (*cssbox.Box, error) {
+	rt, ok := d.r.(reflowTree)
+	if !ok {
+		return nil, fmt.Errorf("omnidoc: %s: %w", writer, ErrNoStructure)
+	}
+	root := rt.cssboxRoot()
+	if root == nil {
+		return nil, fmt.Errorf("omnidoc: %s: %w", writer, ErrNoStructure)
+	}
+	return root, nil
+}
+
 // reflowResources is implemented by renderers that retain their source's resource
 // loader, so a conversion backend that embeds media (the DOCX writer) can fetch the
 // document's images. The PDF renderer does not implement it (extraction carries no

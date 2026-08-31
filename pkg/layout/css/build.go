@@ -111,7 +111,17 @@ func BuildWithFontsPagesRunningMedia(ctx context.Context, doc *html.Document, lo
 	resolver := gcss.NewResolver(sheets, logf)
 	resolver.SetMedia(media)
 
-	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root), running)
+	// Report a depth truncation once: a document deep enough to hit the cap is
+	// usually also wide, and one line is the useful signal.
+	depthWarned := false
+	depthLogf := func(format string, args ...any) {
+		if depthWarned {
+			return
+		}
+		depthWarned = true
+		logf(format, args...)
+	}
+	root = generate(doc.Root, resolver, resolver.ComputeRoot(doc.Root), running, 0, depthLogf)
 	if root == nil {
 		// The root itself computed to display:none (e.g. html{display:none}).
 		// Degrade to an empty block root rather than falling through to the
@@ -170,15 +180,41 @@ func assembleSheets(ctx context.Context, doc *html.Document, loader resource.Res
 	return sheets, faces, pages
 }
 
+// maxBoxTreeDepth bounds the element nesting generate will descend into. It is
+// far beyond anything a real document reaches -- the deepest human-authored HTML
+// is a few dozen levels -- and hostile input past it is treated like truncated
+// input: the prefix is kept and the rest dropped with a log.
+//
+// The cap is not decorative. generate recurses once per element and takes a
+// gcss.ComputedStyle BY VALUE, which is 2,144 bytes, so nesting depth is stack
+// depth multiplied by a two-kilobyte frame. Measured: ~80,000 nested <div> (about
+// 880 KB of HTML) exhausts Go's 1 GB goroutine stack and raises
+// `fatal error: stack overflow` through runtime.throw -- which recover() cannot
+// catch, so the recover at the BuildWithFonts boundary is structurally unable to
+// contain it and the whole process dies.
+//
+// Passing the style by pointer would raise the ceiling rather than remove it,
+// and is a far wider change; the bound is what actually makes the failure mode
+// safe. 1024 matches the SVG parser's maxElementDepth for the same reason.
+const maxBoxTreeDepth = 1024
+
 // generate recursively builds the box for element e (whose computed style is cs)
 // and its descendants. Returns nil for a display:none subtree. A box with
 // position:running(name) (CSS GCPM) is built normally but recorded in running under
 // its name; the parent loop then omits it from its in-flow children (taken fully out
 // of flow). running is never nil (the build entry initializes it).
-func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running map[string]*cssbox.Box) *cssbox.Box {
+//
+// depth is the current nesting level, bounded by maxBoxTreeDepth; logf reports
+// the truncation once (both may be threaded from the build entry).
+func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running map[string]*cssbox.Box, depth int, logf func(string, ...any)) *cssbox.Box {
 	if cs.Display == "none" {
 		return nil
 	}
+	if depth >= maxBoxTreeDepth {
+		logf("html: element nesting exceeds %d, truncating (rendering parsed prefix)", maxBoxTreeDepth)
+		return nil
+	}
+	depth++
 
 	b := &cssbox.Box{Style: cs}
 	classifyDisplay(b, cs.Display)
@@ -250,7 +286,7 @@ func generate(e *html.Element, r *gcss.Resolver, cs gcss.ComputedStyle, running 
 		switch c := child.(type) {
 		case *html.Element:
 			childCS := r.Compute(c, cs)
-			if cb := generate(c, r, childCS, running); cb != nil {
+			if cb := generate(c, r, childCS, running, depth, logf); cb != nil {
 				if cb.Position == cssbox.PosRunning {
 					// Out of flow: record by name (last duplicate wins) and do NOT
 					// append to the parent's in-flow children.

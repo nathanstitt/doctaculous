@@ -173,9 +173,45 @@ structurally unable to catch it:
   survives, ~1.5 MB raises `fatal error: stack overflow`. Bounded at
   `maxObjectDepth` (256), enforced in both `parseArray` and `parseDictOrStream`
   since they recurse through each other via `parseFromToken`.
-- `pkg/layout/css/build.go` — ~150k nested `<div>` (1.6 MB) kills the process.
-  **Still open.** Frames are large because `css.ComputedStyle` passes **by value**
-  through `Compute`→`inheritFrom`.
+- ~~`pkg/layout/css/build.go`~~ — **done.** Reproduced, and worse than recorded:
+  **80,000** nested `<div>` (~880 KB, not 1.6 MB) is enough.
+  `sizeof(ComputedStyle)` is **2,144 bytes** and `generate` takes it by value, so
+  nesting depth is stack depth times a two-kilobyte frame. Bounded at
+  `maxBoxTreeDepth` (1024), degrading with a once-only log. Passing the style by
+  pointer would raise the ceiling rather than remove it, and touches far more
+  code; the bound is what makes the failure mode safe.
+
+### 0d-bis. The HTML parser is quadratic in nesting — **DONE, not in the audit**
+
+Found while reproducing 0d, upstream of it, and different in kind:
+`pkg/html.Parse` does not crash on deep nesting — it **hangs**.
+
+`golang.org/x/net/html` resolves a close tag with `indexOfElementInScope`, which
+scans the open-element stack linearly, so nesting is quadratic in open elements.
+Measured *inside* `xhtml.Parse`:
+
+| nested `<div>` | time in `xhtml.Parse` | this repo's own tree walk |
+| --- | --- | --- |
+| 30,000 | 3.7 s | ~6 ms |
+| 60,000 | 15.1 s | ~12 ms |
+| 200,000 | did not finish | — |
+
+Four times the time for twice the depth — textbook quadratic. **The cost is
+entirely in the dependency**, and it lands before this package gets control, so
+it cannot be bounded after the fact.
+
+Fixed by declining over-deep input up front: a tokenizer-only pre-pass counts
+nesting and returns `ErrTooDeeplyNested` past `maxNestingDepth` (4096). It uses
+`x/net/html`'s own tokenizer, so tag recognition matches the parser exactly
+rather than relying on a hand-rolled scan of markup, and it is linear — 11 ms for
+200,000 levels — with an early exit, so refusing costs microseconds regardless of
+file size. Void elements are excluded, since they never enter the open-element
+stack.
+
+Worth recording in `docs/DEPENDENCIES.md`: this is a performance characteristic
+of an approved dependency that we have to defend against ourselves, not a bug we
+can fix upstream.
+
 
 ### 0e. PDF page-tree has no visited-set — **DONE**
 
@@ -228,15 +264,57 @@ files 0f does not name:
 After the four fixes: **181 million executions clean**, against a crash within 78
 seconds before them.
 
-### 0f. Overflow defeats the image-dimension guard — audit-reported
+### 0f. Overflow defeats the image-dimension guard — **DONE**
 
-`pkg/render/raster/page.go` — the bounds check multiplies width by height, so at
-w=h=2³¹ the product is negative and at 2³⁴ it is exactly zero. Both pass the guard,
-then `image.NewRGBA` allocates terabytes. Use an overflow-safe comparison.
+**The headline claim does not reproduce, and this is the first audit item that is
+simply wrong.** `pkg/render/raster/page.go` does not multiply in integer
+arithmetic — it computes `fW*fH` in **float64**, which cannot wrap, and its
+comment already says why: *"Compute dimensions in float64, then validate before
+casting to int, so an attacker-controlled MediaBox or DPI cannot overflow int."*
+`git log -S` shows that guard has been there since the raster layer was written.
 
-Related, same shape: RTF `\ilvl` amplifies 35 bytes to 56 MB (`pkg/rtf/rtf.go`), and
-docx/epub have a ~2,500× zip-bomb ratio (`zip.go`, `epub.go`) where pptx/xlsx are
-immune because they index lazily.
+Measured, every case the audit named is correctly refused:
+
+| MediaBox | result |
+| --- | --- |
+| 2³¹ × 2³¹ | refused — "page too large … exceeds 134217728-pixel cap" |
+| 2³⁴ × 2³⁴ | refused |
+| 2⁴⁰ × 2⁴⁰ | refused |
+
+**The bug is real, but in a different file.** `pkg/render/raster/image.go`,
+`decodeRawImage`, takes an image's `/Width` and `/Height` with only a `> 0` check
+and then does the integer arithmetic the audit described: `w*nComps*bpc` for the
+row stride and `rowBytes*h` for the short-data guard. At h = 2⁶⁰ that product goes
+negative, the guard passes, and `image.NewRGBA` is reached with an impossible
+height — where it **panics**. Caught only by the per-page recover, which costs the
+whole page for one bad image. Now bounded against the same `maxPixels` the page
+path uses, compared by **division** so the check cannot itself overflow;
+`maxPixels` is promoted to a package constant so both paths share one definition.
+
+**RTF `\ilvl` is worse than recorded.** Not "35 bytes to 56 MB" — the HTML emitter
+writes one `<ul>`/`<ol>` per level, so a **34-byte** document with
+`\ilvl2000000000` **never finishes at all**. At `\ilvl100000` it is 30 bytes in,
+1.4 MB out (46,000×). Clamped to `maxListLevel` (64); RTF allows 0–8 and Word
+exposes nine.
+
+**The zip-bomb entry understates the ratio and misplaces the cause.** Both readers
+already bound each part at 256 MiB — the gap is that neither bounded the **total**,
+and both do bulk reads (`partsWithPrefix` over `word/media/*`, and EPUB's
+`OpenBytes`, which decompresses every entry). Measured: a **4 MB `.docx` with 20
+compressible media parts decompressed to 4.2 GB** (1,028×, not ~2,500×) and drove
+peak RSS to 6 GB — with every individual part inside its 256 MiB limit the entire
+way. Fixed with a `maxTotalPartBytes` budget (512 MiB) in both; DOCX takes parts
+in sorted order so a truncation is deterministic rather than depending on map
+iteration.
+
+**The pptx/xlsx immunity claim holds.** Checked: `rawPart` and its siblings fetch
+one part at a time and never accumulate, so the per-part cap is sufficient there.
+
+Covered by `pkg/render/raster/image_bounds_test.go`, `pkg/rtf/ilvl_test.go`,
+`pkg/docx/zipbomb_test.go`, and `pkg/epub/zipbomb_test.go`. The zip budgets are
+test-overridable so proving them costs kilobytes rather than half a gigabyte —
+allocating the real ceiling under `-race` is how a CI runner gets OOM-killed
+(see item 13).
 
 ### 0g. Silent wrong output on the PDF path — **DONE (PDF half)**
 
@@ -299,7 +377,7 @@ distinguishing author-written declarations from synthesized ones, which is a rea
 design question rather than a plumbing job. It is a missing diagnostic, not wrong
 output, so it does not block the tag on 0g's own argument.
 
-### 0h. Add fuzz targets — **`xlsx` and `pdf` done; 7 parsers remain**
+### 0h. Add fuzz targets — **`xlsx`, `pdf`, `css`, `svg` done; 5 parsers remain**
 
 The audit's sharpest structural point: **there are no fuzz targets for `pdf`, `docx`,
 `pptx`, `rtf`, `epub`, `svg`, `css`, `font`, or `markdown`.** Fuzzing today covers
@@ -325,6 +403,39 @@ reproduce from the persisted corpus entry, because the killing input is not alwa
 written before the process dies. Writing each input to a file at the top of the
 fuzz body, and removing it on success, is what actually recovered the 504-byte
 `/N` case here.
+
+**`css` and `svg` landed here** (`pdf` and `xlsx` on their own branches). Four
+targets: `css.Parse` (parse + cascade), `ParseDeclarations`, `ParseColorValue`,
+and `svg.Parse` (XML + cascade + scene build, seeded from 40 real resvg
+fixtures).
+
+`pkg/css` came back **clean** — 20M, 144M and 169M executions on the three
+targets, no crashes. That is a genuine result rather than a weak target: the
+package is written defensively, `Parse` is documented as total, and the property
+parsers already reject what they cannot use.
+
+`pkg/svg` found **two defects in under four seconds each**, both escaping the
+public `Parse` on documents under 70 bytes:
+
+- **`<text x="0">0 <A>` panicked** with `index out of range [1] with length 1`.
+  `recordLists` stores a `[start,end)` span over the character slice, and
+  `dropTrailingSpace` then shrinks that slice. The parser already knew about this
+  hazard — `trimLengths` exists for exactly it, and its comment says so — but the
+  position lists were missed while the `textLength` ranges were handled.
+- **`<path d="M0 0Z0 0l 0 0">` hung forever.** A number where a command is
+  expected means "repeat the previous command", but `closepath` consumes no
+  arguments, so repeating it never advances the scanner. SVG's path grammar has
+  no implicit repetition for `closepath`, so stopping is both the correct parse
+  and the terminating one.
+
+After both fixes: 80M executions clean.
+
+Two things worth carrying to the remaining parsers. First, **a clean fuzz run is
+information, not a failed attempt** — `css` being clean at 300M+ executions is
+evidence the package is sound, and it took the same effort to establish as the
+two SVG bugs. Second, **seed from the real corpus**: the SVG target seeds from 40
+resvg fixtures, which is what gave the mutator valid structure to corrupt rather
+than making it discover SVG syntax from scratch.
 
 Also worth noting: `pkg/pdf/filter/jbig2` is excluded from golangci-lint as vendored
 code, so it receives no static analysis at all despite containing several of the
@@ -415,7 +526,7 @@ Two viable options, pick one:
   interfaces discovered by type assertion (`interface{ RenderOffscreen(...) }`).
   More work now; grows forever without breaking.
 
-### 3. Export `WithContext(ctx)` as an `OpenOption`
+### 3. Export `WithContext(ctx)` as an `OpenOption` — **DONE**
 
 `context.Context` is missing from 40 of 45 `Open*` functions, and absent entirely
 from `pkg/docx` and `pkg/xlsx` — the two packages the README designates as supported
@@ -425,12 +536,22 @@ full-package zip and XML parsing with no way to cancel.
 The codebase already felt this and worked around it with a parallel `*Context` naming
 family for HTML and URL only. `OpenHTMLBytesContext`'s doc admits the plumbing
 exists but is unexported: *"ctx rides in as the unexported withOpenContext option…
-(there is no exported way to, today)"*.
+(there is no exported way to, today)"* — quoted verbatim from the source, and still
+accurate.
 
-Exporting that one option retires the whole `*Context` name family before it is
-frozen. `OpenOption` is already variadic on most of these, so it is additive.
+Exported as `WithContext`, a one-line wrapper over the existing unexported option.
+Verified by cancellation, not by compilation: an already-cancelled context makes
+`OpenHTMLBytes` return `context.Canceled`, and — the point of the change — the
+same option cancels the **Markdown, text and CSV** frontends, which the `*Context`
+family never covered. Ordering matches those functions (they prepend, so a
+caller's own `WithContext` still wins), and a nil ctx is ignored.
 
-### 4. Reconcile the duplicate `ErrSheetNotFound`
+Note this does **not** reach `pkg/docx` / `pkg/xlsx` themselves: their `Open`,
+`Edit` and `Save` take no options at all, so cancelling their zip and XML parsing
+needs new signatures rather than a new option. That is a separate change, and one
+worth making before the tag for the same reason as this one.
+
+### 4. Reconcile the duplicate `ErrSheetNotFound` — **DONE**
 
 Two sentinels that do not interoperate:
 
@@ -440,18 +561,31 @@ Two sentinels that do not interoperate:
 Verified by compiling a program against both packages: `errors.Is` between them
 returns **false**, and the messages differ only by a colon. A caller using both —
 exactly the tinycld case — will write the wrong check and it will compile and pass
-review.
+review. **Reproduced exactly**, both directions false.
 
-Fix: make one an alias of the other, or wrap.
+Fixed by aliasing: `omnidoc.ErrSheetNotFound = xlsx.ErrSheetNotFound`. Both names
+keep working, so no caller breaks, and `pkg/xlsx` owns the concept because it is
+the lower-level package that resolves sheet names. The `omnidoc` message gains a
+colon as a result — a visible string change, harmless because the whole point is
+that nobody should have been matching on it.
 
-While here, two error classes have no sentinel at all. Ten sites return bare
-`fmt.Errorf` for one branchable condition ("this document cannot produce a box
-tree"): `docxwrite_backend.go:41`, `csvwrite_backend.go:37`, `rtfwrite_backend.go:41`,
-`epubwrite_backend.go:35`, `htmlwrite_backend.go:31`, `pptxwrite_backend.go:36`,
-`xlsxwrite_backend.go:28`, `markdown_backend.go:39`, `pdfwrite_backend.go:64`. A
-caller wanting "fall back to rasterizing if structure extraction won't work" has to
-string-match. Add `ErrNoStructure`, and `ErrPageOutOfRange` for
-`reflow_paint.go:19`.
+`ErrNoStructure` and `ErrPageOutOfRange` added and wired: nine writers and the
+page-range helper now wrap them. The nine did not even agree on their wording —
+seven said "document has no convertible structure" and two said "document is not a
+reflow document" — so a caller string-matching had two strings to guess at.
+
+**Writing the test found a live bug the plan did not have.** Asserting
+`ErrNoStructure` needs a document with no box tree, and the obvious candidate (an
+opened image) turned out to have one. The real case is **SVG**: its renderer
+satisfies `reflowTree` but is built with pages and no root, so `cssboxRoot()`
+returns nil, the type assertion succeeds, and the writers walked a nil tree —
+producing **an empty output file and a nil error**. That is precisely the failure
+mode item 0g was about, on a path 0g never reached: `omnidoc convert x.svg x.md`
+wrote a zero-byte file and exited 0.
+
+Fixed with a `structureRoot` helper that checks the ROOT rather than just the
+interface, used by all nine writers. `svg → md` now exits 1 with a matchable
+error; `svg → png` is unaffected.
 
 Adding sentinels later is technically additive, but errors returned by v1.0 stay
 unmatchable forever, so callers written against v1.0 keep string-matching.

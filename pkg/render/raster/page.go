@@ -36,6 +36,16 @@ type Options struct {
 	FontProvider font.Provider
 }
 
+// maxPixels bounds any single allocated raster: ~134M px (about 11600² , or A0
+// at 300 dpi) — generous for real documents but bounded.
+//
+// It applies to the page canvas AND to every image decoded onto it, because both
+// take their dimensions from the file. The page path can compare in float64
+// (which cannot wrap); the image path must compare by division, since its row
+// arithmetic is integer and overflows into a negative product that passes a
+// naive size check.
+const maxPixels = 1 << 27
+
 // RenderPage rasterizes a single page to an *image.RGBA at the requested DPI,
 // honoring the page's /Rotate. It runs the content interpreter against the
 // raster Device. Unsupported features (e.g. text without a font backend yet)
@@ -70,7 +80,6 @@ func RenderPage(ctx context.Context, pg *pdf.Page, opts Options) (out *image.RGB
 	if !isFinitePositive(fW) || !isFinitePositive(fH) {
 		return nil, fmt.Errorf("raster: degenerate scaled size %gx%g", fW, fH)
 	}
-	const maxPixels = 1 << 27 // ~134M px (e.g. ~11600² or A0 @ 300dpi), generous but bounded
 	if fW*fH > float64(maxPixels) {
 		return nil, fmt.Errorf("raster: page too large (%.0fx%.0f px exceeds %d-pixel cap; lower DPI)", fW, fH, maxPixels)
 	}

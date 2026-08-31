@@ -26,11 +26,11 @@ func (o HTMLWriteOptions) toWriterOptions() htmlwrite.Options {
 // logical structure is recovered by extraction). Unlike GFM, HTML expresses table cell
 // spans natively, so extracted tables round-trip their colspan/rowspan losslessly.
 func (d *Document) WriteHTML(_ context.Context, out io.Writer, opts HTMLWriteOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteHTML: document has no convertible structure")
+	root, err := structureRoot(d, "WriteHTML")
+	if err != nil {
+		return err
 	}
-	if err := htmlwrite.Write(rt.cssboxRoot(), out, opts.toWriterOptions()); err != nil {
+	if err := htmlwrite.Write(root, out, opts.toWriterOptions()); err != nil {
 		return fmt.Errorf("omnidoc: write html: %w", err)
 	}
 	return nil

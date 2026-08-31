@@ -73,6 +73,20 @@ var (
 	// supported by the generic Convert/Write path; the format-specific writers
 	// (e.g. WriteHTML on an HTML document) remain unrestricted.
 	ErrSameFormat = errors.New("source and target are the same format")
+	// ErrNoStructure reports a document the structure writers cannot work from:
+	// it carries pixels or page geometry but no box tree to walk. Opened images
+	// are the usual case.
+	//
+	// It exists because this is a BRANCHABLE condition, not just a failure. The
+	// natural response is to fall back to rasterizing, and without a sentinel a
+	// caller had to string-match — across nine call sites that did not even agree
+	// on the wording ("document has no convertible structure" in seven of them,
+	// "document is not a reflow document" in the other two).
+	ErrNoStructure = errors.New("document has no convertible structure")
+	// ErrPageOutOfRange reports a page index outside [0, PageCount). It is
+	// separated from other failures because it is the one a caller can fix by
+	// asking for a different page.
+	ErrPageOutOfRange = errors.New("page index out of range")
 )
 
 // formatCaps is the single capability table consulted by both the API and the
