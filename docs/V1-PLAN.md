@@ -803,20 +803,45 @@ and resolution, not the tokenizer). Both corrections are recorded in `BACKLOG.md
 
 ---
 
-## Phase 3 — `margin: 0 auto` does not center
+## Phase 3 — `margin: 0 auto` does not center — **DONE**
 
 **Verified by rendering, not by reading the comment.** A 200px box with
 `margin: 0 auto` in a 600px viewport renders hard against the left edge.
+Reproduced before fixing (X=0, want X=200) and mutation-verified after.
 
-`pkg/internal/layout/css/block.go:1131` — `usedEdges` resolves auto margins to 0, and says so:
+`pkg/internal/layout/css/block.go` — `usedEdges` resolved auto margins to 0, and said so:
 *"Auto margins compute to 0 in this PR (horizontal margin:auto centering is
-deferred)."*
+deferred)."* That comment now points at `resolveAutoMarginsX` instead.
 
 This is the most common centering idiom in CSS. Every centered-layout document we
 render is wrong today, silently. The backlog sizes it small–medium, and the
 absolutely-positioned equivalent already shipped, so the concept is proven.
 
 Needs a showcase section and regenerated goldens per the project rule.
+
+**Outcome.** `resolveAutoMarginsX` implements CSS 2.1 §10.3.3, called from `layoutBlock`
+after the used width is known. It deliberately does NOT live in `usedEdges`: that
+function has 16 callers including intrinsic-width measurement and float sizing, where an
+auto margin genuinely is zero, so resolving there would have changed sizing paths that
+must not move.
+
+Four cases, all tested: two auto margins split the leftover evenly; one absorbs all of it
+and pushes the box to the opposite edge; a specified margin is honoured with auto taking
+only the remainder; and — the one that would have been a bug — a box WIDER than its
+container has negative leftover, which is floored at 0 so it overflows right instead of
+being dragged off the left edge of the page. The leftover is measured from the BORDER
+box, so padding and borders count; a content-box measurement would mis-centre by half
+the insets.
+
+Showcase §44 covers all five cases plus the over-wide clamp. **Zero layout movement in
+the existing corpus:** the full suite passed before the goldens were touched, meaning no
+document in the corpus used the idiom — which is why nothing caught this. The 44 existing
+golden pages each changed by exactly 30 pixels, in a 6×7 box in the footer, verified by
+decoded-pixel comparison and by cropping the region: the page-count total reading
+"21 / 44" became "21 / 45". Nothing else moved.
+
+`docs/BACKLOG.md` E2 is removed (29 open now), per the rule that shipped work leaves the
+backlog.
 
 ---
 

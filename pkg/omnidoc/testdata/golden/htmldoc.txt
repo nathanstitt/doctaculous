@@ -1200,3 +1200,33 @@ Which glyphs stay upright is Unicode's Vertical_Orientation property (UAX #50). 
 What is not implemented
 
 One line only. There is no vertical line wrapping: a run longer than the block extent overflows and logs, rather than starting a second line beside the first. vertical-lr is accepted and lays out identically to vertical-rl — the two differ only in which side subsequent lines stack from, and there are none — so it logs rather than quietly equating them. A shrink‑to‑fit vertical box (inline‑block, float) is still measured on the horizontal axis, so it comes out as wide as its text is long; transposing that means turning the intrinsic‑measure seam that table, grid and flex sizing all share, so it logs instead. Text decoration and inline‑box backgrounds are skipped on a vertical line: every span the painter computes is an X range, and drawing them anyway would rule a line across the page instead of beside the text. Vertical alternate glyph forms (the vert/ vrt2 font features) are out of scope — a rotated glyph is the rotated Latin form, not a purpose‑designed vertical one.
+
+44 / AUTO MARGINS
+
+margin: 0 auto
+
+The most common centering idiom in CSS did nothing. Auto margins resolved to zero, so every centered‑layout document rendered hard against the left edge — silently, and for as long as the engine had existed. No document in the corpus used it, which is why nothing caught it.
+
+margin: 0 auto
+
+margin-right: auto
+
+margin-left: auto
+
+margin-left: 50px; margin-right: auto
+
+Every rail is the same width, so the only thing moving each box is how its margins resolve. Two auto margins split the leftover space evenly and centre the box; one auto margin absorbs all of it and pushes the box to the opposite edge — which is why the second and third rails are mirror images. A specified margin is honoured as‑is and the auto one takes only what remains, so the fourth box sits at exactly 50px rather than being centred.
+
+What the leftover is measured from
+
+100 + 48
+
+The space to distribute is what is left after the whole border box — content, padding and borders together (CSS 2.1 §10.3.3). This box has a 100px content width but 20px of padding and a 4px border on each side, so 148px is centred, not 100px. Measuring from the content box instead would shift it 24px to the right.
+
+The case that must not centre
+
+wider than its container
+
+When the box is wider than the space it sits in, the leftover is negative. A naïve half‑split would give each margin a negative value and drag the box off the left edge of the page; the spec instead treats the auto margin as zero, so the box starts at the left and overflows to the right — what every browser does. The clamp is a one‑line floor, and the test that pins it is the reason it is not a one‑line bug.
+
+Vertical auto margins are untouched: in normal flow they compute to zero (CSS §10.6.3), and vertical centering with auto is a flex/grid feature that those paths resolve themselves. Only the horizontal axis is handled here.
