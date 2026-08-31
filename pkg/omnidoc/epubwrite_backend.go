@@ -30,9 +30,9 @@ func (o EPUBOptions) toWriterOptions() epubwrite.Options {
 // heading-less document is one chapter), a nav.xhtml table of contents, and
 // XHTML content documents serialized by the HTML writer.
 func (d *Document) WriteEPUB(ctx context.Context, out io.Writer, opts EPUBOptions) error {
-	rt, ok := d.r.(reflowTree)
-	if !ok {
-		return fmt.Errorf("omnidoc: WriteEPUB: document has no convertible structure")
+	root, err := structureRoot(d, "WriteEPUB")
+	if err != nil {
+		return err
 	}
 	wopts := opts.toWriterOptions()
 	// Embed images through the source's own resource loader when the backend
@@ -41,7 +41,7 @@ func (d *Document) WriteEPUB(ctx context.Context, out io.Writer, opts EPUBOption
 	if rr, ok := d.r.(reflowResources); ok {
 		wopts.Loader = rr.resourceLoader()
 	}
-	if err := epubwrite.Write(ctx, rt.cssboxRoot(), out, wopts); err != nil {
+	if err := epubwrite.Write(ctx, root, out, wopts); err != nil {
 		return fmt.Errorf("omnidoc: write epub: %w", err)
 	}
 	return nil

@@ -293,7 +293,7 @@ Two viable options, pick one:
   interfaces discovered by type assertion (`interface{ RenderOffscreen(...) }`).
   More work now; grows forever without breaking.
 
-### 3. Export `WithContext(ctx)` as an `OpenOption`
+### 3. Export `WithContext(ctx)` as an `OpenOption` — **DONE**
 
 `context.Context` is missing from 40 of 45 `Open*` functions, and absent entirely
 from `pkg/docx` and `pkg/xlsx` — the two packages the README designates as supported
@@ -303,12 +303,22 @@ full-package zip and XML parsing with no way to cancel.
 The codebase already felt this and worked around it with a parallel `*Context` naming
 family for HTML and URL only. `OpenHTMLBytesContext`'s doc admits the plumbing
 exists but is unexported: *"ctx rides in as the unexported withOpenContext option…
-(there is no exported way to, today)"*.
+(there is no exported way to, today)"* — quoted verbatim from the source, and still
+accurate.
 
-Exporting that one option retires the whole `*Context` name family before it is
-frozen. `OpenOption` is already variadic on most of these, so it is additive.
+Exported as `WithContext`, a one-line wrapper over the existing unexported option.
+Verified by cancellation, not by compilation: an already-cancelled context makes
+`OpenHTMLBytes` return `context.Canceled`, and — the point of the change — the
+same option cancels the **Markdown, text and CSV** frontends, which the `*Context`
+family never covered. Ordering matches those functions (they prepend, so a
+caller's own `WithContext` still wins), and a nil ctx is ignored.
 
-### 4. Reconcile the duplicate `ErrSheetNotFound`
+Note this does **not** reach `pkg/docx` / `pkg/xlsx` themselves: their `Open`,
+`Edit` and `Save` take no options at all, so cancelling their zip and XML parsing
+needs new signatures rather than a new option. That is a separate change, and one
+worth making before the tag for the same reason as this one.
+
+### 4. Reconcile the duplicate `ErrSheetNotFound` — **DONE**
 
 Two sentinels that do not interoperate:
 
@@ -318,18 +328,31 @@ Two sentinels that do not interoperate:
 Verified by compiling a program against both packages: `errors.Is` between them
 returns **false**, and the messages differ only by a colon. A caller using both —
 exactly the tinycld case — will write the wrong check and it will compile and pass
-review.
+review. **Reproduced exactly**, both directions false.
 
-Fix: make one an alias of the other, or wrap.
+Fixed by aliasing: `omnidoc.ErrSheetNotFound = xlsx.ErrSheetNotFound`. Both names
+keep working, so no caller breaks, and `pkg/xlsx` owns the concept because it is
+the lower-level package that resolves sheet names. The `omnidoc` message gains a
+colon as a result — a visible string change, harmless because the whole point is
+that nobody should have been matching on it.
 
-While here, two error classes have no sentinel at all. Ten sites return bare
-`fmt.Errorf` for one branchable condition ("this document cannot produce a box
-tree"): `docxwrite_backend.go:41`, `csvwrite_backend.go:37`, `rtfwrite_backend.go:41`,
-`epubwrite_backend.go:35`, `htmlwrite_backend.go:31`, `pptxwrite_backend.go:36`,
-`xlsxwrite_backend.go:28`, `markdown_backend.go:39`, `pdfwrite_backend.go:64`. A
-caller wanting "fall back to rasterizing if structure extraction won't work" has to
-string-match. Add `ErrNoStructure`, and `ErrPageOutOfRange` for
-`reflow_paint.go:19`.
+`ErrNoStructure` and `ErrPageOutOfRange` added and wired: nine writers and the
+page-range helper now wrap them. The nine did not even agree on their wording —
+seven said "document has no convertible structure" and two said "document is not a
+reflow document" — so a caller string-matching had two strings to guess at.
+
+**Writing the test found a live bug the plan did not have.** Asserting
+`ErrNoStructure` needs a document with no box tree, and the obvious candidate (an
+opened image) turned out to have one. The real case is **SVG**: its renderer
+satisfies `reflowTree` but is built with pages and no root, so `cssboxRoot()`
+returns nil, the type assertion succeeds, and the writers walked a nil tree —
+producing **an empty output file and a nil error**. That is precisely the failure
+mode item 0g was about, on a path 0g never reached: `omnidoc convert x.svg x.md`
+wrote a zero-byte file and exited 0.
+
+Fixed with a `structureRoot` helper that checks the ROOT rather than just the
+interface, used by all nine writers. `svg → md` now exits 1 with a matchable
+error; `svg → png` is unaffected.
 
 Adding sentinels later is technically additive, but errors returned by v1.0 stay
 unmatchable forever, so callers written against v1.0 keep string-matching.

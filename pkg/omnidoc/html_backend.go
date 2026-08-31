@@ -66,9 +66,27 @@ func defaultOpenConfig() openConfig {
 	return openConfig{viewportPt: defaultViewportPt, loader: nil, logf: nil, media: css.MediaScreen, ctx: context.Background()}
 }
 
+// WithContext bounds open-time work -- box generation, resource loading, and
+// layout -- with a caller's context. A nil ctx is ignored and the default
+// (context.Background()) stands.
+//
+// It applies to EVERY Open* entry point, because they all resolve their options
+// through the same config. That is why it is worth exporting: the codebase had
+// already felt the need for cancellation and answered it with a parallel
+// *Context naming family (OpenHTMLBytesContext, OpenURLContext,
+// OpenHTMLFileContext) covering HTML and URLs only, while the other Open*
+// functions had no way to cancel at all. One option covers them all, and retires
+// that family before a v1 tag freezes it.
+//
+// Ordering matches those functions: they prepend the option internally, so a
+// caller passing their own WithContext still wins.
+//
+//	doc, err := omnidoc.OpenBytes(data, omnidoc.WithContext(ctx))
+func WithContext(ctx context.Context) OpenOption { return withOpenContext(ctx) }
+
 // withOpenContext threads a caller's context into open-time layout and
-// resource loading. Unexported: the ctx-taking entry points (OpenReader,
-// OpenReaderAs, Convert) prepend it; a nil ctx is ignored.
+// resource loading. It backs the exported [WithContext]; the ctx-taking entry
+// points (OpenReader, OpenReaderAs, Convert) prepend it. A nil ctx is ignored.
 func withOpenContext(ctx context.Context) HTMLOption {
 	return func(c *openConfig) {
 		if ctx != nil {

@@ -1,7 +1,6 @@
 package omnidoc
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,7 +11,18 @@ import (
 // ErrSheetNotFound reports that a sheet name passed to WithSheets matches no
 // worksheet in the workbook. Callers can branch on it via errors.Is; the wrapping
 // error names the missing sheet.
-var ErrSheetNotFound = errors.New("xlsx sheet not found")
+//
+// It IS [xlsx.ErrSheetNotFound], not a second sentinel that happens to mean the
+// same thing. Until v1 these were distinct values whose messages differed by a
+// single colon ("xlsx sheet not found" here, "xlsx: sheet not found" there), so
+// errors.Is between them returned false in both directions -- a caller using both
+// packages, which is the whole point of this one, would write the wrong check and
+// it would compile, pass review, and silently never match.
+//
+// Aliasing rather than wrapping keeps both names working for existing callers
+// while making the two interchangeable; pkg/xlsx owns the concept because it is
+// the lower-level package that actually resolves sheet names.
+var ErrSheetNotFound = xlsx.ErrSheetNotFound
 
 // OpenXLSX reads and renders a SpreadsheetML (.xlsx) workbook: every visible
 // sheet becomes a ruled table (preceded by the sheet's name as a heading when

@@ -14,9 +14,11 @@ func fillBackground(img *image.RGBA, c color.Color) {
 	draw.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{}, draw.Src)
 }
 
-// errPageOutOfRange reports a page index outside [0,count).
+// errPageOutOfRange reports a page index outside [0,count). It wraps
+// [ErrPageOutOfRange] so a caller can branch on the condition with errors.Is
+// rather than string-matching, while the message still names the real bounds.
 func errPageOutOfRange(index, count int) error {
-	return fmt.Errorf("page index %d out of range [0,%d)", index, count)
+	return fmt.Errorf("%w: page index %d out of range [0,%d)", ErrPageOutOfRange, index, count)
 }
 
 // maxRasterPixels bounds a rasterized page's pixel count. It must stay equal to
