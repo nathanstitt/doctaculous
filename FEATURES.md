@@ -1506,6 +1506,21 @@ read+write vocabulary for the tinycld text adoption path):
   chunk's true box needs shaping, which happens a layer away from where paint servers resolve;
   `userSpaceOnUse` is exact. A `<tspan>` nesting cap and a whole-document character budget
   (`maxTextChars`, 200,000) bound text against hostile input, both logged once.
+- **Fuzzed against hostile input** (`FuzzParse` in `pkg/svg`, `pkg/css`, seeded from the resvg
+  corpus): `svg.Parse` survives arbitrary bytes through XML parsing, the cascade, and scene
+  building. Two defects it found and that are now fixed: a `<text>` position list whose recorded
+  character range outlived the characters after a trailing space was stripped (an index panic out of
+  the public `Parse`), and a `closepath` followed by numbers, which the implicit-repetition rule
+  repeated forever without consuming input (a hang). `pkg/css` fuzzes `Parse` + cascade,
+  `ParseDeclarations`, and `ParseColorValue`, and came back clean.
+- **Bounded HTML nesting** (`pkg/html`, `maxNestingDepth` 4096): `golang.org/x/net/html` resolves
+  close tags with a linear scan of the open-element stack, so deep nesting is quadratic — 60,000
+  nested `<div>` take 15s inside the dependency and 200,000 do not finish. Since the cost lands
+  before this package gets control, `Parse` counts nesting with a linear tokenizer pre-pass (11 ms
+  at 200,000 levels, early-exit) and returns `ErrTooDeeplyNested` rather than handing the document
+  over. Box generation applies its own `maxBoxTreeDepth` (1024) for the same reason: `generate`
+  recurses per element carrying a 2,144-byte `ComputedStyle` by value, so ~80,000 levels exhausted
+  the goroutine stack — a `fatal error` no `recover` can catch.
 - **`letter-spacing` and `word-spacing` on SVG text** — applied as a post-shaping advance adjustment
   on the flat glyph slice, resolved per SOURCE CHARACTER, so a `<tspan letter-spacing="10">` inside a
   `<text letter-spacing="3">` widens only its own gaps. Values may be a bare number, any absolute
