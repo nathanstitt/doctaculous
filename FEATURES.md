@@ -12,6 +12,17 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
 
 - **Parsing**: classic xref tables, xref streams (`/Type /XRef`), and object streams (`/ObjStm`).
   A broken `startxref` falls back to an object-scan rebuild.
+- **Bounded against hostile input** (`FuzzParse` in `pkg/pdf`): object nesting is capped at 256
+  (both `parseArray` and `parseDictOrStream`, which recurse through each other); the page-tree walk
+  marks visited object numbers, so a node whose `Kids` point back at an earlier node cannot fan out
+  — that is exponential *below* the depth cap, and produced 67 million pages from a 1.7 KB file;
+  an object stream's `/N` is checked against what its data can hold before sizing a slice, and a
+  stream whose `/N` refers back into itself is refused rather than recursing through `Document`;
+  a stream `/Length` is bounds-checked without integer overflow; and a decoded stream is capped at
+  `filter.MaxDecodedSize` (512 MB) *during* decompression, so a flate bomb never allocates its
+  output. These matter beyond fidelity: a stack overflow and an OOM are raised through
+  `runtime.throw`, which `recover()` cannot catch, so the per-page recover guarantee depends on
+  them. Every one was found by fuzzing, not by reading the code.
 - **Encryption** (`pkg/pdf/crypt.go`): Standard Security Handler with an empty user password, over
   RC4 (V1/V2), AES-128 (V4/AESV2), and AES-256 (V5/R6/AESV3). A doc with a real password returns
   `ErrEncryptedNeedsPassword`; an unsupported handler returns `ErrEncrypted`.

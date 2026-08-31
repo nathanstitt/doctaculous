@@ -22,8 +22,11 @@ func flateDecode(data []byte) ([]byte, error) {
 		return nil, nil
 	}
 	if zr, err := zlib.NewReader(bytes.NewReader(data)); err == nil {
-		out, rerr := io.ReadAll(zr)
+		out, rerr := readAllBounded(zr)
 		_ = zr.Close()
+		if errors.Is(rerr, ErrTooLarge) {
+			return nil, rerr
+		}
 		if rerr == nil || isTruncation(rerr) {
 			return out, nil
 		}
@@ -40,12 +43,32 @@ func flateDecode(data []byte) ([]byte, error) {
 
 func rawDeflate(data []byte) ([]byte, error) {
 	fr := flate.NewReader(bytes.NewReader(data))
-	out, rerr := io.ReadAll(fr)
+	out, rerr := readAllBounded(fr)
 	_ = fr.Close()
+	if errors.Is(rerr, ErrTooLarge) {
+		return nil, rerr
+	}
 	if rerr != nil && !isTruncation(rerr) {
 		return nil, fmt.Errorf("flate(raw): %w", rerr)
 	}
 	return out, nil
+}
+
+// readAllBounded is io.ReadAll with a ceiling, for decompressors whose output
+// size is controlled by the file rather than by us. Reading through a
+// LimitReader means the memory for an over-large stream is never allocated at
+// all, which an after-the-fact length check cannot achieve: by the time it could
+// run, the allocation has already happened.
+//
+// One byte past the limit is read so that hitting it exactly is distinguishable
+// from a stream that merely ends there.
+func readAllBounded(r io.Reader) ([]byte, error) {
+	limit := maxDecodedSize
+	out, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if int64(len(out)) > limit {
+		return nil, fmt.Errorf("%w: exceeds the %d-byte limit", ErrTooLarge, limit)
+	}
+	return out, err
 }
 
 func isTruncation(err error) bool {
