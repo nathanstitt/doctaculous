@@ -39,7 +39,7 @@ func tomdCmd(args []string) error {
 		return err
 	}
 
-	doc, err := openInput(input, omnidoc.FormatUnknown, "", *bundledFonts, false, nil)
+	doc, err := openInput(input, omnidoc.FormatUnknown, "", *bundledFonts, false, nil, nil)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}

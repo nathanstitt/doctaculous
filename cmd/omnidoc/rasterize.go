@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -90,7 +91,7 @@ func rasterizeCmd(args []string) error {
 		return fmt.Errorf("unsupported --page-size %q (want \"letter\" or \"tall\")", *pageSize)
 	}
 
-	doc, err := openInput(input, omnidoc.FormatUnknown, *pageSize, *bundledFonts, false, nil)
+	doc, err := openInput(input, omnidoc.FormatUnknown, *pageSize, *bundledFonts, false, nil, nil)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}
@@ -171,6 +172,23 @@ func htmlOpts(pageSize string, bundledFonts, printMedia bool) []omnidoc.HTMLOpti
 		opts = append(opts, omnidoc.WithPrintMedia())
 	}
 	return opts
+}
+
+// verboseLogf returns the degradation logger to install for a -v run, or nil
+// when the flag is off.
+//
+// The library reports what it could not render through this logger and nowhere
+// else, so without one every degradation is invisible: a skipped page, an
+// unsupported construct, a page whose content stream would not decode. Default
+// off keeps ordinary runs quiet; -v is how a user finds out WHY an output looks
+// wrong.
+func verboseLogf(verbose bool) func(string, ...any) {
+	if !verbose {
+		return nil
+	}
+	return func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "omnidoc: "+format+"\n", args...) //nolint:errcheck // stderr write
+	}
 }
 
 // resolvePages converts the --pages/--page flags into zero-based, in-range page

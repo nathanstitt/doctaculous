@@ -47,8 +47,16 @@ omnidoc convert book.epub book.docx            # ebook → Word, images and all
 omnidoc convert notes.md deck.pptx             # each heading becomes a slide
 omnidoc convert photo.heic photo.webp          # iPhone photo → lossless WebP
 omnidoc convert diagram.pdf diagram.svg        # PDF → SVG paths, not a bitmap
+omnidoc convert -v scanned.pdf notes.md        # report what could not be converted
 omnidoc rasterize input.pdf --page 1 --out page1.png --dpi 150
 ```
+
+Conversions **degrade rather than fail**: an unreadable page or an unsupported
+construct is skipped and the rest of the document still converts. That is only
+useful if you can find out it happened, so `-v` reports each degradation to
+stderr — a skipped page, a font that could not be resolved, a construct that was
+dropped. It is off by default; reach for it when an output looks emptier than the
+input did.
 
 `convert` sniffs the input format from **content first** (magic bytes, OPC/zip
 classification, HTML sniffing), then the extension; the output format comes from

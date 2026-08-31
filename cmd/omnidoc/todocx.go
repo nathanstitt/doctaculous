@@ -44,7 +44,7 @@ func todocxCmd(args []string) error {
 		return fmt.Errorf("--out is required")
 	}
 
-	doc, err := openInput(input, omnidoc.FormatUnknown, "", *bundledFonts, false, nil)
+	doc, err := openInput(input, omnidoc.FormatUnknown, "", *bundledFonts, false, nil, nil)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", input, err)
 	}

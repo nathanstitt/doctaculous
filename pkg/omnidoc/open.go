@@ -117,7 +117,16 @@ func openDetected(ctx context.Context, f Format, data []byte, dir string, opts [
 		if err != nil {
 			return nil, err
 		}
-		return &Document{r: &pdfRenderer{doc: d}, format: FormatPDF}, nil
+		// Carry the caller's logger onto the renderer. Structure extraction runs
+		// lazily on the first Write* call, long after these options are gone, and
+		// it is the one path that can produce an empty output file with a nil
+		// error -- so the logger has to be captured here or it is unavailable
+		// when the degradation actually happens.
+		cfg := defaultOpenConfig()
+		for _, opt := range opts {
+			opt(&cfg)
+		}
+		return &Document{r: &pdfRenderer{doc: d, logf: cfg.logf}, format: FormatPDF}, nil
 	case FormatDOCX:
 		d, err := docx.OpenBytes(data)
 		if err != nil {
