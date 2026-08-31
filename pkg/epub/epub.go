@@ -31,6 +31,18 @@ var ErrEncrypted = errors.New("epub: encrypted (DRM-protected) books are not sup
 // maxPartSize caps any single decompressed part, mirroring the OOXML readers.
 const maxPartSize = 256 << 20
 
+// maxTotalPartBytes caps the decompressed bytes an entire book may occupy,
+// mirroring the OOXML readers. The per-part cap does not bound a container that
+// holds many parts; see the comment in OpenBytes.
+const maxTotalPartBytes = 512 << 20
+
+// totalPartBudget is the ceiling OpenBytes actually enforces. It exists only so
+// a test can lower it: proving the cap at its real value means decompressing
+// half a gigabyte, which under -race costs several more gigabytes of shadow
+// memory. Production code reads [maxTotalPartBytes]; nothing but a test may
+// write this.
+var totalPartBudget = maxTotalPartBytes
+
 // Book is a parsed EPUB: its metadata title, the spine documents' body markup
 // in reading order, and the collected styling, with the container retained for
 // resource resolution (images, fonts, linked CSS).
@@ -83,7 +95,19 @@ func OpenBytes(data []byte) (*Book, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotEPUB, err)
 	}
+	// Every entry is decompressed into memory here, so the TOTAL is bounded as
+	// well as each part. maxPartSize alone does not bound a book: a container can
+	// hold arbitrarily many entries, and N of them each just under the per-part
+	// cap multiply. Measured on the sibling OOXML reader, a 4 MB package holding
+	// 20 compressible parts expanded to 4.2 GB with every individual part inside
+	// its 256 MiB limit.
+	//
+	// Over-budget entries are skipped rather than aborting the open, matching how
+	// an over-large single part is already handled: the book degrades to missing
+	// images or chapters. container.xml is required below, so a truncation that
+	// loses it still reports an honest error rather than a silently empty book.
 	parts := map[string][]byte{}
+	total := 0
 	for _, f := range zr.File {
 		rc, err := f.Open()
 		if err != nil {
@@ -94,6 +118,10 @@ func OpenBytes(data []byte) (*Book, error) {
 		if err != nil || len(b) > maxPartSize {
 			continue
 		}
+		if total+len(b) > totalPartBudget {
+			continue
+		}
+		total += len(b)
 		parts[strings.TrimPrefix(f.Name, "/")] = b
 	}
 	if _, ok := parts["META-INF/container.xml"]; !ok {

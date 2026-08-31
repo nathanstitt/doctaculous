@@ -264,15 +264,57 @@ files 0f does not name:
 After the four fixes: **181 million executions clean**, against a crash within 78
 seconds before them.
 
-### 0f. Overflow defeats the image-dimension guard — audit-reported
+### 0f. Overflow defeats the image-dimension guard — **DONE**
 
-`pkg/render/raster/page.go` — the bounds check multiplies width by height, so at
-w=h=2³¹ the product is negative and at 2³⁴ it is exactly zero. Both pass the guard,
-then `image.NewRGBA` allocates terabytes. Use an overflow-safe comparison.
+**The headline claim does not reproduce, and this is the first audit item that is
+simply wrong.** `pkg/render/raster/page.go` does not multiply in integer
+arithmetic — it computes `fW*fH` in **float64**, which cannot wrap, and its
+comment already says why: *"Compute dimensions in float64, then validate before
+casting to int, so an attacker-controlled MediaBox or DPI cannot overflow int."*
+`git log -S` shows that guard has been there since the raster layer was written.
 
-Related, same shape: RTF `\ilvl` amplifies 35 bytes to 56 MB (`pkg/rtf/rtf.go`), and
-docx/epub have a ~2,500× zip-bomb ratio (`zip.go`, `epub.go`) where pptx/xlsx are
-immune because they index lazily.
+Measured, every case the audit named is correctly refused:
+
+| MediaBox | result |
+| --- | --- |
+| 2³¹ × 2³¹ | refused — "page too large … exceeds 134217728-pixel cap" |
+| 2³⁴ × 2³⁴ | refused |
+| 2⁴⁰ × 2⁴⁰ | refused |
+
+**The bug is real, but in a different file.** `pkg/render/raster/image.go`,
+`decodeRawImage`, takes an image's `/Width` and `/Height` with only a `> 0` check
+and then does the integer arithmetic the audit described: `w*nComps*bpc` for the
+row stride and `rowBytes*h` for the short-data guard. At h = 2⁶⁰ that product goes
+negative, the guard passes, and `image.NewRGBA` is reached with an impossible
+height — where it **panics**. Caught only by the per-page recover, which costs the
+whole page for one bad image. Now bounded against the same `maxPixels` the page
+path uses, compared by **division** so the check cannot itself overflow;
+`maxPixels` is promoted to a package constant so both paths share one definition.
+
+**RTF `\ilvl` is worse than recorded.** Not "35 bytes to 56 MB" — the HTML emitter
+writes one `<ul>`/`<ol>` per level, so a **34-byte** document with
+`\ilvl2000000000` **never finishes at all**. At `\ilvl100000` it is 30 bytes in,
+1.4 MB out (46,000×). Clamped to `maxListLevel` (64); RTF allows 0–8 and Word
+exposes nine.
+
+**The zip-bomb entry understates the ratio and misplaces the cause.** Both readers
+already bound each part at 256 MiB — the gap is that neither bounded the **total**,
+and both do bulk reads (`partsWithPrefix` over `word/media/*`, and EPUB's
+`OpenBytes`, which decompresses every entry). Measured: a **4 MB `.docx` with 20
+compressible media parts decompressed to 4.2 GB** (1,028×, not ~2,500×) and drove
+peak RSS to 6 GB — with every individual part inside its 256 MiB limit the entire
+way. Fixed with a `maxTotalPartBytes` budget (512 MiB) in both; DOCX takes parts
+in sorted order so a truncation is deterministic rather than depending on map
+iteration.
+
+**The pptx/xlsx immunity claim holds.** Checked: `rawPart` and its siblings fetch
+one part at a time and never accumulate, so the per-part cap is sufficient there.
+
+Covered by `pkg/render/raster/image_bounds_test.go`, `pkg/rtf/ilvl_test.go`,
+`pkg/docx/zipbomb_test.go`, and `pkg/epub/zipbomb_test.go`. The zip budgets are
+test-overridable so proving them costs kilobytes rather than half a gigabyte —
+allocating the real ceiling under `-race` is how a CI runner gets OOM-killed
+(see item 13).
 
 ### 0g. Silent wrong output on the PDF path
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -14,6 +15,26 @@ import (
 // memory use against a zip bomb (a tiny DEFLATE entry that expands without limit)
 // while comfortably exceeding any legitimate document.xml/styles.xml.
 const maxPartSize = 256 << 20 // 256 MiB
+
+// maxTotalPartBytes caps the decompressed bytes a single bulk read may return
+// across ALL parts.
+//
+// maxPartSize alone does not bound a package: partsWithPrefix reads every
+// matching entry, so N parts each just under the per-part cap multiply. Measured,
+// a 4 MB .docx holding 20 highly-compressible word/media parts decompressed to
+// 4.2 GB (a 1,028x amplification) and drove peak RSS to 6 GB — a per-part cap of
+// 256 MiB was respected by every single part along the way.
+//
+// 512 MiB total is far more than any real document's media (a photo-heavy Word
+// file runs to tens of megabytes) while keeping a hostile one survivable.
+const maxTotalPartBytes = 512 << 20 // 512 MiB
+
+// totalPartBudget is the ceiling partsWithPrefix actually enforces. It exists
+// only so a test can lower it: proving the cap at its real value means
+// decompressing half a gigabyte, which under -race costs several more gigabytes
+// of shadow memory and is enough to get a CI runner OOM-killed. Production code
+// reads [maxTotalPartBytes]; nothing but a test may write this.
+var totalPartBudget = maxTotalPartBytes
 
 // pkgReader is an opened OOXML package: the ZIP plus a relationship-aware lookup
 // of its parts. It exists only during Open; the parsed Document retains no
@@ -74,17 +95,37 @@ func (p *pkgReader) mediaParts() map[string][]byte {
 
 // partsWithPrefix returns every part under a name prefix keyed by part name,
 // or nil when none exist.
+//
+// The total is bounded by maxTotalPartBytes: the per-part cap does not bound a
+// bulk read, since a package can hold arbitrarily many parts. Parts are taken in
+// sorted order so which ones survive a truncation is deterministic rather than
+// depending on map iteration, and the excess is dropped exactly as an
+// over-large single part is — treated as absent, so a media-heavy document
+// degrades to missing images rather than failing to open.
 func (p *pkgReader) partsWithPrefix(prefix string) map[string][]byte {
-	var out map[string][]byte
+	var names []string
 	for name := range p.files {
 		if strings.HasPrefix(name, prefix) {
-			if data, ok := p.part(name); ok {
-				if out == nil {
-					out = map[string][]byte{}
-				}
-				out[name] = data
-			}
+			names = append(names, name)
 		}
+	}
+	sort.Strings(names)
+
+	var out map[string][]byte
+	total := 0
+	for _, name := range names {
+		data, ok := p.part(name)
+		if !ok {
+			continue
+		}
+		if total+len(data) > totalPartBudget {
+			break
+		}
+		total += len(data)
+		if out == nil {
+			out = map[string][]byte{}
+		}
+		out[name] = data
 	}
 	return out
 }
