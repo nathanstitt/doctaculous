@@ -163,23 +163,70 @@ The track bound is on the *expanded* count, not the repetition count, since
 Covered by `pkg/layout/css/unbounded_counts_test.go` (11 termination cases plus
 the attribute-clamp table) and `pkg/css/grid_bounds_test.go`.
 
-### 0d. Stack overflows that `recover()` cannot catch — audit-reported
+### 0d. Stack overflows that `recover()` cannot catch — **PDF half DONE**
 
 These raise `fatal error` via `runtime.throw`, which is **not recoverable**. This is
 the finding that undermines the batch guarantee, because the per-page `recover` is
 structurally unable to catch it:
 
-- `pkg/pdf/parser.go`, `parseArray` — recursion with no depth cap, while every
-  sibling has one (`resolve.go` 32, `page.go` 64, `function.go` 32).
+- ~~`pkg/pdf/parser.go`, `parseArray`~~ — **done.** Reproduced: ~1.2 MB of `[`
+  survives, ~1.5 MB raises `fatal error: stack overflow`. Bounded at
+  `maxObjectDepth` (256), enforced in both `parseArray` and `parseDictOrStream`
+  since they recurse through each other via `parseFromToken`.
 - `pkg/layout/css/build.go` — ~150k nested `<div>` (1.6 MB) kills the process.
-  Frames are large because `css.ComputedStyle` passes **by value** through
-  `Compute`→`inheritFrom`.
+  **Still open.** Frames are large because `css.ComputedStyle` passes **by value**
+  through `Compute`→`inheritFrom`.
 
-### 0e. PDF page-tree has no visited-set — audit-reported
+### 0e. PDF page-tree has no visited-set — **DONE**
 
-`pkg/pdf/page.go`, `walkPageTree` caps depth but never marks visited nodes, so a
-cyclic tree expands exponentially: reported as 22 levels → 4.2M pages in 0.76 s. It
-runs inside `loadPages` during **open**, before any recover exists.
+`pkg/pdf/page.go`, `walkPageTree` caps depth but never marks visited nodes. It runs
+inside `loadPages` during **open**, before any recover exists.
+
+**Reproduced exactly as the audit reported** — 1,427 bytes → 4.2M pages in 0.78 s
+(the audit said 0.76 s), and 240 bytes more → 67M pages in 12.8 s.
+
+The important detail, which the "cyclic tree" framing obscures: **the depth cap of
+64 never fires.** The blow-up is the *fan-out*, not the depth — each level doubles,
+so 2^26 pages are produced at depth 26 and the walk terminates on its own, having
+allocated gigabytes. A deeper cap would not have helped; only a visited set does.
+
+Fixed by tracking visited object numbers per walk. Only a `Reference` can reach a
+node twice, so tracking object numbers catches every cycle a file can express.
+Verified against the 8 real-world corpus PDFs: page counts are byte-identical
+before and after, so legitimately-shared page objects are unaffected.
+
+### 0d/0e addendum — what fuzzing found that the audit did not
+
+Per the decision to pull **0h** forward for `pdf`, `FuzzParse` was written before
+fixing 0d/0e. That ordering paid for itself: the audit named two PDF defects, and
+the fuzzer found **two more**, both in the same unrecoverable class.
+
+- **Object-stream `/N` sizes a slice.** A 504-byte input declaring
+  `/N 40000000020` asked for a 320 GB allocation. The header loop would have
+  rejected the very first pair, but the process was already dead — an allocation
+  cannot be validated after the fact. Now bounded by what the data can hold
+  (each entry needs ≥4 bytes of header).
+- **Object streams can recurse through the `Document`.** A stream whose `/N` is an
+  indirect reference living inside *that same stream* cycles
+  `loadObjStream → GetInt → Resolve → loadObject → parseObjectFromStream →
+  loadObjStream` until the stack is gone. The parser depth cap cannot see this:
+  every level builds a fresh parser. Fixed with an in-progress set.
+
+Two more were found while chasing those, both of the shape **0f** describes but in
+files 0f does not name:
+
+- **`/Length` overflow.** `start+n <= len(src)` passes when `start+n` overflows to
+  negative, then indexes the slice out of range
+  (`index out of range [-9223372036854775764]`). Rewritten as
+  `n <= len(src)-start`, which cannot overflow.
+- **No ceiling on decoded stream size.** A 2.9 MB PDF whose content stream is a
+  flate bomb decoded to 2 GB and drove peak RSS to **4.5 GB in 1.1 s**; the ratio
+  holds for larger inputs. Bounded at `filter.MaxDecodedSize` (512 MB) *during*
+  decompression via `io.LimitReader`, so the memory is never allocated — checking
+  the length afterwards would be too late by definition.
+
+After the four fixes: **181 million executions clean**, against a crash within 78
+seconds before them.
 
 ### 0f. Overflow defeats the image-dimension guard — **DONE**
 
@@ -244,7 +291,7 @@ Same class, lower blast radius: `applyDeclaration` in `pkg/css/cascade.go` silen
 drops every malformed or unsupported property, though `Resolver` already carries a
 `logf` used elsewhere in the file.
 
-### 0h. Add fuzz targets
+### 0h. Add fuzz targets — **`xlsx` and `pdf` done; 7 parsers remain**
 
 The audit's sharpest structural point: **there are no fuzz targets for `pdf`, `docx`,
 `pptx`, `rtf`, `epub`, `svg`, `css`, `font`, or `markdown`.** Fuzzing today covers
@@ -254,22 +301,47 @@ bugs were found, which is not a coincidence worth ignoring.
 A `FuzzOpen` per parser would have caught nearly every item in this phase. Without
 them, Phase 0 fixes the bugs we happened to find rather than the class.
 
+**This prediction was tested and held.** `FuzzOpenBytes` (`pkg/xlsx`) and
+`FuzzParse` (`pkg/pdf`) have landed. Writing the PDF target *before* fixing 0d/0e
+found two defects the audit missed and two more of 0f's shape in files 0f does not
+name — four in total, every one of them in the unrecoverable
+`runtime.throw` class. See the 0d/0e addendum above.
+
+The lesson for the remaining seven: **write the fuzz target first.** The audit's
+per-item findings are real but they are a sample, and reading a parser does not
+surface the shapes a mutator finds in minutes. Remaining: `docx`, `pptx`, `rtf`,
+`epub`, `svg`, `css`, `font`, `markdown`.
+
+Worth knowing for whoever picks this up: a crash found only under `-fuzz` may not
+reproduce from the persisted corpus entry, because the killing input is not always
+written before the process dies. Writing each input to a file at the top of the
+fuzz body, and removing it on success, is what actually recovered the 504-byte
+`/N` case here.
+
 Also worth noting: `pkg/pdf/filter/jbig2` is excluded from golangci-lint as vendored
 code, so it receives no static analysis at all despite containing several of the
 reported hangs.
 
 ### Suggested order
 
-1. ~~Bound `parseRef` (0a)~~ — **done**; stopped a live panic *and* an
-   unrecoverable OOM on the row axis
-2. ~~Reject non-finite numbers (0b)~~ — **done**; needed the tokenizer fix as
-   well as `parseNonNegNumber` to actually close the class
-3. Cap `colspan`/`rowspan`/grid lines/`repeat()` (0c)
-4. Depth caps in `parseArray` and friends (0d)
-5. Visited-set in `walkPageTree` (0e)
-6. Overflow-safe dimension guard (0f)
+**Revised: fuzz the parser before fixing it.** The original order put 0h last. On
+the evidence above that is backwards — the PDF target found twice as many defects
+as the audit had for that package, in one afternoon, and three of the four could
+not have been caught by a `recover`. For each remaining parser, write `FuzzOpen`
+first and let it set the work list.
+
+1. ~~Clamp `parseRef` (0a)~~ — **done**
+2. ~~Reject non-finite numbers (0b)~~ — **done**
+3. ~~Cap `colspan`/`rowspan`/grid lines/`repeat()` (0c)~~ — **done**
+4. ~~Depth cap in the PDF object parser (0d)~~ — **done**; the
+   `layout/css/build.go` half remains
+5. ~~Visited-set in `walkPageTree` (0e)~~ — **done**
+6. Overflow-safe dimension guard (0f) — note two instances of this shape have
+   already been fixed in `pkg/pdf`; `render/raster`, `rtf`, and the docx/epub zip
+   ratios remain
 7. Plumb `Logf`, starting at `pdf_backend.go` (0g)
-8. `FuzzOpen` per parser, wired into CI (0h)
+8. `FuzzOpen` for the remaining parsers, wired into CI (0h) — `xlsx` and `pdf`
+   are done
 
 Then re-read the "Limitations" paragraph in `README.md` — the one beginning
 "Unsupported constructs degrade rather than crash" — and confirm it is true before
