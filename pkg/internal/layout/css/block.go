@@ -290,6 +290,13 @@ func (e *Engine) layoutBlock(ctx context.Context, b *cssbox.Box, cbWidth, origin
 	contentW := resolveContentWidth(b, cbWidth, ed)
 	borderW := contentW + ed.pL + ed.pR + ed.bL + ed.bR
 
+	// CSS 10.3.3: distribute the leftover inline space to whichever horizontal margins
+	// are `auto`. This is what makes `margin: 0 auto` centre. It runs HERE rather than
+	// in usedEdges because the equation needs the resolved width, and because
+	// usedEdges is also called from intrinsic-width measurement and float sizing,
+	// where an auto margin genuinely is zero.
+	resolveAutoMarginsX(b, cbWidth, borderW, &ed)
+
 	// The left edge of the content box in page space. The border-box left is
 	// originX+mL; content sits inside the left border+padding.
 	contentX := originX + ed.mL + ed.bL + ed.pL
@@ -1134,18 +1141,71 @@ type edges struct {
 	pT, pR, pB, pL float64
 }
 
+// resolveAutoMarginsX distributes the leftover inline space of a normal-flow block
+// box to its `auto` horizontal margins, per CSS 2.1 §10.3.3, mutating ed in place.
+// This is what makes the `margin: 0 auto` centering idiom work.
+//
+// The constraint is cbWidth = mL + bL + pL + contentW + pR + bR + mR, where borderW
+// already carries everything between the margins. leftover is what the margins must
+// absorb between them:
+//
+//   - both margins auto  → split evenly (centred). The canonical case.
+//   - one margin auto    → that margin takes the whole leftover, pushing the box to
+//     the opposite edge.
+//   - neither auto       → nothing to do; an over-constrained box keeps its specified
+//     margins and simply overflows, which matches the engine's existing
+//     start-edge-wins behaviour elsewhere.
+//
+// A NEGATIVE leftover means the box is wider than its containing block. CSS 10.3.3
+// treats an auto margin as 0 in that case rather than pulling the box backwards, so
+// leftover is floored at 0 — otherwise `margin: 0 auto` on an over-wide box would
+// shift it LEFT of its container, which no browser does.
+//
+// Only the horizontal axis is handled. A vertical `auto` margin computes to 0 in
+// normal flow per CSS 10.6.3 (vertical centering via auto margins is a flex/grid
+// feature, and those paths do their own resolution), so usedEdges' zero is already
+// correct there.
+func resolveAutoMarginsX(b *cssbox.Box, cbWidth, borderW float64, ed *edges) {
+	fs := b.Style.FontSizePt
+	mLAuto := isAuto2(b.Style.MarginLeft, fs)
+	mRAuto := isAuto2(b.Style.MarginRight, fs)
+	if !mLAuto && !mRAuto {
+		return
+	}
+	// An anonymous box has no specified margins to be auto, and its width already
+	// fills the container; leave it alone rather than inventing a shift.
+	if isAnonymous(b) {
+		return
+	}
+	leftover := cbWidth - borderW - ed.mL - ed.mR
+	if leftover <= 0 {
+		return // over-constrained or exactly filled: auto margins stay 0
+	}
+	switch {
+	case mLAuto && mRAuto:
+		ed.mL += leftover / 2
+		ed.mR += leftover / 2
+	case mLAuto:
+		ed.mL += leftover
+	default:
+		ed.mR += leftover
+	}
+}
+
 // usedEdges resolves the margins, border widths, and paddings of box b against a
 // containing block of width cbWidth. Percentages on every edge resolve against
 // cbWidth (CSS resolves vertical padding/margin percentages against the containing
 // block's width too). Padding and border widths clamp to non-negative; margins may
 // be negative. A border edge's used width is zero unless its style draws (a
 // border-style of none/"" yields zero used width regardless of the declared width).
-// Auto margins compute to 0 in this PR (horizontal margin:auto centering is
-// deferred).
+// Auto margins resolve to 0 HERE; horizontal `auto` margins are then given their
+// share of the leftover space by resolveAutoMarginsX, once the used width is known
+// (CSS 10.3.3). Callers that only want intrinsic or float sizing — where an auto
+// margin genuinely contributes nothing — use this result directly and are unaffected.
 func usedEdges(b *cssbox.Box, cbWidth float64) edges {
 	fs := b.Style.FontSizePt
 	margin := func(l gcss.Length) float64 {
-		// Auto margins -> 0 (centering deferred); other values may be negative.
+		// Auto margins -> 0 here; see resolveAutoMarginsX. Others may be negative.
 		v, isAuto := resolveLen(l, fs, cbWidth)
 		if isAuto {
 			return 0

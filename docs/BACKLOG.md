@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**30 open · 2 in progress**, audited against the code on 2026-08-30 (see below). The engine is
+**29 open · 2 in progress**, audited against the code on 2026-08-30 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -67,8 +67,6 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   `text-bottom`/percentage/length all fall through to a 0 shift. Table cells are a separate mechanism
   (`table.go` reads `VerticalAlign` for cell alignment) and are unaffected.
   *Audit note: the entry this replaced listed the whole keyword set as landed. It had not.*
-- ☐ **E2. `margin: auto` horizontal centering** (block-level). *Small–medium.* No auto-margin handling
-  exists in the block sizing path.
 - ☐ **E3. Margin-collapse edge cases** — empty-block collapse-through, clearance, `min-height`
   interaction. *Medium.* Collapse-through is **no longer silent**: an empty block's margins do not
   collapse through it (CSS 2.1 §8.3.1), so an empty `<div style="margin:40px 0">` between two paragraphs

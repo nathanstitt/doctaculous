@@ -1307,3 +1307,35 @@ a.seen:visited { color: #6a9a3a; }
   font-size: 10px;
   color: #8a8375;
 }
+
+/* §44: `margin: 0 auto` centering. Every rail below is the SAME width, so the only
+   thing that moves a box within it is how its horizontal margins resolve. The rail
+   carries the dashed outline; the box inside it is solid. */
+.marail {
+  border: 1px dashed #c9c2b0;
+  margin-bottom: 10px;
+  padding: 6px;
+}
+.mabox {
+  width: 180px;
+  height: 30px;
+  background: #9b3d2e;
+  color: #f7f2e4;
+  font-size: 11px;
+  text-align: center;
+  line-height: 30px;
+}
+.mabox.center { margin: 0 auto; }
+.mabox.pushright { margin-left: auto; margin-right: 0; }
+.mabox.stayleft { margin-left: 0; margin-right: auto; }
+.mabox.fixedleft { margin-left: 50px; margin-right: auto; }
+/* Wider than its rail: the leftover is negative, so the auto margins must resolve to
+   0 and let the box overflow to the RIGHT rather than pulling it off the left edge. */
+.mabox.toowide { width: 150%; margin: 0 auto; }
+/* Padding and borders count toward the border box the centring is measured from. */
+.mabox.padded {
+  width: 100px;
+  margin: 0 auto;
+  padding: 0 20px;
+  border: 4px solid #3a4a5a;
+}

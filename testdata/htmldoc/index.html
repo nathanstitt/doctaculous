@@ -1954,5 +1954,47 @@ newline is kept.</p>
       rotated Latin form, not a purpose&#8209;designed vertical one.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">44 / AUTO MARGINS</span>
+    <h2><code>margin: 0 auto</code></h2>
+    <p class="lede">The most common centering idiom in CSS did nothing. Auto margins
+      resolved to zero, so every centered&#8209;layout document rendered hard against
+      the left edge &mdash; silently, and for as long as the engine had existed. No
+      document in the corpus used it, which is why nothing caught it.</p>
+
+    <div class="marail"><div class="mabox center">margin: 0 auto</div></div>
+    <div class="marail"><div class="mabox stayleft">margin-right: auto</div></div>
+    <div class="marail"><div class="mabox pushright">margin-left: auto</div></div>
+    <div class="marail"><div class="mabox fixedleft">margin-left: 50px; margin-right: auto</div></div>
+    <p class="caption">Every rail is the same width, so the only thing moving each box
+      is how its margins resolve. Two auto margins split the leftover space evenly and
+      centre the box; <em>one</em> auto margin absorbs all of it and pushes the box to
+      the opposite edge &mdash; which is why the second and third rails are mirror
+      images. A specified margin is honoured as&#8209;is and the auto one takes only
+      what remains, so the fourth box sits at exactly 50px rather than being centred.</p>
+
+    <h4>What the leftover is measured from</h4>
+    <div class="marail"><div class="mabox padded">100 + 48</div></div>
+    <p class="caption">The space to distribute is what is left after the whole
+      <em>border</em> box &mdash; content, padding and borders together
+      (CSS&nbsp;2.1&nbsp;&sect;10.3.3). This box has a 100px content width but 20px of
+      padding and a 4px border on each side, so 148px is centred, not 100px. Measuring
+      from the content box instead would shift it 24px to the right.</p>
+
+    <h4>The case that must not centre</h4>
+    <div class="marail"><div class="mabox toowide">wider than its container</div></div>
+    <p class="caption">When the box is <em>wider</em> than the space it sits in, the
+      leftover is negative. A na&iuml;ve half&#8209;split would give each margin a
+      negative value and drag the box off the left edge of the page; the spec instead
+      treats the auto margin as zero, so the box starts at the left and overflows to the
+      right &mdash; what every browser does. The clamp is a one&#8209;line floor, and
+      the test that pins it is the reason it is not a one&#8209;line bug.</p>
+
+    <p class="caption">Vertical auto margins are untouched: in normal flow they compute
+      to zero (CSS&nbsp;&sect;10.6.3), and vertical centering with <code>auto</code> is a
+      flex/grid feature that those paths resolve themselves. Only the horizontal axis is
+      handled here.</p>
+  </section>
+
 </body>
 </html>

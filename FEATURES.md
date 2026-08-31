@@ -121,7 +121,13 @@ bullet's design rationale is in its PR:
 - **Block + inline normal flow** (`pkg/internal/layout/inline`, `pkg/internal/layout/css/block.go`+`inline.go`,
   `pkg/internal/layout/paint`, `OpenHTML`/`OpenHTMLBytes`): the box model — width/`auto`/%, `box-sizing`,
   min/max, margins including vertical collapsing, padding, borders, backgrounds — plus the IFC
-  (shaping and breaking, `text-align`, `line-height`) and the fragment tree. **Margin collapsing
+  (shaping and breaking, `text-align`, `line-height`) and the fragment tree. **Horizontal `auto`
+  margins** resolve per CSS 2.1 §10.3.3 (`resolveAutoMarginsX`), so `margin: 0 auto` centres a
+  fixed-width block: two auto margins split the leftover evenly, one absorbs all of it and pushes
+  the box to the opposite edge, and the leftover is measured from the BORDER box. An over-wide box
+  clamps to a zero margin and overflows right rather than being dragged off the left edge. Vertical
+  auto margins stay 0 in normal flow (§10.6.3); flex and grid resolve their own. Showcase §44.
+  **Margin collapsing
   degrades honestly:** collapsing is pairwise between adjacent siblings and through parent/first-
   and last-child, but an EMPTY block's own top and bottom margins do not collapse THROUGH it
   (CSS 2.1 §8.3.1), so an empty `<div style="margin:40px 0">` between two paragraphs opens a gap up
