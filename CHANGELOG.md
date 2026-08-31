@@ -59,6 +59,14 @@ Three of the defects were in dependencies rather than in this code.
   non-replaced inline box, and empty-block margin collapse-through.
 - Flex content height with margins; overflow clipping with `max-height`.
 
+### Fixed — portability
+
+- CI now runs the suite on Linux, macOS, and Windows; previously only Linux. The first
+  Windows run found that the repo had no `.gitattributes`, so text goldens were checked
+  out as CRLF while the engine emits LF, failing every byte-compared `.svg`/`.md`/
+  `.txt`/`.html` golden. Line endings are now normalized, and every binary fixture
+  format is marked explicitly.
+
 ### Documentation
 
 - Three overlapping backlog documents were consolidated into `docs/BACKLOG.md`,

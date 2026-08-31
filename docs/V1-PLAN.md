@@ -874,9 +874,19 @@ backlog.
     `-race` runs on Linux ONLY: the point of the other two is path and filesystem
     behaviour, and racing all three would triple the matrix cost to re-answer a
     question Linux already answers. gofmt and vet are Linux-only for the same reason.
-    A pre-flight audit found the tree already portable — 138 `filepath.Join` calls, no
-    raw-slash paths in tests, no `exec.Command`, no unix-permission tests — so the
-    matrix is expected to pass rather than to start a porting project.
+    A pre-flight audit found the tree portable in the way I looked for — 138
+    `filepath.Join` calls, no raw-slash paths in tests, no `exec.Command`, no
+    unix-permission tests. **It found a real bug anyway, on its first run**, in the one
+    place source-reading would not have caught: the repo had no `.gitattributes`, so
+    git checked text goldens out as CRLF on Windows while the engine emits LF. Every
+    `.svg`/`.md`/`.txt`/`.html` golden failed the byte comparison — 20+ tests — each
+    reporting "first difference at line 1" with `want` and `got` rendering identically
+    on screen. macOS passed, which is what isolated it to the checkout rather than the
+    code. Fixed at the cause (`.gitattributes` normalizing text to LF and marking every
+    binary fixture format explicitly), not by making the comparison tolerant of `\r` —
+    that would have taught the tests to accept an already-corrupted fixture. Verified
+    `git add --renormalize .` is a no-op on the tree, so only the Windows checkout
+    changes. All three OSes now pass.
 13. **The race suite has almost no memory headroom.** It peaks at ~13.3 GB RSS
     against a 16 GB runner. That was latent until the rename nudged it over, and the
     kernel killed the job (SIGTERM, exit 143) minutes into a 30-minute budget — a
