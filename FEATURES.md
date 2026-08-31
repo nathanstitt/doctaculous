@@ -51,7 +51,13 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   `/BBox` clip.
 - **Fonts** (`github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), and symbolic subset
-  TrueType. Non-embedded base-14 faces come from bundled substitutes (`pkg/font/standard`: TeX Gyre
+  TrueType. **A malformed font program cannot take the process down**: the upstream parser indexes
+  its tables without checking, so a self-inconsistent cmap subtable slices at a negative bound and
+  panics (found by fuzzing). The parse is recovered and reported as a load failure — the same guard
+  this package already applied to `FontHExtents`/`FontVExtents`, extended to the entry point. It
+  matters because a font program is untrusted document input, embedded in a PDF or fetched as a web
+  font, and the panic fires during OPEN, before any per-page recover exists; a caller now falls back
+  to a substitute face, which is what an unreadable font should do anyway. Non-embedded base-14 faces come from bundled substitutes (`pkg/font/standard`: TeX Gyre
   Heros/Termes, Inconsolata) in **regular/bold/italic/bold-italic** variants, chosen from the
   `/BaseFont` name plus descriptor `/Flags` in PDF, or from the computed `Style` in reflow.
   **Installed system fonts are the DEFAULT** source for non-embedded fonts. An `OSFontProvider`
@@ -852,6 +858,14 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   HTML sniffing by design. Landed with a cross-cutting inline-core fix: empty forced lines
   (blank lines in pre/pre-wrap/pre-line) now get a CSS strut height instead of collapsing
   (`pkg/layout/inline` shape/break). All prior goldens stayed byte-identical.
+- **Bounded block nesting** (`maxBlockNesting`, 1024 markers per line; `ErrTooDeeplyNested`):
+  goldmark's block parser is quadratic in the containers opened on ONE line — 50,000 `- ` markers
+  take 10.8s, and 200,000 (a 400 KB file) never finish. It is DEPTH that costs, not size: the same
+  50,000 items spread over 50,000 lines parse in 79ms, so the bound is per line rather than a
+  document-size cap that would reject large legitimate files. A linear pre-scan counts the leading
+  marker run and declines the source before goldmark sees it. Fenced code blocks are skipped — a
+  README showing example Markdown inside ``` opens no containers, and costs 238µs rather than
+  seconds.
 
 **DOCX writer** (`pkg/render/docxwrite`, `WriteDOCX`, CLI `todocx` +
 `convert.. out.docx`):
