@@ -42,7 +42,9 @@ func (d *Device) compositeBlend(mask *image.Alpha, c color.RGBA, blendMode strin
 		return
 	}
 
-	b := mask.Bounds()
+	// Intersected with the surface, for the reason composite documents: a region
+	// Device must not walk the parts of a page-sized mask it cannot write.
+	b := mask.Bounds().Intersect(d.img.Bounds())
 	clip := d.activeClip()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {

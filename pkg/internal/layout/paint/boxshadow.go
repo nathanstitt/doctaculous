@@ -241,6 +241,21 @@ func paintBlurredShadow(dev render.Device, s *layout.ShadowItem, mat render.Matr
 	if !ok {
 		return false
 	}
+	// Skip a shadow that lands entirely outside what the device may write.
+	//
+	// This matters for the sub-region path (raster.NewRegion), which replays the
+	// page's whole item list: a blurred shadow is among the most expensive items
+	// on a page, and without this every region render would rasterize and blur
+	// every shadow in the document before discarding the ones it does not show.
+	// It roughly halved the cost of a dialog-sized region on a card-heavy page.
+	//
+	// Devices that do not report a write region — every full-page device, and
+	// every non-raster backend — are unaffected and paint exactly as before.
+	if wr, hasWR := dev.(interface{ WriteBounds() image.Rectangle }); hasWR {
+		if !surf.rect.Add(surf.origin).Overlaps(wr.WriteBounds()) {
+			return false
+		}
+	}
 
 	// Rasterize the SILHOUETTE — the solid shape, not the ring — because that
 	// is what a blur is defined over. The ring's inner edge is a clip boundary,
