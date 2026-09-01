@@ -309,3 +309,76 @@ func totalAlpha(b *Buffer) float32 {
 	}
 	return sum
 }
+
+// TestBlurAlphaMatchesRGBAAlpha is the invariant the box-shadow path depends
+// on: blurring a coverage plane must give the same answer as blurring a full
+// RGBA buffer and reading its alpha channel. If these ever diverge, a soft
+// shadow silently stops matching what the SVG/CSS filter path would paint.
+//
+// A uniformly-coloured shape is used because that is exactly the input
+// BlurAlpha is for — the box-shadow silhouette carries one colour, so alpha
+// holds the entire signal.
+func TestBlurAlphaMatchesRGBAAlpha(t *testing.T) {
+	const w, h = 61, 43
+	r := image.Rect(0, 0, w, h)
+
+	// A solid rounded-ish blob, opaque inside and transparent outside.
+	rgba := NewBuffer(r, SRGB)
+	cov := make([]float32, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var a float32
+			if x >= 12 && x < 48 && y >= 9 && y < 34 {
+				a = 1
+			}
+			cov[y*w+x] = a
+			rgba.Set(x, y, 0.2, 0.4, 0.9, a)
+		}
+	}
+
+	for _, sigma := range []float64{0.9, 2.5, 7} {
+		gotBuf := GaussianBlur(rgba, sigma, sigma, r)
+		gotCov := BlurAlpha(cov, w, h, sigma, sigma)
+		if gotCov == nil {
+			t.Fatalf("sigma=%g: BlurAlpha returned nil", sigma)
+		}
+		worst := 0.0
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				_, _, _, wantA := gotBuf.At(x, y)
+				d := math.Abs(float64(wantA) - float64(gotCov[y*w+x]))
+				if d > worst {
+					worst = d
+				}
+			}
+		}
+		// Both run the identical box passes over the identical values, so the
+		// only permitted difference is float32 summation order.
+		if worst > 1e-5 {
+			t.Errorf("sigma=%g: alpha-only blur diverges from RGBA blur by %g (max)", sigma, worst)
+		}
+	}
+}
+
+// TestBlurAlphaDegenerate pins the guards: BlurAlpha must never panic on a
+// short or empty plane, and a deviation too small to form a box leaves the
+// coverage unchanged (the same "unblurred" outcome boxSizes gives GaussianBlur).
+func TestBlurAlphaDegenerate(t *testing.T) {
+	if got := BlurAlpha(nil, 4, 4, 1, 1); got != nil {
+		t.Errorf("nil plane: got %v, want nil", got)
+	}
+	if got := BlurAlpha(make([]float32, 3), 4, 4, 1, 1); got != nil {
+		t.Errorf("short plane: got non-nil, want nil")
+	}
+	if got := BlurAlpha(make([]float32, 4), 2, 2, 0, 0); got == nil || len(got) != 4 {
+		t.Errorf("zero deviation: want an unblurred copy of length 4, got %v", got)
+	}
+	src := []float32{1, 0, 0, 1}
+	out := BlurAlpha(src, 2, 2, 0.001, 0.001)
+	for i := range src {
+		if out[i] != src[i] {
+			t.Errorf("sub-box deviation must leave coverage unchanged: got %v, want %v", out, src)
+			break
+		}
+	}
+}

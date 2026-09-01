@@ -2,6 +2,7 @@ package paint
 
 import (
 	"image"
+	"image/color"
 	"math"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
@@ -303,61 +304,90 @@ func blurShadowSurface(silhouette *image.RGBA, sigma float64, inset bool) *image
 	if region.Empty() {
 		return nil
 	}
-	// sRGB, not linearRGB: a box-shadow is a CSS effect and CSS composites in
-	// sRGB. Running it in the SVG primitives' linearRGB default would make every
-	// soft edge visibly lighter than a browser's — the same colour-space trap
-	// applyCSSFilterChain documents.
-	buf := svgfilter.FromRGBA(silhouette, region, svgfilter.SRGB)
-	buf = svgfilter.GaussianBlur(buf, sigma, sigma, region)
-	if buf == nil {
+	// The silhouette is a SOLID SHAPE in one uniform colour (the caller fills it
+	// with exactly one Fill in s.Color), so its only varying channel is coverage.
+	// Blur that channel alone and re-apply the colour afterwards: the RGB a full
+	// RGBA blur would compute is the constant it started with, and the two
+	// RGBA<->float32 conversions around it — measured as MORE expensive than the
+	// blur itself — disappear with it.
+	//
+	// No colour space conversion is involved for the same reason, which also
+	// settles the trap the RGBA path had to be careful about: a box-shadow is a
+	// CSS effect and CSS composites in sRGB, and blurring coverage rather than
+	// colour is sRGB-neutral, so there is no linearRGB default to opt out of.
+	w, h := region.Dx(), region.Dy()
+	if w <= 0 || h <= 0 {
 		return nil
 	}
-	if inset {
-		invertShadowAlpha(buf)
-	}
-	return buf.ToRGBA()
-}
-
-// invertShadowAlpha turns a blurred interior silhouette into the inner shadow's
-// own coverage: alpha becomes (peak - alpha), where peak is the shadow colour's
-// own alpha, so a fully-covered interior pixel becomes fully clear and a pixel
-// the interior does not reach carries the shadow at full strength.
-//
-// The colour channels are left alone. Buffer holds STRAIGHT (non-premultiplied)
-// alpha, so a pixel's RGB is already the shadow's colour wherever it was
-// painted — but a pixel the silhouette never touched is transparent BLACK, and
-// raising its alpha without setting its colour would paint black instead of the
-// shadow colour. The colour is therefore written from the silhouette's own peak
-// channels, which the caller guarantees are uniform (a single solid fill).
-func invertShadowAlpha(buf *svgfilter.Buffer) {
-	if buf == nil {
-		return
-	}
-	r, g, b, peak := shadowPeak(buf)
-	if peak <= 0 {
-		return
-	}
-	for i := 0; i+3 < len(buf.Pix); i += 4 {
-		a := peak - buf.Pix[i+3]
-		if a < 0 {
-			a = 0
-		}
-		buf.Pix[i], buf.Pix[i+1], buf.Pix[i+2], buf.Pix[i+3] = r, g, b, a
-	}
-}
-
-// shadowPeak reports the silhouette's colour and its maximum alpha — the
-// shadow's own colour at full strength. Reading it from the buffer rather than
-// re-deriving it from the ShadowItem keeps invertShadowAlpha independent of how
-// the silhouette was painted (in particular of the sRGB round trip the raster
-// backend's 8-bit surface imposes, which a recomputed float would not match).
-func shadowPeak(buf *svgfilter.Buffer) (r, g, b, peak float32) {
-	for i := 0; i+3 < len(buf.Pix); i += 4 {
-		if a := buf.Pix[i+3]; a > peak {
-			r, g, b, peak = buf.Pix[i], buf.Pix[i+1], buf.Pix[i+2], a
+	cov := make([]float32, w*h)
+	var cr, cg, cb uint8
+	var peak uint8
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := silhouette.RGBAAt(region.Min.X+x, region.Min.Y+y)
+			cov[y*w+x] = float32(c.A) / 255
+			if c.A > peak {
+				// Straight (un-premultiplied) colour: image.RGBA is
+				// premultiplied, and the shadow colour is what the silhouette
+				// carries at full coverage.
+				cr, cg, cb, peak = c.R, c.G, c.B, c.A
+			}
 		}
 	}
-	return r, g, b, peak
+	if peak == 0 {
+		return nil // nothing was painted; no shadow to composite
+	}
+	cr, cg, cb = unpremul8(cr, peak), unpremul8(cg, peak), unpremul8(cb, peak)
+
+	cov = svgfilter.BlurAlpha(cov, w, h, sigma, sigma)
+	if cov == nil {
+		return nil
+	}
+
+	peakF := float32(peak) / 255
+	out := image.NewRGBA(region)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			a := cov[y*w+x]
+			if inset {
+				// An inner shadow's ink is where the interior is NOT: coverage
+				// becomes (peak - coverage).
+				a = peakF - a
+			}
+			if a <= 0 {
+				continue
+			}
+			if a > 1 {
+				a = 1
+			}
+			a8 := uint8(a*255 + 0.5)
+			if a8 == 0 {
+				continue
+			}
+			// image.RGBA is premultiplied. Premultiply in FLOAT and round once,
+			// rather than rounding the alpha first and scaling the 8-bit colour
+			// by it: quantizing twice loses up to a level per channel on every
+			// soft pixel, which on a wide gradient is a visible extra step.
+			out.SetRGBA(region.Min.X+x, region.Min.Y+y, color.RGBA{
+				R: uint8(float32(cr)*a + 0.5),
+				G: uint8(float32(cg)*a + 0.5),
+				B: uint8(float32(cb)*a + 0.5),
+				A: a8,
+			})
+		}
+	}
+	return out
+}
+
+// unpremul8 recovers a straight colour channel from a premultiplied one.
+func unpremul8(v, a uint8) uint8 {
+	if a == 0 {
+		return 0
+	}
+	if a == 255 {
+		return v
+	}
+	return uint8(min(uint32(v)*255/uint32(a), 255))
 }
 
 // shadowClip intersects the device clip with the region the shadow is allowed

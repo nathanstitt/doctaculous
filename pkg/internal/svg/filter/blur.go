@@ -305,3 +305,103 @@ func boxBlurV(src, dst []float32, w, h int, p boxPass) {
 		}
 	}
 }
+
+// BlurAlpha blurs a single-channel COVERAGE plane and returns the result,
+// applying exactly the three box passes GaussianBlur applies (the same
+// boxSizes, the same extent clamping, the same treatment of samples off the
+// edge as zero). The alpha it produces therefore matches the alpha channel
+// GaussianBlur would produce for the same input — an equivalence the tests
+// assert directly, because the box-shadow path depends on it.
+//
+// It exists for that path, whose input is a SOLID SHAPE in one uniform colour.
+// Such an input carries no colour variation to blur: every covered pixel has
+// the same RGB, so a full RGBA blur spends four channels of arithmetic, plus
+// two whole RGBA<->float32 conversions, to recompute three channels that were
+// already known. Measured on a shadow-heavy page, those conversions cost MORE
+// than the blur itself.
+//
+// src is a w*h plane of coverage in [0,1] — not premultiplied RGBA, because
+// with a single uniform colour there is nothing to premultiply against and
+// coverage is the entire signal. It is not modified. A nil or short src, or a
+// degenerate size, returns nil.
+func BlurAlpha(src []float32, w, h int, sdx, sdy float64) []float32 {
+	if w <= 0 || h <= 0 || len(src) < w*h {
+		return nil
+	}
+	// Bound each axis by the extent it blurs across, exactly as GaussianBlur
+	// does; see clampToExtent for why a deviation past this erases its input.
+	sdx = clampToExtent(sdx, w)
+	sdy = clampToExtent(sdy, h)
+	bx, by := boxSizes(sdx), boxSizes(sdy)
+
+	buf := make([]float32, w*h)
+	copy(buf, src[:w*h])
+	if bx == nil && by == nil {
+		return buf // identity on both axes: unblurred, matching GaussianBlur
+	}
+	tmp := make([]float32, w*h)
+	for _, d := range bx {
+		boxBlurAlphaH(buf, tmp, w, h, d)
+		buf, tmp = tmp, buf
+	}
+	for _, d := range by {
+		boxBlurAlphaV(buf, tmp, w, h, d)
+		buf, tmp = tmp, buf
+	}
+	return buf
+}
+
+// boxBlurAlphaH is boxBlurH over a single-channel plane: one horizontal box
+// pass with a running sum, so the cost is O(pixels) whatever the box width.
+func boxBlurAlphaH(src, dst []float32, w, h int, p boxPass) {
+	if p.size <= 1 {
+		copy(dst, src)
+		return
+	}
+	inv := float32(1) / float32(p.size)
+	for y := range h {
+		row := y * w
+		var s float32
+		// Prime the window for x = 0: it spans [-left, size-left).
+		for k := -p.left; k < p.size-p.left; k++ {
+			if k >= 0 && k < w {
+				s += src[row+k]
+			}
+		}
+		for x := range w {
+			dst[row+x] = s * inv
+			if o := x - p.left; o >= 0 && o < w {
+				s -= src[row+o]
+			}
+			if in := x + p.size - p.left; in >= 0 && in < w {
+				s += src[row+in]
+			}
+		}
+	}
+}
+
+// boxBlurAlphaV is boxBlurV over a single-channel plane.
+func boxBlurAlphaV(src, dst []float32, w, h int, p boxPass) {
+	if p.size <= 1 {
+		copy(dst, src)
+		return
+	}
+	inv := float32(1) / float32(p.size)
+	for x := range w {
+		var s float32
+		for k := -p.left; k < p.size-p.left; k++ {
+			if k >= 0 && k < h {
+				s += src[k*w+x]
+			}
+		}
+		for y := range h {
+			dst[y*w+x] = s * inv
+			if o := y - p.left; o >= 0 && o < h {
+				s -= src[o*w+x]
+			}
+			if in := y + p.size - p.left; in >= 0 && in < h {
+				s += src[in*w+x]
+			}
+		}
+	}
+}
