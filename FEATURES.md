@@ -391,6 +391,21 @@ bullet's design rationale is in its PR:
   pixel-cap degradation in the same package does. **DOCX output carries no shadow at all.**
   `pkg/internal/docxwrite` consumes the `cssbox` tree directly rather than the painted item list, so
   it never sees a shadow item, and it has no `box-shadow` analogue to map one onto.
+- **Sub-region rasterization** (`Document.RasterizePageRegion`, `raster.NewRegion`): renders only a
+  rect of a page, returning an image whose `Bounds()` are that rect in **page-absolute** device
+  pixels, so it composites straight onto a cached full-page frame with no offset arithmetic. The
+  pixels are **identical** to the same crop of `RasterizePage` — the property that makes the
+  composite seamless, pinned by a test over rects cutting through shadows, gradients, overlapping
+  boxes and text. That identity is the whole difficulty: the device reports the **page's** size and
+  rasterizes masks against the **page**, because a device reporting its own sub-rect clamps every
+  offscreen surface derived from it (a box-shadow blur, a CSS filter) to the region — measured at
+  56/255 off — while clipping masks to the sub-rect shifts antialiasing at the boundary by 1/255,
+  exactly where it shows. Cost scales with the region but not proportionally: the page's item list is
+  replayed in full, with out-of-region items rejected by a bounds test and blurred shadows skipped
+  via `WriteBounds`, so a small region on a busy page is bounded below by the cost of that walk.
+  Measured on a 1920×480 dashboard, a 400×300 region renders **3.4× faster** than the page (52ms →
+  16ms) with 79% fewer allocations. Reflow documents only; an opened PDF returns
+  `ErrRegionUnsupported`, since its content interpreter has no notion of a partial page.
 - **Link pseudo-classes + `text-decoration: underline`** (`pkg/internal/css/selector.go`, `pkg/internal/html/ua.go`):
   `:link`/`:visited` plus general pseudo-class parsing.
 - **Inline emphasis UA defaults** (`pkg/internal/html/ua.go`): `strong`/`b` bold, `em`/`i`/`cite`/`var`/`dfn`

@@ -21,7 +21,16 @@ import (
 // pages render on separate Devices, which is how the page-parallel path stays
 // lock-free.
 type Device struct {
-	img  *image.RGBA
+	img *image.RGBA
+	// page is the whole page's extent in device pixels. It equals img.Bounds()
+	// for an ordinary Device and is LARGER for a region Device (see NewRegion),
+	// where img covers only the sub-rect being painted.
+	//
+	// Every GEOMETRY decision reads this rather than img.Bounds(): content is
+	// positioned in page coordinates, and an effect painted inside the region can
+	// legitimately be shaped by pixels outside it. img.Bounds() governs only
+	// where pixels may be WRITTEN.
+	page image.Rectangle
 	clip []*image.Alpha // clip stack; top is the active mask (nil = unclipped)
 	logf func(string, ...any)
 
@@ -45,8 +54,43 @@ type groupState struct {
 // New returns a Device drawing onto img. The caller owns img and reads the
 // result after interpretation completes.
 func New(img *image.RGBA) *Device {
-	return &Device{img: img, logf: func(string, ...any) {}}
+	return &Device{img: img, page: img.Bounds(), logf: func(string, ...any) {}}
 }
+
+// NewRegion returns a Device that paints only part of a page: it may write only
+// within region.Bounds(), but reports and reasons about the geometry of the
+// whole page, whose extent in device pixels is page.
+//
+// region must be a sub-image (image.RGBA.SubImage) of a page-sized surface, so
+// its Bounds() carry PAGE-ABSOLUTE coordinates rather than starting at the
+// origin. Painting a page's full item list through such a Device produces
+// exactly the pixels a full-page render would put in that rect — the property
+// the whole thing exists for, since the result is composited over a cached
+// full-page frame and any difference shows as a seam.
+//
+// Passing the page extent separately is what makes that true, and is the reason
+// this constructor exists rather than callers using New on a sub-image. New
+// would report the REGION's size from Size(), and page-space geometry would
+// then be measured against a surface claiming to be a few hundred pixels tall:
+// every offscreen surface derived from Size — a box-shadow blur, a CSS filter —
+// would be clamped to the region, silently losing the part of the effect
+// contributed from outside it and landing what remains in the wrong place. That
+// is not a subtle error; a shadow measured this way was off by 56/255.
+func NewRegion(region *image.RGBA, page image.Rectangle) *Device {
+	return &Device{img: region, page: page, logf: func(string, ...any) {}}
+}
+
+// WriteBounds reports the region of the page this Device may write, in
+// page-absolute device pixels: the whole page for an ordinary Device, the
+// sub-rect for a region Device (NewRegion).
+//
+// It lets an expensive painter skip work whose pixels would be discarded — see
+// pkg/internal/layout/paint's box-shadow path, where a region would otherwise
+// build and blur every shadow on the page before throwing most of them away.
+// It is deliberately NOT part of the render.Device interface: a backend that
+// cannot restrict its writes simply does not implement it, and callers treat
+// its absence as "everything is writable".
+func (d *Device) WriteBounds() image.Rectangle { return d.img.Bounds() }
 
 // SetLogf installs a debug logger that receives messages about approximated or
 // unsupported features (e.g. even-odd fills). Safe to call before rendering.
@@ -56,10 +100,15 @@ func (d *Device) SetLogf(logf func(string, ...any)) {
 	}
 }
 
-// Size reports the bitmap dimensions.
+// Size reports the PAGE's pixel dimensions, which for a region Device
+// (NewRegion) is not the size of the surface it may write to.
+//
+// Callers use this to size offscreen surfaces and to bound page-space geometry,
+// and both must reason about the whole page: a region reporting its own size
+// would clamp a box-shadow blur or a CSS filter to the region and lose the part
+// of the effect contributed from outside it.
 func (d *Device) Size() (w, h int) {
-	b := d.img.Bounds()
-	return b.Dx(), b.Dy()
+	return d.page.Dx(), d.page.Dy()
 }
 
 // Fill paints path's interior with paint.Color under the current clip.
@@ -518,7 +567,22 @@ func (d *Device) activeClip() *image.Alpha {
 const evenOddSupersample = 4
 
 func (d *Device) rasterizeMask(path *render.Path, rule render.FillRule) *image.Alpha {
-	bb := pathDeviceBounds(path).Intersect(d.img.Bounds())
+	pb := pathDeviceBounds(path)
+	// Nothing this path covers is writable: skip before rasterizing. On a region
+	// Device this is what keeps replaying the page's whole item list affordable —
+	// an item belonging elsewhere on the page costs one rectangle test instead of
+	// a rasterization whose coverage would be discarded.
+	if !pb.Overlaps(d.img.Bounds()) {
+		return nil
+	}
+	// Clipped to the PAGE, not to this Device's surface. On a region Device the
+	// two differ, and using the surface would change the mask's GEOMETRY: both
+	// rasterizers derive their accumulation buffer and subscanline sampling from
+	// the mask rectangle, so a shape truncated at the region edge yields slightly
+	// different coverage along that edge than the same shape rasterized whole.
+	// That is a 1/255 seam exactly at the boundary the result gets composited
+	// across — the one place it would be visible.
+	bb := pb.Intersect(d.page)
 	if bb.Empty() {
 		return nil
 	}
@@ -540,7 +604,11 @@ func (d *Device) rasterizeMask(path *render.Path, rule render.FillRule) *image.A
 // composite blends src color through the coverage mask (and active clip) onto
 // the image using source-over alpha.
 func (d *Device) composite(mask *image.Alpha, c color.RGBA) {
-	b := mask.Bounds()
+	// Intersected with the surface: the mask is rasterized against the whole page
+	// (see rasterizeMask), so on a region Device a shape crossing the boundary
+	// has most of its mask in pixels this Device cannot write. Walking those
+	// would cost the full shape per region and undo the saving.
+	b := mask.Bounds().Intersect(d.img.Bounds())
 	clip := d.activeClip()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {

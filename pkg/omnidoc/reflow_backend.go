@@ -237,19 +237,9 @@ func (r *reflowRenderer) renderPage(ctx context.Context, index int, opts RasterO
 	// to zero height) is a legitimate degenerate document, not an attack, so it
 	// clamps to a 1x1 page exactly as before this guard existed; only non-finite
 	// (NaN/Inf, impossible from any real layout) is rejected outright.
-	scale := opts.dpi() / 72
-	fW := math.Ceil(pg.WidthPt * scale)
-	fH := math.Ceil(pg.HeightPt * scale)
-	if math.IsNaN(fW) || math.IsInf(fW, 0) || math.IsNaN(fH) || math.IsInf(fH, 0) {
-		return nil, fmt.Errorf("omnidoc: degenerate scaled page size %gx%g", fW, fH)
-	}
-	if fW*fH > float64(maxRasterPixels) {
-		return nil, fmt.Errorf("omnidoc: page too large (%.0fx%.0f px exceeds %d-pixel cap; lower DPI)", fW, fH, maxRasterPixels)
-	}
-	pxW := int(fW)
-	pxH := int(fH)
-	if pxW <= 0 || pxH <= 0 {
-		pxW, pxH = 1, 1
+	pxW, pxH, scale, err := reflowPagePixels(pg, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, pxW, pxH))
@@ -285,4 +275,85 @@ func (r *reflowRenderer) renderPage(ctx context.Context, index int, opts RasterO
 		return nil, fmt.Errorf("omnidoc: render page %d: %w", index, err)
 	}
 	return img, nil
+}
+
+// renderPageRegion rasterizes the part of page index covered by region (in
+// device pixels at the effective DPI), returning an image whose Bounds() are
+// that rect in PAGE-ABSOLUTE coordinates.
+//
+// The pixels are identical to the same rect of a full renderPage: the painter
+// replays the page's whole item list through a region Device, which restricts
+// writes to the rect while keeping every geometry decision in page space (see
+// raster.NewRegion). Nothing about item ORDER changes, so groups, clips, blend
+// modes and z-order behave exactly as in a full render — which is what a caller
+// compositing the result over a cached frame depends on.
+func (r *reflowRenderer) renderPageRegion(ctx context.Context, index int, region image.Rectangle, opts RasterOptions) (image.Image, error) {
+	if index < 0 || index >= len(r.pages.Pages) {
+		return nil, errPageOutOfRange(index, len(r.pages.Pages))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("omnidoc: render page %d region: %w", index, err)
+	}
+	pg := &r.pages.Pages[index]
+	pxW, pxH, scale, err := reflowPagePixels(pg, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// The region is clipped to the page: a caller asking for a rect that hangs
+	// off the edge gets the part that exists rather than an error, matching how
+	// every other geometry input here degrades. An empty intersection is an
+	// error, though — it means the caller asked for pixels that cannot exist,
+	// and silently handing back a zero-sized image would look like a render that
+	// simply drew nothing.
+	full := image.Rect(0, 0, pxW, pxH)
+	clipped := region.Intersect(full)
+	if clipped.Empty() {
+		return nil, fmt.Errorf("omnidoc: render page %d region %v: does not intersect the page %v", index, region, full)
+	}
+
+	// The canvas is page-sized but only the region's rows are touched, so the
+	// allocation is the page's while the WORK is the region's. Allocating just
+	// the region instead would make its Bounds() start at the origin and lose the
+	// page-absolute coordinates every geometry decision depends on.
+	canvas := image.NewRGBA(full)
+	sub := canvas.SubImage(clipped).(*image.RGBA)
+	bg := opts.Background
+	if bg == nil {
+		bg = color.White
+	}
+	if cb := r.pages.CanvasBackground; cb.A != 0 {
+		bg = cb
+	}
+	fillBackground(sub, bg)
+
+	dev := raster.NewRegion(sub, full)
+	dev.SetLogf(opts.Logf)
+	paint.PaintPageWithOptions(dev, pg, render.Scale(scale, scale), paint.Options{Logf: opts.Logf})
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("omnidoc: render page %d region: %w", index, err)
+	}
+	return sub, nil
+}
+
+// reflowPagePixels resolves a laid-out page's pixel size and the page→device
+// scale at opts' effective DPI, applying the same finiteness and pixel-cap
+// guards renderPage does. Shared so the region path cannot drift from the
+// full-page path on sizing, which would put the two in different coordinate
+// systems and make a region composite misalign.
+func reflowPagePixels(pg *layout.Page, opts RasterOptions) (pxW, pxH int, scale float64, err error) {
+	scale = opts.dpi() / 72
+	fW := math.Ceil(pg.WidthPt * scale)
+	fH := math.Ceil(pg.HeightPt * scale)
+	if math.IsNaN(fW) || math.IsInf(fW, 0) || math.IsNaN(fH) || math.IsInf(fH, 0) {
+		return 0, 0, 0, fmt.Errorf("omnidoc: degenerate scaled page size %gx%g", fW, fH)
+	}
+	if fW*fH > float64(maxRasterPixels) {
+		return 0, 0, 0, fmt.Errorf("omnidoc: page too large (%.0fx%.0f px exceeds %d-pixel cap; lower DPI)", fW, fH, maxRasterPixels)
+	}
+	pxW, pxH = int(fW), int(fH)
+	if pxW <= 0 || pxH <= 0 {
+		pxW, pxH = 1, 1
+	}
+	return pxW, pxH, scale, nil
 }
