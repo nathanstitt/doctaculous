@@ -511,3 +511,87 @@ func TestPDFShadingDoesNotDescribe(t *testing.T) {
 		}
 	}
 }
+
+// countingRamp is a linRamp that records how many times Eval was called, so a
+// test can distinguish "evaluated per pixel" from "evaluated per table entry".
+type countingRamp struct {
+	inner linRamp
+	calls *int
+}
+
+func (f countingRamp) Eval(in []float64) []float64 {
+	*f.calls++
+	return f.inner.Eval(in)
+}
+func (f countingRamp) NumOutputs() int { return f.inner.NumOutputs() }
+
+// TestShadingRampMemoized is the guard on the colorAt ramp cache: sampling a
+// shading far more times than the table has entries must not evaluate the
+// /Function more than once per entry. Without the cache this count would track
+// the number of SAMPLES (the per-pixel cost the cache exists to remove).
+func TestShadingRampMemoized(t *testing.T) {
+	calls := 0
+	fn := countingRamp{inner: linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0, 1}}, calls: &calls}
+	sh := NewAxialShader(0, 0, 100, 0, fn, nil, SpreadPad)
+
+	const samples = 50000
+	for i := 0; i < samples; i++ {
+		sh.ColorAt(float64(i)*100/float64(samples), 0)
+	}
+	if calls > rampLUTSize {
+		t.Errorf("Function evaluated %d times for %d samples; the ramp cache should cap it at %d (one per table entry)",
+			calls, samples, rampLUTSize)
+	}
+	if calls == 0 {
+		t.Fatal("Function never evaluated; the shader is not sampling the ramp at all")
+	}
+}
+
+// TestShadingRampQuantizationBounded pins the fidelity cost of the ramp cache.
+//
+// The table quantizes the parametric value, so a cached lookup can differ from a
+// direct evaluation. That error is what decides whether the goldens hold, so it
+// is asserted here directly rather than left to be discovered as a golden diff:
+// at rampLUTSize entries no channel may move by more than 1/255, which is inside
+// the golden suites' own per-channel tolerance.
+func TestShadingRampQuantizationBounded(t *testing.T) {
+	fn := linRamp{c0: [3]float64{1, 0, 0}, c1: [3]float64{0, 0.5, 1}}
+	cached := NewAxialShader(0, 0, 100, 0, fn, nil, SpreadPad)
+
+	// An independent shading used only for direct (uncached) evaluation, so
+	// filling one ramp cannot affect the other's measurement.
+	direct := NewAxialShader(0, 0, 100, 0, fn, nil, SpreadPad).(*shading)
+
+	worst := 0
+	const samples = 20000
+	for i := 0; i <= samples; i++ {
+		x := float64(i) * 100 / float64(samples)
+		got, ok := cached.ColorAt(x, 0)
+		if !ok {
+			t.Fatalf("ColorAt(%g,0) reported !ok", x)
+		}
+		// Recompute the parametric value the shading would use, then evaluate
+		// it without the table.
+		want := direct.evalColorAt(float64(i) / float64(samples))
+		for _, d := range []int{
+			absInt(int(got.R) - int(want.R)),
+			absInt(int(got.G) - int(want.G)),
+			absInt(int(got.B) - int(want.B)),
+			absInt(int(got.A) - int(want.A)),
+		} {
+			if d > worst {
+				worst = d
+			}
+		}
+	}
+	if worst > 1 {
+		t.Errorf("ramp cache shifts a channel by %d/255; it must stay within 1/255 to hold the golden tolerances (rampLUTSize=%d too small?)", worst, rampLUTSize)
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}

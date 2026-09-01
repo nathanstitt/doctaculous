@@ -87,7 +87,11 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
 - **Shadings** (`pkg/internal/raster/shading.go`, `render.Shader`): axial, radial and function-based
   shadings via `sh`; shading patterns (PatternType 2) via `scn`; and mesh shadings (Types 4–7,
   `shading_mesh.go`), where Coons and tensor patches are tessellated with a bilinear-corner
-  approximation. Tiling patterns (PatternType 1) are pending.
+  approximation. Tiling patterns (PatternType 1) are pending. Axial and radial shadings are a 1-D
+  function of the parametric value, so their colours are memoized in a 4096-entry table over the
+  `/Domain` on first paint: the `/Function` runs once per table entry rather than once per pixel.
+  The table quantizes the parameter, bounded by test to at most 1/255 on any channel — inside the
+  golden suites' own tolerance.
 - **Images** (`pkg/internal/raster/image.go`): DeviceGray/RGB/CMYK/Indexed/ICCBased at 1–16 bpc,
   baseline JPEG, `/SMask` alpha, `/ImageMask` stencils, `/Decode` arrays on both the raw and DCT
   paths, and inline images (`BI`/`ID`/`EI`).

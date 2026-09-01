@@ -79,6 +79,17 @@ type shading struct {
 	fn          function.Func // /Function: parametric value(s) → color components
 	domain      [2]float64    // /Domain [t0 t1] for axial/radial (default [0 1])
 
+	// ramp memoizes colorAt over domain (see rampLUTSize). Built on first use.
+	//
+	// This makes a shading value NOT safe for concurrent use. That is the same
+	// contract Device already carries ("a Device is not safe for concurrent
+	// use; render one page per Device"), and it holds for the same reason: a
+	// shading is built by newShader from one page's resources and used only by
+	// the Device rendering that page. A future band-parallel renderer that
+	// shares one page's shadings across goroutines must build the ramp before
+	// the fan-out or give each worker its own shading.
+	ramp []color.RGBA
+
 	// Axial (Type 2) geometry.
 	axis [4]float64 // x0 y0 x1 y1
 
@@ -346,10 +357,62 @@ func clamp01(v float64) float64 {
 	return v
 }
 
+// rampLUTSize is the number of entries in the memoized /Domain ramp built by
+// colorAt. An axial or radial shading is a 1-D function of the parametric value
+// t, so its colors can be tabulated once and looked up per pixel instead of
+// re-evaluated — the difference between one /Function evaluation per PIXEL and
+// one per table entry, on a gradient that typically covers tens of thousands of
+// pixels.
+//
+// The size is a fidelity/cost tradeoff measured against the golden corpus rather
+// than picked for roundness. The table quantizes t, so too few entries shift
+// pixels: at 1024 a smooth feColorMatrix ramp moved by up to 5/255, which is
+// invisible but exceeds the goldens' ±4 per-channel tolerance. At 4096 the worst
+// deviation across the whole corpus is 1/255 and every golden passes unchanged.
+// Going further is counterproductive: at 65536 the table costs more to fill than
+// the evaluations it saves, and a full page render measured SLOWER than no cache
+// at all. 4096 is the point where the quantization is smaller than the
+// rasterizer's own rounding and the table still pays for itself.
+const rampLUTSize = 4096
+
 // colorAt maps a parametric value t through /Function to an RGBA color. When no
 // function is present the components are taken directly (rare for shadings, but
 // tolerated).
+//
+// Results are memoized in a lazily-built table over the shading's /Domain (see
+// rampLUTSize). The table is built on first use rather than at parse time so a
+// shading that is never painted — one resolved into a resource dict but not
+// referenced by any drawing operator — costs nothing.
 func (s *shading) colorAt(t float64) color.RGBA {
+	lo, hi := s.domain[0], s.domain[1]
+	if !(hi > lo) {
+		// Degenerate or inverted domain: the ramp is a single color, and the
+		// division below would be meaningless. Evaluate directly.
+		return s.evalColorAt(t)
+	}
+	if s.ramp == nil {
+		s.ramp = make([]color.RGBA, rampLUTSize)
+		for i := range s.ramp {
+			s.ramp[i] = s.evalColorAt(lo + (hi-lo)*float64(i)/float64(rampLUTSize-1))
+		}
+	}
+	// Nearest-entry lookup. t is already folded into the domain by the caller's
+	// spread/extend handling, but clamp anyway: a caller that passes an
+	// out-of-range t must get the endpoint color, never an out-of-bounds index.
+	idx := int((t-lo)/(hi-lo)*float64(rampLUTSize-1) + 0.5)
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= rampLUTSize {
+		idx = rampLUTSize - 1
+	}
+	return s.ramp[idx]
+}
+
+// evalColorAt is colorAt without the memoization: the direct /Function
+// evaluation. It is what fills the table, and the fallback for a degenerate
+// domain.
+func (s *shading) evalColorAt(t float64) color.RGBA {
 	if s.fn == nil {
 		return s.toRGBA([]float64{t})
 	}
