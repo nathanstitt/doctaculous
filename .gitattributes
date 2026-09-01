@@ -1,0 +1,53 @@
+# Line endings.
+#
+# Golden files are compared BYTE FOR BYTE against what the engine emits, and the
+# engine always writes "\n". Without this file, git's autocrlf setting checks text
+# goldens out as CRLF on Windows, so every .svg/.md/.txt/.html golden fails with a
+# diff that renders identically on screen — an invisible trailing \r. That is exactly
+# what the first Windows CI run hit: 20+ failures, all "first difference at line 1",
+# all with visually identical want/got.
+#
+# So: normalize text in the working tree on every platform, and mark every binary
+# format explicitly so git never tries to "fix" its line endings.
+
+# Default: let git detect text and store it with LF, but check it out with LF too.
+* text=auto eol=lf
+
+# Golden and fixture formats that are text and byte-compared.
+*.svg   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.go    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+
+# Shell scripts must keep LF or they will not run.
+*.sh    text eol=lf
+
+# Binary: never touch these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.heic  binary
+*.hevc  binary
+*.avif  binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.pptx  binary
+*.epub  binary
+*.rtf   binary
+*.ttf   binary
+*.otf   binary
+*.ttc   binary
+*.woff  binary
+*.woff2 binary
+*.gz    binary
+*.zip   binary

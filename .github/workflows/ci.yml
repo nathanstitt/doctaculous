@@ -10,24 +10,43 @@ permissions:
 
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     # Without this, a job inherits GitHub's 6-hour default and a runner that
     # never picks up the work sits "queued" indefinitely — one run on this repo
     # was stuck for over 25 hours, holding up a stacked PR chain with no signal
     # either way. The race suite is the long pole at a few minutes, so 30 is
     # generous headroom over a normal run while still failing fast on a hang.
     timeout-minutes: 30
+    strategy:
+      # One OS failing should not cancel the others: when a path bug shows up on
+      # Windows, the Linux result is what tells you whether it is Windows-specific.
+      fail-fast: false
+      matrix:
+        # The release ships darwin and windows binaries (.goreleaser.yaml), so
+        # both are tested here. Their value is PATH AND FILESYSTEM behaviour —
+        # separators, case-insensitivity, CRLF — which Linux cannot exercise.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # "1.25.x", not go-version-file. go.mod's `go` directive is the module's
+          # MINIMUM (1.25.0), and setup-go treats it as an exact pin -- so reading
+          # from the file built every run on 1.25.0 itself, thirteen patch releases
+          # behind, carrying eight known stdlib vulnerabilities that govulncheck
+          # duly reported. Testing on the latest 1.25 patch matches what a user
+          # building from source gets, while go.mod keeps stating the real floor.
+          go-version: "1.25.x"
+          check-latest: true
           cache: true
 
+      # gofmt and vet are OS-independent, so running them three times would just
+      # burn runner minutes to reach the same answer.
       - name: Verify formatting
+        if: matrix.os == 'ubuntu-latest'
         run: |
           fmtout=$(gofmt -l .)
           if [ -n "$fmtout" ]; then
@@ -37,21 +56,66 @@ jobs:
           fi
 
       - name: go vet
+        if: matrix.os == 'ubuntu-latest'
         run: go vet ./...
+
+      # Reachability-aware vulnerability scanning: govulncheck reports a CVE only
+      # when a path in this module actually calls the vulnerable symbol, so it does
+      # not fail on advisories against code that is merely linked. That makes it
+      # safe to have it gate the build rather than just report.
+      #
+      # It scans the standard library too, against the toolchain in use — which is
+      # how the pinned-to-1.25.0 problem above was found: eight stdlib advisories
+      # that a current patch release already fixes. A failure here naming only
+      # stdlib packages means the runner's Go is behind, not that this repo has
+      # work to do; the fix is the Go version in the setup step, not the code.
+      #
+      # Linux-only for the same reason as vet: the answer does not vary by OS.
+      #
+      # Pinned rather than @latest. The vulnerability DATABASE is fetched at run
+      # time, so a pin does not stale the findings — it only fixes the scanner
+      # binary, which is a tool this workflow executes and should therefore be a
+      # reviewed dependency like any other.
+      - name: govulncheck
+        if: matrix.os == 'ubuntu-latest'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       - name: Build
         run: go build ./...
 
+      # Recorded so a future memory regression is diagnosable rather than a
+      # mystery SIGTERM. See the race step below for why the headroom matters.
+      - name: Report runner capacity
+        shell: bash
+        run: |
+          echo "cores: $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '?')"
+          free -g 2>/dev/null || vm_stat 2>/dev/null | head -3 || wmic OS get TotalVisibleMemorySize 2>/dev/null || true
+
       - name: Test (race + coverage)
+        if: matrix.os == 'ubuntu-latest'
         # -p bounds how many package binaries run at once. Without it the suite
-        # peaks at ~13.3 GB RSS against this runner's 16 GB and the kernel kills
-        # it (SIGTERM, exit 143) minutes into a 30-minute budget. Three levels of
-        # parallelism compound: go test runs packages up to GOMAXPROCS, each
-        # package runs its t.Parallel tests, and every rasterize opens a
-        # GOMAXPROCS-sized worker pool — then -race multiplies the footprint.
-        # Capping the outermost level is the one knob that does not cost
-        # coverage or serialize the suite.
+        # peaks well past this runner's 16 GB and the kernel kills it (SIGTERM,
+        # exit 143) minutes into a 30-minute budget — a failure that reads as a
+        # hang. Three levels of parallelism compound: go test runs packages up to
+        # GOMAXPROCS, each package runs its t.Parallel tests, and every rasterize
+        # opens a GOMAXPROCS-sized worker pool — then -race multiplies the
+        # footprint. Capping the outermost level is the one knob that does not
+        # cost coverage or serialize the suite.
+        #
+        # Measured 2026-08-31 with -p 2: 12.0 GB peak at GOMAXPROCS=14, 9.2 GB at
+        # GOMAXPROCS=4. A standard runner is 4-core, so the real figure is the
+        # lower one — roughly 58% of the ceiling. Re-measure with
+        # `/usr/bin/time -l go test -race -p 2 -count=1 ./...` before raising any
+        # parallelism knob.
         run: go test -race -p 2 -coverprofile=coverage.out ./...
+
+      # macOS and Windows run WITHOUT -race: the point of these two is path and
+      # filesystem behaviour, not data races, and -race would triple the cost of
+      # the matrix to re-answer a question Linux already answers. -p 2 stays, for
+      # the memory reason above.
+      - name: Test
+        if: matrix.os != 'ubuntu-latest'
+        run: go test -p 2 ./...
 
   lint:
     name: Lint
@@ -66,7 +130,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # "1.25.x", not go-version-file. go.mod's `go` directive is the module's
+          # MINIMUM (1.25.0), and setup-go treats it as an exact pin -- so reading
+          # from the file built every run on 1.25.0 itself, thirteen patch releases
+          # behind, carrying eight known stdlib vulnerabilities that govulncheck
+          # duly reported. Testing on the latest 1.25 patch matches what a user
+          # building from source gets, while go.mod keeps stating the real floor.
+          go-version: "1.25.x"
+          check-latest: true
           cache: true
 
       - name: golangci-lint

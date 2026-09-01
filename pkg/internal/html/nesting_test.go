@@ -5,14 +5,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	xhtml "golang.org/x/net/html"
 )
 
-// TestNestingLimit covers the depth bound on Parse. The bound exists because
-// x/net/html's close-tag handling is quadratic in the open-element count, so a
-// deeply nested document is a denial of service the caller cannot escape:
-// measured inside xhtml.Parse, 30,000 nested <div> took 3.7s and 60,000 took
-// 15.1s, while 200,000 did not finish. The cost is in the dependency and lands
-// before this package gets control, so declining the input is the only lever.
+// TestNestingLimit covers the depth bound on Parse.
+//
+// The bound was added because x/net/html's close-tag handling was quadratic in
+// the open-element count, making a deeply nested document a denial of service
+// the caller could not escape: measured inside xhtml.Parse at the time, 30,000
+// nested <div> took 3.7s and 60,000 took 15.1s, while 200,000 did not finish.
+//
+// Upstream has since fixed that (GO-2026-4440, x/net v0.45.0) with a 512-element
+// limit of its own, so this guard is now about the ERROR a caller gets and the
+// cost of the refusal, not about preventing a hang. See maxNestingDepth.
 func TestNestingLimit(t *testing.T) {
 	deep := func(n int) []byte {
 		return []byte(strings.Repeat("<div>", n) + "x" + strings.Repeat("</div>", n))
@@ -29,6 +35,39 @@ func TestNestingLimit(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTooDeeplyNested) {
 		t.Errorf("error = %v, want it to wrap ErrTooDeeplyNested", err)
+	}
+}
+
+// TestNestingLimitMatchesUpstream pins maxNestingDepth to x/net/html's own
+// open-element cap.
+//
+// The two must stay equal. If ours drifts ABOVE upstream's, every document in
+// the gap gets refused by the dependency instead of by us — this package's check
+// becomes dead code and the caller loses ErrTooDeeplyNested for a rewordable
+// error string. If ours drifts BELOW, we reject documents the parser would have
+// accepted.
+//
+// This asserts on upstream's OBSERVED behaviour rather than on a constant it
+// does not export, so a version bump that moves their limit fails here with a
+// specific message instead of quietly changing which documents are accepted.
+func TestNestingLimitMatchesUpstream(t *testing.T) {
+	// Bypass this package's check by calling the dependency directly, and find
+	// the depth at which it starts refusing.
+	upstreamAccepts := func(n int) bool {
+		src := strings.Repeat("<div>", n) + "x" + strings.Repeat("</div>", n)
+		_, err := xhtml.Parse(strings.NewReader(src))
+		return err == nil
+	}
+
+	if !upstreamAccepts(maxNestingDepth) {
+		t.Errorf("x/net/html refuses %d levels but maxNestingDepth allows it; "+
+			"upstream's cap dropped below ours — lower maxNestingDepth to match", maxNestingDepth)
+	}
+	// A document one level past our limit must be one upstream also refuses.
+	// If upstream still accepts it, our bound is stricter than it needs to be.
+	if upstreamAccepts(maxNestingDepth + 1) {
+		t.Errorf("x/net/html accepts %d levels but maxNestingDepth refuses it; "+
+			"upstream's cap rose above ours — raise maxNestingDepth to match", maxNestingDepth+1)
 	}
 }
 

@@ -849,14 +849,44 @@ backlog.
 
 9. **`pkg/internal/layout` has no package doc comment** — the only one of 50 missing it. It
    renders blank on pkg.go.dev, which the README badge links to directly.
+   **DONE, with a correction:** the premise no longer holds. That package moved under
+   `internal/` in Phase 1, so it does not appear on pkg.go.dev at all. Re-checked all
+   seven PUBLIC packages — `omnidoc`, `docx`, `xlsx`, `pdf`, `crop`, `heif`, `resource`
+   — and every one already has a doc comment, so nothing renders blank. The comment was
+   still written, for anyone reading the source: it documents the display-list seam
+   (`Pages`/`Page`/`Item`) that ARCHITECTURE.md describes.
 10. **Zero `Example` functions in the repo.** With ~70 exported functions, pkg.go.dev
     will show no runnable examples at all. The highest-leverage doc fix available;
     `Convert`, `ConvertFile`, `Open`, and `RasterizePage` are the ones that matter.
+    **DONE** — six examples in `pkg/omnidoc/example_test.go`, all with `// Output:`
+    blocks, so `go test` compiles and RUNS them and a drifting example fails CI. Two
+    caught mistakes in my own first draft: `Document` has no `Close` method, and an
+    HTML document opened without pagination renders as one tall viewport-width page
+    (1280×200), not US Letter — both now documented in the examples themselves.
 11. **README badge contradicts `go.mod`** — badge says Go 1.26, `go.mod:3` says
     `1.25.0`. Fix the badge; 1.25 is the correct floor and CI derives from the file.
+    **DONE** — badge now reads 1.25.
 12. **CI tests one OS.** `ci.yml:14` is `ubuntu-latest` only, while `.goreleaser.yaml`
     ships darwin and windows binaries. Windows path handling is never tested. Add a
     matrix.
+    **DONE** — `ubuntu-latest`, `macos-latest`, `windows-latest`, with `fail-fast:
+    false` so a Windows-only failure still shows the Linux result for comparison.
+    `-race` runs on Linux ONLY: the point of the other two is path and filesystem
+    behaviour, and racing all three would triple the matrix cost to re-answer a
+    question Linux already answers. gofmt and vet are Linux-only for the same reason.
+    A pre-flight audit found the tree portable in the way I looked for — 138
+    `filepath.Join` calls, no raw-slash paths in tests, no `exec.Command`, no
+    unix-permission tests. **It found a real bug anyway, on its first run**, in the one
+    place source-reading would not have caught: the repo had no `.gitattributes`, so
+    git checked text goldens out as CRLF on Windows while the engine emits LF. Every
+    `.svg`/`.md`/`.txt`/`.html` golden failed the byte comparison — 20+ tests — each
+    reporting "first difference at line 1" with `want` and `got` rendering identically
+    on screen. macOS passed, which is what isolated it to the checkout rather than the
+    code. Fixed at the cause (`.gitattributes` normalizing text to LF and marking every
+    binary fixture format explicitly), not by making the comparison tolerant of `\r` —
+    that would have taught the tests to accept an already-corrupted fixture. Verified
+    `git add --renormalize .` is a no-op on the tree, so only the Windows checkout
+    changes. All three OSes now pass.
 13. **The race suite has almost no memory headroom.** It peaks at ~13.3 GB RSS
     against a 16 GB runner. That was latent until the rename nudged it over, and the
     kernel killed the job (SIGTERM, exit 143) minutes into a 30-minute budget — a
@@ -866,9 +896,76 @@ backlog.
     item 12 lands: a matrix multiplies runners, not per-runner memory, and macOS and
     Windows runners are not more generous. If it is still near the ceiling, cap the
     per-rasterize pool in tests rather than trimming coverage.
+    **MEASURED, no change needed.** Re-measured on 2026-08-31 with
+    `/usr/bin/time -l go test -race -p 2 -count=1 ./...`:
 
-Also missing, in rough priority: `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.
-Consider SBOM and artifact signing — both increasingly expected at 1.0.
+    | GOMAXPROCS | peak RSS | of a 16 GB runner |
+    | --- | --- | --- |
+    | 14 (this workstation) | 12.0 GB | 75% |
+    | 4 (a standard runner) | 9.2 GB | 58% |
+
+    The 13.3 GB in the original finding predates `-p 2`. A standard GitHub runner is
+    4-core, so the figure that matters is the lower one, and 58% is real headroom — not
+    the near-ceiling the item feared. No per-rasterize cap was added: adding a knob to
+    fix a problem the measurement says is not there would be worse than the gap.
+    Item 12's matrix does not change this, because only the Linux job runs `-race`.
+    The numbers and the re-measure command are recorded in `ci.yml` beside the flag,
+    and CI now prints each runner's cores and memory so a future regression is
+    diagnosable rather than a mystery SIGTERM.
+
+~~Also missing, in rough priority: `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.~~
+**All three added**, and linked from the README.
+
+`SECURITY.md` is the one that carries weight: this library parses untrusted documents,
+so it states the threat model explicitly (a crash, hang, or unbounded allocation from a
+malformed file IS a vulnerability; a fidelity gap is not) and lists the Phase 0 bounds
+that are now load-bearing. Every hardening claim in it was verified against the code
+before it was written, not recalled.
+
+`CHANGELOG.md` leads with the two breaking changes an existing user must act on — the
+`doctaculous` → `omnidoc` module rename, and the public surface going from 16 packages
+to 7. Entries before v0.1.1 point at git history rather than being reconstructed.
+
+Still open: SBOM and artifact signing — both increasingly expected at 1.0.
+
+**`govulncheck` was added to CI ahead of both**, because it is the item that produces
+security value rather than a compliance artifact: it is reachability-aware, so it flags
+an advisory only when a path in this module actually CALLS the vulnerable symbol. An
+SBOM tells a consumer what is inside the binary; `govulncheck` tells us what is
+exploitable through it. (Go binaries already carry their module graph — `go version -m`
+— so an SBOM is largely a re-publication of that in a scanner-readable format. Its real
+value here is procurement, plus the vendored JBIG2 decoder, which is NOT a Go module and
+so is invisible to `go version -m`.)
+
+Its first run found **9 reachable vulnerabilities in dependencies**: 8 in
+`golang.org/x/net` (all in the HTML parser this project's core path calls) and 1 in
+`golang.org/x/image`. Both were already-approved dependencies, so the fix was a version
+bump, not a policy question — `x/net` v0.43.0 → v0.55.0 and `x/image` v0.43.0 → v0.45.0,
+with no golden movement.
+
+**This is a direct answer to a gap Phase 0 recorded.** That phase noted three of its
+defects were in dependencies, and that `docs/DEPENDENCIES.md` vets licensing and purity
+but not hostile-input behaviour. `govulncheck` closes exactly that gap, and its first
+finding proves the point: GO-2026-4440 IS the quadratic HTML-nesting blowup Phase 0
+found by fuzzing and worked around with its own bound. Upstream has since fixed it with
+a limit of the same shape (512 open elements), so the local guard was re-matched to
+upstream's — 4096 → 510 — rather than left as unreachable dead code. A new test pins the
+two limits together empirically, so a future upstream change fails loudly instead of
+silently making the local check dead again.
+
+It also found a second, unrelated problem — one nothing else would have surfaced.
+`setup-go` treats `go.mod`'s `go` directive as an EXACT PIN, not a minimum, so
+`go-version-file: go.mod` had CI building and testing every run on **go1.25.0**:
+fourteen patch releases behind, carrying 8 known standard-library vulnerabilities in
+`net/url`, `crypto/tls`, `encoding/xml`, `encoding/asn1`, `net/textproto`, `crypto/x509`
+and `net/http`. The repo had no work to do; the runner's toolchain did. Switched to
+`go-version: "1.25.x"` with `check-latest`, which keeps `go.mod` stating the true floor
+while CI exercises what someone building from source today actually gets. CI now runs
+go1.25.14 and reports **"affected by 0 vulnerabilities."**
+
+Worth noting for the SBOM decision above: this is the class of finding an SBOM does not
+produce. An SBOM would have faithfully recorded "built with go1.25.0" without any
+indication that the figure was a problem.
 
 Two things confirmed **fine**, so nobody re-investigates them:
 
@@ -909,9 +1006,16 @@ wrong output. That is what makes them safe to ship.
 
 Recorded so they stop being re-litigated: JPEG2000 (no viable pure-Go decoder
 exists), mid-flex/mid-grid-item splitting (owner-signed deferral; flex and grid size
-items collectively, so it needs the fragmentainer inside track sizing), `subgrid`,
-variable-font axes, and `writing-mode` for HTML — the last of which still needs its
-`SCOPE.md` entry per item 5.
+items collectively, so it needs the fragmentainer inside track sizing), `subgrid`, and
+variable-font axes.
+
+~~`writing-mode` for HTML~~ was listed here too, and that was wrong on both counts:
+it is neither unplanned nor missing its `SCOPE.md` entry. Vertical text SHIPS on the
+HTML and SVG paths (verified in code — `WritingMode` is an inherited `ComputedStyle`
+field with a cascade case, and `text-orientation` ships with it), `SCOPE.md` carries
+the entry explaining the gap is moot, and the residual work is tracked in
+`docs/CSS-LAYOUT.md`. The only genuinely excluded piece is vertical GLYPH FORMS, which
+needs GSUB feature application this engine does not do. See item 5.
 
 ## If this is too much
 
