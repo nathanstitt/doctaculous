@@ -372,7 +372,11 @@ bullet's design rationale is in its PR:
   The blur is `sigma = radius/2`, per the spec's "the shadow's edge transitions over a distance
   equal to the blur radius, centred on the edge". It runs through **`pkg/internal/svg/filter`'s existing
   `feGaussianBlur`**: the repo keeps exactly one blur implementation, shared by SVG filters, the CSS
-  `filter` shorthand and now this. Square corners only — `border-radius` is not implemented, and
+  `filter` shorthand and now this. A shadow's silhouette is one uniform colour, so it takes that
+  blur's **alpha-only entry point** (`filter.BlurAlpha`) — the same three box passes over a coverage
+  plane instead of four RGBA channels, skipping both `RGBA<->float32` conversions, which profiled as
+  costing more than the blur arithmetic itself. A test asserts the two agree channel-for-channel.
+  Square corners only — `border-radius` is not implemented, and
   `paint.shadowOutline` documents the single integration point for it.
 - **A `box-shadow` with no blur stays fully vector, including in PDF.** It is a plain even-odd fill
   of the box's shape, so the common patterns — a hard offset, a spread ring, an `inset` colour
