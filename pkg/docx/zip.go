@@ -3,6 +3,7 @@ package docx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -161,27 +162,42 @@ func (p *pkgReader) mainDocumentPart() (string, error) {
 	return "", fmt.Errorf("%w: word/document.xml", ErrMissingPart)
 }
 
-// Open reads and parses a .docx file from a path.
-func Open(filePath string) (*Document, error) {
+// Open reads and parses a .docx file from a path. ctx bounds the parse: the
+// os.ReadFile itself is not interruptible, but every part decode and each
+// block of the document body checks for cancellation, so a hostile package can
+// be abandoned instead of wedging the caller. A nil ctx means context.Background().
+func Open(ctx context.Context, filePath string) (*Document, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("docx: open %s: %w", filePath, err)
 	}
-	return OpenBytes(data)
+	return OpenBytes(ctx, data)
 }
 
 // OpenBytes parses a .docx from an in-memory byte slice. The slice is read but
-// not retained.
-func OpenBytes(data []byte) (*Document, error) {
-	return OpenReaderAt(bytes.NewReader(data), int64(len(data)))
+// not retained. See Open for what ctx bounds.
+func OpenBytes(ctx context.Context, data []byte) (*Document, error) {
+	return OpenReaderAt(ctx, bytes.NewReader(data), int64(len(data)))
 }
 
 // OpenReaderAt parses a .docx from a random-access reader of the given size,
-// matching the io.ReaderAt+size convention the PDF parser uses.
-func OpenReaderAt(r io.ReaderAt, size int64) (*Document, error) {
+// matching the io.ReaderAt+size convention the PDF parser uses. See Open for
+// what ctx bounds.
+func OpenReaderAt(ctx context.Context, r io.ReaderAt, size int64) (*Document, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	pkg, err := openPackage(r, size)
 	if err != nil {
 		return nil, err
 	}
-	return parsePackage(pkg)
+	return parsePackage(ctx, pkg)
+}
+
+// cancelled reports ctx's error, wrapped with the package prefix, or nil.
+func cancelled(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("docx: %w", err)
+	}
+	return nil
 }

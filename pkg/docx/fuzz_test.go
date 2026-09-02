@@ -3,6 +3,7 @@ package docx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,7 @@ func FuzzOpenBytes(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		doc, err := OpenBytes(data)
+		doc, err := OpenBytes(context.Background(), data)
 		if err != nil || doc == nil {
 			return
 		}

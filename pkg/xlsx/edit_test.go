@@ -3,6 +3,7 @@ package xlsx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -60,7 +61,7 @@ func zipParts(t *testing.T, data []byte) ([]string, map[string][]byte) {
 // part byte-identically, in the original order.
 func TestEditNoOpByteIdentical(t *testing.T) {
 	src := editFixture()
-	f, err := Edit(src)
+	f, err := Edit(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func TestEditNoOpByteIdentical(t *testing.T) {
 	sh.Cells(func(int, int, CellData) bool { return true })
 	_ = sh.Cell(1, 2)
 
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestEditNoOpByteIdentical(t *testing.T) {
 // content inside the edited part survives verbatim.
 func TestEditSurgicalPreservation(t *testing.T) {
 	src := editFixture()
-	f, err := Edit(src)
+	f, err := Edit(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestEditSurgicalPreservation(t *testing.T) {
 	if err := sh.SetNumber(2, 2, 99); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestEditSurgicalPreservation(t *testing.T) {
 	}
 
 	// The edit reads back through the enriched reader.
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,12 +180,12 @@ func TestEditTypedCellWrites(t *testing.T) {
 	if err := sh.SetFormula(3, 2, `CONCAT("a","b")`, Value{Kind: KindString, S: "ab"}); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func TestEditTypedCellWrites(t *testing.T) {
 	}
 
 	// ClearCell drops content but keeps the (date) style.
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +230,7 @@ func TestEditTypedCellWrites(t *testing.T) {
 
 // TestEditSheetOps covers add/delete/move/rename/visibility/tab color.
 func TestEditSheetOps(t *testing.T) {
-	f, err := Edit(editFixture())
+	f, err := Edit(context.Background(), editFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,11 +259,11 @@ func TestEditSheetOps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +285,7 @@ func TestEditSheetOps(t *testing.T) {
 	}
 
 	// Guards: the last visible sheet can be neither hidden nor deleted.
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +306,7 @@ func TestEditSheetOps(t *testing.T) {
 
 // TestEditGeometry covers merges, panes, dimensions, and row/col sizing.
 func TestEditGeometry(t *testing.T) {
-	f, err := Edit(editFixture())
+	f, err := Edit(context.Background(), editFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,11 +320,11 @@ func TestEditGeometry(t *testing.T) {
 	sh.SetRowHeight(1, 30)
 	sh.SetColWidth(2, 18.5)
 
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +343,7 @@ func TestEditGeometry(t *testing.T) {
 	}
 
 	// Editor-side reads agree; clearing restores the unset state.
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,11 +370,11 @@ func TestEditGeometry(t *testing.T) {
 	sh2.SetFrozen(0, 0)
 	sh2.ClearRowHeight(1)
 	sh2.ClearColWidth(2)
-	out2, err := f2.Save()
+	out2, err := f2.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wb2, err := OpenBytes(out2)
+	wb2, err := OpenBytes(context.Background(), out2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +392,7 @@ func TestEditColRangeSplit(t *testing.T) {
  <cols><col min="1" max="5" width="20" customWidth="1"/></cols>
  <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
 </worksheet>`).Bytes()
-	f, err := Edit(src)
+	f, err := Edit(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,11 +401,11 @@ func TestEditColRangeSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 	sh.SetColWidth(3, 5)
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +421,7 @@ func TestEditColRangeSplit(t *testing.T) {
 // TestEditDeterministic pins byte-identical saves for identical edit sequences.
 func TestEditDeterministic(t *testing.T) {
 	run := func() []byte {
-		f, err := Edit(editFixture())
+		f, err := Edit(context.Background(), editFixture())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -434,7 +435,7 @@ func TestEditDeterministic(t *testing.T) {
 		if _, err := f.AddSheet("Extra"); err != nil {
 			t.Fatal(err)
 		}
-		out, err := f.Save()
+		out, err := f.Save(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -482,7 +483,7 @@ func TestEditCalcChainInvalidation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, err := Edit(buf.Bytes())
+	f, err := Edit(context.Background(), buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +494,7 @@ func TestEditCalcChainInvalidation(t *testing.T) {
 	if err := sh.SetNumber(2, 2, 21); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +509,7 @@ func TestEditCalcChainInvalidation(t *testing.T) {
 		t.Error("calcChain relationship survived")
 	}
 	// The output still opens.
-	if _, err := OpenBytes(out); err != nil {
+	if _, err := OpenBytes(context.Background(), out); err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 }
@@ -519,15 +520,15 @@ func TestNewBlankWorkbook(t *testing.T) {
 	if names := f.SheetNames(); len(names) != 1 || names[0] != "Sheet1" {
 		t.Fatalf("SheetNames = %v", names)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatalf("a fresh blank workbook must open: %v", err)
 	}
-	if len(wb.Sheets) != 1 || wb.Sheets[0].Hidden {
+	if len(wb.Sheets) != 1 || wb.Sheets[0].Visibility != SheetVisible {
 		t.Errorf("blank workbook sheets = %+v", wb.Sheets)
 	}
 	// New is deterministic.

@@ -2,6 +2,7 @@ package xlsx
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -88,7 +89,7 @@ func TestPivotRoundTrip(t *testing.T) {
 		t.Error("cache must refresh on load (values recompute, not round-trip)")
 	}
 
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestPivotRemoveThenAdd(t *testing.T) {
 	}
 	withPivot := mustSave(t, f)
 
-	f2, err := Edit(withPivot)
+	f2, err := Edit(context.Background(), withPivot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func TestPivotRemoveThenAdd(t *testing.T) {
 	}
 
 	// Remove-then-add in ONE session: exactly one pivot afterwards.
-	f3, err := Edit(withPivot)
+	f3, err := Edit(context.Background(), withPivot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestPivotRemoveThenAdd(t *testing.T) {
 	if err := f3.AddPivotTable(pt); err != nil {
 		t.Fatal(err)
 	}
-	f4, err := Edit(mustSave(t, f3))
+	f4, err := Edit(context.Background(), mustSave(t, f3))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestDefinedNamesRoundTrip(t *testing.T) {
 	}
 	out := mustSave(t, f)
 
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +223,7 @@ func TestDefinedNamesRoundTrip(t *testing.T) {
 		t.Errorf("name 1 = %+v", local)
 	}
 
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +235,7 @@ func TestDefinedNamesRoundTrip(t *testing.T) {
 	if err := f2.SetDefinedNames(nil); err != nil {
 		t.Fatal(err)
 	}
-	wb2, err := OpenBytes(mustSave(t, f2))
+	wb2, err := OpenBytes(context.Background(), mustSave(t, f2))
 	if err != nil {
 		t.Fatal(err)
 	}

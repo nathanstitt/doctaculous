@@ -2,6 +2,7 @@ package xlsx
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"strconv"
@@ -27,7 +28,10 @@ const (
 )
 
 // parseWorkbook locates and parses the workbook and its satellite parts.
-func parseWorkbook(pkg *pkgReader) (*Workbook, error) {
+func parseWorkbook(ctx context.Context, pkg *pkgReader) (*Workbook, error) {
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 	wbPart := "xl/workbook.xml"
 	if rel, ok := pkg.firstRelOfType("/", relOfficeDocument); ok {
 		if pkg.read(rel.Target) != nil {
@@ -87,9 +91,11 @@ func parseWorkbook(pkg *pkgReader) (*Workbook, error) {
 		if data == nil {
 			continue
 		}
-		sheet := parseSheet(data, shared, styles, date1904)
+		sheet, err := parseSheet(ctx, data, shared, styles, date1904)
+		if err != nil {
+			return nil, err
+		}
 		sheet.Name = s.Name
-		sheet.Hidden = s.State == "hidden" || s.State == "veryHidden"
 		switch s.State {
 		case "hidden":
 			sheet.Visibility = SheetHidden
@@ -169,11 +175,6 @@ func parseSharedStrings(data []byte) []string {
 type styleTable struct {
 	numFmtByXf []int          // xf index -> numFmtId
 	customFmt  map[int]string // custom numFmtId -> format code
-	fontByXf   []int          // xf index -> font index
-	fillByXf   []int          // xf index -> fill index
-	alignByXf  []string       // xf index -> horizontal alignment ("" default)
-	fonts      []struct{ b, i bool }
-	fills      []string // fill index -> "RRGGBB" or ""
 	// resolved is the full Style per xf index, shared (read-only) between
 	// every cell referencing the xf.
 	resolved []*Style
@@ -339,17 +340,11 @@ func parseStyles(data []byte) styleTable {
 
 	fullFonts := make([]Font, len(doc.Fonts.Font))
 	for i, f := range doc.Fonts.Font {
-		st.fonts = append(st.fonts, struct{ b, i bool }{f.B != nil, f.I != nil})
 		fullFonts[i] = fontFromXML(f)
 	}
 
 	fullFills := make([]Fill, len(doc.Fills.Fill))
 	for i, f := range doc.Fills.Fill {
-		rgb := ""
-		if f.Pattern.Type == "solid" && f.Pattern.FgColor != nil {
-			rgb = normalizeRGB(f.Pattern.FgColor.RGB)
-		}
-		st.fills = append(st.fills, rgb)
 		fullFills[i] = fillFromXML(f)
 	}
 
@@ -374,17 +369,6 @@ func parseStyles(data []byte) styleTable {
 
 	for _, xf := range doc.CellXfs.Xf {
 		st.numFmtByXf = append(st.numFmtByXf, xf.NumFmtID)
-		st.fontByXf = append(st.fontByXf, xf.FontID)
-		st.fillByXf = append(st.fillByXf, xf.FillID)
-		align := ""
-		if xf.Alignment != nil {
-			switch xf.Alignment.Horizontal {
-			case "left", "center", "right":
-				align = xf.Alignment.Horizontal
-			}
-		}
-		st.alignByXf = append(st.alignByXf, align)
-
 		s := &Style{NumFmtID: xf.NumFmtID, NumFmt: resolveNumFmt(xf.NumFmtID, st.customFmt)}
 		if xf.FontID >= 0 && xf.FontID < len(fullFonts) {
 			s.Font = fullFonts[xf.FontID]
@@ -424,10 +408,14 @@ func parseStyles(data []byte) styleTable {
 // range (no styles part, or a malformed index).
 func (st styleTable) styleFor(xf int) *Style {
 	if xf < 0 || xf >= len(st.resolved) {
-		return nil
+		return defaultStyle
 	}
 	return st.resolved[xf]
 }
+
+// defaultStyle is the shared zero Style for cells with no resolvable xf, so
+// Cell.Style is never nil (see that field's doc). Read-only by contract.
+var defaultStyle = &Style{}
 
 // normalizeRGB reduces an ARGB/RGB hex to "RRGGBB" (uppercased), or "".
 func normalizeRGB(v string) string {
@@ -447,20 +435,6 @@ func (st styleTable) numFmtID(xf int) int {
 		return 0
 	}
 	return st.numFmtByXf[xf]
-}
-
-// cellStyle resolves the presentation facts for a style index.
-func (st styleTable) cellStyle(xf int) (bold, italic bool, fill, align string) {
-	if xf < 0 || xf >= len(st.fontByXf) {
-		return false, false, "", ""
-	}
-	if fi := st.fontByXf[xf]; fi >= 0 && fi < len(st.fonts) {
-		bold, italic = st.fonts[fi].b, st.fonts[fi].i
-	}
-	if fi := st.fillByXf[xf]; fi >= 0 && fi < len(st.fills) {
-		fill = st.fills[fi]
-	}
-	return bold, italic, fill, st.alignByXf[xf]
 }
 
 // rawCell is one c element before value resolution.
@@ -484,7 +458,10 @@ type sharedMaster struct {
 
 // parseSheet streams one worksheet part into a dense Sheet grid, collecting
 // the sheet-level facts (merges, panes, dimensions, tab color) along the way.
-func parseSheet(data []byte, shared []string, styles styleTable, date1904 bool) Sheet {
+// parseSheet decodes one worksheet part. ctx is checked at every <row>: a
+// single sheet can be most of a workbook, so per-sheet checks alone would let
+// one hostile part run unbounded.
+func parseSheet(ctx context.Context, data []byte, shared []string, styles styleTable, date1904 bool) (Sheet, error) {
 	var sheet Sheet
 	var cells []rawCell
 	maxRow, maxCol := -1, -1
@@ -531,6 +508,9 @@ func parseSheet(data []byte, shared []string, styles styleTable, date1904 bool) 
 					}
 				}
 			case "row":
+				if err := cancelled(ctx); err != nil {
+					return Sheet{}, err
+				}
 				parseRowElement(e, &sheet, styles)
 			case "col":
 				parseColElement(e, &sheet)
@@ -599,7 +579,7 @@ func parseSheet(data []byte, shared []string, styles styleTable, date1904 bool) 
 	}
 
 	if maxRow < 0 || maxCol < 0 {
-		return sheet
+		return sheet, nil
 	}
 	grid := make([][]Cell, maxRow+1)
 	for i := range grid {
@@ -613,13 +593,8 @@ func parseSheet(data []byte, shared []string, styles styleTable, date1904 bool) 
 				c.formula = shiftFormula(m.src, c.row-m.row, c.col-m.col)
 			}
 		}
-		bold, italic, fill, align := styles.cellStyle(c.styleIdx)
 		grid[c.row][c.col] = Cell{
 			Text:    displayValue(c, shared, styles, date1904),
-			Bold:    bold,
-			Italic:  italic,
-			FillRGB: fill,
-			Align:   align,
 			Value:   typedValue(c, shared, styles, date1904),
 			Formula: c.formula,
 			StyleID: c.styleIdx,
@@ -627,7 +602,7 @@ func parseSheet(data []byte, shared []string, styles styleTable, date1904 bool) 
 		}
 	}
 	sheet.Cells = grid
-	return sheet
+	return sheet, nil
 }
 
 // parseRowElement reads a row's explicit height and row-level style.

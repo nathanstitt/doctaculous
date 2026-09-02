@@ -1,6 +1,7 @@
 package docx
 
 import (
+	"context"
 	"image/color"
 
 	"github.com/nathanstitt/omnidoc/pkg/docx"
@@ -82,7 +83,7 @@ func modelSpecimenDocx() []byte {
 			}},
 		},
 	}
-	data, err := docx.Bytes(doc)
+	data, err := docx.Bytes(context.Background(), doc)
 	if err != nil {
 		panic("model specimen: " + err.Error()) // a fixture builder failure is a programming error
 	}

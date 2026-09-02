@@ -3,6 +3,7 @@ package docx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -29,8 +30,12 @@ var ErrInvalidDocument = errors.New("invalid document")
 // Degenerate content the reader cannot represent is normalized rather than
 // errored: a run with no text, break, or reference is omitted (the parser
 // would drop it anyway).
-func Write(w io.Writer, doc *Document) error {
-	data, err := Bytes(doc)
+//
+// ctx bounds serialization: it is checked between the parts assembled and
+// before each part is compressed, so a very large document can be abandoned.
+// A nil ctx means context.Background().
+func Write(ctx context.Context, w io.Writer, doc *Document) error {
+	data, err := Bytes(ctx, doc)
 	if err != nil {
 		return err
 	}
@@ -41,12 +46,15 @@ func Write(w io.Writer, doc *Document) error {
 }
 
 // Bytes is Write into a fresh byte slice.
-func Bytes(doc *Document) ([]byte, error) {
+func Bytes(ctx context.Context, doc *Document) ([]byte, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("docx: %w: nil document", ErrInvalidDocument)
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	dw := newDocWriter(doc)
-	parts, err := dw.assemble()
+	parts, err := dw.assemble(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +62,9 @@ func Bytes(doc *Document) ([]byte, error) {
 	zw := zip.NewWriter(&buf)
 	stamp := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, p := range parts {
+		if err := cancelled(ctx); err != nil {
+			return nil, err
+		}
 		f, err := zw.CreateHeader(&zip.FileHeader{Name: p.name, Method: zip.Deflate, Modified: stamp})
 		if err != nil {
 			return nil, fmt.Errorf("docx: create part %s: %w", p.name, err)
@@ -181,8 +192,11 @@ const (
 )
 
 // assemble produces every package part in the fixed deterministic order.
-func (dw *docWriter) assemble() ([]wpart, error) {
+func (dw *docWriter) assemble(ctx context.Context) ([]wpart, error) {
 	doc := dw.doc
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Structural relationships exist before the rels part is emitted.
 	if doc.Styles != nil {
@@ -222,6 +236,9 @@ func (dw *docWriter) assemble() ([]wpart, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	parts := []wpart{
 		{"[Content_Types].xml", []byte(dw.contentTypesXML(headerParts, footerParts))},
@@ -255,6 +272,9 @@ func (dw *docWriter) assemble() ([]wpart, error) {
 			return nil, err
 		}
 		parts = append(parts, wpart{"word/comments.xml", p})
+	}
+	if err := cancelled(ctx); err != nil {
+		return nil, err
 	}
 	for _, hp := range headerParts {
 		p, err := dw.hdrFtrXML(doc.Headers[hp.relID], "hdr")

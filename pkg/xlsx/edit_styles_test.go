@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -14,11 +15,11 @@ func floatp(f float64) *float64 { return &f }
 // saveAndRead saves the editor and reopens through the enriched reader.
 func saveAndRead(t *testing.T, f *File) *Workbook {
 	t.Helper()
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestPatchPreservesUnmodeledFacets(t *testing.T) {
  </cellXfs>
 </styleSheet>`).
 		Bytes()
-	f, err := Edit(src)
+	f, err := Edit(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,12 +245,12 @@ func TestPatchPreservesUnmodeledFacets(t *testing.T) {
 	if err := sh.PatchCellStyle(1, 1, StylePatch{Font: &FontPatch{Bold: boolp(true)}}); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +306,7 @@ func TestPatchDedupes(t *testing.T) {
 	if a, b := sh.Cell(1, 1).StyleID, sh.Cell(2, 1).StyleID; a != b {
 		t.Errorf("identical patches yielded different xfs: %d vs %d", a, b)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +335,7 @@ func TestRowStylePatch(t *testing.T) {
 		t.Errorf("reader row style = %+v", st)
 	}
 
-	f2, err := Edit(mustSave(t, f))
+	f2, err := Edit(context.Background(), mustSave(t, f))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +431,7 @@ func TestCustomNumFmtReuse(t *testing.T) {
 // mustSave is a test helper returning saved bytes.
 func mustSave(t *testing.T, f *File) []byte {
 	t.Helper()
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

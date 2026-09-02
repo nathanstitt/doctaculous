@@ -3,6 +3,7 @@ package xlsx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -66,7 +67,18 @@ type File struct {
 
 // Edit opens xlsx bytes for in-place modification. The data is retained (the
 // zip reader indexes into it) and must not be mutated by the caller.
-func Edit(data []byte) (*File, error) {
+//
+// Edit only indexes the package; parts are parsed lazily by the accessors
+// (Sheet, DefinedNames, ...), so ctx bounds the open itself and nothing after
+// it. Save takes its own context for the serialization. A nil ctx means
+// context.Background().
+func Edit(ctx context.Context, data []byte) (*File, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotXLSX, err)
@@ -90,7 +102,7 @@ func Edit(data []byte) (*File, error) {
 // the default style table, deterministic output. It is the writer-first
 // starting point (and regenerates blank-workbook templates).
 func New() *File {
-	f, err := Edit(blankWorkbook())
+	f, err := Edit(context.Background(), blankWorkbook())
 	if err != nil {
 		panic("xlsx: the built-in blank workbook must open: " + err.Error())
 	}
@@ -229,19 +241,28 @@ func (f *File) originalPart(name string) bool {
 // byte-verbatim (raw compressed streams — a no-op Edit+Save round-trip is
 // part-for-part byte-identical), dirty parts re-serialize through xmlpart,
 // added parts append in sorted order with a fixed timestamp.
-func (f *File) Save() ([]byte, error) {
+//
+// ctx is checked before each part is written, so a large workbook's
+// serialization can be abandoned. A nil ctx means context.Background().
+func (f *File) Save(ctx context.Context) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := f.SaveTo(&buf); err != nil {
+	if err := f.SaveTo(ctx, &buf); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
 // SaveTo streams Save's output to w.
-func (f *File) SaveTo(w io.Writer) error {
+func (f *File) SaveTo(ctx context.Context, w io.Writer) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	zw := zip.NewWriter(w)
 	written := map[string]bool{}
 	for _, zf := range f.zr.File {
+		if err := cancelled(ctx); err != nil {
+			return err
+		}
 		name := zf.Name
 		if f.deleted[name] || written[name] {
 			continue
@@ -274,6 +295,9 @@ func (f *File) SaveTo(w io.Writer) error {
 	sort.Strings(names)
 	stamp := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, name := range names {
+		if err := cancelled(ctx); err != nil {
+			return err
+		}
 		data := f.added[name]
 		if f.dirty[name] {
 			var err error
