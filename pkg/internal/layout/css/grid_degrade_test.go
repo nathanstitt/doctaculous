@@ -2,9 +2,9 @@ package css
 
 // grid_degrade_test.go — degradation tests for the CSS Grid layout engine.
 //
-// Each test covers one documented deferral or degenerate case from the spec's
-// "Degradation & error handling" table in
-// docs/superpowers/specs/2026-06-26-html-grid-design.md. The test asserts:
+// Each test covers one documented deferral or degenerate case from the grid
+// design's "Degradation & error handling" table (the design doc lives in git
+// history; docs/BACKLOG.md carries what is still open). The test asserts:
 //   - no panic (the test itself fails if layoutGrid panics)
 //   - the ACTUAL documented fallback geometry (not "an item exists")
 //

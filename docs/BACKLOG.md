@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**29 open · 2 in progress**, audited against the code on 2026-08-30 (see below). The engine is
+**29 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -83,8 +83,8 @@ trusting any entry that has aged** — grep for the claimed symptom first.
 
 ## HTML/CSS — web fonts
 
-- ☐ **G1. Synthetic bold/oblique** for an `@font-face` family supplying one variant. *Medium.* Note the
-  bundled substitutes ship regular-only — resolving K6 also unblocks this caveat.
+- ☐ **G1. Synthetic bold/oblique** for an `@font-face` family supplying one variant. *Medium.* This is
+  about `@font-face` families only: the bundled substitutes ship real bold/italic/bold-italic faces.
 - ☐ **G2. `unicode-range` subsetting.** *Medium.* The whole face is used for every rune. The descriptor
   is **not** parsed into `FontFace` — it is recognized and reported, not honoured. It reaches
   `Stylesheet.Unsupported` and is logged once by a caller holding a logger, so the wrong-face case is at
@@ -134,9 +134,11 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   missing is the rendering.
 - ☐ **K5. Encryption: non-empty user/owner passwords, per-stream `/Crypt` overrides, `/Perms`
   validation.** *Medium.* Only empty-password documents authenticate today (`pkg/pdf/crypt.go`).
-- ☐ **K6. Base-14 weights and symbol fonts** — bold/italic/oblique map to regular (this affects DOCX
-  too), and Symbol/ZapfDingbats have no substitute, so those runs are skipped. Needs bundled weighted
-  faces, symbol look-alikes, and AFM widths. *Medium–large.*
+- ☐ **K6. Base-14 residuals** — weighted/slanted substitutes ship (bold/italic/bold-italic Heros,
+  Termes, and a bold Inconsolata), and a caller-supplied `FontProvider` resolves Symbol/ZapfDingbats.
+  Remaining: a bundled OFL Symbol look-alike for the no-provider case (those runs are skipped today),
+  AFM tables for exact base-14 advances when a PDF omits `/Widths`, and synthetic emboldening for a
+  family missing a real variant. *Medium.* See `docs/PDF.md`.
 
 ## PDF — performance
 

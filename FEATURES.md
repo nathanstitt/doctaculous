@@ -66,6 +66,11 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   mode is an opt-out: `--bundled-fonts` on the CLI, or `RasterOptions.BundledFonts` /
   `PDFOptions.BundledFonts` / `WithBundledFonts()` in the library. The golden tests pin it. An
   explicit `RasterOptions.FontProvider` (or reflow `WithSystemFontProvider`) still overrides both.
+  Those seams are typed with the **public `omnidoc.FontProvider` and `omnidoc.SystemFontProvider`
+  interfaces** (one method each: `LoadStyled(family, bold, italic)` and `LoadLocal(name)`), so an
+  application can implement them, and **`omnidoc.DirFontProvider{Dir}`** is the ready-made
+  implementation over a directory of font files — the same resolver the file-based openers install
+  beside a document. `SVGOptions.FontProvider` takes the same type.
   Each system match is **verified against the face's own `name` table** (`Face.FamilyName`) and
   rejected when that names a different family. `sysfont.Match` never reports a miss, so without the
   check a request for an absent family came back as some unrelated installed font (measured: `DejaVu
@@ -123,7 +128,7 @@ bullet's design rationale is in its PR:
   anonymous-box fixups, whitespace collapsing, and `display:none` pruning. `<link>` resolves through
   `pkg/resource.ResourceLoader`.
 - **Block + inline normal flow** (`pkg/internal/layout/inline`, `pkg/internal/layout/css/block.go`+`inline.go`,
-  `pkg/internal/layout/paint`, `OpenHTML`/`OpenHTMLBytes`): the box model — width/`auto`/%, `box-sizing`,
+  `pkg/internal/layout/paint`, `OpenHTMLFile`/`OpenHTMLBytes`): the box model — width/`auto`/%, `box-sizing`,
   min/max, margins including vertical collapsing, padding, borders, backgrounds — plus the IFC
   (shaping and breaking, `text-align`, `line-height`) and the fragment tree. **Horizontal `auto`
   margins** resolve per CSS 2.1 §10.3.3 (`resolveAutoMarginsX`), so `margin: 0 auto` centres a
@@ -147,7 +152,7 @@ bullet's design rationale is in its PR:
   an inline generates no fragment, so there is nothing to carry the offset — and a non-zero offset
   now logs once per layout instead of vanishing silently. A zero/absent offset stays quiet, since
   that is the establish-a-containing-block idiom and it works. Block-level relative is exact.
-- **Overflow clipping** (`pkg/internal/css` `overflow`, `layout.ClipPush/PopKind`): clipping to the padding
+- **Overflow clipping** (`pkg/internal/css` `overflow`, `layout.ClipPushKind`/`ClipPopKind`): clipping to the padding
   box, BFC establishment, and deferred float interactions. All four clip keywords are honored —
   `hidden`/`scroll`/`auto`/**`clip`**, where `clip` differs only in forbidding programmatic
   scrolling and allowing `overflow-clip-margin`, neither of which exists in the single-tall-page
@@ -177,7 +182,8 @@ bullet's design rationale is in its PR:
   means "span everything", and the grid-extent pass trims it to the real count anyway.
 - **Web fonts** (`pkg/internal/css/fontface.go`, `pkg/internal/font/sfnt.go`/`woff1.go`/`woff2*.go`,
   `pkg/internal/layout/font`): `@font-face` capture, WOFF1/WOFF2 decode including the glyf/loca transform,
-  `local()` through `DiskFontProvider`, and family-fallback-list resolution.
+  `local()` through `DirFontProvider` (the public face of the internal `DiskFontProvider`), and
+  family-fallback-list resolution.
   **Degrades honestly:** two `@font-face` descriptors are recognized but not implemented —
   `unicode-range` (so a family split across subsetted faces uses the WHOLE face for every rune) and
   `font-display` (no async loading exists in synchronous layout). Both are now reported through
@@ -729,7 +735,7 @@ bullet's design rationale is in its PR:
 - **End-to-end "specimen" showcase** (`testdata/htmldoc/`, `htmldoc-*` goldens): one multi-file doc
   exercising every HTML/CSS/image slice, served over loopback HTTP via `OpenURL` + `WithPageSize`.
 
-**DOCX frontend** (`OpenDOCX`/`OpenDOCXBytes`, `docx-*` goldens):
+**DOCX frontend** (`OpenDOCXFile`/`OpenDOCXBytes`, `docx-*` goldens):
 
 - **Parse + cascade** (`pkg/docx`, `pkg/internal/style`): the ZIP/OPC container, `document.xml`
   (paragraphs, runs, `w:t`/`w:br`/`w:tab`), run and paragraph properties, section geometry
@@ -808,7 +814,7 @@ bullet's design rationale is in its PR:
   diffs against a direct raster. The **htmldoc showcase** (`TestHTMLDocSVGShowcase`) runs all 44
   pages of the specimen document through that same loop against the existing `htmldoc-p*.png`
   raster goldens — no new goldens, so any raster-vs-SVG disagreement shows against a
-  known-good reference. 35 of 44 pages match within the standard budget; the 8 pages embedding
+  known-good reference. 37 of 45 pages match within the standard budget; the 8 pages embedding
   an `<image>` are bounded loosely (the reader cannot draw it back), and the budget is 0.3%
   rather than 0.2% for a measured, documented reason: a gradient swatch's single antialiased
   edge row differs between the two rasterizations, interiors byte-identical.
@@ -828,7 +834,7 @@ bullet's design rationale is in its PR:
   ignores `mask-type` degrades to a too-permissive mask rather than an invisible one.
 
 **HTML/DOCX → Markdown & plain text** (`pkg/internal/markdownwrite`, `WriteMarkdown`
-+ `WriteText`, CLI `tomd`):
++ `WriteText`, CLI `convert .. out.md`):
 
 - A conversion backend that walks the shared `cssbox` tree rather than the paint seam, because it
   needs structure rather than glyphs. One walker therefore serves both HTML and DOCX. Both frontends
@@ -840,7 +846,7 @@ bullet's design rationale is in its PR:
   expanded by content duplication.
 
 **PDF → Markdown & HTML** (`pkg/internal/extract`, `pkg/internal/htmlwrite`, `WriteHTML`,
-CLI `tomd <pdf>` / `tohtml`):
+CLI `convert in.pdf out.md` / `out.html`):
 
 - Structure recovery from a PDF's positioned glyphs and vector paths. The content interpreter gains
   optional, paint-neutral capture sinks — `content.Options.TextSink`/`GraphicsSink`, where nil keeps
@@ -874,10 +880,9 @@ CLI `tomd <pdf>` / `tohtml`):
   matched. Wiring `ErrNoStructure` surfaced a live bug: `svg → md` used to write an empty file and
   exit 0, because the nil box tree passed a type assertion that only tested the interface.
 - **`WithContext(ctx)`** bounds open-time box generation, resource loading and layout on **every**
-  `Open*` entry point. It replaces a parallel `*Context` naming family that covered HTML and URLs
-  only; the plumbing already existed but was unexported, as `OpenHTMLBytesContext`'s own doc
-  admitted. A caller's own `WithContext` outranks the one those functions prepend, and a nil ctx is
-  ignored.
+  `Open*` entry point, and for `OpenURL` the HTTP fetch of the page itself. It replaced, and then
+  retired, a parallel `*Context` naming family that covered HTML and URLs only. A caller's own
+  `WithContext` outranks the one the path-taking openers prepend, and a nil ctx is ignored.
   Every opener stamps `Document.Format()`. Generic `Convert`/`ConvertFile`/`(*Document).Write`
   dispatch any valid input→output pair; the legacy `ConvertXToY` wrappers were shims pinned
   byte-identical and have since been removed. Same-format conversion is a deliberate
@@ -885,7 +890,7 @@ CLI `tomd <pdf>` / `tohtml`):
   `WriteImage`/`EncodeImage`: Convert-to-image writes one page, and multi-page goes through CLI `%d`
   fan-out. SVG is both an input and an output format (`WriteSVG`), sharing the image path's
   one-page-per-file shape and `%d` fan-out. The CLI is `convert <in> <out>` with `--from`/`--to`, and all subcommands share one
-  detection-based opener — so rasterize no longer assumes unknown extensions are PDF, and topdf
+  detection-based opener — so rasterize no longer assumes unknown extensions are PDF, and
   `--print` actually applies print media now. A new format lands by flipping its capability bit and
   adding one switch case in `openDetected`/`Write` — see the sibling contract in.
 
@@ -909,8 +914,7 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   README showing example Markdown inside ``` opens no containers, and costs 238µs rather than
   seconds.
 
-**DOCX writer** (`pkg/internal/docxwrite`, `WriteDOCX`, CLI `todocx` +
-`convert.. out.docx`):
+**DOCX writer** (`pkg/internal/docxwrite`, `WriteDOCX`, CLI `convert.. out.docx`):
 
 - Everything →.docx: HTML, Markdown, text, and PDF via extraction. It is a cssbox STRUCTURE
   writer — boxwalk-based like the Markdown one, and not layout-faithful — emitting native Word
@@ -983,11 +987,10 @@ deps), `pkg/omnidoc/markdown_frontend.go`+`text_frontend.go`):
   on text output, for search-index extraction. The capability gate for hosts is
   `FormatFromMIME(mt).ValidInput()`.
 
-- **Cancellable HTML render, end to end.** The HTML entry points that lacked a context gained
-  ctx-taking twins: `OpenHTMLBytesContext`/`OpenHTMLFileContext`/`OpenURLContext`.
-  `OpenURLContext` also bounds the HTTP fetch of the page itself, which `OpenURL` ran under
-  `context.Background()`. The no-ctx originals are unchanged and delegate with
-  `context.Background()`, so every existing caller stays source- and byte-compatible.
+- **Cancellable HTML render, end to end.** `WithContext` reaches every HTML entry point
+  (`OpenHTMLBytes`, `OpenHTMLFile`, `OpenURL`), and for `OpenURL` bounds the HTTP fetch of the page
+  itself as well as the layout. Threading a live context changes no pixel and no page dimension
+  versus the same open without one (pinned by test).
   Rasterization now actually honors its context: `reflowRenderer.renderPage` took
   `_ context.Context` and dropped it, so `RasterizePage` advertised a cancellation it never
   performed. It now checks before the allocation/paint and again after paint. Layout gained the two
@@ -1016,6 +1019,11 @@ document model consumed externally by tinycld/text):
 
 **DOCX model writer — the public-model PR 2/3** (`pkg/docx` `Write`/`Bytes`):
 
+- **Context-bounded, reader and writer.** `Open`/`OpenBytes`/`OpenReaderAt` and `Write`/`Bytes`
+  take a `context.Context` first. The parser checks it per body block and between parts, the
+  writer between assembled parts and before each is compressed, so either direction fails with
+  `context.Canceled` instead of running to completion on a document the caller has given up on.
+
 - A full-vocabulary deterministic OPC emitter living in pkg/docx itself: stdlib-only,
   schema-ordered props, rels preserved with structural/hyperlink rels allocated, tabs/delText/
   xml:space mirrored, a Word-complete drawing scaffold, and zero SectionProps falling back to
@@ -1040,6 +1048,10 @@ document model consumed externally by tinycld/text):
 
 **XLSX preservation-first editor core — calc-adoption PR 2/5** (`pkg/xlsx` `Edit`/`New`/`Save`):
 
+- **Context-bounded.** `Open`/`OpenBytes`/`Edit`/`Save`/`SaveTo` take a `context.Context` first;
+  the reader checks it per sheet and per `<row>`, `Save` per part, so a hostile workbook is
+  abandoned mid-parse with `context.Canceled` rather than wedging the caller. `Edit` only indexes
+  the package (parts parse lazily on access), so its context bounds the open alone.
 - Open-mutate-save under the strongest preservation contract. Untouched parts copy byte-verbatim at
   the zip layer, so a no-op Edit+Save is part-for-part byte-identical and reads never dirty
   anything. Dirty parts re-serialize through `internal/xmlpart` on pinned beevik/etree settings:
@@ -1108,7 +1120,7 @@ document model consumed externally by tinycld/text):
   which structure writers previously dropped nested items over.
 
 **EPUB output** (`pkg/internal/epubwrite`, `WriteEPUB`, `convert.. out.epub`)
-— **completes the any⇄any table: all 13 formats are both inputs AND outputs**:
+— **completes the any⇄any table: every format is both an input AND an output** (fifteen today, with HEIC the one input-only addition since):
 
 - Deterministic EPUB 3 built ON htmlwrite, since content documents ARE XHTML: a new
   byte-identical `XHTML` mode self-closes voids, and a new `ImageSrc` hook rewrites srcs during
@@ -1688,9 +1700,9 @@ read+write vocabulary for the tinycld text adoption path):
   kerning-pair pass runs for simple scripts. There is therefore no kerning to disable and no length
   that could replace it. A synthetic squeeze or a fabricated small-caps would change advances and
   glyph shapes in ways no font designer sanctioned and no other renderer reproduces.
-- Not yet, each degrading with a `WithLogf` debug line rather than failing: filters,
-  `<image>`, and inline `<svg>` inside HTML/`<img src=*.svg>` — tracked as the PR 7–8 slices in
-  `docs/superpowers/specs/2026-08-25-svg-support-design.md`.
+- `<image>` is the one element still refused, degrading with a `WithLogf` debug line rather than
+  failing (filters and inline `<svg>`/`<img src=*.svg>` in HTML, once deferred alongside it, have
+  since shipped — see the SVG filters and "SVG in HTML" entries below).
 - 100 curated fixtures from the resvg suite's `text/**` tranche land with SVG text, with committed
   goldens: `text/` (25), `tspan/` (25), `text-anchor/` (11), `font-size/` (16), `font-weight/` (12),
   `font-family/` (6), `font-style/` (3), `direction/` (1), `unicode-bidi/` (1). Most of that suite
@@ -2016,8 +2028,8 @@ own entry further down:
 - Filters nested more than 4 deep degrade to unfiltered, **logged once per page**, matching the SVG
   side's nesting bound. Each live level holds its own offscreen surface, so depth bounds concurrent
   memory rather than just CPU.
-- **Still silent, deliberately:** the two caps above do NOT log on the **PDF** path. `pkg/internal/render/
-  pdfwrite` calls plain `PaintPage`, because its `RenderOffscreen` always declines and it already
+- **Still silent, deliberately:** the two caps above do NOT log on the **PDF** path. `pkg/internal/pdfwrite`
+  calls plain `PaintPage`, because its `RenderOffscreen` always declines and it already
   reports once per document that every filter in the file paints unfiltered. A second, narrower
   reason for a subset of brackets would annotate an outcome already stated for all of them, and it
   would have to fire from the concurrent per-band render phase, where the once-per-page flags are

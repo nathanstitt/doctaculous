@@ -37,7 +37,7 @@ These are **not** vulnerabilities, though they are still worth reporting as bugs
 
 ## Hardening already in place
 
-A dedicated hardening pass (Phase 0 of the v1 plan) fuzzed the parsers and fixed every
+A dedicated hardening pass before v1.0 fuzzed the parsers and fixed every
 crash and hang it found. The bounds it left behind are load-bearing, so if you are
 looking for weak points, these are the edges:
 
@@ -63,7 +63,10 @@ therefore cannot accumulate silently between releases.
 
 ## Supported versions
 
-Pre-1.0, only the latest release gets fixes. That changes at v1.0.0.
+Only the latest release of the current major version receives fixes. A report against
+an older release is verified against the latest one, and the fix lands there; there are
+no long-term-support branches. Within a major version the exported API of the seven
+public packages is stable, so upgrading to pick up a fix does not require code changes.
 
 ## Scope
 

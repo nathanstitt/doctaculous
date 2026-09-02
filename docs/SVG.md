@@ -72,7 +72,7 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   and 2 are `blend-*` (`mix-blend-mode` is not honored by the reader). Those paths are asserted
   structurally instead. Implementing `<image>` in the reader would close 15 of the 17.
 
-  `TestHTMLDocSVGShowcase` runs the same loop over all 44 pages of the htmldoc specimen against
+  `TestHTMLDocSVGShowcase` runs the same loop over all 45 pages of the htmldoc specimen against
   the committed raster goldens, and hits the same wall: 8 of its pages embed an `<image>` and are
   bounded loosely (`svgShowcasePagesWithRasterContent`). Those 8 tighten to the normal budget the
   day the reader grows `<image>`.
@@ -130,8 +130,7 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
 - **Filters not implemented** (each renders the element unfiltered with a log): `feTurbulence`,
   `feConvolveMatrix`, `feDiffuseLighting`/`feSpecularLighting` + light sources, `feMorphology`,
   `feImage`, `feTile`, `feComponentTransfer`, `feDisplacementMap`. `enable-background` is dropped
-
-  2.78% differing pixels; the tolerance was NOT widened to hide it.
+  outright (removed from the spec, implemented by no browser), as is `<tref>`.
 
 ## Known approximations
 
@@ -139,15 +138,12 @@ asserted on the emitted PDF, not on pixels. Routing SVG through the raster
   aspect differs from the document's squashes where a browser re-applies the SVG's own
   `preserveAspectRatio` against the used size and letterboxes. Exact whenever CSS sizing preserved
   the ratio (unsized `<img>`, one axis given, matching box) — the common case. Needs the parsed
-
-  outright (removed from the spec, implemented by no browser), as is `<tref>`.
+  value retained on `svg.Document`; `resolveSize` consumes it into `rootM` and discards it.
 
 - **A non-uniform transform rasterizes a filter region at the wrong aspect** — `filterSpace` derives
   a single uniform scale (`pkg/internal/svg/draw/filter.go`); a per-axis filter space threaded through
   `filterM`/`postM` and every primitive's subregion math would fix it. One corpus fixture measures
-
-
-  value retained on `svg.Document`; `resolveSize` consumes it into `rootM` and discards it.
+  2.78% differing pixels; the tolerance was NOT widened to hide it.
 
 - **NO computed CSS property inherits across the HTML→SVG boundary** — not `letter-spacing`, not
   `color`, not `font-family`. Inline `<svg>` is REPLACED content: box generation re-serializes the

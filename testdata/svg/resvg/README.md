@@ -708,9 +708,10 @@ verify correctly under substitution regardless of which face is used.
 
 ### Deliberately NOT vendored
 
-- **`textPath/` (44) and `writing-mode/` (25)** — deferred subsystems; both
-  degrade with a log today. `tref/` (11) is dropped, not deferred (removed
-  from SVG 2).
+- **`textPath/` (44)** — a deferred subsystem; it degrades with a log today.
+  `tref/` (11) is dropped, not deferred (removed from SVG 2). (`writing-mode/`
+  was once listed here too; 19 of its 23 files are now vendored, with the four
+  held back explained in the vertical-text notes further down.)
 - **`textLength`/`lengthAdjust` (16), `letter-spacing`/`word-spacing` (19),
   the baseline attributes (62), `text-decoration`** — a later task.
 - **Emoji (`text/emojis`, `compound-emojis`, and the coordinate-list
