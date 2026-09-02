@@ -43,15 +43,15 @@ func hugeParagraph() []byte {
 		"</p></body></html>")
 }
 
-// TestOpenHTMLBytesContextCancelledBeforeStart: a ctx already cancelled when the
+// TestOpenHTMLBytesWithContextCancelledBeforeStart: a ctx already cancelled when the
 // open begins must fail rather than laying the document out to completion.
-func TestOpenHTMLBytesContextCancelledBeforeStart(t *testing.T) {
+func TestOpenHTMLBytesWithContextCancelledBeforeStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	doc, err := OpenHTMLBytesContext(ctx, cancelDoc(), WithBundledFonts())
+	doc, err := OpenHTMLBytes(cancelDoc(), WithContext(ctx), WithBundledFonts())
 	if err == nil {
-		t.Fatalf("OpenHTMLBytesContext with a pre-cancelled ctx returned a document, want an error")
+		t.Fatalf("OpenHTMLBytes with WithContext with a pre-cancelled ctx returned a document, want an error")
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want one wrapping context.Canceled", err)
@@ -61,29 +61,29 @@ func TestOpenHTMLBytesContextCancelledBeforeStart(t *testing.T) {
 	}
 }
 
-// TestOpenHTMLBytesContextDeadlineExceeded: a deadline that expires during layout
+// TestOpenHTMLBytesWithContextDeadlineExceeded: a deadline that expires during layout
 // must surface as context.DeadlineExceeded, not Canceled and not a partial
 // document. The huge single paragraph guarantees layout is still running when the
 // (already-past) deadline is consulted.
-func TestOpenHTMLBytesContextDeadlineExceeded(t *testing.T) {
+func TestOpenHTMLBytesWithContextDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 
-	_, err := OpenHTMLBytesContext(ctx, hugeParagraph(), WithBundledFonts())
+	_, err := OpenHTMLBytes(hugeParagraph(), WithContext(ctx), WithBundledFonts())
 	if err == nil {
-		t.Fatalf("OpenHTMLBytesContext with an expired deadline returned a document, want an error")
+		t.Fatalf("OpenHTMLBytes with WithContext with an expired deadline returned a document, want an error")
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want one wrapping context.DeadlineExceeded", err)
 	}
 }
 
-// TestOpenHTMLBytesContextCancelMidLayout is the test that actually proves the
+// TestOpenHTMLBytesWithContextCancelMidLayout is the test that actually proves the
 // per-line check in layoutInline earns its place: a single enormous paragraph is
 // ONE block child, so the pre-existing between-children check never fires. The
 // ctx is cancelled from another goroutine after layout is underway, and the open
 // must return promptly instead of running to completion.
-func TestOpenHTMLBytesContextCancelMidLayout(t *testing.T) {
+func TestOpenHTMLBytesWithContextCancelMidLayout(t *testing.T) {
 	data := hugeParagraph()
 
 	// Baseline: how long does this document take to lay out uncancelled? The
@@ -108,7 +108,7 @@ func TestOpenHTMLBytesContextCancelMidLayout(t *testing.T) {
 	}()
 
 	start = time.Now()
-	_, err := OpenHTMLBytesContext(ctx, data, WithBundledFonts())
+	_, err := OpenHTMLBytes(data, WithContext(ctx), WithBundledFonts())
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -227,7 +227,7 @@ func TestLiveContextNeverSpuriouslyCancels(t *testing.T) {
 			ctx, cancel := tc.ctx()
 			defer cancel()
 
-			doc, err := OpenHTMLBytesContext(ctx, data, WithBundledFonts())
+			doc, err := OpenHTMLBytes(data, WithContext(ctx), WithBundledFonts())
 			if err != nil {
 				t.Fatalf("open with a live ctx: %v", err)
 			}
@@ -245,20 +245,20 @@ func TestLiveContextNeverSpuriouslyCancels(t *testing.T) {
 	}
 }
 
-// TestOpenHTMLBytesContextMatchesOpenHTMLBytes pins the hard compatibility
+// TestOpenHTMLBytesWithContextMatchesOpenHTMLBytes pins the hard compatibility
 // requirement: threading a live context must not change a single pixel or a
 // single page dimension versus the historical no-ctx entry point. This is what
 // makes the change safe for every existing caller.
-func TestOpenHTMLBytesContextMatchesOpenHTMLBytes(t *testing.T) {
+func TestOpenHTMLBytesWithContextMatchesOpenHTMLBytes(t *testing.T) {
 	data := cancelDoc()
 
 	plain, err := OpenHTMLBytes(data, WithBundledFonts(), WithPageSize(LetterWidthPt, LetterHeightPt))
 	if err != nil {
 		t.Fatalf("OpenHTMLBytes: %v", err)
 	}
-	withCtx, err := OpenHTMLBytesContext(context.Background(), data, WithBundledFonts(), WithPageSize(LetterWidthPt, LetterHeightPt))
+	withCtx, err := OpenHTMLBytes(data, WithContext(context.Background()), WithBundledFonts(), WithPageSize(LetterWidthPt, LetterHeightPt))
 	if err != nil {
-		t.Fatalf("OpenHTMLBytesContext: %v", err)
+		t.Fatalf("OpenHTMLBytes with WithContext: %v", err)
 	}
 
 	if plain.PageCount() != withCtx.PageCount() {
@@ -287,7 +287,7 @@ func TestOpenHTMLBytesContextMatchesOpenHTMLBytes(t *testing.T) {
 			t.Fatalf("page %d: ctx image is %T, want *image.RGBA", i, b)
 		}
 		if !bytes.Equal(ra.Pix, rb.Pix) {
-			t.Fatalf("page %d: pixels differ between OpenHTMLBytes and OpenHTMLBytesContext", i)
+			t.Fatalf("page %d: pixels differ between OpenHTMLBytes and OpenHTMLBytes with WithContext", i)
 		}
 	}
 }

@@ -7,13 +7,6 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/rtf"
 )
 
-// OpenRTF reads and renders a Rich Text Format document at path, laid out at
-// the default viewport width. For additional options (e.g. WithPageSize) use
-// OpenRTFFile.
-func OpenRTF(path string) (*Document, error) {
-	return OpenRTFFile(path)
-}
-
 // OpenRTFFile reads and renders an .rtf file at path, applying any options.
 func OpenRTFFile(path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)

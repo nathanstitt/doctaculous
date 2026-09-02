@@ -9,7 +9,7 @@ import (
 	markdownwrite "github.com/nathanstitt/omnidoc/pkg/internal/markdownwrite"
 )
 
-// MarkdownOptions controls HTML/DOCX -> Markdown (or plain-text) conversion.
+// MarkdownOptions controls Markdown (or plain-text) output.
 type MarkdownOptions struct {
 	// Plain renders plain text instead of Markdown: no heading hashes, emphasis
 	// markers, or link URLs — just the document's text with block and table structure
@@ -29,10 +29,11 @@ func (o MarkdownOptions) toWriterOptions() markdownwrite.Options {
 	return markdownwrite.Options{Plain: o.Plain, Logf: o.Logf}
 }
 
-// WriteMarkdown writes an opened reflow document (HTML or DOCX) to out as GitHub-
-// Flavored Markdown. It works on any document that can produce a cssbox tree: an opened
-// HTML or DOCX reflow document, or an opened PDF (whose logical structure is recovered by
-// extraction). Set opts.Plain for plain text.
+// WriteMarkdown writes an opened document to out as GitHub-Flavored Markdown. It
+// works on any document that can produce a box tree: every reflow input (HTML, DOCX,
+// EPUB, ...), or an opened PDF (whose logical structure is recovered by extraction).
+// A document with no convertible structure returns ErrNoStructure. Set opts.Plain
+// for plain text.
 func (d *Document) WriteMarkdown(_ context.Context, out io.Writer, opts MarkdownOptions) error {
 	root, err := structureRoot(d, "WriteMarkdown")
 	if err != nil {

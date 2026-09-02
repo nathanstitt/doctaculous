@@ -1,7 +1,7 @@
 package gen
 
 // This file exposes the embedded raw font bytes to tests in other packages
-// (notably pkg/font), which need real font programs to exercise parsing and
+// (notably pkg/internal/font), which need real font programs to exercise parsing and
 // glyph extraction hermetically. It is a _test.go file so the accessors are
 // only compiled into test binaries.
 

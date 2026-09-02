@@ -69,7 +69,7 @@ func TestHTMLFilterNoneIsPixelIdentical(t *testing.T) {
 func filterProbeInk(img *image.RGBA) color.RGBA { return img.RGBAAt(75, 34) }
 
 // TestHTMLFilterAppliesTheChainEndToEnd is the end-to-end counterpart of the
-// per-function mapping tests in pkg/layout/paint: it drives real HTML through
+// per-function mapping tests in pkg/internal/layout/paint: it drives real HTML through
 // parse → cascade → layout → bracket emission → paint, and asserts on the
 // resulting PIXELS of the filtered box.
 //
@@ -158,12 +158,12 @@ func closeRGBA(got, want color.RGBA, tol int) bool {
 
 // TestHTMLFilterOverCapReachesTheCallersLogf is the end-to-end guard on the
 // painter's diagnostics wiring: an over-cap filter must reach the LOGGER THE
-// PUBLIC API CALLER PASSED, not merely a logger somewhere inside pkg/layout/paint.
+// PUBLIC API CALLER PASSED, not merely a logger somewhere inside pkg/internal/layout/paint.
 //
 // It is the degradation a real user actually hits — maxCSSFilterPixels is 4M and
 // a full-page filter at 300 DPI is well past it, so the same document filters at
 // 150 DPI and stops filtering at 300 with nothing in the output to explain why.
-// The unit tests in pkg/layout/paint prove the notice is emitted; only this one
+// The unit tests in pkg/internal/layout/paint prove the notice is emitted; only this one
 // proves RasterOptions.Logf is actually threaded through to the painter.
 func TestHTMLFilterOverCapReachesTheCallersLogf(t *testing.T) {
 	t.Parallel()

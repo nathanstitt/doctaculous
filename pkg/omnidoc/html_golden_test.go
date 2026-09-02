@@ -869,7 +869,7 @@ line area</textarea></div>
 </body></html>`,
 	},
 	{
-		// Inline <svg> markup, parsed by pkg/svg after pkg/html re-serializes the
+		// Inline <svg> markup, parsed by pkg/internal/svg after pkg/internal/html re-serializes the
 		// foreign-content subtree. The camelCase names the HTML parser REPAIRS
 		// (linearGradient, clipPath, gradientUnits) are load-bearing here: if the
 		// re-serialization lost them, the gradient and the clip would both silently

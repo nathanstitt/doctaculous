@@ -67,7 +67,7 @@ func chapterName(i int) string {
 	return "ch" + string(rune('1'+i)) + ".xhtml"
 }
 
-// TestEPUBCoverIsSurfacedByBothConventions checks the pkg/epub parse result
+// TestEPUBCoverIsSurfacedByBothConventions checks the pkg/internal/epub parse result
 // directly: CoverHref and CoverMediaType come out of the manifest under either
 // convention, and a book with no cover reports none.
 func TestEPUBCoverIsSurfacedByBothConventions(t *testing.T) {

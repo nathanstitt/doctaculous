@@ -8,7 +8,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/pdfwrite"
 )
 
-// PDFOptions controls HTML/DOCX -> PDF conversion.
+// PDFOptions controls PDF output.
 type PDFOptions struct {
 	// PageWidthPt, PageHeightPt set the PDF page size in points; default US Letter
 	// (612x792) when zero.
@@ -56,8 +56,10 @@ func (o PDFOptions) toWriterOptions() pdfwrite.Options {
 	}
 }
 
-// WritePDF writes an opened reflow document (HTML or DOCX) to out as a PDF. It
-// returns an error if the document is not a reflow document (e.g. an opened PDF).
+// WritePDF writes an opened reflow document — anything laid out by the CSS engine:
+// HTML, DOCX, EPUB, XLSX, PPTX, RTF, Markdown, text, CSV/TSV, images, SVG — to out
+// as a PDF with selectable text. An opened PDF has no layout to re-typeset and
+// returns ErrNoStructure.
 func (d *Document) WritePDF(ctx context.Context, out io.Writer, opts PDFOptions) error {
 	rp, ok := d.r.(reflowPages)
 	if !ok {

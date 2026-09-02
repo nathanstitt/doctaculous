@@ -11,14 +11,6 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
-// OpenEPUB reads and renders an EPUB book: the spine documents concatenate in
-// reading order (each chapter starting a new page when paginated), with the
-// book's stylesheets, images, and fonts resolving from the container. For
-// additional options use OpenEPUBFile.
-func OpenEPUB(path string) (*Document, error) {
-	return OpenEPUBFile(path)
-}
-
 // OpenEPUBFile reads and renders an .epub file at path, applying any options.
 func OpenEPUBFile(path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)

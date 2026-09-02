@@ -22,7 +22,7 @@ func missingGlyphLogs(msgs []string) []string {
 	return got
 }
 
-// The bug this pins was NOT that the diagnostic did not exist — pkg/layout/inline
+// The bug this pins was NOT that the diagnostic did not exist — pkg/internal/layout/inline
 // has emitted it all along, and the CSS path has always shown it. It was that
 // every site constructing an SVG renderer left its logger nil, so the message was
 // produced and thrown away.
@@ -54,7 +54,7 @@ func TestStandaloneSVGReportsMissingGlyphs(t *testing.T) {
 }
 
 // Inline <svg> inside HTML takes a DIFFERENT construction site
-// (pkg/layout/css/svg.go, via the engine rather than the frontend), so it needs
+// (pkg/internal/layout/css/svg.go, via the engine rather than the frontend), so it needs
 // its own assertion — fixing one said nothing about the other.
 func TestInlineSVGInHTMLReportsMissingGlyphs(t *testing.T) {
 	html := []byte(`<html><body style="margin:0"><svg width="200" height="100" viewBox="0 0 200 100">` +

@@ -3,6 +3,8 @@ package omnidoc
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -10,10 +12,8 @@ import (
 // TestWithContextCancelsOpen covers the exported cancellation option.
 //
 // Before it, context.Context was reachable only through a parallel *Context
-// naming family (OpenHTMLBytesContext, OpenURLContext, OpenHTMLFileContext)
-// covering HTML and URLs; every other Open* had no way to cancel, and
-// OpenHTMLBytesContext's own doc admitted the plumbing existed but that "there
-// is no exported way to" reach it. One option covers them all.
+// naming family covering HTML and URLs (since retired); every other Open* had
+// no way to cancel. One option covers them all.
 func TestWithContextCancelsOpen(t *testing.T) {
 	// Big enough that layout does real work, so a cancellation has something to
 	// interrupt rather than racing an instant return.
@@ -75,9 +75,29 @@ func TestWithContextCallerWins(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	// The entry point prepends context.Background(); the caller's cancelled
-	// context comes later and must override it.
-	if _, err := OpenHTMLBytesContext(context.Background(), src, WithContext(cancelled)); !errors.Is(err, context.Canceled) {
+	// The internal open path prepends its own context (openReflowFrontend does
+	// exactly this); the caller's cancelled context comes later and must
+	// override it.
+	if _, err := OpenHTMLBytes(src, withOpenContext(context.Background()), WithContext(cancelled)); !errors.Is(err, context.Canceled) {
 		t.Errorf("caller's WithContext did not win: err = %v, want context.Canceled", err)
+	}
+}
+
+// TestWithContextBoundsURLFetch pins that WithContext reaches the HTTP fetch in
+// OpenURL, not only the layout after it. The server never answers until the
+// request is abandoned, so a live context would hang here; a cancelled one must
+// fail at the fetch with context.Canceled.
+func TestWithContextBoundsURLFetch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := OpenURL(srv.URL, WithContext(cancelled))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("OpenURL with cancelled WithContext: err = %v, want context.Canceled", err)
 	}
 }

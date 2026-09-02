@@ -30,10 +30,10 @@
 //
 // # Features
 //
-// The toolkit reads and writes thirteen formats — PDF, DOCX, XLSX, PPTX, EPUB,
-// RTF, HTML, Markdown, plain text, CSV, TSV, PNG, and JPEG. Every format is
-// both an input and an output, and HTML input may also be an http(s) URL.
-// Highlights:
+// The toolkit reads and writes fifteen formats — PDF, DOCX, XLSX, PPTX, EPUB,
+// RTF, HTML, Markdown, plain text, CSV, TSV, PNG, JPEG, WebP, and SVG. Every
+// one is both an input and an output; HEIC is a sixteenth, input-only format,
+// and HTML input may also be an http(s) URL. Highlights:
 //
 //   - A pure-Go PDF interpreter: classic and stream xrefs, object streams,
 //     broken-file repair, RC4/AES-128/AES-256 encryption, the full filter set

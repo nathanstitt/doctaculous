@@ -95,7 +95,7 @@ func docToPDF(t *testing.T, doc *Document) []byte {
 }
 
 // hasImageXObject reports whether raw PDF bytes declare an image XObject. Only
-// stream BODIES are Flate-compressed by pkg/render/pdfwrite (see writer.addStream);
+// stream BODIES are Flate-compressed by pkg/internal/pdfwrite (see writer.addStream);
 // every dictionary is written as plain text, so the /Subtype /Image key of an image
 // XObject is searchable directly in the raw bytes. Both the spaced and unspaced
 // spellings are checked because the writer's dictionary formatting is not part of
@@ -132,7 +132,7 @@ func pdfStreams(t *testing.T, raw []byte) string {
 	return out.String()
 }
 
-// greenFillOp is the PDF non-stroking RGB colour operator pkg/render/pdfwrite
+// greenFillOp is the PDF non-stroking RGB colour operator pkg/internal/pdfwrite
 // emits for #00c000 (0, 192/255, 0 at its four-decimal precision). Nothing else
 // in these documents sets that colour, so its presence means the probe SVG's
 // rectangle really was painted.
@@ -193,7 +193,7 @@ func TestHTMLImgSVGEmitsVectorNotImageXObject(t *testing.T) {
 
 // TestHTMLInlineSVGEmitsVectorNotImageXObject is the same claim for INLINE <svg>
 // markup, which travels a different route into the engine (re-serialized by
-// pkg/html rather than fetched through a loader) and so needs its own proof.
+// pkg/internal/html rather than fetched through a loader) and so needs its own proof.
 func TestHTMLInlineSVGEmitsVectorNotImageXObject(t *testing.T) {
 	t.Parallel()
 	raw := htmlToPDF(t, `<html><body>`+vectorProbeSVG+`</body></html>`)
@@ -225,7 +225,7 @@ func TestHTMLImgPNGStillEmitsImageXObject(t *testing.T) {
 }
 
 // TestHTMLSVGIntrinsicSizing covers the four replaced-element sizing cases an
-// embedded SVG must satisfy. The critical one is the viewBox-only case: pkg/svg's
+// embedded SVG must satisfy. The critical one is the viewBox-only case: pkg/internal/svg's
 // resolveSize has ALREADY applied CSS's 300x150 default by the time Document is
 // built, which is correct for a standalone SVG (it is its own sizing authority)
 // and wrong here, where the outer <img>'s CSS supplies an axis and the SVG must
@@ -285,7 +285,7 @@ func TestHTMLSVGIntrinsicSizing(t *testing.T) {
 // lower-cases foreign-content names and the parser then REPAIRS them via
 // svgTagNameAdjustments (clippath -> clipPath, lineargradient -> linearGradient,
 // gradientunits -> gradientUnits, ...). If the re-serialize step lost those
-// repairs, pkg/svg — a case-sensitive XML parser — would see <clippath> and
+// repairs, pkg/internal/svg — a case-sensitive XML parser — would see <clippath> and
 // <lineargradient>, silently fail to resolve every gradient and clip reference,
 // and render the wrong picture with no error anywhere.
 //
@@ -296,7 +296,7 @@ func TestInlineSVGCamelCaseSurvivesReserialization(t *testing.T) {
 	t.Parallel()
 	// Deliberately lower-cased in the SOURCE, as an HTML author may legally write
 	// it: the HTML parser is what restores the camelCase spellings, and this test
-	// asserts they survive all the way to pkg/svg.
+	// asserts they survive all the way to pkg/internal/svg.
 	const src = `<html><body><svg width="100" height="50" viewbox="0 0 100 50">
 <defs>
   <lineargradient id="g" gradientunits="objectBoundingBox" x1="0" y1="0" x2="1" y2="0">
@@ -318,7 +318,7 @@ func TestInlineSVGCamelCaseSurvivesReserialization(t *testing.T) {
 }
 
 // TestInlineSVGGeneratesNoHTMLBoxes proves box generation stops at <svg>. Before
-// this change, pkg/html's buildElement ignored Namespace entirely, so <circle>
+// this change, pkg/internal/html's buildElement ignored Namespace entirely, so <circle>
 // and <path> walked into generate() and produced HTML block boxes — invisible
 // boxes that nonetheless consumed layout height and could push following content
 // down. The <svg> must now be a single replaced leaf.
@@ -401,7 +401,7 @@ func TestMalformedSVGSrcDegradesGracefully(t *testing.T) {
 func TestMalformedInlineSVGDegradesGracefully(t *testing.T) {
 	t.Parallel()
 	// x/net/html recovers from any of this into SOME tree; whatever it hands back,
-	// pkg/svg must not panic on it and the document must still render.
+	// pkg/internal/svg must not panic on it and the document must still render.
 	for _, src := range []string{
 		`<html><body><svg width="10"><rect</svg></body></html>`,
 		`<html><body><svg></body></html>`,

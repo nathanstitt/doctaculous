@@ -128,7 +128,7 @@ func TestHTMLDocMarkdown(t *testing.T) {
 // Adding a section to index.html would not exercise an output format at all —
 // the showcase renders HTML to PNG. So this drives the richest document in the
 // repo THROUGH the SVG writer instead: every page is converted to SVG, re-read
-// with pkg/svg, rasterized, and compared against the SAME committed
+// with pkg/internal/svg, rasterized, and compared against the SAME committed
 // htmldoc-p<i>.png goldens the raster path is held to. No new goldens are
 // committed; reusing the raster ones is the point, because any place the two
 // backends disagree shows up as a diff against a reference that is already
@@ -210,7 +210,7 @@ func TestHTMLDocSVGShowcase(t *testing.T) {
 // svgShowcasePagesWithRasterContent are the showcase pages whose SVG output
 // embeds an <image> — raster content, or a gradient that had to be sampled.
 //
-// pkg/svg does not implement <image> (docs/SVG.md), so on the way back in that
+// pkg/internal/svg does not implement <image> (docs/SVG.md), so on the way back in that
 // content renders as nothing and the comparison would measure the READER, not
 // this writer. They are listed explicitly rather than detected, so that a page
 // which stops containing raster content — or a NEW page that starts embedding

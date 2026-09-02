@@ -12,13 +12,6 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/pptx"
 )
 
-// OpenPPTX reads and renders a PresentationML (.pptx) deck: each visible
-// slide becomes one fixed-size page with its shapes absolutely positioned.
-// For additional options use OpenPPTXFile.
-func OpenPPTX(path string) (*Document, error) {
-	return OpenPPTXFile(path)
-}
-
 // OpenPPTXFile reads and renders a .pptx file at path, applying any options.
 func OpenPPTXFile(path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)

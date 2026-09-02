@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -40,25 +41,33 @@ type reflowRenderer struct {
 	loader resource.ResourceLoader
 }
 
-// OpenDOCX reads and parses a .docx file, lays out all pages, and returns a
-// Document ready to rasterize. Layout runs once here (pagination is global, so
-// pages cannot be laid out independently); rasterization then parallelizes over
-// the precomputed pages.
-func OpenDOCX(path string) (*Document, error) {
-	d, err := docx.Open(path)
+// OpenDOCXFile reads and parses a .docx file at path, lays out all pages, and
+// returns a Document ready to rasterize or convert. Layout runs once here
+// (pagination is global, so pages cannot be laid out independently);
+// rasterization then parallelizes over the precomputed pages. Of the options,
+// WithContext bounds both the parse and the layout; the HTML-specific options
+// (viewport, resource loader, media, fonts) are inert for DOCX, whose geometry
+// and media come from the package itself.
+func OpenDOCXFile(path string, opts ...OpenOption) (*Document, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("omnidoc: open docx %q: %w", path, err)
 	}
-	return docxDocument(context.Background(), d)
+	return OpenDOCXBytes(data, opts...)
 }
 
-// OpenDOCXBytes parses a .docx from an in-memory byte slice and lays it out.
-func OpenDOCXBytes(data []byte) (*Document, error) {
-	d, err := docx.OpenBytes(data)
+// OpenDOCXBytes parses a .docx from an in-memory byte slice and lays it out,
+// applying any options. See OpenDOCXFile for which options apply.
+func OpenDOCXBytes(data []byte, opts ...OpenOption) (*Document, error) {
+	cfg := defaultOpenConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	d, err := docx.OpenBytes(cfg.ctx, data)
 	if err != nil {
 		return nil, err
 	}
-	return docxDocument(context.Background(), d)
+	return docxDocument(cfg.ctx, d)
 }
 
 // docxDocument lowers a parsed DOCX through the style cascade into the recursive
@@ -215,10 +224,10 @@ func (r *reflowRenderer) renderPage(ctx context.Context, index int, opts RasterO
 	// again after paint (below). Those are the only two useful seams on this path:
 	// everything between them is a single PaintPage call over an already-laid-out
 	// item list, and the per-item/per-glyph interior of that walk is far too hot to
-	// carry a ctx.Err() (see pkg/layout/paint) — a check there would cost more than
+	// carry a ctx.Err() (see pkg/internal/layout/paint) — a check there would cost more than
 	// the work it guards. The genuinely unbounded loops on the reflow pipeline are
 	// in LAYOUT, which runs at open time and has its own check between block
-	// children (pkg/layout/css/block.go); by the time renderPage is reached the
+	// children (pkg/internal/layout/css/block.go); by the time renderPage is reached the
 	// pages are fixed and the remaining work is bounded by the pixel cap enforced
 	// just below. The multi-page fan-out is cancelled per page by RasterizePages,
 	// which consults ctx before dispatching each job.
@@ -231,7 +240,7 @@ func (r *reflowRenderer) renderPage(ctx context.Context, index int, opts RasterO
 	// width/height are unclamped document attributes, unlike CSS-derived sizes
 	// elsewhere in the reflow pipeline) cannot overflow int, trigger a
 	// multi-gigabyte allocation, or reach image.NewRGBA with a huge/negative
-	// rectangle (which panics). Mirrors pkg/render/raster/page.go's RenderPage
+	// rectangle (which panics). Mirrors pkg/internal/raster/page.go's RenderPage
 	// guard (isFinitePositive-style finiteness check + maxPixels cap), except a
 	// non-positive-but-finite size (e.g. an empty HTML/DOCX document laying out
 	// to zero height) is a legitimate degenerate document, not an attack, so it

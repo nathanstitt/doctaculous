@@ -36,7 +36,7 @@ var texGyreTermesPFB []byte
 var texGyreHerosPFB []byte
 
 // TeXGyreTermesPFB and TeXGyreHerosPFB expose the embedded classic Type 1
-// programs to tests in other packages (notably pkg/font).
+// programs to tests in other packages (notably pkg/internal/font).
 func TeXGyreTermesPFB() []byte { return texGyreTermesPFB }
 func TeXGyreHerosPFB() []byte  { return texGyreHerosPFB }
 

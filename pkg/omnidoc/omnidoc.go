@@ -9,8 +9,6 @@ import (
 	"math"
 	"runtime"
 	"sync"
-
-	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 )
 
 // Document is an opened document ready for rendering. It is read-only after Open
@@ -72,12 +70,12 @@ type RasterOptions struct {
 	// FontProvider, if set, resolves a non-embedded font (a standard-14 /BaseFont or
 	// an unknown family) to real font bytes before the bundled substitute is tried —
 	// letting a caller supply system fonts, exact-metric faces, or a face for a family
-	// the bundle has no look-alike for (Symbol, ZapfDingbats). nil (the default) uses
-	// the bundled weighted substitutes only, keeping rendering hermetic. A
-	// layoutfont.DiskFontProvider satisfies this.
-	FontProvider font.Provider
+	// the bundle has no look-alike for (Symbol, ZapfDingbats). A DirFontProvider
+	// satisfies this. nil (the default) selects by BundledFonts: system fonts, or the
+	// bundled weighted substitutes only.
+	FontProvider FontProvider
 	// BundledFonts selects hermetic bundled-font mode: non-embedded fonts resolve only
-	// from the bundled substitutes (pkg/font/standard), never the host's installed
+	// from the bundled substitutes (pkg/internal/font/standard), never the host's installed
 	// fonts. Default false = system mode, which installs an OSFontProvider so real
 	// installed fonts are used. Ignored when FontProvider is set explicitly (that
 	// provider always wins). The golden/reference tests set this true for reproducibility.
@@ -171,7 +169,7 @@ type regionRenderer interface {
 // ErrRegionUnsupported is returned by RasterizePageRegion for a document whose
 // backend cannot render part of a page. Callers test for it with errors.Is to
 // fall back to a full-page render.
-var ErrRegionUnsupported = errors.New("omnidoc: sub-region rendering is not supported for this document format")
+var ErrRegionUnsupported = errors.New("sub-region rendering is not supported for this document format")
 
 // RasterizePageRegion renders only the part of a page covered by region,
 // returning an image whose Bounds() are that rect in PAGE-ABSOLUTE device
@@ -191,8 +189,10 @@ var ErrRegionUnsupported = errors.New("omnidoc: sub-region rendering is not supp
 // on a busy page is bounded below by the cost of walking that list. Measured on
 // a 1920x480 dashboard, a 400x300 region renders ~3.4x faster than the page.
 //
-// Only reflow documents (HTML, DOCX, EPUB, XLSX, Markdown, SVG) support this;
-// an opened PDF returns ErrRegionUnsupported.
+// Every input format except PDF supports this — HTML, DOCX, EPUB, XLSX, PPTX,
+// RTF, Markdown, text, CSV/TSV, images and SVG all lay out through the reflow
+// engine, which can paint a window of a page. An opened PDF returns
+// ErrRegionUnsupported: its content interpreter has no notion of a partial page.
 func (d *Document) RasterizePageRegion(ctx context.Context, index int, region image.Rectangle, opts RasterOptions) (image.Image, error) {
 	rr, ok := d.r.(regionRenderer)
 	if !ok {
