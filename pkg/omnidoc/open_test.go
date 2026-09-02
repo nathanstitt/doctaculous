@@ -224,7 +224,7 @@ func TestDocumentFormatStamped(t *testing.T) {
 		{"OpenBytes pdf", func() (*Document, error) { return OpenBytes(pdfBytes) }, FormatPDF},
 		{"OpenDOCXBytes", func() (*Document, error) { return OpenDOCXBytes(docxBytes) }, FormatDOCX},
 		{"OpenHTMLBytes", func() (*Document, error) { return OpenHTMLBytes(htmlBytes) }, FormatHTML},
-		{"OpenDOCX", func() (*Document, error) { return OpenDOCX(docxPath) }, FormatDOCX},
+		{"OpenDOCXFile", func() (*Document, error) { return OpenDOCXFile(docxPath) }, FormatDOCX},
 		{"OpenHTMLFile", func() (*Document, error) { return OpenHTMLFile(htmlPath) }, FormatHTML},
 		{"OpenBytesAs", func() (*Document, error) { return OpenBytesAs(FormatPDF, pdfBytes) }, FormatPDF},
 	}

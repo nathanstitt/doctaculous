@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Command gen_animated builds pkg/webp/testdata/animated.webp, the animated
+// Command gen_animated builds pkg/internal/webp/testdata/animated.webp, the animated
 // fixture the WebP reader's degradation tests need. Run by hand from the repo
 // root when the fixture must change; the result is committed so tests stay
 // offline:
@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	srcPath = "pkg/webp/testdata/still-lossless.webp"
-	outPath = "pkg/webp/testdata/animated.webp"
+	srcPath = "pkg/internal/webp/testdata/still-lossless.webp"
+	outPath = "pkg/internal/webp/testdata/animated.webp"
 
 	// The canvas of still-lossless.webp (tux.lossless.webp upstream). The frames
 	// reuse its bitstream, so the animation canvas must match it exactly.

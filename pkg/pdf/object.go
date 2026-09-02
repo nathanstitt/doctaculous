@@ -44,8 +44,8 @@ type Reference struct {
 }
 
 // Stream is a PDF stream object: a dictionary plus raw (still-encoded) bytes.
-// Use the filter package together with the dictionary's Filter entry to decode
-// the contents.
+// Document.DecodedStream applies the dictionary's Filter chain and returns the
+// decoded contents.
 type Stream struct {
 	Dict Dict
 	Raw  []byte

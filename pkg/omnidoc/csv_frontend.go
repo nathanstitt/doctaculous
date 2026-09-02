@@ -7,13 +7,6 @@ import (
 	"strings"
 )
 
-// OpenCSV reads and renders a comma-separated-values file as a single ruled
-// table, laying it out at the default viewport width into one tall page. For
-// additional options (e.g. WithPageSize) use OpenCSVFile.
-func OpenCSV(path string) (*Document, error) {
-	return OpenCSVFile(path)
-}
-
 // OpenCSVFile reads and renders a CSV file at path, applying any options.
 func OpenCSVFile(path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)
@@ -32,11 +25,6 @@ func OpenCSVFile(path string, opts ...HTMLOption) (*Document, error) {
 // yields a valid empty document.
 func OpenCSVBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 	return openSeparatedValues(data, ',', FormatCSV, opts)
-}
-
-// OpenTSV reads and renders a tab-separated-values file. See OpenCSV.
-func OpenTSV(path string) (*Document, error) {
-	return OpenTSVFile(path)
 }
 
 // OpenTSVFile reads and renders a TSV file at path, applying any options.

@@ -159,7 +159,7 @@ func TestOpenHTMLFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	doc, err := OpenHTML(htmlPath)
+	doc, err := OpenHTMLFile(htmlPath)
 	if err != nil {
 		t.Fatalf("OpenHTML: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestOpenHTMLFile(t *testing.T) {
 // does not exist.
 func TestOpenHTMLMissingFile(t *testing.T) {
 	t.Parallel()
-	if _, err := OpenHTML(filepath.Join(t.TempDir(), "does-not-exist.html")); err == nil {
+	if _, err := OpenHTMLFile(filepath.Join(t.TempDir(), "does-not-exist.html")); err == nil {
 		t.Fatal("expected an error opening a missing HTML file")
 	}
 }

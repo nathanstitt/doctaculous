@@ -1,6 +1,9 @@
 package docx
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestParsePackageFidelityParts covers the package-level plumbing added for
 // the public model: endnotes and comments parts, customXml preservation
@@ -29,7 +32,7 @@ func TestParsePackageFidelityParts(t *testing.T) {
 		"customXml/item1.xml": `<myapp><data/></myapp>`,
 	})
 
-	doc, err := parsePackage(pkg)
+	doc, err := parsePackage(context.Background(), pkg)
 	if err != nil {
 		t.Fatalf("parsePackage: %v", err)
 	}

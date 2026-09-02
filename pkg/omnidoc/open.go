@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nathanstitt/omnidoc/pkg/docx"
-	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
@@ -128,11 +126,9 @@ func openDetected(ctx context.Context, f Format, data []byte, dir string, opts [
 		}
 		return &Document{r: &pdfRenderer{doc: d, logf: cfg.logf}, format: FormatPDF}, nil
 	case FormatDOCX:
-		d, err := docx.OpenBytes(data)
-		if err != nil {
-			return nil, err
-		}
-		return docxDocument(ctx, d)
+		// Prepended, so a caller's WithContext outranks the entry point's ctx,
+		// exactly as openReflowFrontend arranges for the HTML-family inputs.
+		return OpenDOCXBytes(data, append([]OpenOption{withOpenContext(ctx)}, opts...)...)
 	case FormatHTML:
 		return openReflowFrontend(ctx, OpenHTMLBytes, data, dir, opts)
 	case FormatMarkdown:
@@ -177,7 +173,7 @@ func openReflowFrontend(ctx context.Context, open func([]byte, ...OpenOption) (*
 	if dir != "" {
 		opts = append([]OpenOption{
 			WithResourceLoader(resource.DirLoader{Base: dir}),
-			WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
+			WithSystemFontProvider(DirFontProvider{Dir: dir}),
 		}, opts...)
 	}
 	return open(data, opts...)

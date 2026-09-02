@@ -311,10 +311,6 @@ func parseLvlOverride(dec *xml.Decoder) (LevelOverride, error) {
 	}
 }
 
-// ParseNumberingForTest exposes parseNumbering to external test packages
-// (pkg/docx/cssbox). It is not part of the stable API.
-func ParseNumberingForTest(data []byte) (*Numbering, error) { return parseNumbering(data) }
-
 // parseNumFmt maps a w:numFmt value to a NumFmt.
 func parseNumFmt(val string) NumFmt {
 	switch val {

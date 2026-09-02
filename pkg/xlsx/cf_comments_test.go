@@ -2,6 +2,7 @@ package xlsx
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func cfFixture() []byte {
 // TestCFRead pins the reader view: typed fields, dxf resolution, and the
 // byte-faithful Raw passthrough token.
 func TestCFRead(t *testing.T) {
-	wb, err := OpenBytes(cfFixture())
+	wb, err := OpenBytes(context.Background(), cfFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func TestCFRead(t *testing.T) {
 	}
 
 	// The editor sees the same view.
-	f, err := Edit(cfFixture())
+	f, err := Edit(context.Background(), cfFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestCFRead(t *testing.T) {
 // verbatim (priority renumbered), a typed rule synthesizes with a minted dxf,
 // and the whole set replaces what was there.
 func TestCFSetAuthoritative(t *testing.T) {
-	f, err := Edit(cfFixture())
+	f, err := Edit(context.Background(), cfFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +113,12 @@ func TestCFSetAuthoritative(t *testing.T) {
 	if err := sh.SetConditionalFormats(next); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestCFSetAuthoritative(t *testing.T) {
 	}
 
 	// Clearing removes every block.
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func TestCFSetAuthoritative(t *testing.T) {
 	if err := sh2.SetConditionalFormats(nil); err != nil {
 		t.Fatal(err)
 	}
-	wb2, err := OpenBytes(mustSave(t, f2))
+	wb2, err := OpenBytes(context.Background(), mustSave(t, f2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestCFSetAuthoritative(t *testing.T) {
 // Style set gets a freshly minted dxf and its dxfId stamped onto the raw
 // element, while a Raw rule without Style keeps its embedded dxfId verbatim.
 func TestCFRawWithStyleMintsDxf(t *testing.T) {
-	f, err := Edit(cfFixture())
+	f, err := Edit(context.Background(), cfFixture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +189,12 @@ func TestCFRawWithStyleMintsDxf(t *testing.T) {
 	if err := sh.SetConditionalFormats(next); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.Save()
+	out, err := f.Save(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestCommentsRoundTrip(t *testing.T) {
 	}
 	out := mustSave(t, f)
 
-	wb, err := OpenBytes(out)
+	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +272,7 @@ func TestCommentsRoundTrip(t *testing.T) {
 	}
 
 	// Replace one note, remove the other.
-	f2, err := Edit(out)
+	f2, err := Edit(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +289,7 @@ func TestCommentsRoundTrip(t *testing.T) {
 	if err := sh2.RemoveComment(4, 1); err != nil {
 		t.Fatal(err)
 	}
-	wb2, err := OpenBytes(mustSave(t, f2))
+	wb2, err := OpenBytes(context.Background(), mustSave(t, f2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +302,7 @@ func TestCommentsRoundTrip(t *testing.T) {
 // TestCommentsPreserveOtherParts pins that note edits stay surgical.
 func TestCommentsPreserveOtherParts(t *testing.T) {
 	src := editFixture()
-	f, err := Edit(src)
+	f, err := Edit(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}

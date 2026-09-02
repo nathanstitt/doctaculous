@@ -10,12 +10,15 @@ This project lives or dies on its test corpus.
   impractical to generate (complex real-world files, specific producers, fidelity/integration cases)
   — keep them small and note provenance/license in the PR. `cmd/dumpfixtures` materializes generated
   fixtures for inspection.
-- **Core corpus (`gen.Core` in `testdata/gen/core.go`)**: ~10 fixtures (`text`, `vector`, `flate`,
-  `multipage`, `rotated`, `image-flate`, `image-jpeg`, `xref-stream`, `objstm`, `bad-xref`) each
-  locking one must-always-work path from parse through raster. Range over it where a uniform sweep
+- **Core corpus (`gen.Core` in `testdata/gen/core.go`)**: 35 fixtures — file structure (`flate`,
+  `multipage`, `rotated`, `xref-stream`, `objstm`, `bad-xref`, `encrypted-rc4`), vector paint
+  (`vector`, `stroke-joins`, `even-odd`, `alpha`, `blend-*`, `form-xobject`), every shading type
+  (`shading-*`), images in every colour model and filter (`image-*`, `inline-image`), and every font
+  kind (`text`, `embedded-truetype`, `type0`, `cff`, `type1`, `symbolic-truetype`) — each locking
+  one must-always-work path from parse through raster. Range over it where a uniform sweep
   fits (parser round-trip, golden rendering, the parallel-render benchmark). When you add a fixture
   for a new core path, add it to `gen.Core`.
-- **SVG corpus (`testdata/svg/resvg`, 848 fixtures)**: curated from resvg-test-suite (MIT, pinned
+- **SVG corpus (`testdata/svg/resvg`, 867 fixtures)**: curated from resvg-test-suite (MIT, pinned
   commit), one feature per file, with our own committed goldens under
   `pkg/omnidoc/testdata/golden/svg-resvg/`. Provenance and every curation/exclusion decision live
   in that directory's README — read it before adding or excluding a fixture.

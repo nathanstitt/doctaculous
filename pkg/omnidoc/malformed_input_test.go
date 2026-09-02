@@ -9,7 +9,7 @@ import (
 // "unsupported constructs degrade rather than crash" -- at the public entry
 // point, for the class of input that broke it.
 //
-// Each of these hung forever before the non-finite rejection in pkg/css: an
+// Each of these hung forever before the non-finite rejection in pkg/internal/css: an
 // infinite flex-grow makes the free-space distribution loop in layout/css never
 // converge. The hang happens inside OpenHTMLBytes, during layout, so it is not
 // reachable by a RasterizePage context -- there is no deadline a caller could

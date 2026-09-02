@@ -18,29 +18,29 @@ import (
 //
 // These are gaps in this toolkit's SVG *reader*, not defects in the writer's
 // output: the emitted markup is valid SVG that a browser renders correctly,
-// but pkg/svg does not yet consume the feature, so a comparison would measure
+// but pkg/internal/svg does not yet consume the feature, so a comparison would measure
 // the reader. They are skipped rather than given a loose tolerance, because a
 // widened budget would silently also excuse a real writer regression.
 //
 // Each entry was confirmed by inspecting the emitted markup and locating the
 // corresponding reader gap:
 //
-//   - <image> is unimplemented in pkg/svg — a documented, pre-existing gap
+//   - <image> is unimplemented in pkg/internal/svg — a documented, pre-existing gap
 //     (see FEATURES.md, "Not yet ... <image>"). The writer emits a correct
 //     <image> with a base64 PNG; the reader draws nothing.
-//   - mix-blend-mode is not honored by pkg/svg, so a blended group composites
+//   - mix-blend-mode is not honored by pkg/internal/svg, so a blended group composites
 //     as source-over on the way back in.
 //   - PDF-sourced shadings deliberately do not describe themselves
-//     (pkg/render/raster/shading.go's DescribeShading is gated on alphaFromFn),
+//     (pkg/internal/raster/shading.go's DescribeShading is gated on alphaFromFn),
 //     so they take the writer's sampled-<image> fallback and hit the <image>
 //     gap above. Gradients from HTML/SVG input DO stay native — asserted by
 //     TestHTMLGradientStaysVector.
 func roundTripBlockedBy(name string) string {
 	switch {
 	case strings.HasPrefix(name, "image-"), name == "inline-image":
-		return "pkg/svg does not implement <image> (reader gap, not a writer defect)"
+		return "pkg/internal/svg does not implement <image> (reader gap, not a writer defect)"
 	case strings.HasPrefix(name, "blend-"):
-		return "pkg/svg does not honor mix-blend-mode (reader gap)"
+		return "pkg/internal/svg does not honor mix-blend-mode (reader gap)"
 	case strings.HasPrefix(name, "shading-"):
 		return "PDF shadings are not self-describing upstream, so they emit a sampled <image> the reader cannot draw"
 	}
@@ -90,7 +90,7 @@ func head(s string) string {
 // TestSVGOutputRoundTripsThroughOwnParser is the core correctness check for the
 // SVG backend, and the one it is uniquely able to make: this toolkit both
 // writes AND reads SVG, so the emitted document can be fed back through
-// pkg/svg, rasterized, and compared against a direct raster of the same source.
+// pkg/internal/svg, rasterized, and compared against a direct raster of the same source.
 //
 // That catches whole classes of defect a string assertion cannot — mis-nested
 // groups, a clip applied to the wrong subtree, a transform in the wrong order,

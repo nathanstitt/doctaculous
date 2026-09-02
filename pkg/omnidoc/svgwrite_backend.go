@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 
-	"github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/internal/svgwrite"
 )
@@ -37,7 +36,7 @@ type SVGOptions struct {
 	// FontProvider and BundledFonts mirror RasterOptions: they resolve the
 	// faces whose outlines are emitted. Glyphs are written as outlines, so the
 	// face chosen here determines the shapes in the output.
-	FontProvider font.Provider
+	FontProvider FontProvider
 	BundledFonts bool
 }
 
@@ -129,7 +128,7 @@ func paintVectorSafely(ctx context.Context, vp vectorPages, index int, dev rende
 //
 // It works on every input format, including PDF. Output is genuinely vector —
 // paths, clips, masks and native gradients — not a rasterized page wrapped in
-// an <image>. Text is emitted as glyph outlines; see pkg/render/svgwrite's
+// an <image>. Text is emitted as glyph outlines; see pkg/internal/svgwrite's
 // package doc for why.
 func (d *Document) WriteSVG(ctx context.Context, out io.Writer, index int, opts SVGOptions) error {
 	vp, ok := d.r.(vectorPages)

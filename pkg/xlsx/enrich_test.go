@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func enrichedWorkbook(t *testing.T) *Workbook {
 		SetSharedStrings(shared).
 		SetDefinedNames(`<definedName name="Total" hidden="1">Enriched!$B$1</definedName><definedName name="Local" localSheetId="0">Enriched!$A$1:$A$4</definedName>`).
 		Bytes()
-	wb, err := OpenBytes(data)
+	wb, err := OpenBytes(context.Background(), data)
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -184,9 +185,9 @@ func TestEnrichedStyles(t *testing.T) {
 		t.Errorf("builtin numFmt resolution = %+v", st3)
 	}
 
-	// The legacy display facts are untouched by the enrichment.
-	if c := s.Cells[0][0]; !c.Bold || !c.Italic || c.FillRGB != "FFEE00" || c.Align != "center" {
-		t.Errorf("legacy facts = %+v", c)
+	// The display facts a conversion reads all come from the resolved Style.
+	if st := s.Cells[0][0].Style; !st.Font.Bold || !st.Font.Italic || st.Fill.Fg.RGB != "FFEE00" || st.Alignment.Horizontal != "center" {
+		t.Errorf("display facts = %+v", st)
 	}
 }
 

@@ -87,6 +87,11 @@ var (
 	// separated from other failures because it is the one a caller can fix by
 	// asking for a different page.
 	ErrPageOutOfRange = errors.New("page index out of range")
+	// ErrTooDeeplyNested reports an HTML or Markdown document refused at parse
+	// because its element or block nesting exceeds the engine's bound (512 open
+	// HTML elements, matching x/net/html; 1024 Markdown block markers on one
+	// line). Both are hostile-input guards: real documents sit far below them.
+	ErrTooDeeplyNested = errors.New("document nesting too deep")
 )
 
 // formatCaps is the single capability table consulted by both the API and the

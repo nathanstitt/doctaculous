@@ -8,7 +8,8 @@ backend · `pkg/internal/pdfwrite` PDF-writer backend · `pkg/internal/svgwrite`
 backend · `pkg/omnidoc` public API ·
 `cmd/omnidoc` thin CLI.
 
-**Reflowable documents** (DOCX and HTML) share a second pipeline that meets the PDF pipeline at
+**Reflowable documents** (DOCX, HTML, and everything that lowers to HTML first — Markdown, text,
+CSV/TSV, XLSX, RTF, PPTX, EPUB, images) share a second pipeline that meets the PDF pipeline at
 `render.Device`. There is **one recursive, format-neutral box model** (`pkg/internal/layout/cssbox`) that the
 CSS layout engine (`pkg/internal/layout/css`) consumes, driving **every** reflow format. A reflow frontend is
 a parse+lower step producing a `cssbox` tree with resolved `css.ComputedStyle`:

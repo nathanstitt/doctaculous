@@ -1,17 +1,12 @@
 // Command omnidoc is the command-line interface to the omnidoc document
-// toolkit. The primary verb is "convert", which converts any supported input
-// (PDF, DOCX, HTML file, or http(s) URL) to any supported output (pdf, md, txt,
-// html, png, jpg, webp), detecting formats from content and extensions. The focused
-// subcommands remain: "rasterize" renders document pages to images, "topdf"
-// converts a reflow document to a PDF with searchable text, "tomd" converts one
-// to Markdown or plain text, and "tohtml" to HTML.
+// toolkit. "convert" converts any supported input (a document file or an
+// http(s) URL) to any supported output, detecting formats from content and
+// extensions; "rasterize" renders document pages to images.
 package main
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
 // version, commit, and date are overridden at build time via
@@ -41,14 +36,6 @@ func run(args []string) error {
 		return convertCmd(args[1:])
 	case "rasterize":
 		return rasterizeCmd(args[1:])
-	case "topdf":
-		return topdfCmd(args[1:])
-	case "tomd":
-		return tomdCmd(args[1:])
-	case "tohtml":
-		return tohtmlCmd(args[1:])
-	case "todocx":
-		return todocxCmd(args[1:])
 	case "version", "-v", "--version":
 		// A goreleaser build fills commit/date; a plain `go build` leaves the
 		// defaults, so only decorate when they were injected.
@@ -62,62 +49,9 @@ func run(args []string) error {
 		usage()
 		return nil
 	default:
-		// No explicit subcommand: infer the command from the --in/--out file extensions
-		// (a .pdf output => topdf; a .md/.txt output => tomd; an image output =>
-		// rasterize).
-		cmd, err := inferCommand(args)
-		if err != nil {
-			usage()
-			return err
-		}
-		switch cmd {
-		case "topdf":
-			return topdfCmd(args)
-		case "tomd":
-			return tomdCmd(args)
-		case "tohtml":
-			return tohtmlCmd(args)
-		case "todocx":
-			return todocxCmd(args)
-		case "convert":
-			return convertCmd(args)
-		}
-		return rasterizeCmd(args)
+		usage()
+		return fmt.Errorf("unknown command %q (want convert, rasterize, version, or help)", args[0])
 	}
-}
-
-// inferCommand picks a subcommand from the flags when none is named. It prefers the
-// output extension (--out): a .pdf output means "topdf", an image output (.png/.jpg/
-// .jpeg/.webp) means "rasterize". Failing that it falls back to the input: a .pdf input can
-// only be rasterized, while an .html/.htm/.docx input or an http(s) URL means topdf.
-// It errors (rather than guessing) when neither extension is conclusive.
-func inferCommand(args []string) (string, error) {
-	in := flagValue(args, "in")
-	out := flagValue(args, "out")
-	switch strings.ToLower(filepath.Ext(out)) {
-	case ".pdf":
-		return "topdf", nil
-	case ".md", ".markdown", ".txt":
-		return "tomd", nil
-	case ".html", ".htm":
-		return "tohtml", nil
-	case ".docx":
-		return "todocx", nil
-	case ".csv", ".tsv", ".xlsx", ".svg", ".svgz":
-		return "convert", nil
-	case ".png", ".jpg", ".jpeg", ".webp":
-		return "rasterize", nil
-	}
-	if isHTTPURL(in) {
-		return "topdf", nil
-	}
-	switch strings.ToLower(filepath.Ext(in)) {
-	case ".html", ".htm", ".docx", ".md", ".markdown", ".txt", ".text", ".csv", ".tsv", ".xlsx":
-		return "topdf", nil
-	case ".pdf":
-		return "rasterize", nil
-	}
-	return "", fmt.Errorf("cannot infer command; use \"omnidoc convert <in> <out>\", name a subcommand, or use recognizable --in/--out extensions")
 }
 
 // resolveInput returns the single input document from the --in flag or a positional
@@ -138,53 +72,29 @@ func resolveInput(inFlag string, positional []string) (string, error) {
 	}
 }
 
-// flagValue returns the value of --name/-name from args, supporting both the
-// "--name value" and "--name=value" forms. It returns "" when absent.
-func flagValue(args []string, name string) string {
-	long, short := "--"+name, "-"+name
-	for i, a := range args {
-		switch {
-		case a == long || a == short:
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-		case strings.HasPrefix(a, long+"="):
-			return strings.TrimPrefix(a, long+"=")
-		case strings.HasPrefix(a, short+"="):
-			return strings.TrimPrefix(a, short+"=")
-		}
-	}
-	return ""
-}
-
 func usage() {
 	fmt.Fprint(os.Stderr, `omnidoc - pure-Go document toolkit
 
 usage:
   omnidoc convert   <input> <output> [flags]   (any format to any other)
-  omnidoc topdf     --in <file.html|.docx|URL> --out file.pdf [flags]
-  omnidoc todocx    --in <file.pdf|.html|.md|URL> --out file.docx [flags]
-  omnidoc tomd      --in <file.pdf|.html|.docx|URL> [--out file.md] [--plain]
-  omnidoc tohtml    --in <file.pdf|.html|.docx|URL> [--out file.html] [--fragment]
-  omnidoc rasterize  --in <file.pdf|.docx|.html|URL> --out file.png [flags]
-  omnidoc --in <input> --out <output>   (subcommand inferred from extensions)
+  omnidoc rasterize <input> --out file.png [flags]
   omnidoc version
   omnidoc help
 
 "convert" detects the input format from content and extension (--from overrides)
-and takes the output format from the output extension (--to overrides). Inputs:
-pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, webp, heic, svg, http(s) URLs.
-Outputs: pdf, docx, xlsx, pptx, epub, rtf, md, txt, html, csv, tsv, png, jpg, webp (lossless), svg.
-CSV/TSV/XLSX output carries the
-document's tables (prose is dropped). SVG output is vector (paths, clips,
-gradients; text as glyph outlines) and holds one page per file, so multi-page
-input needs a numbered output name, as image output does. Converting a
-document to its own format is not supported.
+and takes the output format from the output extension (--to overrides).
+Inputs:  pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg,
+         webp, heic, svg, and http(s) URLs.
+Outputs: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg,
+         webp (lossless), svg.
+CSV/TSV/XLSX output carries the document's tables (prose is dropped). SVG output
+is vector (paths, clips, gradients; text as glyph outlines) and holds one page
+per file, so multi-page input needs a numbered output name, as image output
+does. Converting a document to its own format is not supported.
 
-The input may be given via --in or as a positional argument. When no subcommand is
-named, it is inferred from the --out extension (.pdf => topdf; .md/.txt => tomd;
-.png/.jpg/.webp => rasterize).
+"rasterize" renders one page, or a --pages range, of any input to PNG, JPEG, or
+WebP. The input may be given via --in or as a positional argument.
 
-run "omnidoc convert -h" (or topdf/rasterize/... -h) for subcommand flags.
+run "omnidoc convert -h" or "omnidoc rasterize -h" for the flags.
 `)
 }

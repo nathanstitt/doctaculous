@@ -34,7 +34,7 @@ func writeHTML(t *testing.T, src string, opts Options) []byte {
 // CI-enforced consumer every mapping must satisfy.
 func reopen(t *testing.T, data []byte) *docx.Document {
 	t.Helper()
-	d, err := docx.OpenBytes(data)
+	d, err := docx.OpenBytes(context.Background(), data)
 	if err != nil {
 		t.Fatalf("docx.OpenBytes rejects the produced package: %v", err)
 	}

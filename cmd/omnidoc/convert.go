@@ -40,8 +40,8 @@ func convertCmd(args []string) error {
 	var (
 		in   = fs.String("in", "", "input document or http(s) URL (alternative to the first positional argument)")
 		out  = fs.String("out", "", "output file (alternative to the second positional argument; \"-\" writes to stdout and requires --to)")
-		from = fs.String("from", "", "input format override: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, or webp (default: detected from content and extension)")
-		to   = fs.String("to", "", "output format override: pdf, docx, xlsx, md, txt, html, csv, tsv, png, jpg, or webp (default: from the output extension)")
+		from = fs.String("from", "", "input format override: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, webp, heic, or svg (default: detected from content and extension)")
+		to   = fs.String("to", "", "output format override: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, webp, or svg (default: from the output extension)")
 
 		pageSize = fs.String("page-size", "letter", "HTML pagination: \"letter\" paginates onto US-Letter pages (default), \"tall\" renders one tall page")
 		workers  = fs.Int("workers", runtime.GOMAXPROCS(0), "max concurrent page renderers (pdf and image outputs)")
@@ -78,7 +78,7 @@ func convertCmd(args []string) error {
 	)
 	fs.Var(&sheets, "sheet", "xlsx input: render only this worksheet by name; repeat or comma-separate for several, in order (default: all visible sheets)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: omnidoc convert <input.pdf|.docx|.html|.md|.txt|URL> <output.pdf|.docx|.md|.txt|.html|.png|.jpg|.webp> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: omnidoc convert <input file or URL> <output file> [flags]\n       any of pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, png, jpg, webp, svg (plus heic in);\n       formats come from content and extension, or --from/--to\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderArgs(args, convertValueFlags)); err != nil {

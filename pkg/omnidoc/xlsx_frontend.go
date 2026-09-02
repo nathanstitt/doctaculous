@@ -24,14 +24,6 @@ import (
 // the lower-level package that actually resolves sheet names.
 var ErrSheetNotFound = xlsx.ErrSheetNotFound
 
-// OpenXLSX reads and renders a SpreadsheetML (.xlsx) workbook: every visible
-// sheet becomes a ruled table (preceded by the sheet's name as a heading when
-// more than one sheet is visible), laid out at the default viewport width. For
-// additional options (e.g. WithPageSize) use OpenXLSXFile.
-func OpenXLSX(path string) (*Document, error) {
-	return OpenXLSXFile(path)
-}
-
 // OpenXLSXFile reads and renders an .xlsx file at path, applying any options
 // (e.g. WithSheets to select worksheets, WithPageSize for pagination).
 func OpenXLSXFile(path string, opts ...OpenOption) (*Document, error) {
@@ -55,7 +47,7 @@ func OpenXLSXBytes(data []byte, opts ...OpenOption) (*Document, error) {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	wb, err := xlsx.OpenBytes(data)
+	wb, err := xlsx.OpenBytes(cfg.ctx, data)
 	if err != nil {
 		return nil, fmt.Errorf("omnidoc: %w", err)
 	}
@@ -80,7 +72,7 @@ func selectSheets(wb *xlsx.Workbook, names []string) ([]xlsx.Sheet, error) {
 	if len(names) == 0 {
 		var visible []xlsx.Sheet
 		for _, s := range wb.Sheets {
-			if !s.Hidden {
+			if s.Visibility == xlsx.SheetVisible {
 				visible = append(visible, s)
 			}
 		}
@@ -168,20 +160,27 @@ func sheetToHTML(b *strings.Builder, s xlsx.Sheet) {
 	b.WriteString("</table>\n")
 }
 
-// cellStyleAttr renders a cell's presentation facts as an inline style.
+// cellStyleAttr renders a cell's presentation facts as an inline style: the
+// font's weight and slant, a solid fill with an explicit RGB (indexed and theme
+// colours are not resolved here), and an explicit horizontal alignment.
 func cellStyleAttr(c xlsx.Cell) string {
+	st := c.Style
+	if st == nil {
+		return ""
+	}
 	var parts []string
-	if c.Bold {
+	if st.Font.Bold {
 		parts = append(parts, "font-weight: bold")
 	}
-	if c.Italic {
+	if st.Font.Italic {
 		parts = append(parts, "font-style: italic")
 	}
-	if c.FillRGB != "" {
-		parts = append(parts, "background-color: #"+c.FillRGB)
+	if st.Fill.Pattern == "solid" && st.Fill.Fg.RGB != "" {
+		parts = append(parts, "background-color: #"+st.Fill.Fg.RGB)
 	}
-	if c.Align != "" {
-		parts = append(parts, "text-align: "+c.Align)
+	switch st.Alignment.Horizontal {
+	case "left", "center", "right":
+		parts = append(parts, "text-align: "+st.Alignment.Horizontal)
 	}
 	return strings.Join(parts, "; ")
 }

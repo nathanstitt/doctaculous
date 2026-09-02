@@ -2,6 +2,7 @@ package docx_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -59,19 +60,19 @@ func TestWriteIdempotenceOnExternalCorpus(t *testing.T) {
 // relationship surviving verbatim, and model equality outside the rel table.
 func assertWriteFixedPoint(t *testing.T, pkg1 []byte) {
 	t.Helper()
-	d1, err := docx.OpenBytes(pkg1)
+	d1, err := docx.OpenBytes(context.Background(), pkg1)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	pkg2, err := docx.Bytes(d1)
+	pkg2, err := docx.Bytes(context.Background(), d1)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	d2, err := docx.OpenBytes(pkg2)
+	d2, err := docx.OpenBytes(context.Background(), pkg2)
 	if err != nil {
 		t.Fatalf("reopen written: %v", err)
 	}
-	pkg3, err := docx.Bytes(d2)
+	pkg3, err := docx.Bytes(context.Background(), d2)
 	if err != nil {
 		t.Fatalf("write second cycle: %v", err)
 	}

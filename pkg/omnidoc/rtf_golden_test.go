@@ -116,7 +116,7 @@ func TestRTFDetectionAndConvert(t *testing.T) {
 		}
 	}
 
-	// RTF is a conversion output too (pkg/render/rtfwrite).
+	// RTF is a conversion output too (pkg/internal/rtfwrite).
 	var out bytes.Buffer
 	err = Convert(context.Background(), strings.NewReader("<p>hi</p>"), &out, ConvertOptions{From: FormatHTML, To: FormatRTF})
 	if err != nil {

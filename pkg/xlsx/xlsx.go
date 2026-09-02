@@ -1,16 +1,29 @@
-// Package xlsx is a read-only SpreadsheetML (.xlsx) reader: it extracts each
-// visible sheet's CACHED cell values — the last value Excel computed, stored in
-// the file — as display strings, along with the presentation facts a document
-// conversion needs (bold/italic, fill color, alignment, merged ranges).
-// Formulas are not evaluated (the cached <v> is the value), and nothing is
-// written. The package is hand-rolled on archive/zip plus streaming
-// encoding/xml, mirroring pkg/docx's reader; the dependency alternatives were
-// audited and rejected (see docs/superpowers/specs/2026-07-09-xlsx-input-design.md).
+// Package xlsx reads and edits SpreadsheetML (.xlsx) workbooks.
+//
+// The reader (Open/OpenBytes → Workbook) extracts each sheet's CACHED cell
+// values — the last value Excel computed, stored in the file — as display
+// strings and typed values, along with the presentation facts a document
+// conversion needs (fonts, fills, alignment, borders, merged ranges,
+// conditional formats, comments). Formulas are not evaluated: the cached <v>
+// is the value.
+//
+// The editor (Edit/New → File, with SheetEdit per worksheet) is
+// preservation-first: Edit followed by Save of an untouched workbook is
+// part-for-part byte-identical, and an edit re-serializes only the XML parts
+// it dirtied, keeping unknown elements, attributes, and prefixes intact. It
+// writes typed cells, formulas with cached values, style patches, conditional
+// formats, comments, pivot tables, defined names, merges, and frozen panes.
+//
+// Both are hand-rolled on archive/zip plus encoding/xml (the editor rewrites
+// dirty parts through the raw-fidelity DOM in github.com/beevik/etree),
+// mirroring pkg/docx. It is a SUPPORTED PUBLIC API consumed outside this
+// repository — changes from here are additive only.
 package xlsx
 
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -66,9 +79,9 @@ const (
 
 // Sheet is one worksheet's used range as a dense rectangular grid.
 type Sheet struct {
-	Name   string
-	Hidden bool
-	// Visibility refines Hidden (which stays true for both hidden states).
+	Name string
+	// Visibility is the sheet's view state; a document conversion renders only
+	// SheetVisible sheets by default.
 	Visibility Visibility
 	// Cells is the used range, row-major, padded rectangular. Empty trailing
 	// rows/columns beyond the used range are not represented.
@@ -106,13 +119,6 @@ type Cell struct {
 	// Text is the display string: the cached value rendered through the cell's
 	// number format (dates and times included).
 	Text string
-	// Bold and Italic come from the cell's font.
-	Bold, Italic bool
-	// FillRGB is the solid fill color as "RRGGBB", or "" for none.
-	FillRGB string
-	// Align is the explicit horizontal alignment ("left", "center", "right"),
-	// or "" for the format default.
-	Align string
 
 	// Value is the typed cached value (KindEmpty for a padding cell).
 	Value Value
@@ -122,8 +128,11 @@ type Cell struct {
 	Formula string
 	// StyleID is the cell's xf index into the styles part (0 = default).
 	StyleID int
-	// Style is the fully resolved style, shared per xf index; nil for xf 0
-	// with no styles part.
+	// Style is the fully resolved style, shared (read-only) per xf index. It
+	// is never nil: a workbook with no styles part, or a cell whose xf is out
+	// of range, carries the zero Style. Presentation facts a conversion needs
+	// live here — Style.Font.Bold/Italic, Style.Fill (Pattern "solid" with
+	// Fg.RGB set is a solid colour), Style.Alignment.Horizontal.
 	Style *Style
 }
 
@@ -243,17 +252,24 @@ type Merge struct {
 	RowSpan, ColSpan int
 }
 
-// Open reads and parses the workbook at path.
-func Open(pathName string) (*Workbook, error) {
+// Open reads and parses the workbook at path. ctx bounds the parse: the
+// os.ReadFile itself is not interruptible, but every sheet and every row within
+// a sheet checks for cancellation, so a hostile workbook can be abandoned
+// instead of wedging the caller. A nil ctx means context.Background().
+func Open(ctx context.Context, pathName string) (*Workbook, error) {
 	data, err := os.ReadFile(pathName)
 	if err != nil {
 		return nil, err
 	}
-	return OpenBytes(data)
+	return OpenBytes(ctx, data)
 }
 
-// OpenBytes parses a workbook from an in-memory byte slice.
-func OpenBytes(data []byte) (*Workbook, error) {
+// OpenBytes parses a workbook from an in-memory byte slice. See Open for what
+// ctx bounds.
+func OpenBytes(ctx context.Context, data []byte) (*Workbook, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotXLSX, err)
@@ -265,7 +281,7 @@ func OpenBytes(data []byte) (*Workbook, error) {
 	if _, ok := pkg.parts["[Content_Types].xml"]; !ok {
 		return nil, fmt.Errorf("%w: missing [Content_Types].xml", ErrNotXLSX)
 	}
-	return parseWorkbook(pkg)
+	return parseWorkbook(ctx, pkg)
 }
 
 // pkgReader resolves and reads OPC parts.
@@ -354,4 +370,12 @@ func joinPart(dir, target string) string {
 		return cleanPart(target)
 	}
 	return cleanPart(path.Join(dir, target))
+}
+
+// cancelled reports ctx's error, wrapped with the package prefix, or nil.
+func cancelled(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("xlsx: %w", err)
+	}
+	return nil
 }

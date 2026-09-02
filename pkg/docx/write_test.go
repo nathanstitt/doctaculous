@@ -2,6 +2,7 @@ package docx
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image/color"
@@ -13,11 +14,11 @@ import (
 // mustRoundTrip writes doc, reopens it, and returns the reparsed document.
 func mustRoundTrip(t *testing.T, doc *Document) *Document {
 	t.Helper()
-	data, err := Bytes(doc)
+	data, err := Bytes(context.Background(), doc)
 	if err != nil {
 		t.Fatalf("Bytes: %v", err)
 	}
-	got, err := OpenBytes(data)
+	got, err := OpenBytes(context.Background(), data)
 	if err != nil {
 		t.Fatalf("OpenBytes(Write(doc)): %v", err)
 	}
@@ -367,11 +368,11 @@ func TestModelRoundTrip(t *testing.T) {
 func TestWriteDeterministic(t *testing.T) {
 	for _, f := range modelCore {
 		doc := f.build()
-		a, err := Bytes(doc)
+		a, err := Bytes(context.Background(), doc)
 		if err != nil {
 			t.Fatalf("%s: %v", f.name, err)
 		}
-		b, err := Bytes(doc)
+		b, err := Bytes(context.Background(), doc)
 		if err != nil {
 			t.Fatalf("%s: %v", f.name, err)
 		}
@@ -386,17 +387,17 @@ func TestWriteDeterministic(t *testing.T) {
 func TestWriteInvalidDocument(t *testing.T) {
 	danglingDrawing := &Document{Body: []Block{paraOf(ParagraphProps{},
 		ParaChild{Drawing: &Drawing{RelID: "rId99", WidthEMU: 1, HeightEMU: 1}})}}
-	if _, err := Bytes(danglingDrawing); !errors.Is(err, ErrInvalidDocument) {
+	if _, err := Bytes(context.Background(), danglingDrawing); !errors.Is(err, ErrInvalidDocument) {
 		t.Errorf("dangling drawing rel: want ErrInvalidDocument, got %v", err)
 	}
 
 	danglingLink := &Document{Body: []Block{paraOf(ParagraphProps{},
 		ParaChild{Hyperlink: &Hyperlink{RelID: "rId42", Runs: []Run{{Text: "x"}}}})}}
-	if _, err := Bytes(danglingLink); !errors.Is(err, ErrInvalidDocument) {
+	if _, err := Bytes(context.Background(), danglingLink); !errors.Is(err, ErrInvalidDocument) {
 		t.Errorf("dangling hyperlink rel: want ErrInvalidDocument, got %v", err)
 	}
 
-	if _, err := Bytes(nil); !errors.Is(err, ErrInvalidDocument) {
+	if _, err := Bytes(context.Background(), nil); !errors.Is(err, ErrInvalidDocument) {
 		t.Errorf("nil document: want ErrInvalidDocument, got %v", err)
 	}
 }

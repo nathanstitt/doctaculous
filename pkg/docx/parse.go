@@ -2,6 +2,7 @@ package docx
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -20,7 +21,10 @@ const wNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 // parsePackage parses the main document and (if present) the styles part into a
 // Document. Styles are resolved relative to the main document's relationships,
 // falling back to the conventional word/styles.xml.
-func parsePackage(pkg *pkgReader) (*Document, error) {
+func parsePackage(ctx context.Context, pkg *pkgReader) (*Document, error) {
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 	mainName, err := pkg.mainDocumentPart()
 	if err != nil {
 		return nil, err
@@ -31,7 +35,10 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 	}
 
 	doc := &Document{Section: defaultSection()}
-	if err := parseDocument(mainData, doc); err != nil {
+	if err := parseDocument(ctx, mainData, doc); err != nil {
+		return nil, err
+	}
+	if err := cancelled(ctx); err != nil {
 		return nil, err
 	}
 
@@ -55,13 +62,19 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 		doc.Numbering = num
 	}
 
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 	doc.Rels = pkg.allRels(mainName)
 	doc.Media = pkg.mediaParts()
-	headers, footers, err := resolveHeadersFooters(pkg, doc.Rels)
+	headers, footers, err := resolveHeadersFooters(ctx, pkg, doc.Rels)
 	if err != nil {
 		return nil, err
 	}
 	doc.Headers, doc.Footers = headers, footers
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Footnotes/endnotes parts: prefer the relationship target, fall back to the
 	// convention. The two parts share their grammar (parseNotes).
@@ -82,6 +95,9 @@ func parsePackage(pkg *pkgReader) (*Document, error) {
 		doc.Endnotes = en
 	}
 
+	if err := cancelled(ctx); err != nil {
+		return nil, err
+	}
 	// Comments part.
 	const commentsType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
 	if data, ok := pkg.part(resolveByType(pkg, mainName, commentsType, "word/comments.xml")); ok {
@@ -203,10 +219,13 @@ func resolveByType(pkg *pkgReader, mainName, relType, fallback string) string {
 // document relationships, keyed by relationship id. Header and footer parts are
 // distinguished by relationship type. A malformed part is a hard error, matching
 // the other optional parts (styles/numbering/footnotes).
-func resolveHeadersFooters(pkg *pkgReader, rels map[string]Relationship) (headers, footers map[string]*HeaderFooter, err error) {
+func resolveHeadersFooters(ctx context.Context, pkg *pkgReader, rels map[string]Relationship) (headers, footers map[string]*HeaderFooter, err error) {
 	const hdrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
 	const ftrType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
 	for id, rel := range rels {
+		if err := cancelled(ctx); err != nil {
+			return nil, nil, err
+		}
 		switch rel.Type {
 		case hdrType:
 			if data, ok := pkg.part(rel.Target); ok {
@@ -320,7 +339,7 @@ func (p *pkgReader) allRels(partName string) map[string]Relationship {
 
 // parseDocument walks word/document.xml, filling the body blocks and the
 // body-level section properties.
-func parseDocument(data []byte, doc *Document) error {
+func parseDocument(ctx context.Context, data []byte, doc *Document) error {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		tok, err := dec.Token()
@@ -335,7 +354,7 @@ func parseDocument(data []byte, doc *Document) error {
 			continue
 		}
 		if se.Name.Space == wNS && se.Name.Local == "body" {
-			if err := parseBody(dec, doc); err != nil {
+			if err := parseBody(ctx, dec, doc); err != nil {
 				return err
 			}
 		}
@@ -343,8 +362,12 @@ func parseDocument(data []byte, doc *Document) error {
 	return nil
 }
 
-// parseBody consumes the children of w:body until its end element.
-func parseBody(dec *xml.Decoder, doc *Document) error {
+// parseBody consumes the children of w:body until its end element. It checks
+// ctx before each block-level child: the body is where a large document's
+// parse time goes, and a block is the natural granularity — cheap enough to
+// check every time, and fine enough that cancellation lands within one
+// paragraph or table of the request.
+func parseBody(ctx context.Context, dec *xml.Decoder, doc *Document) error {
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -352,6 +375,9 @@ func parseBody(dec *xml.Decoder, doc *Document) error {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if err := cancelled(ctx); err != nil {
+				return err
+			}
 			if t.Name.Space != wNS {
 				if err := dec.Skip(); err != nil {
 					return fmt.Errorf("%w: body: %v", ErrMalformedXML, err)

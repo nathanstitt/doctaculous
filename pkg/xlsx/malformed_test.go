@@ -3,6 +3,7 @@ package xlsx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -68,7 +69,7 @@ func TestOpenBytesMalformedRefs(t *testing.T) {
 			// Before the fix this panicked out of OpenBytes with "makeslice:
 			// len out of range" (columns) or allocated until the process was
 			// killed (rows). Either one fails the run here.
-			wb, err := OpenBytes(data)
+			wb, err := OpenBytes(context.Background(), data)
 			if err != nil {
 				return // rejecting the file outright is an acceptable outcome
 			}
@@ -106,7 +107,7 @@ func TestOpenBytesMalformedColElement(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			data := buildSheet(t, `<cols><col `+c.attr+` width="10"/></cols>`+
 				`<sheetData><row><c r="A1" t="str"><v>x</v></c></row></sheetData>`)
-			wb, err := OpenBytes(data)
+			wb, err := OpenBytes(context.Background(), data)
 			if err != nil {
 				return
 			}
@@ -137,7 +138,7 @@ func FuzzOpenBytes(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		wb, err := OpenBytes(data)
+		wb, err := OpenBytes(context.Background(), data)
 		if err != nil {
 			return
 		}

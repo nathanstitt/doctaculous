@@ -10,6 +10,12 @@ These are non-negotiable. A change that violates one is wrong regardless of what
   `golang.org/x/text` (BSD — `unicode/bidi`, a complete UAX#9 incl. bracket pairs; promoted from
   indirect when inline bidi reordering landed, no new module),
   `github.com/andybalholm/brotli` (MIT, pure-Go — WOFF2 Brotli decompression only),
+  `github.com/adrg/sysfont` (MIT, pure-Go — locates installed OS fonts by scanning the platform
+  font directories, for the default system-font mode; it brings `adrg/xdg` and `adrg/strutil`,
+  both MIT, as its only transitive deps),
+  `github.com/yuin/goldmark` (MIT, pure-Go, zero deps — the CommonMark + GFM parser behind
+  Markdown input; its block nesting is bounded at our boundary because it is quadratic in per-line
+  nesting depth on hostile input),
   `github.com/beevik/etree` (BSD-2, pure-Go, zero deps — the raw-fidelity XML DOM the xlsx
   editor rewrites dirty parts through; prefixes/attr order/CDATA preserved, verified in source
   before adoption),

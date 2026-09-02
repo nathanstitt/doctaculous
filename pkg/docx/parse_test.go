@@ -3,6 +3,7 @@ package docx
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"image/color"
 	"testing"
@@ -65,7 +66,7 @@ func TestParseParagraphsAndRuns(t *testing.T) {
   <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1440" w:right="1440"/></w:sectPr>
 </w:body></w:document>`
 
-	d, err := OpenBytes(buildDocx(t, doc, ""))
+	d, err := OpenBytes(context.Background(), buildDocx(t, doc, ""))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestParseSectionGeometry(t *testing.T) {
   <w:p><w:r><w:t>x</w:t></w:r></w:p>
   <w:sectPr><w:pgSz w:w="15840" w:h="12240"/><w:pgMar w:top="720" w:bottom="720" w:left="1080" w:right="1080"/></w:sectPr>
 </w:body></w:document>`
-	d, err := OpenBytes(buildDocx(t, doc, ""))
+	d, err := OpenBytes(context.Background(), buildDocx(t, doc, ""))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestParseSectionGeometry(t *testing.T) {
 
 func TestParseDefaultSectionWhenAbsent(t *testing.T) {
 	doc := docHeader + `<w:body><w:p><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>`
-	d, err := OpenBytes(buildDocx(t, doc, ""))
+	d, err := OpenBytes(context.Background(), buildDocx(t, doc, ""))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestParseBreakAndStyleRef(t *testing.T) {
   <w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>
   <w:p><w:r><w:t>before</w:t><w:br w:type="page"/><w:t>after</w:t></w:r></w:p>
 </w:body></w:document>`
-	d, err := OpenBytes(buildDocx(t, doc, ""))
+	d, err := OpenBytes(context.Background(), buildDocx(t, doc, ""))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestParseBreakAndStyleRef(t *testing.T) {
 }
 
 func TestParseNotDocx(t *testing.T) {
-	if _, err := OpenBytes([]byte("not a zip")); err == nil {
+	if _, err := OpenBytes(context.Background(), []byte("not a zip")); err == nil {
 		t.Error("OpenBytes(garbage): want error")
 	} else if !errors.Is(err, ErrNotDocx) {
 		t.Errorf("OpenBytes(garbage): err = %v, want ErrNotDocx", err)
@@ -164,7 +165,7 @@ func TestParseNotDocx(t *testing.T) {
 func TestParseDegradesGracefully(t *testing.T) {
 	t.Run("malformed document XML", func(t *testing.T) {
 		data := buildDocx(t, docHeader+`<w:body><w:p><w:r><w:t>oops`, "") // truncated, unclosed tags
-		if _, err := OpenBytes(data); err == nil {
+		if _, err := OpenBytes(context.Background(), data); err == nil {
 			t.Fatal("OpenBytes(malformed XML): want error, got nil")
 		} else if !errors.Is(err, ErrMalformedXML) {
 			t.Errorf("err = %v, want ErrMalformedXML", err)
@@ -184,7 +185,7 @@ func TestParseDegradesGracefully(t *testing.T) {
 		if err := zw.Close(); err != nil {
 			t.Fatalf("zip close: %v", err)
 		}
-		if _, err := OpenBytes(buf.Bytes()); err == nil {
+		if _, err := OpenBytes(context.Background(), buf.Bytes()); err == nil {
 			t.Fatal("OpenBytes(no document.xml): want error, got nil")
 		} else if !errors.Is(err, ErrMissingPart) {
 			t.Errorf("err = %v, want ErrMissingPart", err)
@@ -199,7 +200,7 @@ func TestParseTextPreservesWhitespace(t *testing.T) {
 	doc := docHeader + `<w:body>
   <w:p><w:r><w:t xml:space="preserve"> spaced </w:t></w:r><w:r><w:t>untrimmed </w:t></w:r></w:p>
 </w:body></w:document>`
-	d, err := OpenBytes(buildDocx(t, doc, ""))
+	d, err := OpenBytes(context.Background(), buildDocx(t, doc, ""))
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -239,7 +240,7 @@ func TestParseParagraphFillsContent(t *testing.T) {
 func mustParse(t *testing.T, documentXML string) *Document {
 	t.Helper()
 	doc := &Document{Section: defaultSection()}
-	if err := parseDocument([]byte(documentXML), doc); err != nil {
+	if err := parseDocument(context.Background(), []byte(documentXML), doc); err != nil {
 		t.Fatalf("parseDocument: %v", err)
 	}
 	return doc

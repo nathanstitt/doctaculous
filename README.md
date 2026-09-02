@@ -117,14 +117,14 @@ Three routes run through the code. They all meet at one format-neutral CSS box
 tree and one backend-agnostic paint interface.
 
 ```text
- DOCX · HTML · Markdown · text          ┌────────────────────────┐      render.Device
- CSV/TSV · XLSX · RTF · PPTX     ─────▶ │  one CSS layout engine │ ───▶  ├─ raster    → PNG · JPEG
- EPUB · PNG/JPEG/HEIC · http(s) URLs    │  (pkg/internal/layout/css)      │       └─ pdfwrite  → PDF
-   frontends lower to a shared          │  blocks · inlines ·    │          (selectable text)
-   box tree (pkg/internal/layout/cssbox)         │  floats · tables ·     │
-        │                               │  flex · grid ·         │
-        │                               │  paged media           │
-        │                               └────────────────────────┘
+ DOCX · HTML · Markdown · text       ┌────────────────────────────┐
+ CSV/TSV · XLSX · RTF · PPTX         │  one CSS layout engine     │     render.Device
+ EPUB · PNG/JPEG/HEIC · http(s) URLs │  (pkg/internal/layout/css) │     ├─ raster   → PNG · JPEG
+   frontends lower to a shared  ───▶ │  blocks · inlines ·        │ ──▶ └─ pdfwrite → PDF
+   box tree                          │  floats · tables ·         │        (selectable text)
+   (pkg/internal/layout/cssbox)      │  flex · grid ·             │
+        │                            │  paged media               │
+        │                            └────────────────────────────┘
         └───▶ structure writers walk the box tree, not pixels:
               Markdown · text · HTML · DOCX · RTF · PPTX · EPUB · CSV/TSV · XLSX
 
@@ -205,7 +205,7 @@ a panic, and one bad page can't kill a batch. The gaps worth knowing about:
   intra-only 4:2:0 at 8/10-bit (Main/Main 10/Main Still); P/B slices, range
   extensions, and >10-bit are rejected rather than approximated.
 - **WebP is stills-only, and writes lossless.** Animated WebP is refused with a
-  typed `ErrAnimated`. Output is VP8L, since no pure-Go lossy VP8 encoder
+  typed `ErrAnimatedImage`. Output is VP8L, since no pure-Go lossy VP8 encoder
   exists — expect PNG-sized files, not JPEG-sized ones.
 
 The complete feature inventory lives in [FEATURES.md](FEATURES.md).
@@ -299,13 +299,15 @@ built from it. All are permissively licensed and may be redistributed:
   names. See the `LICENSE-*.txt` files in
   [`pkg/internal/font/standard/fonts/`](pkg/internal/font/standard/fonts/).
 
-Two further carve-outs, both isolated and NOT shipped with the library:
+Two further carve-outs, both isolated:
 
 - [`pkg/internal/filter/jbig2/`](pkg/internal/filter/jbig2/) vendors
   [xiaoqidun/jbig2](https://github.com/xiaoqidun/jbig2) (pure-Go JBIG2 decoding,
-  **Apache-2.0**, MIT-compatible) with its upstream `LICENSE` and `NOTICE`.
+  **Apache-2.0**, MIT-compatible) with its upstream `LICENSE` and `NOTICE`. It
+  IS compiled into the library — it is the PDF `JBIG2Decode` filter — so a
+  binary built from omnidoc carries that Apache-2.0 code and its `NOTICE`.
 - [`testdata/external/`](testdata/external/) holds third-party **test inputs
-  only** under their own licenses: PDFs (CC-BY-SA-4.0, from
+  only**, never compiled or shipped, under their own licenses: PDFs (CC-BY-SA-4.0, from
   [py-pdf/sample-files](https://github.com/py-pdf/sample-files)) and DOCX/XLSX
   files (Apache-2.0 / MPL-2.0 / MIT, from Apache POI, LibreOffice, and
   Open-XML-SDK). Each directory's README carries per-file provenance.

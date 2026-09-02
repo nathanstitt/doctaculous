@@ -107,18 +107,25 @@ func TestLowerListPrependsMarkerText(t *testing.T) {
 	}
 }
 
+// docxParseNumbering builds the numbering a one-level decimal list parses to:
+// abstract definition 0 with "%1." markers, instantiated as numId 1. It is
+// constructed through the public model rather than parsed, so this package does
+// not need a parse hook exported from pkg/docx.
 func docxParseNumbering() (*docx.Numbering, error) {
-	return docx.ParseNumberingForTest([]byte(`<?xml version="1.0"?>
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>
-  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
-</w:numbering>`))
+	return numberingWith(1, docx.NumLevel{Format: docx.NumFmtDecimal, Text: "%1."}), nil
 }
 
+// docxParseBulletNumbering is docxParseNumbering's bullet counterpart: a
+// "•" bullet level instantiated as numId 2.
 func docxParseBulletNumbering() (*docx.Numbering, error) {
-	return docx.ParseNumberingForTest([]byte(`<?xml version="1.0"?>
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="&#8226;"/></w:lvl></w:abstractNum>
-  <w:num w:numId="2"><w:abstractNumId w:val="0"/></w:num>
-</w:numbering>`))
+	return numberingWith(2, docx.NumLevel{Format: docx.NumFmtBullet, Text: "\u2022"}), nil
+}
+
+// numberingWith returns a Numbering whose abstract definition 0 has lvl as its
+// level 0, referenced by the single instance numID.
+func numberingWith(numID int, lvl docx.NumLevel) *docx.Numbering {
+	n := docx.NewNumbering()
+	n.Abstract[0] = map[int]docx.NumLevel{0: lvl}
+	n.Instances[numID] = docx.NumInstance{AbstractID: 0}
+	return n
 }

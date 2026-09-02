@@ -1,6 +1,7 @@
 package xlsx
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -11,7 +12,7 @@ func openFixture(t *testing.T, name string) *Workbook {
 	t.Helper()
 	for _, f := range genxlsx.Core {
 		if f.Name == name {
-			wb, err := OpenBytes(f.Bytes())
+			wb, err := OpenBytes(context.Background(), f.Bytes())
 			if err != nil {
 				t.Fatalf("OpenBytes(%s): %v", name, err)
 			}
@@ -112,14 +113,14 @@ func TestDate1904Epoch(t *testing.T) {
 	styles := `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>`
 
-	wb, err := OpenBytes(genxlsx.New().AddSheet("S", sheet).SetStyles(styles).SetDate1904().Bytes())
+	wb, err := OpenBytes(context.Background(), genxlsx.New().AddSheet("S", sheet).SetStyles(styles).SetDate1904().Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := wb.Sheets[0].Cells[0][0].Text; got != "1904-04-10" {
 		t.Errorf("1904-system serial 100 = %q, want 1904-04-10", got)
 	}
-	wb, err = OpenBytes(genxlsx.New().AddSheet("S", sheet).SetStyles(styles).Bytes())
+	wb, err = OpenBytes(context.Background(), genxlsx.New().AddSheet("S", sheet).SetStyles(styles).Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,14 +132,14 @@ func TestDate1904Epoch(t *testing.T) {
 func TestStyledFixture(t *testing.T) {
 	wb := openFixture(t, "styled")
 	g := wb.Sheets[0].Cells
-	if !g[0][0].Bold {
-		t.Errorf("A1 not bold: %+v", g[0][0])
+	if !g[0][0].Style.Font.Bold {
+		t.Errorf("A1 not bold: %+v", g[0][0].Style)
 	}
-	if !g[1][0].Italic || g[1][0].FillRGB != "FFEECC" {
-		t.Errorf("A2 style wrong: %+v", g[1][0])
+	if st := g[1][0].Style; !st.Font.Italic || st.Fill.Pattern != "solid" || st.Fill.Fg.RGB != "FFEECC" {
+		t.Errorf("A2 style wrong: %+v", st)
 	}
-	if g[2][0].Align != "right" {
-		t.Errorf("A3 align = %q, want right", g[2][0].Align)
+	if got := g[2][0].Style.Alignment.Horizontal; got != "right" {
+		t.Errorf("A3 align = %q, want right", got)
 	}
 }
 
@@ -161,16 +162,16 @@ func TestMultisheetFixture(t *testing.T) {
 	if len(wb.Sheets) != 3 {
 		t.Fatalf("sheets = %d, want 3", len(wb.Sheets))
 	}
-	if wb.Sheets[0].Name != "First" || wb.Sheets[0].Hidden {
-		t.Errorf("sheet 0 = %q hidden=%v", wb.Sheets[0].Name, wb.Sheets[0].Hidden)
+	if wb.Sheets[0].Name != "First" || wb.Sheets[0].Visibility != SheetVisible {
+		t.Errorf("sheet 0 = %q visibility=%v", wb.Sheets[0].Name, wb.Sheets[0].Visibility)
 	}
-	if !wb.Sheets[2].Hidden {
+	if wb.Sheets[2].Visibility == SheetVisible {
 		t.Errorf("sheet 2 should be hidden")
 	}
 }
 
 func TestNotXLSX(t *testing.T) {
-	if _, err := OpenBytes([]byte("not a zip")); !errors.Is(err, ErrNotXLSX) {
+	if _, err := OpenBytes(context.Background(), []byte("not a zip")); !errors.Is(err, ErrNotXLSX) {
 		t.Errorf("want ErrNotXLSX, got %v", err)
 	}
 }

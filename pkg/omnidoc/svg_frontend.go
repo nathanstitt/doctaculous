@@ -12,12 +12,6 @@ import (
 	svgdraw "github.com/nathanstitt/omnidoc/pkg/internal/svg/draw"
 )
 
-// OpenSVG reads a standalone SVG (or gzip-compressed .svgz) as a single-page
-// document: the page is exactly the SVG's viewport (1 user unit = 1 pt), and
-// every conversion follows — rasterization renders at device resolution, and
-// PDF output carries real vector paths, not a bitmap.
-func OpenSVG(path string, opts ...OpenOption) (*Document, error) { return OpenSVGFile(path, opts...) }
-
 // OpenSVGFile reads an SVG file at path, applying any options.
 func OpenSVGFile(path string, opts ...OpenOption) (*Document, error) {
 	data, err := os.ReadFile(path)

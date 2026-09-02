@@ -24,48 +24,48 @@ func TestRasterizeBundledFontsFlag(t *testing.T) {
 	}
 }
 
-// TestTopdfBundledFontsFlag: topdf accepts --bundled-fonts and writes a PDF.
-func TestTopdfBundledFontsFlag(t *testing.T) {
+// TestConvertToPDFBundledFontsFlag: convert to PDF accepts --bundled-fonts and writes a PDF.
+func TestConvertToPDFBundledFontsFlag(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "in.html")
 	if err := os.WriteFile(in, []byte(`<html><body style="font-family:Helvetica"><p>hi</p></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out.pdf")
-	if err := topdfCmd([]string{in, "--out", out, "--bundled-fonts"}); err != nil {
-		t.Fatalf("topdfCmd --bundled-fonts: %v", err)
+	if err := convertCmd([]string{in, out, "--bundled-fonts"}); err != nil {
+		t.Fatalf("convertCmd --bundled-fonts: %v", err)
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("output not written: %v", err)
 	}
 }
 
-// TestTohtmlBundledFontsFlag: tohtml accepts --bundled-fonts and writes output.
-func TestTohtmlBundledFontsFlag(t *testing.T) {
+// TestConvertToHTMLBundledFontsFlag: convert to HTML accepts --bundled-fonts and writes output.
+func TestConvertToHTMLBundledFontsFlag(t *testing.T) {
 	dir := t.TempDir()
-	in := filepath.Join(dir, "in.html")
-	if err := os.WriteFile(in, []byte(`<html><body><h1>Title</h1></body></html>`), 0o644); err != nil {
+	in := filepath.Join(dir, "in.md")
+	if err := os.WriteFile(in, []byte("# Title\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out.html")
-	if err := tohtmlCmd([]string{in, "--out", out, "--bundled-fonts"}); err != nil {
-		t.Fatalf("tohtmlCmd --bundled-fonts: %v", err)
+	if err := convertCmd([]string{in, out, "--bundled-fonts"}); err != nil {
+		t.Fatalf("convertCmd --bundled-fonts: %v", err)
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("output not written: %v", err)
 	}
 }
 
-// TestTomdBundledFontsFlag: tomd accepts --bundled-fonts.
-func TestTomdBundledFontsFlag(t *testing.T) {
+// TestConvertToMarkdownBundledFontsFlag: convert to Markdown accepts --bundled-fonts.
+func TestConvertToMarkdownBundledFontsFlag(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "in.html")
 	if err := os.WriteFile(in, []byte(`<html><body><p>hello</p></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "out.md")
-	if err := tomdCmd([]string{in, "--out", out, "--bundled-fonts"}); err != nil {
-		t.Fatalf("tomdCmd --bundled-fonts: %v", err)
+	if err := convertCmd([]string{in, out, "--bundled-fonts"}); err != nil {
+		t.Fatalf("convertCmd --bundled-fonts: %v", err)
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("output not written: %v", err)

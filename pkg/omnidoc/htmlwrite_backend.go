@@ -8,7 +8,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/htmlwrite"
 )
 
-// HTMLWriteOptions controls conversion to HTML (PDF/DOCX/HTML -> HTML).
+// HTMLWriteOptions controls conversion to HTML.
 type HTMLWriteOptions struct {
 	// Fragment, when true, emits only the body markup (no <!DOCTYPE>/<html>/<head>
 	// wrapper), for embedding. Default false (a complete document).
@@ -22,8 +22,9 @@ func (o HTMLWriteOptions) toWriterOptions() htmlwrite.Options {
 }
 
 // WriteHTML writes an opened document to out as HTML. It works on any document that can
-// produce a cssbox tree: an opened HTML or DOCX reflow document, or an opened PDF (whose
-// logical structure is recovered by extraction). Unlike GFM, HTML expresses table cell
+// produce a box tree: every reflow input (HTML, DOCX, EPUB, Markdown, ...), or an opened
+// PDF (whose logical structure is recovered by extraction). A document with no
+// convertible structure returns ErrNoStructure. Unlike GFM, HTML expresses table cell
 // spans natively, so extracted tables round-trip their colspan/rowspan losslessly.
 func (d *Document) WriteHTML(_ context.Context, out io.Writer, opts HTMLWriteOptions) error {
 	root, err := structureRoot(d, "WriteHTML")

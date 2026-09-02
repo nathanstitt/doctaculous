@@ -2,6 +2,7 @@ package xlsx
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,7 +48,7 @@ func TestExternalCorpusPreservation(t *testing.T) {
 			}
 
 			// The reader sees the pinned shape.
-			wb, err := OpenBytes(data)
+			wb, err := OpenBytes(context.Background(), data)
 			if err != nil {
 				t.Fatalf("OpenBytes: %v", err)
 			}
@@ -67,7 +68,7 @@ func TestExternalCorpusPreservation(t *testing.T) {
 			}
 
 			// The pivot read path agrees on the editor view.
-			f, err := Edit(data)
+			f, err := Edit(context.Background(), data)
 			if err != nil {
 				t.Fatalf("Edit: %v", err)
 			}
@@ -77,7 +78,7 @@ func TestExternalCorpusPreservation(t *testing.T) {
 
 			// The preservation contract: a no-op Edit+Save is part-for-part
 			// byte-identical (reads never dirty).
-			out, err := f.Save()
+			out, err := f.Save(context.Background())
 			if err != nil {
 				t.Fatalf("no-op Save: %v", err)
 			}
@@ -93,7 +94,7 @@ func TestExternalCorpusPreservation(t *testing.T) {
 			}
 
 			// A real edit still reopens through the reader.
-			f2, err := Edit(data)
+			f2, err := Edit(context.Background(), data)
 			if err != nil {
 				t.Fatalf("Edit: %v", err)
 			}
@@ -104,11 +105,11 @@ func TestExternalCorpusPreservation(t *testing.T) {
 			if err := sh.SetString(1, 1, "edited by test"); err != nil {
 				t.Fatalf("SetString: %v", err)
 			}
-			edited, err := f2.Save()
+			edited, err := f2.Save(context.Background())
 			if err != nil {
 				t.Fatalf("Save after edit: %v", err)
 			}
-			if _, err := OpenBytes(edited); err != nil {
+			if _, err := OpenBytes(context.Background(), edited); err != nil {
 				t.Errorf("edited workbook does not reopen: %v", err)
 			}
 		})

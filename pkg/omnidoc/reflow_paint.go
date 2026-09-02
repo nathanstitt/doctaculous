@@ -22,7 +22,7 @@ func errPageOutOfRange(index, count int) error {
 }
 
 // maxRasterPixels bounds a rasterized page's pixel count. It must stay equal to
-// pkg/render/raster's unexported maxPixels: both guard the same "don't allocate
+// pkg/internal/raster's unexported maxPixels: both guard the same "don't allocate
 // an attacker-controlled image" hazard on their own rasterization path (PDF vs.
 // reflow), so a change to one bound should be a change to both. At 1<<27
 // (~134M px) that's roughly an 11600x11600 square, or a 200in-wide poster at

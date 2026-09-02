@@ -1,6 +1,9 @@
 package docx
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestParseSdtBlockUnwrap verifies a block-level w:sdt (content control) has its
 // w:sdtContent unwrapped so the inner paragraphs survive parsing rather than being
@@ -144,14 +147,14 @@ func TestWriteHighlightNameValidated(t *testing.T) {
 		Body: []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{Text: "x",
 			Props: RunProps{HasHighlight: true, Highlight: rgba(0xFF, 0xFF, 0),
 				HighlightName: "#ff0000"}}}}}}}}
-	b, err := Bytes(doc)
+	b, err := Bytes(context.Background(), doc)
 	if err != nil {
 		t.Fatalf("Bytes: %v", err)
 	}
 	// Reopen: the emitted highlight must be the valid RGBA-mapped name, so the parser
 	// resolves it (a "#ff0000" emitted verbatim would not be a known ST_HighlightColor
 	// and would parse back with HasHighlight=false).
-	rd, err := OpenBytes(b)
+	rd, err := OpenBytes(context.Background(), b)
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}
@@ -201,11 +204,11 @@ func TestNoteSeparatorRoundTrip(t *testing.T) {
 	notes.ByID[1] = []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{Text: "body"}}}}}}
 	doc := &Document{Styles: DefaultStyles(), Footnotes: notes,
 		Body: []Block{{Paragraph: &Paragraph{Content: []ParaChild{{Run: &Run{Text: "x", FootnoteRef: 1}}}}}}}
-	b, err := Bytes(doc)
+	b, err := Bytes(context.Background(), doc)
 	if err != nil {
 		t.Fatalf("Bytes: %v", err)
 	}
-	rd, err := OpenBytes(b)
+	rd, err := OpenBytes(context.Background(), b)
 	if err != nil {
 		t.Fatalf("OpenBytes: %v", err)
 	}

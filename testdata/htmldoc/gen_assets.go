@@ -6,7 +6,7 @@
 // when the images need to change; the produced files are committed so the golden
 // test stays offline. Each image exercises a distinct decoder on the engine's
 // <img> path: PNG, baseline JPEG (DCTDecode-equivalent), GIF, and lossless WebP
-// (VP8L, encoded by pkg/webp — the only one of the four the toolkit both writes
+// (VP8L, encoded by pkg/internal/webp — the only one of the four the toolkit both writes
 // and reads).
 package main
 

@@ -12,6 +12,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/html"
 	layoutcss "github.com/nathanstitt/omnidoc/pkg/internal/layout/css"
 	layoutfont "github.com/nathanstitt/omnidoc/pkg/internal/layout/font"
+	mdfront "github.com/nathanstitt/omnidoc/pkg/internal/markdown"
 	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
@@ -70,16 +71,13 @@ func defaultOpenConfig() openConfig {
 // layout -- with a caller's context. A nil ctx is ignored and the default
 // (context.Background()) stands.
 //
-// It applies to EVERY Open* entry point, because they all resolve their options
-// through the same config. That is why it is worth exporting: the codebase had
-// already felt the need for cancellation and answered it with a parallel
-// *Context naming family (OpenHTMLBytesContext, OpenURLContext,
-// OpenHTMLFileContext) covering HTML and URLs only, while the other Open*
-// functions had no way to cancel at all. One option covers them all, and retires
-// that family before a v1 tag freezes it.
+// It applies to every Open* entry point that does layout work, because they all
+// resolve their options through the same config; for OpenURL it also bounds the
+// HTTP fetch. The parse step of an opened PDF or SVG is not interruptible; ctx
+// takes effect from rasterization onward for those.
 //
-// Ordering matches those functions: they prepend the option internally, so a
-// caller passing their own WithContext still wins.
+// The path-taking openers (Open, OpenHTMLFile, ...) prepend their own defaults
+// before applying opts, so a caller's WithContext always wins.
 //
 //	doc, err := omnidoc.OpenBytes(data, omnidoc.WithContext(ctx))
 func WithContext(ctx context.Context) OpenOption { return withOpenContext(ctx) }
@@ -147,16 +145,16 @@ func WithDefaultPaged() HTMLOption {
 }
 
 // WithResourceLoader sets the loader used to resolve <link> stylesheet refs (and,
-// later, images/fonts). Defaults to no loader (links are skipped). OpenHTML
+// later, images/fonts). Defaults to no loader (links are skipped). OpenHTMLFile
 // supplies a DirLoader rooted at the document's directory.
 func WithResourceLoader(l resource.ResourceLoader) HTMLOption {
 	return func(c *openConfig) { c.loader = l }
 }
 
 // WithSystemFontProvider sets the provider used to resolve @font-face local()
-// sources. Defaults to nil (local() never matches; the next src is tried). OpenHTML
-// supplies a DiskFontProvider rooted at the document's directory.
-func WithSystemFontProvider(p layoutfont.SystemFontProvider) HTMLOption {
+// sources. Defaults to nil (local() never matches; the next src is tried). OpenHTMLFile
+// supplies a DirFontProvider rooted at the document's directory.
+func WithSystemFontProvider(p SystemFontProvider) HTMLOption {
 	return func(c *openConfig) { c.sys = p }
 }
 
@@ -199,31 +197,18 @@ func WithPrintMedia() HTMLOption {
 	return func(c *openConfig) { c.media = css.MediaPrint }
 }
 
-// OpenHTML reads and renders an HTML file at path, laying it out at the default
-// viewport width into a single tall page, and returns a Document ready to
-// rasterize. Relative <link> stylesheet refs resolve through a loader rooted at
-// the file's directory. For additional options (e.g. WithPageSize), use
-// OpenHTMLFile.
-func OpenHTML(path string) (*Document, error) {
-	return OpenHTMLFile(path)
-}
-
 // OpenHTMLFile reads and renders an HTML file at path, applying any options, and
-// returns a Document ready to rasterize. Like OpenHTML it roots a DirLoader and a
-// DiskFontProvider at the file's directory so relative <link>/<img>/@font-face refs
+// returns a Document ready to rasterize. Like OpenHTMLFile it roots a DirLoader and a
+// DirFontProvider at the file's directory so relative <link>/<img>/@font-face refs
 // resolve from disk; the caller's opts are applied AFTER those defaults, so e.g.
 // WithPageSize(LetterWidthPt, LetterHeightPt) paginates the file, and a caller's own
 // WithResourceLoader overrides the directory loader.
+//
+// WithContext bounds box generation, sub-resource loading, and layout. The
+// os.ReadFile of path itself is not interruptible (the standard library offers
+// no ctx-taking form), so the context takes effect from parsing onward — which
+// is where a pathological document spends its time anyway.
 func OpenHTMLFile(path string, opts ...HTMLOption) (*Document, error) {
-	return OpenHTMLFileContext(context.Background(), path, opts...)
-}
-
-// OpenHTMLFileContext is OpenHTMLFile with a caller-supplied context bounding box
-// generation, sub-resource loading, and layout. The os.ReadFile of path itself is
-// not interruptible (the standard library offers no ctx-taking form), so ctx
-// takes effect from parsing onward — which is where a pathological document
-// spends its time anyway.
-func OpenHTMLFileContext(ctx context.Context, path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("omnidoc: open html %q: %w", path, err)
@@ -231,9 +216,9 @@ func OpenHTMLFileContext(ctx context.Context, path string, opts ...HTMLOption) (
 	dir := filepath.Dir(path)
 	all := append([]HTMLOption{
 		WithResourceLoader(resource.DirLoader{Base: dir}),
-		WithSystemFontProvider(layoutfont.DiskFontProvider{Dir: dir}),
+		WithSystemFontProvider(DirFontProvider{Dir: dir}),
 	}, opts...)
-	return OpenHTMLBytesContext(ctx, data, all...)
+	return OpenHTMLBytes(data, all...)
 }
 
 // ErrUnsupportedScheme is returned (wrapped) by OpenURL when rawURL uses a scheme
@@ -247,20 +232,23 @@ var ErrUnsupportedScheme = errors.New("unsupported URL scheme")
 // HTTPLoader rooted at rawURL; rawURL itself must be http or https (a non-http(s)
 // scheme returns ErrUnsupportedScheme). Options (e.g. WithViewportWidth, WithLogf,
 // WithSystemFontProvider) may be supplied and take effect after the loader is set.
-// Unlike OpenHTML, no system font provider is configured by default (a URL has no
+// Unlike OpenHTMLFile, no system font provider is configured by default (a URL has no
 // local font directory), so @font-face local() sources do not match unless one is
 // supplied.
+//
+// WithContext bounds BOTH halves of the fetch-then-render: the context is passed
+// to the HTTP fetch of rawURL itself (so a server that never responds is a
+// deadline, not a hang) and then threaded into box generation, sub-resource
+// loading, and layout. Bound it for untrusted URLs — a remote host controls both
+// how slowly it answers and how pathological the document it returns is.
 func OpenURL(rawURL string, opts ...HTMLOption) (*Document, error) {
-	return OpenURLContext(context.Background(), rawURL, opts...)
-}
-
-// OpenURLContext is OpenURL with a caller-supplied context. Unlike OpenURL it
-// bounds BOTH halves of the fetch-then-render: ctx is passed to the HTTP fetch of
-// rawURL itself (so a server that never responds is a deadline, not a hang) and
-// then threaded into box generation, sub-resource loading, and layout. This is
-// the entry point to prefer for untrusted URLs — a remote host controls both how
-// slowly it answers and how pathological the document it returns is.
-func OpenURLContext(ctx context.Context, rawURL string, opts ...HTMLOption) (*Document, error) {
+	// The context is resolved here as well as downstream, because the HTTP
+	// fetch happens before any frontend sees the options.
+	cfg := defaultOpenConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	ctx := cfg.ctx
 	if rawURL == "" {
 		return nil, fmt.Errorf("omnidoc: open url: empty URL")
 	}
@@ -271,44 +259,30 @@ func OpenURLContext(ctx context.Context, rawURL string, opts ...HTMLOption) (*Do
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("omnidoc: open url %q: %w (%q)", rawURL, ErrUnsupportedScheme, u.Scheme)
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	loader := resource.HTTPLoader{Base: u}
 	data, _, err := loader.Load(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("omnidoc: open url %q: %w", rawURL, err)
 	}
 	allOpts := append([]HTMLOption{WithResourceLoader(loader)}, opts...)
-	return OpenHTMLBytesContext(ctx, data, allOpts...)
+	return OpenHTMLBytes(data, allOpts...)
 }
 
 // OpenHTMLBytes parses and renders in-memory HTML, applying any options, and
-// returns a Document ready to rasterize. It lays out under context.Background():
-// the open cannot be cancelled or time-bounded. Use OpenHTMLBytesContext when a
-// pathological document must not be able to wedge the calling goroutine.
+// returns a Document ready to rasterize. Without WithContext it lays out under
+// context.Background() and cannot be cancelled or time-bounded; pass WithContext
+// when a pathological document must not be able to wedge the calling goroutine.
+// A document whose layout runs long can then be abandoned by cancelling the
+// context or giving it a deadline; the open fails with an error wrapping
+// context.Canceled / context.DeadlineExceeded rather than returning a silently
+// truncated document (the layout engine degrades to partial output, and
+// htmlDocument converts that into a hard error at the open boundary).
 func OpenHTMLBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 	cfg := defaultOpenConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 	return htmlDocument(data, cfg)
-}
-
-// OpenHTMLBytesContext is OpenHTMLBytes with a caller-supplied context bounding
-// box generation, resource loading, and layout — the ctx-taking form matching
-// OpenReader/OpenReaderAs. A document whose layout runs long can be abandoned by
-// cancelling ctx or giving it a deadline; the open then fails with an error
-// wrapping context.Canceled / context.DeadlineExceeded rather than returning a
-// silently truncated document (the layout engine degrades to partial output, and
-// htmlDocument converts that into a hard error at the open boundary).
-//
-// ctx rides in as the unexported withOpenContext option, PREPENDED so a caller
-// that passes their own (there is no exported way to, today) would still win —
-// the same ordering openReflowFrontend uses. A nil ctx is ignored and the default
-// (context.Background()) stands.
-func OpenHTMLBytesContext(ctx context.Context, data []byte, opts ...HTMLOption) (*Document, error) {
-	return OpenHTMLBytes(data, append([]HTMLOption{withOpenContext(ctx)}, opts...)...)
 }
 
 // htmlDocument runs the HTML pipeline — parse → box generation → CSS layout —
@@ -318,7 +292,7 @@ func OpenHTMLBytesContext(ctx context.Context, data []byte, opts ...HTMLOption) 
 func htmlDocument(data []byte, cfg openConfig) (*Document, error) {
 	doc, err := html.Parse(data)
 	if err != nil {
-		return nil, fmt.Errorf("omnidoc: parse html: %w", err)
+		return nil, fmt.Errorf("omnidoc: parse html: %w", publicNestingErr(err))
 	}
 	ctx := cfg.ctx
 	if ctx == nil {
@@ -338,8 +312,8 @@ func htmlDocument(data []byte, cfg openConfig) (*Document, error) {
 	}
 	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, sys, cfg.logf)
 	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
-	// The page's author CSS cascades into inline <svg> content. pkg/svg re-parses an
-	// inline <svg> from the markup pkg/html serialized, so it never sees the host
+	// The page's author CSS cascades into inline <svg> content. pkg/internal/svg re-parses an
+	// inline <svg> from the markup pkg/internal/html serialized, so it never sees the host
 	// document's sheets unless they are handed over explicitly.
 	engine.SetAuthorSheets(doc.AuthorSheets)
 	pages, err := engine.LayoutPagedDoc(ctx, root, layoutcss.PagedConfig{
@@ -361,4 +335,18 @@ func htmlDocument(data []byte, cfg openConfig) (*Document, error) {
 		return nil, fmt.Errorf("omnidoc: open html: %w", err)
 	}
 	return &Document{r: &reflowRenderer{pages: pages, root: root, loader: cfg.loader}, format: FormatHTML}, nil
+}
+
+// publicNestingErr maps the internal parsers' nesting sentinels onto the
+// exported ErrTooDeeplyNested, so a caller can branch on one name without
+// reaching into pkg/internal. The original error stays in the chain for its
+// message and the depth it reports.
+func publicNestingErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, html.ErrTooDeeplyNested) || errors.Is(err, mdfront.ErrTooDeeplyNested) {
+		return fmt.Errorf("%w: %w", ErrTooDeeplyNested, err)
+	}
+	return err
 }

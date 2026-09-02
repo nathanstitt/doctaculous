@@ -71,7 +71,7 @@ func Write(ctx context.Context, root *cssbox.Box, w io.Writer, opts Options) err
 	}
 	wr.doc.Numbering = buildNumbering(wr.orderedLists)
 	wr.doc.Section = sectionProps(opts)
-	if err := docx.Write(w, wr.doc); err != nil {
+	if err := docx.Write(ctx, w, wr.doc); err != nil {
 		return fmt.Errorf("docxwrite: %w", err)
 	}
 	return nil

@@ -6,13 +6,6 @@ import (
 	"strings"
 )
 
-// OpenText reads and renders a plain-text (.txt) file, laying it out at the
-// default viewport width into a single tall page. For additional options (e.g.
-// WithPageSize) use OpenTextFile.
-func OpenText(path string) (*Document, error) {
-	return OpenTextFile(path)
-}
-
 // OpenTextFile reads and renders a plain-text file at path, applying any
 // options.
 func OpenTextFile(path string, opts ...HTMLOption) (*Document, error) {

@@ -155,7 +155,7 @@ func TestSVGGradientPDFRoundTrip(t *testing.T) {
 }
 
 // multiStopGradientSVG is a three-stop, fully opaque linear gradient (pad
-// spread, the default) — the shape pkg/render/pdfwrite's FillShading must
+// spread, the default) — the shape pkg/internal/pdfwrite's FillShading must
 // convert into a native /Shading dictionary rather than rasterizing.
 const multiStopGradientSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
   <defs>
@@ -204,7 +204,7 @@ func TestSVGOpaqueGradientVisualEquivalence(t *testing.T) {
 	}
 }
 
-// TestHardBreakStillRendersAsBreak proves pkg/render/pdfwrite's coincident-
+// TestHardBreakStillRendersAsBreak proves pkg/internal/pdfwrite's coincident-
 // offset nudge (minStopSpan, widened from 1e-6 to 5e-4 so it survives
 // formatReal's 4-decimal-place rounding — see shading.go) does not visibly
 // smear a hard two-tone color break (two stops at the same offset) into a
@@ -283,7 +283,7 @@ func TestSVGOpaqueGradientEmitsNativeShading(t *testing.T) {
 
 // TestSVGTransparentGradientEmitsShadingUnderSoftMask proves a gradient with
 // a stop-opacity < 1 stop now emits VECTOR content instead of rasterizing:
-// with luminosity soft masks available (pkg/render/pdfwrite's group.go/
+// with luminosity soft masks available (pkg/internal/pdfwrite's group.go/
 // softmask.go), the color ramp emits as a native /Shading dictionary paired
 // with a /DeviceGray alpha shading under an /SMask, per the SVG groups/clip/
 // mask design doc's decision 4 ("lift the alpha-gradient fallback"). The PDF
@@ -467,7 +467,7 @@ func TestOpenSVGFileMissing(t *testing.T) {
 }
 
 // TestOpenSVGBytesLogf proves WithLogf reaches svg.Parse's degradation
-// diagnostics (an <image> element is in pkg/svg's unsupportedElements set and
+// diagnostics (an <image> element is in pkg/internal/svg's unsupportedElements set and
 // is skipped with one logged line), and that omitting WithLogf entirely
 // (the nil-logf path) still opens the same document without panicking.
 func TestOpenSVGBytesLogf(t *testing.T) {
@@ -553,8 +553,8 @@ func TestSVGDetectAndFormat(t *testing.T) {
 	if FormatFromPath("a.svgz") != FormatSVG {
 		t.Error("svgz ext")
 	}
-	// SVG is valid in both roles: an input frontend (pkg/svg) and an output
-	// backend (pkg/render/svgwrite). Same-format conversion stays rejected on
+	// SVG is valid in both roles: an input frontend (pkg/internal/svg) and an output
+	// backend (pkg/internal/svgwrite). Same-format conversion stays rejected on
 	// the generic path, which CanConvert enforces separately.
 	if !FormatSVG.ValidInput() || !FormatSVG.ValidOutput() {
 		t.Error("caps: want input and output")
@@ -731,7 +731,7 @@ func hexColor(c color.RGBA) string {
 // (SVG -> PDF -> reopen -> raster).
 //
 // Sampling only a single-shape point would NOT catch the bug this guards
-// against: pkg/render/pdfwrite always emitted a spec-correct isolated
+// against: pkg/internal/pdfwrite always emitted a spec-correct isolated
 // transparency Form XObject (verified independently against Poppler), but
 // pkg/pdf/content's reader used to run a group Form's content directly
 // against the ambient constant alpha instead of recognizing /Group and
@@ -809,9 +809,9 @@ func TestSVGGroupOpacityRoundTripsThroughPDFNoSeam(t *testing.T) {
 // TestClipPathAndMaskBothApplyThroughPDF is the discriminating regression
 // test for a bug where an element carrying BOTH clip-path AND mask lost ALL
 // content when rendered through the PDF backend, while rendering correctly
-// direct-to-raster. Root cause: pkg/svg/draw used to pre-combine the clip
+// direct-to-raster. Root cause: pkg/internal/svg/draw used to pre-combine the clip
 // mask and the <mask> luminance result into a single GroupMask before
-// handing it to EndGroup; pkg/render/pdfwrite's BuildLuminanceMask returns a
+// handing it to EndGroup; pkg/internal/pdfwrite's BuildLuminanceMask returns a
 // SENTINEL pointer recognized only by exact identity in its own EndGroup
 // (see softmask.go's takePendingSoftMask), so combining it with a clip mask
 // produced a new value neither backend built, which pdfwrite then silently
@@ -884,12 +884,12 @@ func TestClipPathAndMaskBothApplyThroughPDF(t *testing.T) {
 }
 
 // TestNestedMaskOnMaskThroughPDF is the PDF-backend companion to
-// pkg/svg/draw's TestNestedMaskOnMask: a <mask> that itself carries a
+// pkg/internal/svg/draw's TestNestedMaskOnMask: a <mask> that itself carries a
 // mask="url(#...)" self-reference (mask-on-mask) combines two independent
 // BuildLuminanceMask results, which is the SAME underlying hazard as
 // TestClipPathAndMaskBothApplyThroughPDF (a pdfwrite sentinel losing its
 // identity when combined with another mask) — just triggered entirely
-// within pkg/svg/draw's buildMask instead of at the clip+mask call sites.
+// within pkg/internal/svg/draw's buildMask instead of at the clip+mask call sites.
 // The fix applies msk.Self's mask INSIDE the same BuildLuminanceMask call as
 // msk's own content, via a nested BeginGroup/EndGroup on the scratch device,
 // so at most one BuildLuminanceMask call (and therefore at most one
@@ -1022,9 +1022,9 @@ func TestSVGManySameAlphaShapesDedupeExtGState(t *testing.T) {
 // TestFilteredElementSurvivesPDFRoundTrip is the SVG -> PDF -> reopen ->
 // raster guard for the filter path's pdfwrite contract.
 //
-// pkg/render/pdfwrite returns nil from RenderOffscreen — it emits vector
+// pkg/internal/pdfwrite returns nil from RenderOffscreen — it emits vector
 // operators and has no pixel buffer, and a filter (pure pixel math, with no
-// PDF operator) has no vector form to fall back on. pkg/svg/draw must then
+// PDF operator) has no vector form to fall back on. pkg/internal/svg/draw must then
 // paint the element UNFILTERED: content stays visible and correctly placed,
 // losing only the filter's visual effect.
 //
@@ -1119,7 +1119,7 @@ func TestFilteredElementSurvivesPDFRoundTrip(t *testing.T) {
 
 // TestFilteredElementWithOpacitySurvivesPDFRoundTrip pins the element-opacity
 // half of the same contract: pdfwrite's unfiltered fallback must still apply
-// the element's own opacity, which pkg/svg/draw strips from the source pass
+// the element's own opacity, which pkg/internal/svg/draw strips from the source pass
 // and re-applies to the result. Dropping it on the fallback path would render
 // the element fully opaque in PDF while the raster backend renders it faded.
 func TestFilteredElementWithOpacitySurvivesPDFRoundTrip(t *testing.T) {

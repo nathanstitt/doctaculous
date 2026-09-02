@@ -11,16 +11,17 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/webp"
 )
 
-// OpenImage reads a PNG or JPEG image as a single-page document: the page is
-// exactly the image's pixel size (1 px = 1 pt), so image→PDF yields a page
-// the image fills edge to edge, and every other conversion follows (the
-// structure writers carry the image; the tables-only writers degrade to their
-// documented empty-output story). For options use OpenImageFile.
-func OpenImage(path string) (*Document, error) {
-	return OpenImageFile(path)
-}
+// ErrAnimatedImage reports a well-formed animated WebP offered as image input.
+// The toolkit reads still images only, so the file is refused at open rather
+// than decoded as its first frame. Callers branch on it with errors.Is.
+var ErrAnimatedImage = webp.ErrAnimated
 
-// OpenImageFile reads an image file at path, applying any options.
+// OpenImageFile reads a PNG, JPEG, WebP, or HEIC image at path as a
+// single-page document, applying any options: the page is exactly the image's
+// pixel size (1 px = 1 pt), so image→PDF yields a page the image fills edge to
+// edge, and every other conversion follows (the structure writers carry the
+// image; the tables-only writers degrade to their documented empty-output
+// story).
 func OpenImageFile(path string, opts ...HTMLOption) (*Document, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -52,7 +53,7 @@ func OpenImageBytes(data []byte, opts ...HTMLOption) (*Document, error) {
 		// without this check a page would be built for an image that cannot
 		// decode. The toolkit reads still images only.
 		if webp.IsAnimated(data) {
-			return nil, fmt.Errorf("omnidoc: open image: %w", webp.ErrAnimated)
+			return nil, fmt.Errorf("omnidoc: open image: %w", ErrAnimatedImage)
 		}
 		format, mime = FormatWebP, "image/webp"
 	default:
