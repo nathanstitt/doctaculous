@@ -36,7 +36,7 @@ func rasterizeCmd(args []string) error {
 		bundledFonts = fs.Bool("bundled-fonts", false, "use only the bundled substitute fonts (hermetic); default uses installed system fonts")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: omnidoc rasterize <input.pdf|.docx|.html|URL> [flags]\n") //nolint:errcheck // stderr write
+		fmt.Fprintf(fs.Output(), "usage: omnidoc rasterize <input file or URL> [flags]\n       (any supported input format: pdf, docx, xlsx, pptx, epub, rtf, html, md, txt, csv, tsv, images, svg)\n") //nolint:errcheck // stderr write
 		fs.PrintDefaults()
 	}
 	// Go's flag package stops at the first non-flag argument, so reorder the

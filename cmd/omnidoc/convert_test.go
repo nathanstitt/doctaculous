@@ -224,14 +224,20 @@ func TestConvertCmdCSVOutput(t *testing.T) {
 	}
 }
 
-func TestRunInfersConvertForCSVOutput(t *testing.T) {
+// TestRunRejectsBareInput pins that a bare input path — which an earlier CLI
+// accepted and mapped to a guessed subcommand — is now an error naming the
+// commands that exist, while the explicit "convert" form still works.
+func TestRunRejectsBareInput(t *testing.T) {
 	in := writeConvertInput(t, "in.html", []byte(`<html><body><table><tr><td>x</td></tr></table></body></html>`))
 	out := filepath.Join(t.TempDir(), "out.csv")
-	if err := run([]string{in, "--out", out}); err != nil {
-		t.Fatalf("run: %v", err)
+	if err := run([]string{"convert", in, "--out", out}); err != nil {
+		t.Fatalf("run convert: %v", err)
 	}
 	if data, _ := os.ReadFile(out); string(data) != "x\n" {
-		t.Errorf("inferred csv output = %q", data)
+		t.Errorf("csv output = %q", data)
+	}
+	if err := run([]string{in, "--out", out}); err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Errorf("bare input without a subcommand: err = %v, want an unknown-command error", err)
 	}
 }
 
@@ -313,7 +319,7 @@ func TestConvertCmdXLSXOutput(t *testing.T) {
 	if err := convertCmd([]string{in, out}); err != nil {
 		t.Fatalf("html->xlsx: %v", err)
 	}
-	doc, err := omnidoc.OpenXLSX(out)
+	doc, err := omnidoc.OpenXLSXFile(out)
 	if err != nil {
 		t.Fatalf("produced xlsx does not open: %v", err)
 	}
